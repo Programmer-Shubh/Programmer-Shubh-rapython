@@ -152,29 +152,24 @@ class BacktestEngine:
         return result
 
     def _get_indicator_value(self, indicator, i, close, historical, pre_calc):
-        if indicator == "close":
-            return close
-        elif indicator == "open":
-            return float(historical[i].get("open_price", close))
+        val = close
+        if indicator == "open":
+            val = float(historical[i].get("open_price", close))
         elif indicator == "high":
-            return float(historical[i].get("high_price", close))
+            val = float(historical[i].get("high_price", close))
         elif indicator == "low":
-            return float(historical[i].get("low_price", close))
+            val = float(historical[i].get("low_price", close))
         elif indicator == "predicted_moving_average" and "pma" in pre_calc:
-            pma = pre_calc["pma"].get("pma", {})
-            return pma.get(i, close)
+            val = pre_calc["pma"].get("pma", {}).get(i, close)
         elif indicator == "ai_sentiment" and "ai_sentiment" in pre_calc:
-            asi = pre_calc["ai_sentiment"].get("asi", {})
-            v = asi.get(i)
-            return v["sentiment"] if v else 0
+            v = pre_calc["ai_sentiment"].get("asi", {}).get(i)
+            val = v["sentiment"] if v else 0
         elif indicator == "ai_volatility_range" and "ai_volatility" in pre_calc:
-            vr = pre_calc["ai_volatility"].get("vol_regime", {})
-            r = vr.get(i, "normal")
-            return 80 if r == "high" else (50 if r == "normal" else 20)
+            r = pre_calc["ai_volatility"].get("vol_regime", {}).get(i, "normal")
+            val = 80 if r == "high" else (50 if r == "normal" else 20)
         elif indicator == "ai_trend_score" and "ai_trend" in pre_calc:
-            scores = pre_calc["ai_trend"].get("scores", {})
-            return scores.get(i, 0)
-        return close
+            val = pre_calc["ai_trend"].get("scores", {}).get(i, 0)
+        return val
 
     def _get_buy_signal(self, i, pre_calc, historical, entry_conditions):
         close = historical[i]["close_price"]
