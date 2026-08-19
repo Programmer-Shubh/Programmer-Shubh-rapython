@@ -1,3 +1,4 @@
+import requests
 from core.models.database import Database
 
 
@@ -24,3 +25,42 @@ class LiveMarketData:
             [symbol, strike, option_type, symbol],
         )
         return float(row["close_price"]) if row else None
+
+    def fetch_live_from_nse(self, symbol: str) -> dict:
+        try:
+            url = f"https://www.nseindia.com/api/equity-stockIndices?index={symbol}%2050"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.nseindia.com/market-data/live-equity-market",
+            }
+            session = requests.Session()
+            session.get("https://www.nseindia.com", headers=headers, timeout=5)
+            resp = session.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if "data" in data and len(data["data"]) > 0:
+                    for item in data["data"]:
+                        if "lastPrice" in item:
+                            return {"spot": item["lastPrice"], "change": item.get("pChange", 0), "high": item.get("dayHigh", 0), "low": item.get("dayLow", 0)}
+        except Exception:
+            pass
+        return None
+
+    def fetch_option_chain_nse(self, symbol: str) -> dict:
+        try:
+            url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json",
+                "Referer": "https://www.nseindia.com/market-data/option-chain",
+            }
+            session = requests.Session()
+            session.get("https://www.nseindia.com", headers=headers, timeout=5)
+            resp = session.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception:
+            pass
+        return None

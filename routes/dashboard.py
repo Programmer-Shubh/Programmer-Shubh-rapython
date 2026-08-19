@@ -14,7 +14,25 @@ def get_spots():
     result = {}
     for sym in symbols:
         spot = live.get_spot_price(sym)
-        result[sym] = {"spot": round(spot, 2) if spot > 0 else None, "formatted": f"INR {spot:,.2f}" if spot > 0 else "No Data"}
+        live_data = live.fetch_live_from_nse(sym)
+        if live_data:
+            result[sym] = {
+                "spot": live_data["spot"],
+                "formatted": f"INR {live_data['spot']:,.2f}",
+                "change": live_data.get("change", 0),
+                "high": live_data.get("high", 0),
+                "low": live_data.get("low", 0),
+                "source": "live",
+            }
+        else:
+            result[sym] = {
+                "spot": round(spot, 2) if spot > 0 else None,
+                "formatted": f"INR {spot:,.2f}" if spot > 0 else "No Data",
+                "change": 0,
+                "high": 0,
+                "low": 0,
+                "source": "bhavcopy",
+            }
     return result
 
 
