@@ -1,0 +1,43 @@
+import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from core.models.database import Database
+
+os.environ.setdefault("DB_PATH", os.path.join(os.path.dirname(__file__), "data", "ratrade.db"))
+
+app = FastAPI(title="RaTrade API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+db = Database.get_instance()
+db.init_schema()
+
+from routes import dashboard, option_chain, paper_trade, strategy_builder, bhavcopy_import, scanner
+
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
+app.include_router(option_chain.router, prefix="/api/chain", tags=["Option Chain"])
+app.include_router(paper_trade.router, prefix="/api/trades", tags=["Paper Trade"])
+app.include_router(strategy_builder.router, prefix="/api/backtest", tags=["Strategy Builder"])
+app.include_router(bhavcopy_import.router, prefix="/api/bhavcopy", tags=["Bhavcopy Import"])
+app.include_router(scanner.router, prefix="/api/scanner", tags=["Scanner"])
+
+
+@app.get("/")
+def root():
+    return {"status": "ok", "app": "RaTrade API", "version": "1.0.0"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

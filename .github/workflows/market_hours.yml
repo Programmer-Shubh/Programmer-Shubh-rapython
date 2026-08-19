@@ -24,7 +24,7 @@ jobs:
       - name: Run Market Scanner
         env:
           MARKET_MODE: auto
-          DB_PATH: ./data/ratade.db
+          DB_PATH: ./data/ratrade.db
         run: python scripts/auto_scan.py
 
       - name: Run Auto Trade Logic
@@ -32,6 +32,12 @@ jobs:
           MARKET_MODE: auto
           DB_PATH: ./data/ratrade.db
         run: python scripts/auto_trade.py
+
+      - name: Start API Server
+        run: |
+          uvicorn main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+          curl -f http://localhost:8000/health || exit 1
 
       - name: Upload results
         if: always()
