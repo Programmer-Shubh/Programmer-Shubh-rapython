@@ -1,0 +1,42 @@
+name: Market Hours Auto Trade
+on:
+  schedule:
+    # Monday-Friday, every 5 minutes during market hours (9:15 AM - 3:30 PM IST)
+    - cron: '*/5 3-10 * * 1-5'   # UTC times (IST = UTC+5:30)
+  workflow_dispatch:
+
+jobs:
+  run-scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Market Scanner
+        env:
+          MARKET_MODE: auto
+          DB_PATH: ./data/ratade.db
+        run: python scripts/auto_scan.py
+
+      - name: Run Auto Trade Logic
+        env:
+          MARKET_MODE: auto
+          DB_PATH: ./data/ratrade.db
+        run: python scripts/auto_trade.py
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trade-results-${{ github.run_number }}
+          path: ./data/logs/
+          retention-days: 30

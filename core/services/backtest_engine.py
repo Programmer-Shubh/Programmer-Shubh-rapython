@@ -1,0 +1,462 @@
+import math
+from typing import List, Dict
+from core.services.indicator_engine import IndicatorEngine
+from core.services.transaction_costs import TransactionCosts
+from core.models.database import Database
+from utils.helpers import get_strike_step, get_lot_size, black_scholes
+
+
+class BacktestEngine:
+    def __init__(self):
+        self.indicators = IndicatorEngine()
+        self.initial_capital = 1000000.0
+        self.ohlc_cache = {}
+        self.bt_symbol = ""
+        self.bt_expiry = ""
+        self.implied_volatility = 0.14
+
+    def run(self, historical, symbol, start_date, end_date, ind_list, entry_conditions,
+            exit_conditions, legs, advanced_options, risk_management) -> dict:
+        self._reset()
+        self.bt_symbol = symbol
+        self.bt_expiry = legs[0].get("expiry_date", "") if legs else ""
+        self.implied_volatility = advanced_options.get("implied_volatility", 0.14)
+        use_trailing = advanced_options.get("trailing_sl", False)
+        max_holding = int(advanced_options.get("max_holding_bars", 20))
+        max_trades_day = int(risk_management.get("max_trades_per_day", 5))
+        leg = legs[0] if legs else {"option_type": "CE", "lots": 1, "transaction": "buy"}
+        option_type = leg.get("option_type", "CE")
+        qty = int(leg.get("lots", 1)) * get_lot_size(symbol)
+        txn_type = leg.get("transaction", "buy").lower()
+        leg_sl = float(leg.get("stop_loss", risk_management.get("daily_stop_loss", 500)))
+        leg_tp = float(leg.get("take_profit", risk_management.get("daily_take_profit", 1000)))
+        strike_sel = advanced_options.get("strike_selection", "otm")
+        delta_target = advanced_options.get("delta_target")
+        otm_dist = int(advanced_options.get("otm_distance", 2))
+        trade_mode = advanced_options.get("trade_mode", "positional")
+
+        closes = [h["close_price"] for h in historical]
+        highs = [h["high_price"] for h in historical]
+        lows = [h["low_price"] for h in historical]
+        pre_calc = self._pre_calc(historical, closes, highs, lows, ind_list)
+
+        entries, exits, entry_bars = [], [], []
+        pending_entry = None
+        pending_exit = None
+        daily_trades = 0
+        last_date = ""
+        min_bars = min(15, max(1, len(historical) - 2))
+
+        for i in range(min_bars, len(historical)):
+            cur = historical[i]
+            cur_date = cur["trade_date"]
+            nxt = historical[i + 1] if i + 1 < len(historical) else None
+            is_last = nxt is None or nxt["trade_date"] != cur_date
+
+            if cur_date != last_date:
+                daily_trades = 0
+                last_date = cur_date
+
+            has_open = len(entries) > len(exits)
+            can_enter = not has_open and daily_trades < max_trades_day
+
+            if pending_entry is not None and can_enter:
+                spot = float(cur["open_price"]) if cur.get("open_price", 0) > 0 else float(cur["close_price"])
+                strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
+                premium = self._entry_premium(cur_date, spot, strike, option_type)
+                premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL")
+                costs = TransactionCosts.calculate(premium * qty, txn_type == "sell")
+                entries.append({
+                    "date": cur_date, "strike": str(strike), "price": round(premium, 2),
+                    "quantity": qty, "costs": costs,
+                    "total_cost": round(premium * qty + costs["total"], 2), "type": txn_type,
+                })
+                entry_bars.append(i)
+                daily_trades += 1
+                pending_entry = None
+
+            has_open = len(entries) > len(exits)
+            if has_open and pending_exit is not None:
+                entry = entries[len(exits)]
+                spot = float(cur["open_price"]) if cur.get("open_price", 0) > 0 else float(cur["close_price"])
+                exit_prem = self._exit_premium(cur_date, spot, float(entry["strike"]), option_type)
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY")
+                self._close_position(entries, exits, entry, exit_prem, pending_exit, cur_date, qty, txn_type)
+                pending_exit = None
+
+            has_open = len(entries) > len(exits)
+            if has_open and not (trade_mode == "intraday" and is_last):
+                entry = entries[len(exits)]
+                if leg_sl > 0 or leg_tp > 0:
+                    hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp)
+                    if hit:
+                        exit_prem = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY")
+                        self._close_position(entries, exits, entry, exit_prem, hit["reason"], cur_date, qty, txn_type)
+
+            has_open = len(entries) > len(exits)
+            if has_open and trade_mode == "intraday" and is_last:
+                entry = entries[len(exits)]
+                exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY")
+                self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type)
+
+            if nxt is not None:
+                bars_held = 0
+                if len(entries) > len(exits):
+                    eidx = len(exits)
+                    bars_held = i - (entry_bars[eidx] if eidx < len(entry_bars) else i)
+                time_exit = bars_held >= max_holding
+                buy_sig = self._get_buy_signal(i, pre_calc, historical, entry_conditions)
+                sell_sig = self._get_sell_signal(i, pre_calc, historical, exit_conditions)
+                entry_sig = buy_sig if txn_type == "buy" else sell_sig
+                exit_sig = sell_sig if txn_type == "buy" else buy_sig
+                has_open = len(entries) > len(exits)
+                can_enter = not has_open and daily_trades < max_trades_day
+                if entry_sig and can_enter:
+                    pending_entry = i
+                if has_open and pending_exit is None and (exit_sig or time_exit):
+                    pending_exit = "condition" if exit_sig else "time"
+
+        while len(exits) < len(entries):
+            idx = len(exits)
+            entry = entries[idx]
+            last = historical[-1]
+            exit_prem = self._close_premium(last["trade_date"], float(last["close_price"]), float(entry["strike"]), option_type)
+            self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type)
+
+        return self._build_result(symbol, start_date, end_date, entries, exits)
+
+    def _pre_calc(self, historical, closes, highs, lows, ind_list):
+        result = {}
+        for ind in ind_list:
+            iid = ind.get("id", "") if isinstance(ind, dict) else ind
+            params = ind.get("params", {}) if isinstance(ind, dict) else {}
+            if iid == "supertrend":
+                result["supertrend"] = self.indicators.calculate_supertrend(historical, params.get("period", 10), float(params.get("multiplier", 3)))
+            elif iid == "macd":
+                result["macd"] = self.indicators.calculate_macd(closes, params.get("fast", 12), params.get("slow", 26), params.get("signal", 9))
+            elif iid == "rsi":
+                result["rsi"] = self.indicators.calculate_rsi(closes, params.get("period", 14))
+            elif iid == "ema":
+                result["ema"] = self.indicators.calculate_ema(closes, params.get("period", 50))
+            elif iid == "predicted_moving_average":
+                result["pma"] = self.indicators.calculate_predicted_ma(closes, params.get("lookback", 20))
+            elif iid == "predicted_neural_index":
+                result["pni"] = self.indicators.calculate_predicted_ma(closes, params.get("lookback", 14))
+            elif iid == "ai_sentiment":
+                result["ai_sentiment"] = self.indicators.calculate_ai_sentiment(closes, highs, lows, params.get("lookback", 20))
+            elif iid == "ai_volatility_range":
+                result["ai_volatility"] = self.indicators.calculate_ai_volatility(closes, highs, lows, params.get("lookback", 20))
+            elif iid == "ai_trend_score":
+                result["ai_trend"] = self.indicators.calculate_ai_trend_score(closes)
+        return result
+
+    def _get_indicator_value(self, indicator, i, close, historical, pre_calc):
+        if indicator == "close":
+            return close
+        elif indicator == "open":
+            return float(historical[i].get("open_price", close))
+        elif indicator == "high":
+            return float(historical[i].get("high_price", close))
+        elif indicator == "low":
+            return float(historical[i].get("low_price", close))
+        elif indicator == "predicted_moving_average" and "pma" in pre_calc:
+            pma = pre_calc["pma"].get("pma", {})
+            return pma.get(i, close)
+        elif indicator == "ai_sentiment" and "ai_sentiment" in pre_calc:
+            asi = pre_calc["ai_sentiment"].get("asi", {})
+            v = asi.get(i)
+            return v["sentiment"] if v else 0
+        elif indicator == "ai_volatility_range" and "ai_volatility" in pre_calc:
+            vr = pre_calc["ai_volatility"].get("vol_regime", {})
+            r = vr.get(i, "normal")
+            return 80 if r == "high" else (50 if r == "normal" else 20)
+        elif indicator == "ai_trend_score" and "ai_trend" in pre_calc:
+            scores = pre_calc["ai_trend"].get("scores", {})
+            return scores.get(i, 0)
+        return close
+
+    def _get_buy_signal(self, i, pre_calc, historical, entry_conditions):
+        close = historical[i]["close_price"]
+        prev_close = historical[i - 1]["close_price"] if i > 0 else close
+        buy = False
+        if "supertrend" in pre_calc and i < len(pre_calc["supertrend"]):
+            buy = buy or (close > pre_calc["supertrend"][i])
+        if "macd" in pre_calc:
+            m = pre_calc["macd"]
+            mv = m["macd"][i] if i < len(m["macd"]) and m["macd"][i] is not None else 0
+            sv = m["signal"][i] if i < len(m["signal"]) and m["signal"][i] is not None else 0
+            pm = m["macd"][i - 1] if i > 0 and i - 1 < len(m["macd"]) and m["macd"][i - 1] is not None else 0
+            ps = m["signal"][i - 1] if i > 0 and i - 1 < len(m["signal"]) and m["signal"][i - 1] is not None else 0
+            buy = buy or (mv > sv and pm <= ps)
+        if "rsi" in pre_calc and i < len(pre_calc["rsi"]):
+            buy = buy or (pre_calc["rsi"][i] < 30)
+        if "ema" in pre_calc and i < len(pre_calc["ema"]) and pre_calc["ema"][i] is not None:
+            buy = buy or (close > pre_calc["ema"][i])
+        if entry_conditions:
+            cond_met = True
+            for c in entry_conditions:
+                op = c.get("operator", "")
+                val = float(c.get("value", 0) or 0)
+                ind = c.get("indicator", "close")
+                if not op:
+                    continue
+                cur_v = self._get_indicator_value(ind, i, close, historical, pre_calc)
+                prev_v = self._get_indicator_value(ind, max(0, i - 1), prev_close, historical, pre_calc)
+                if op == "greater_than":
+                    cond_met = cond_met and cur_v > val
+                elif op == "less_than":
+                    cond_met = cond_met and cur_v < val
+                elif op == "crosses_above":
+                    cond_met = cond_met and cur_v > val and prev_v <= val
+                elif op == "crosses_below":
+                    cond_met = cond_met and cur_v < val and prev_v >= val
+            buy = buy or cond_met
+        if not pre_calc and not entry_conditions:
+            buy = True
+        return buy
+
+    def _get_sell_signal(self, i, pre_calc, historical, exit_conditions):
+        close = historical[i]["close_price"]
+        prev_close = historical[i - 1]["close_price"] if i > 0 else close
+        sell = False
+        if "supertrend" in pre_calc and i < len(pre_calc["supertrend"]):
+            sell = sell or (close < pre_calc["supertrend"][i])
+        if "rsi" in pre_calc and i < len(pre_calc["rsi"]):
+            sell = sell or (pre_calc["rsi"][i] > 70)
+        if exit_conditions:
+            cond_met = True
+            for c in exit_conditions:
+                op = c.get("operator", "")
+                val = float(c.get("value", 0) or 0)
+                ind = c.get("indicator", "close")
+                if not op:
+                    continue
+                cur_v = self._get_indicator_value(ind, i, close, historical, pre_calc)
+                prev_v = self._get_indicator_value(ind, max(0, i - 1), prev_close, historical, pre_calc)
+                if op == "greater_than":
+                    cond_met = cond_met and cur_v > val
+                elif op == "less_than":
+                    cond_met = cond_met and cur_v < val
+                elif op == "crosses_above":
+                    cond_met = cond_met and cur_v > val and prev_v <= val
+                elif op == "crosses_below":
+                    cond_met = cond_met and cur_v < val and prev_v >= val
+            sell = sell or cond_met
+        return sell
+
+    def _select_strike(self, spot, symbol, option_type, strike_sel, delta_target, otm_dist):
+        step = get_strike_step(symbol)
+        atm = round(spot / step) * step
+        if strike_sel == "delta" and delta_target is not None:
+            return self._find_delta_strike(spot, symbol, option_type, float(delta_target))
+        offset = otm_dist * step
+        if strike_sel == "itm":
+            offset = -offset if option_type == "CE" else offset
+        elif strike_sel == "otm":
+            offset = offset if option_type == "CE" else -offset
+        else:
+            offset = 0
+        return atm + offset
+
+    def _find_delta_strike(self, spot, symbol, option_type, target_delta):
+        step = get_strike_step(symbol)
+        best = round(spot / step) * step
+        best_diff = 1.0
+        for offset in range(-1000, 1001, int(step)):
+            test = round(spot / step) * step + offset
+            if test <= 0:
+                continue
+            delta = abs(self.indicators.calculate_delta(spot, test, self.implied_volatility, 15 / 365, option_type))
+            diff = abs(delta - abs(target_delta))
+            if diff < best_diff:
+                best_diff = diff
+                best = test
+        return best
+
+    def _check_sl_tp(self, current, entry, option_type, txn_type, sl_amt, tp_amt):
+        entry_price = float(entry["price"])
+        if sl_amt > 20:
+            sl_pct = (sl_amt / max(entry_price, 0.01)) * 100
+        else:
+            sl_pct = sl_amt
+        if tp_amt > 20:
+            tp_pct = (tp_amt / max(entry_price, 0.01)) * 100
+        else:
+            tp_pct = tp_amt
+        if txn_type == "buy":
+            sl_level = entry_price * (1 - sl_pct / 100) if sl_pct > 0 else 0
+            tp_level = entry_price * (1 + tp_pct / 100) if tp_pct > 0 else 0
+        else:
+            sl_level = entry_price * (1 + sl_pct / 100) if sl_pct > 0 else 0
+            tp_level = entry_price * (1 - tp_pct / 100) if tp_pct > 0 else 0
+        high = float(current.get("high_price", 0) or current["close_price"])
+        low = float(current.get("low_price", 0) or current["close_price"])
+        if high < low:
+            high, low = low, high
+        t = max(1, self._days_to_expiry(current.get("trade_date", ""))) / 365.0
+        step = get_strike_step(self.bt_symbol)
+        strike = round(float(entry["strike"]) / step) * step
+        row = Database.get_instance().fetch_one(
+            "SELECT high_price, low_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+            [self.bt_symbol, current.get("trade_date", ""), strike, option_type],
+        )
+        if row:
+            prem_high = float(row["high_price"]) if row["high_price"] > 0 else float(row["low_price"])
+            prem_low = float(row["low_price"]) if row["low_price"] > 0 else float(row["high_price"])
+        else:
+            prem_high = black_scholes(high, strike, t, self.implied_volatility, option_type)
+            prem_low = black_scholes(low, strike, t, self.implied_volatility, option_type)
+        if txn_type == "buy":
+            hit_sl = sl_level > 0 and prem_low <= sl_level
+            hit_tp = tp_level > 0 and prem_high >= tp_level
+        else:
+            hit_sl = sl_level > 0 and prem_high >= sl_level
+            hit_tp = tp_level > 0 and prem_low <= tp_level
+        if hit_sl:
+            return {"reason": "stoploss", "level": sl_level}
+        if hit_tp:
+            return {"reason": "target", "level": tp_level}
+        return None
+
+    def _entry_premium(self, date, spot, strike, option_type):
+        row = Database.get_instance().fetch_one(
+            "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+            [self.bt_symbol, date, strike, option_type],
+        )
+        if row:
+            if row["open_price"] and row["open_price"] > 0:
+                return float(row["open_price"])
+            if row["close_price"] and row["close_price"] > 0:
+                return float(row["close_price"])
+        t = self._days_to_expiry(date) / 365.0
+        return black_scholes(spot, strike, t, self.implied_volatility, option_type)
+
+    def _exit_premium(self, date, spot, strike, option_type):
+        return self._entry_premium(date, spot, strike, option_type)
+
+    def _close_premium(self, date, spot, strike, option_type):
+        row = Database.get_instance().fetch_one(
+            "SELECT close_price, open_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+            [self.bt_symbol, date, strike, option_type],
+        )
+        if row:
+            if row["close_price"] and row["close_price"] > 0:
+                return float(row["close_price"])
+            if row["open_price"] and row["open_price"] > 0:
+                return float(row["open_price"])
+        t = self._days_to_expiry(date) / 365.0
+        return black_scholes(spot, strike, t, self.implied_volatility, option_type)
+
+    def _days_to_expiry(self, bar_date):
+        import datetime
+        if not self.bt_expiry:
+            d = datetime.datetime.strptime(bar_date, "%Y-%m-%d") if bar_date else datetime.datetime.now()
+            days_ahead = 3 - d.weekday()
+            if days_ahead <= 0:
+                days_ahead += 7
+            exp = d + datetime.timedelta(days=days_ahead)
+            self.bt_expiry = exp.strftime("%Y-%m-%d")
+        try:
+            exp_dt = datetime.datetime.strptime(self.bt_expiry, "%Y-%m-%d")
+            bar_dt = datetime.datetime.strptime(bar_date, "%Y-%m-%d") if bar_date else datetime.datetime.now()
+            return max(1, (exp_dt - bar_dt).days)
+        except:
+            return 7
+
+    def _close_position(self, entries, exits, entry, exit_prem, reason, exit_date, qty, txn_type):
+        exit_prem = max(0.01, exit_prem)
+        exit_costs = TransactionCosts.calculate(exit_prem * qty, txn_type == "buy")
+        if txn_type == "buy":
+            pnl = (exit_prem * qty - exit_costs["total"]) - entry["total_cost"]
+        else:
+            pnl = (entry["price"] * entry["quantity"] - entry["costs"]["total"]) - (exit_prem * qty + exit_costs["total"])
+        exits.append({
+            "date": exit_date, "strike": entry["strike"], "price": round(exit_prem, 2),
+            "quantity": qty, "exit_costs": exit_costs, "reason": reason, "pnl": round(pnl, 2),
+        })
+
+    def _build_result(self, symbol, start_date, end_date, entries, exits):
+        equity = [self.initial_capital]
+        capital = self.initial_capital
+        total_trades = 0
+        wins = 0
+        win_amounts = []
+        loss_amounts = []
+        trade_list = []
+        total_brokerage = 0
+        for i in range(len(entries)):
+            entry = entries[i]
+            exit = exits[i] if i < len(exits) else None
+            if exit:
+                pnl = exit["pnl"]
+                capital += pnl
+                total_trades += 1
+                total_brokerage += entry["costs"]["total"] + exit["exit_costs"]["total"]
+                if pnl > 0:
+                    wins += 1
+                    win_amounts.append(pnl)
+                else:
+                    loss_amounts.append(abs(pnl))
+                trade_list.append({"entry": entry, "exit": exit, "pnl": pnl})
+            equity.append(capital)
+        total_return = capital - self.initial_capital
+        total_return_pct = (total_return / self.initial_capital) * 100
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+        avg_win = sum(win_amounts) / len(win_amounts) if win_amounts else 0
+        avg_loss = sum(loss_amounts) / len(loss_amounts) if loss_amounts else 0
+        profit_factor = sum(win_amounts) / max(sum(loss_amounts), 0.01) if loss_amounts else (999 if win_amounts else 0)
+        max_dd = self._max_drawdown(equity)
+        sharpe = self._sharpe(equity)
+        monthly_pnl = {}
+        for t in trade_list:
+            m = t["entry"]["date"][:7]
+            monthly_pnl[m] = monthly_pnl.get(m, 0) + t["pnl"]
+        return {
+            "success": True,
+            "metrics": {
+                "initial_capital": self.initial_capital,
+                "final_capital": round(capital, 2),
+                "total_return": round(total_return, 2),
+                "total_return_pct": round(total_return_pct, 4),
+                "win_rate": round(win_rate, 2),
+                "max_drawdown": round(max_dd, 4),
+                "profit_factor": round(profit_factor, 4),
+                "sharpe_ratio": round(sharpe, 4),
+                "total_trades": total_trades,
+                "winning_trades": wins,
+                "losing_trades": total_trades - wins,
+                "avg_win": round(avg_win, 2),
+                "avg_loss": round(avg_loss, 2),
+                "total_brokerage": round(total_brokerage, 2),
+                "equity_curve": equity,
+                "trade_list": trade_list,
+                "monthly_pnl": monthly_pnl,
+            },
+        }
+
+    def _max_drawdown(self, equity):
+        if not equity:
+            return 0
+        peak = equity[0]
+        max_dd = 0
+        for v in equity:
+            if v > peak:
+                peak = v
+            dd = (peak - v) / peak if peak > 0 else 0
+            max_dd = max(max_dd, dd)
+        return max_dd * 100
+
+    def _sharpe(self, equity):
+        if len(equity) < 2:
+            return 0
+        returns = [(equity[i] - equity[i - 1]) / max(equity[i - 1], 1) for i in range(1, len(equity))]
+        mean = sum(returns) / len(returns)
+        var = sum((r - mean) ** 2 for r in returns) / max(len(returns) - 1, 1)
+        std = math.sqrt(var)
+        return (mean / std) * math.sqrt(252) if std > 0 else 0
+
+    def _reset(self):
+        self.ohlc_cache = {}
+        self.bt_symbol = ""
+        self.bt_expiry = ""
