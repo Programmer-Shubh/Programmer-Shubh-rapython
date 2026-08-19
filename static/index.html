@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RaTrade Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .header { background: linear-gradient(135deg, #1a1f2e, #0d1117); border-bottom: 1px solid #30363d; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { color: #00FF7F; font-size: 24px; }
+        .header span { color: #8b949e; font-size: 14px; }
+        .nav { background: #161b22; border-bottom: 1px solid #30363d; display: flex; gap: 0; padding: 0 32px; }
+        .nav button { background: none; border: none; color: #8b949e; padding: 12px 20px; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .nav button:hover { color: #e6edf3; }
+        .nav button.active { color: #00FF7F; border-bottom-color: #00FF7F; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+        .card h3 { color: #8b949e; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+        .card .value { font-size: 28px; font-weight: 700; color: #00FF7F; }
+        .card .sub { color: #8b949e; font-size: 13px; margin-top: 4px; }
+        .section { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+        .section h2 { color: #e6edf3; font-size: 18px; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #21262d; color: #8b949e; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; padding: 10px 12px; text-align: left; }
+        td { padding: 10px 12px; border-bottom: 1px solid #21262d; font-size: 14px; }
+        tr:hover { background: #1c2128; }
+        .positive { color: #3fb950; }
+        .negative { color: #f85149; }
+        .neutral { color: #8b949e; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+        .badge-ce { background: rgba(63, 185, 80, 0.15); color: #3fb950; }
+        .badge-pe { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+        .badge-buy { background: rgba(63, 185, 80, 0.15); color: #3fb950; }
+        .badge-sell { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+        .tabs button { background: #21262d; border: 1px solid #30363d; color: #8b949e; padding: 6px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+        .tabs button.active { background: #00FF7F15; border-color: #00FF7F; color: #00FF7F; }
+        .form-row { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { color: #8b949e; font-size: 12px; }
+        .form-group select, .form-group input { background: #0d1117; border: 1px solid #30363d; color: #e6edf3; padding: 8px 12px; border-radius: 8px; font-size: 14px; }
+        .btn { background: #00FF7F; color: #0d1117; border: none; padding: 10px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; }
+        .btn:hover { opacity: 0.9; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #30363d; border-top-color: #00FF7F; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .hidden { display: none; }
+        .chain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 768px) { .grid { grid-template-columns: repeat(2, 1fr); } .chain-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>RaTrade</h1>
+        <span id="status">Connecting...</span>
+    </div>
+    <div class="nav">
+        <button class="active" onclick="showTab('dashboard')">Dashboard</button>
+        <button onclick="showTab('chain')">Option Chain</button>
+        <button onclick="showTab('trades')">Paper Trade</button>
+        <button onclick="showTab('backtest')">Strategy Builder</button>
+        <button onclick="showTab('scanner')">Scanner</button>
+        <button onclick="showTab('import')">Bhavcopy Import</button>
+    </div>
+    <div class="container">
+        <div id="dashboard" class="tab-content">
+            <div class="grid" id="spot-cards"></div>
+            <div class="section">
+                <h2>Open Positions</h2>
+                <div id="portfolio-table"></div>
+            </div>
+            <div class="section">
+                <h2>Recent Trades</h2>
+                <div id="history-table"></div>
+            </div>
+        </div>
+        <div id="chain" class="tab-content hidden">
+            <div class="form-row">
+                <div class="form-group"><label>Symbol</label><select id="chain-sym" onchange="loadDates()"><option>NIFTY</option><option>BANKNIFTY</option><option selected>FINNIFTY</option></select></div>
+                <div class="form-group"><label>Date</label><select id="chain-date" onchange="loadExpiries()"></select></div>
+                <div class="form-group"><label>Expiry</label><select id="chain-exp" onchange="loadChain()"></select></div>
+                <div class="form-group" style="justify-content:flex-end"><button class="btn" onclick="loadChain()">Load</button></div>
+            </div>
+            <div class="section" id="chain-info"></div>
+            <div class="section" id="chain-table"></div>
+            <div class="section">
+                <h2>Place Trade</h2>
+                <div class="form-row">
+                    <div class="form-group"><label>Strike</label><select id="trade-strike"></select></div>
+                    <div class="form-group"><label>Type</label><select id="trade-type"><option>CE</option><option>PE</option></select></div>
+                    <div class="form-group"><label>Action</label><select id="trade-action"><option>BUY</option><option>SELL</option></select></div>
+                    <div class="form-group"><label>Lots</label><input type="number" id="trade-qty" value="1" min="1"></div>
+                    <div class="form-group"><label>SL</label><input type="number" id="trade-sl" value="500"></div>
+                    <div class="form-group"><label>TP</label><input type="number" id="trade-tp" value="1000"></div>
+                    <div class="form-group" style="justify-content:flex-end"><button class="btn" onclick="placeChainTrade()">Place Trade</button></div>
+                </div>
+            </div>
+        </div>
+        <div id="trades" class="tab-content hidden">
+            <div class="grid" id="trade-stats"></div>
+            <div class="section">
+                <h2>Open Positions</h2>
+                <div id="open-trades"></div>
+            </div>
+            <div class="section">
+                <h2>Trade History</h2>
+                <div id="closed-trades"></div>
+            </div>
+        </div>
+        <div id="backtest" class="tab-content hidden">
+            <div class="form-row">
+                <div class="form-group"><label>Symbol</label><select id="bt-sym"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option></select></div>
+                <div class="form-group"><label>Start</label><input type="date" id="bt-start" value="2024-08-01"></div>
+                <div class="form-group"><label>End</label><input type="date" id="bt-end" value="2025-01-31"></div>
+                <div class="form-group"><label>Option</label><select id="bt-opt"><option>CE</option><option>PE</option></select></div>
+                <div class="form-group"><label>Transaction</label><select id="bt-txn"><option>buy</option><option>sell</option></select></div>
+                <div class="form-group"><label>SL</label><input type="number" id="bt-sl" value="500"></div>
+                <div class="form-group"><label>TP</label><input type="number" id="bt-tp" value="1000"></div>
+                <div class="form-group" style="justify-content:flex-end"><button class="btn" id="bt-run" onclick="runBacktest()">Run Backtest</button></div>
+            </div>
+            <div class="grid" id="bt-metrics" class="hidden"></div>
+            <div class="section" id="bt-result"></div>
+        </div>
+        <div id="scanner" class="tab-content hidden">
+            <div class="form-row">
+                <div class="form-group"><label>Symbol</label><select id="scan-sym"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option></select></div>
+                <div class="form-group" style="justify-content:flex-end">
+                    <button class="btn" onclick="runVWAP()">VWAP Scan</button>
+                    <button class="btn" onclick="runOI()" style="margin-left:8px">OI Analysis</button>
+                </div>
+            </div>
+            <div class="section" id="scan-result"></div>
+        </div>
+        <div id="import" class="tab-content hidden">
+            <div class="section">
+                <h2>Import Bhavcopy CSV</h2>
+                <div class="form-row">
+                    <div class="form-group"><label>Symbol</label><select id="imp-sym"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option></select></div>
+                    <div class="form-group"><label>CSV File</label><input type="file" id="imp-file" accept=".csv"></div>
+                    <div class="form-group" style="justify-content:flex-end"><button class="btn" onclick="importCSV()">Import</button></div>
+                </div>
+                <div id="imp-result"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+    const API = '';
+    async function api(path, opts) { const r = await fetch(API + path, opts); return r.json(); }
+    function fmt(n) { return n >= 0 ? '₹' + n.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : '-₹' + Math.abs(n).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+    function cls(n) { return n > 0 ? 'positive' : n < 0 ? 'negative' : 'neutral'; }
+    function showTab(id) { document.querySelectorAll('.tab-content').forEach(e => e.classList.add('hidden')); document.getElementById(id).classList.remove('hidden'); document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active')); event.target.classList.add('active'); }
+    async function loadDashboard() {
+        try {
+            const spots = await api('/api/dashboard/spot');
+            document.getElementById('status').textContent = 'Connected';
+            let html = '';
+            for (const [sym, data] of Object.entries(spots)) {
+                html += `<div class="card"><h3>${sym}</h3><div class="value">${data.formatted}</div></div>`;
+            }
+            document.getElementById('spot-cards').innerHTML = html;
+        } catch(e) { document.getElementById('status').textContent = 'Offline'; }
+        try {
+            const p = await api('/api/dashboard/portfolio');
+            if (p.positions && p.positions.length) {
+                let h = `<table><tr><th>Symbol</th><th>Type</th><th>Strike</th><th>Action</th><th>Entry</th><th>Current</th><th>P&L</th></tr>`;
+                p.positions.forEach(t => { h += `<tr><td>${t.symbol}</td><td><span class="badge badge-${t.option_type.toLowerCase()}">${t.option_type}</span></td><td>${t.strike}</td><td><span class="badge badge-${t.transaction_type.toLowerCase()}">${t.transaction_type}</span></td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${t.current_price.toFixed(2)}</td><td class="${cls(t.pnl)}">${fmt(t.pnl)}</td></tr>`; });
+                h += '</table>';
+                document.getElementById('portfolio-table').innerHTML = h;
+            } else { document.getElementById('portfolio-table').innerHTML = '<p class="neutral">No open positions</p>'; }
+        } catch(e) {}
+        try {
+            const h = await api('/api/dashboard/trade-history');
+            if (h.trades && h.trades.length) {
+                let t = `<table><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>`;
+                h.trades.forEach(tr => { t += `<tr><td>${tr.date}</td><td>${tr.symbol}</td><td><span class="badge badge-${tr.option_type.toLowerCase()}">${tr.option_type}</span></td><td>${tr.strike}</td><td>₹${tr.entry.toFixed(2)}</td><td>₹${tr.exit.toFixed(2)}</td><td class="${cls(tr.pnl)}">${tr.pnl_formatted}</td></tr>`; });
+                t += '</table>';
+                document.getElementById('history-table').innerHTML = t;
+            } else { document.getElementById('history-table').innerHTML = '<p class="neutral">No trades yet</p>'; }
+        } catch(e) {}
+    }
+    async function loadDates() { const s = document.getElementById('chain-sym').value; const d = await api('/api/chain/dates/' + s); const sel = document.getElementById('chain-date'); sel.innerHTML = d.dates ? d.dates.slice(0,20).map(x => '<option>'+x+'</option>').join('') : '<option>No Data</option>'; loadExpiries(); }
+    async function loadExpiries() { const s = document.getElementById('chain-sym').value, d = document.getElementById('chain-date').value; if (!d) return; const e = await api('/api/chain/expiries/' + s + '/' + d); const sel = document.getElementById('chain-exp'); sel.innerHTML = e.expiries ? e.expiries.map(x => '<option>'+x+'</option>').join('') : '<option>No Expiry</option>'; }
+    async function loadChain() { const s = document.getElementById('chain-sym').value, d = document.getElementById('chain-date').value, e = document.getElementById('chain-exp').value; if (!d || !e) return; const c = await api('/api/chain/chain/' + s + '/' + d + '/' + e); if (c.error) { document.getElementById('chain-table').innerHTML = '<p>'+c.error+'</p>'; return; }
+        document.getElementById('chain-info').innerHTML = `<strong>Spot: ₹${c.spot.toLocaleString()} | ATM: ${c.atm} | ${c.symbol}</strong>`;
+        let h = '<table><tr><th>CE LTP</th><th>CE OI</th><th>CE Vol</th><th>Strike</th><th>Dist</th><th>PE LTP</th><th>PE OI</th><th>PE Vol</th></tr>';
+        const strikes = document.getElementById('trade-strike');
+        strikes.innerHTML = '';
+        c.rows.forEach(r => { strikes.innerHTML += '<option value="'+r.strike+'">'+r.strike+'</option>'; h += `<tr><td>₹${r.ce_ltp.toFixed(2)}</td><td>${r.ce_oi.toLocaleString()}</td><td>${r.ce_vol.toLocaleString()}</td><td><strong>${r.strike}</strong></td><td class="${r.distance>=0?'positive':'negative'}">${r.distance>0?'+':''}${r.distance}</td><td>₹${r.pe_ltp.toFixed(2)}</td><td>${r.pe_oi.toLocaleString()}</td><td>${r.pe_vol.toLocaleString()}</td></tr>`; });
+        h += '</table>';
+        document.getElementById('chain-table').innerHTML = h;
+    }
+    async function placeChainTrade() { const body = { symbol: document.getElementById('chain-sym').value, option_type: document.getElementById('trade-type').value, strike: parseFloat(document.getElementById('trade-strike').value), expiry: document.getElementById('chain-exp').value, date: document.getElementById('chain-date').value, transaction_type: document.getElementById('trade-action').value, quantity: parseInt(document.getElementById('trade-qty').value), stop_loss: parseFloat(document.getElementById('trade-sl').value), take_profit: parseFloat(document.getElementById('trade-tp').value) };
+        const r = await api('/api/chain/place-trade', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        alert(r.error ? 'Error: ' + r.error : 'Trade placed! ID: ' + r.trade_id + ' @ ₹' + r.entry_price); }
+    async function loadTrades() {
+        try {
+            const o = await api('/api/trades/open');
+            const s = await api('/api/dashboard/stats');
+            let sh = `<div class="card"><h3>Open</h3><div class="value">${s.open_count}</div></div><div class="card"><h3>Closed</h3><div class="value">${s.closed_count}</div></div><div class="card"><h3>Win Rate</h3><div class="value">${s.win_rate}%</div></div><div class="card"><h3>Total P&L</h3><div class="value ${cls(s.total_pnl)}">${fmt(s.total_pnl)}</div></div>`;
+            document.getElementById('trade-stats').innerHTML = sh;
+            if (o.positions && o.positions.length) {
+                let h = '<table><tr><th>#</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Action</th><th>Entry</th><th>Current</th><th>P&L</th><th>SL/TP</th><th>Action</th></tr>';
+                o.positions.forEach(t => { h += `<tr><td>${t.id}</td><td>${t.symbol}</td><td><span class="badge badge-${t.option_type.toLowerCase()}">${t.option_type}</span></td><td>${t.strike}</td><td><span class="badge badge-${t.transaction_type.toLowerCase()}">${t.transaction_type}</span></td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${t.current_price.toFixed(2)}</td><td class="${cls(t.pnl)}">${fmt(t.pnl)}</td><td>₹${t.sl}/₹${t.tp}</td><td><button class="btn btn-sm" onclick="closeTrade(${t.id}, ${t.current_price})">Close</button></td></tr>`; });
+                h += '</table>';
+                document.getElementById('open-trades').innerHTML = h;
+            } else { document.getElementById('open-trades').innerHTML = '<p class="neutral">No open positions</p>'; }
+        } catch(e) {}
+        try {
+            const c = await api('/api/trades/history');
+            if (c.trades && c.trades.length) {
+                let h = '<table><tr><th>#</th><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';
+                c.trades.forEach(t => { h += `<tr><td>${t.id}</td><td>${t.date}</td><td>${t.symbol}</td><td><span class="badge badge-${t.option_type.toLowerCase()}">${t.option_type}</span></td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${cls(t.pnl)}">${t.pnl_formatted}</td></tr>`; });
+                h += '</table>';
+                document.getElementById('closed-trades').innerHTML = h;
+            } else { document.getElementById('closed-trades').innerHTML = '<p class="neutral">No trades yet</p>'; }
+        } catch(e) {}
+    }
+    async function closeTrade(id, price) { if (!confirm('Close trade #' + id + ' at ₹' + price + '?')) return; await api('/api/trades/close', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({trade_id: id, exit_price: price, date: new Date().toISOString().split('T')[0]}) }); loadTrades(); }
+    async function runBacktest() { document.getElementById('bt-run').innerHTML = '<span class="spinner"></span> Running...'; const body = { symbol: document.getElementById('bt-sym').value, start_date: document.getElementById('bt-start').value, end_date: document.getElementById('bt-end').value, indicators: [{id:'rsi', params:{period:14}}], entry_conditions: [{indicator:'close', operator:'greater_than', value:'0'}], legs: [{option_type: document.getElementById('bt-opt').value, lots: 1, transaction: document.getElementById('bt-txn').value, stop_loss: parseFloat(document.getElementById('bt-sl').value), take_profit: parseFloat(document.getElementById('bt-tp').value)}], advanced: {trailing_sl: false, max_holding_bars: 20, strike_selection: 'otm', otm_distance: 2, trade_mode: 'positional', implied_volatility: 0.14, days_to_expiry: 15}, risk: {max_trades_per_day: 5, daily_stop_loss: parseFloat(document.getElementById('bt-sl').value), daily_take_profit: parseFloat(document.getElementById('bt-tp').value)} };
+        const r = await api('/api/backtest/run', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        document.getElementById('bt-run').innerHTML = 'Run Backtest';
+        if (r.error) { document.getElementById('bt-metrics').innerHTML = ''; document.getElementById('bt-result').innerHTML = '<p style="color:#f85149">'+r.error+'</p>'; return; }
+        const m = r.metrics;
+        document.getElementById('bt-metrics').innerHTML = `<div class="card"><h3>Trades</h3><div class="value">${m.total_trades}</div></div><div class="card"><h3>Win Rate</h3><div class="value">${m.win_rate}%</div></div><div class="card"><h3>Return</h3><div class="value ${cls(m.total_return_pct)}">${m.total_return_pct}%</div></div><div class="card"><h3>Max DD</h3><div class="value negative">${m.max_drawdown}%</div></div><div class="card"><h3>Sharpe</h3><div class="value">${m.sharpe_ratio}</div></div><div class="card"><h3>Profit Factor</h3><div class="value">${m.profit_factor}</div></div><div class="card"><h3>Final Capital</h3><div class="value ${cls(m.final_capital - m.initial_capital)}">${fmt(m.final_capital)}</div></div><div class="card"><h3>Brokerage</h3><div class="value">${fmt(m.total_brokerage)}</div></div>`;
+        let t = '<h2>Trade List</h2><table><tr><th>Entry</th><th>Exit</th><th>Strike</th><th>Entry ₹</th><th>Exit ₹</th><th>P&L</th></tr>';
+        r.trade_list.forEach(tr => { t += `<tr><td>${tr.entry_date}</td><td>${tr.exit_date||'-'}</td><td>${tr.strike}</td><td>₹${tr.entry_price.toFixed(2)}</td><td>${tr.exit_price?'₹'+tr.exit_price.toFixed(2):'-'}</td><td class="${cls(tr.pnl)}">${tr.pnl_formatted}</td></tr>`; });
+        t += '</table>';
+        document.getElementById('bt-result').innerHTML = t;
+    }
+    async function runVWAP() { const s = document.getElementById('scan-sym').value; const r = await api('/api/scanner/vwap/' + s); if (r.error) { document.getElementById('scan-result').innerHTML = '<p>'+r.error+'</p>'; return; }
+        let h = `<h2>VWAP Scanner - ${r.symbol} (${r.date})</h2><table><tr><th>Strike</th><th>LTP</th><th>OI</th><th>Volume</th><th>Signal</th><th>Distance</th></tr>`;
+        r.results.forEach(x => { const sc = x.signal==='BULLISH'?'positive':x.signal==='BEARISH'?'negative':'neutral'; h += `<tr><td>${x.strike}</td><td>₹${x.ltp.toFixed(2)}</td><td>${x.oi.toLocaleString()}</td><td>${x.volume.toLocaleString()}</td><td class="${sc}">${x.signal}</td><td>+${x.distance}</td></tr>`; });
+        h += '</table>';
+        document.getElementById('scan-result').innerHTML = h;
+    }
+    async function runOI() { const s = document.getElementById('scan-sym').value; const r = await api('/api/scanner/oi/' + s); if (r.error) { document.getElementById('scan-result').innerHTML = '<p>'+r.error+'</p>'; return; }
+        let h = `<h2>OI Analysis - ${r.symbol} (${r.date}) | PCR: ${r.pcr}</h2><div class="chain-grid"><div><h3 style="color:#3fb950;margin-bottom:8px">Top CE OI</h3><table><tr><th>Strike</th><th>OI</th><th>LTP</th></tr>`;
+        r.ce_top.forEach(x => { h += `<tr><td>${x.strike}</td><td>${x.oi.toLocaleString()}</td><td>₹${x.ltp.toFixed(2)}</td></tr>`; });
+        h += '</table></div><div><h3 style="color:#f85149;margin-bottom:8px">Top PE OI</h3><table><tr><th>Strike</th><th>OI</th><th>LTP</th></tr>';
+        r.pe_top.forEach(x => { h += `<tr><td>${x.strike}</td><td>${x.oi.toLocaleString()}</td><td>₹${x.ltp.toFixed(2)}</td></tr>`; });
+        h += '</table></div></div>';
+        document.getElementById('scan-result').innerHTML = h;
+    }
+    async function importCSV() { const file = document.getElementById('imp-file').files[0]; if (!file) { alert('Select a CSV file'); return; }
+        const fd = new FormData(); fd.append('file', file); fd.append('symbol', document.getElementById('imp-sym').value);
+        const r = await api('/api/bhavcopy/import-csv', { method: 'POST', body: fd });
+        document.getElementById('imp-result').innerHTML = r.error ? '<p style="color:#f85149">'+r.error+'</p>' : '<p style="color:#3fb950">Imported '+r.imported+' records for '+r.symbol+'</p>';
+    }
+    loadDashboard();
+    setInterval(loadDashboard, 30000);
+    </script>
+</body>
+</html>

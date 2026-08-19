@@ -1,6 +1,8 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from core.models.database import Database
 
 os.environ.setdefault("DB_PATH", os.path.join(os.path.dirname(__file__), "data", "ratrade.db"))
@@ -30,7 +32,10 @@ app.include_router(scanner.router, prefix="/api/scanner", tags=["Scanner"])
 
 @app.get("/")
 def root():
-    return {"status": "ok", "app": "RaTrade API", "version": "1.0.0"}
+    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "index.html"))
+
+
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 
 
 @app.get("/health")
