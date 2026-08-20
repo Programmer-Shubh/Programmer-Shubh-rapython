@@ -174,6 +174,12 @@ class OptionScanner:
             "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=?",
             [symbol, strike, option_type, trade_date],
         )
+        if not row:
+            # Fallback: drop expiry_date filter so we find any row matching strike+option_type
+            row = self.db.fetch_one(
+                "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=?",
+                [symbol, strike, option_type],
+            )
         premium = float(row['close_price']) if row and row['close_price'] else None
         expiry = row['expiry_date'] if row and row.get('expiry_date') else ''
         return {'strike': strike, 'premium': premium, 'expiry': expiry}
