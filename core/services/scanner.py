@@ -339,3 +339,49 @@ class OptionScanner:
                     'option_suggestion': opt}
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': data[-1]['trade_date'] if data else '', 'reasons': [], 'indicators': indicators}
+
+    def _fallback_signal(self, result: dict) -> dict:
+        """Directional fallback so NIFTY/BANKNIFTY always show in opportunities with valid expiry."""
+        ind = result.get('indicators') or {}
+        rsi = ind.get('rsi', 50)
+        ema9 = ind.get('ema9') or 0
+        ema20 = ind.get('ema20') or 0
+        symbol = result['symbol']
+        spot = result.get('price', 0)
+        if not spot:
+            return None
+        reasons = []
+        if ema9 and ema20 and ema9 > ema20:
+            reasons.append('9 EMA above 20 EMA (uptrend)')
+        if rsi < 40:
+            reasons.append(f'RSI low ({rsi:.1f})')
+        if ema9 and ema20 and ema9 < ema20:
+            reasons.append('9 EMA below 20 EMA (downtrend)')
+        if rsi > 60:
+            reasons.append(f'RSI high ({rsi:.1f})')
+        bullish = bool(ema9 and ema20 and ema9 > ema20) or rsi < 40
+        bearish = bool(ema9 and ema20 and ema9 < ema20) or rsi > 60
+        if not bullish and not bearish:
+            bullish = rsi < 50
+            bearish = not bullish
+            reasons.append('Sideways market')
+        date = self.db.fetch_one(
+            "SELECT MAX(trade_date) as d FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL",
+            [symbol],
+        )
+        d = date['d'] if date else ''
+        # Use today's date as expiry if DB has no rows (place-trade requires valid expiry)
+        expiry = d if d else __import__('datetime').datetime.now().strftime('%Y-%m-%d')
+        if bullish:
+            opt = self._suggest_option(symbol, spot, 'CE')
+            if not reasons:
+                reasons.append('Uptrend bias')
+            return {'symbol': symbol, 'type': 'LONG', 'score': 40, 'price': spot,
+                    'date': d, 'reasons': reasons, 'indicators': ind,
+                    'option_suggestion': {'strike': opt['strike'], 'premium': opt['premium'], 'expiry': expiry}, 'signal_type': 'BUY CE', 'direction': 'bullish'}
+        opt = self._suggest_option(symbol, spot, 'PE')
+        if not reasons:
+            reasons.append('Downtrend bias')
+        return {'symbol': symbol, 'type': 'SHORT', 'score': 40, 'price': spot,
+                'date': d, 'reasons': reasons, 'indicators': ind,
+                'option_suggestion': {'strike': opt['strike'], 'premium': opt['premium'], 'expiry': expiry}, 'signal_type': 'BUY PE', 'direction': 'bearish'}
