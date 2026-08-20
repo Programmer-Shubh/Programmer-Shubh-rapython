@@ -1,4 +1,4 @@
-# Market Hours Auto Trade
+name: Market Hours Auto Trade
 
 on:
   schedule:
