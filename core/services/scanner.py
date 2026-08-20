@@ -41,27 +41,98 @@ class OptionScanner:
         short_signals.sort(key=lambda x: x['score'], reverse=True)
         return {'long': long_signals[:5], 'short': short_signals[:5], 'total_scanned': len(symbols)}
 
-    def get_top_opportunities(self, symbols=None) -> list:
+    def get_top_opportunities(self, symbols=None, top_n: int = 5) -> list:
         if symbols is None:
             symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'RELIANCE', 'HDFCBANK',
                        'ICICIBANK', 'TCS', 'INFY', 'ITC', 'SBIN',
                        'HUL', 'LT', 'AXISBANK', 'KOTAKBANK', 'ASIANPAINT']
-        vwap_result = self.scan_vwap(symbols)
+        # Always analyse index symbols first so NIFTY/BANKNIFTY option trades appear.
+        index_priority = ['NIFTY', 'BANKNIFTY', 'FINNIFTY']
+        ordered = index_priority + [s for s in symbols if s not in index_priority]
+        vwap_result = self.scan_vwap(ordered)
         all_signals = []
+        seen = set()
         for s in vwap_result.get('long', []):
+            if s['symbol'] in seen:
+                continue
+            seen.add(s['symbol'])
             s['signal_type'] = 'BUY CE'
+            s['direction'] = 'bullish'
             all_signals.append(s)
         for s in vwap_result.get('short', []):
+            if s['symbol'] in seen:
+                continue
+            seen.add(s['symbol'])
             s['signal_type'] = 'BUY PE'
+            s['direction'] = 'bearish'
             all_signals.append(s)
-        seen = set()
-        unique = []
-        for s in all_signals:
-            if s['symbol'] not in seen:
-                seen.add(s['symbol'])
-                unique.append(s)
-        unique.sort(key=lambda x: x['score'], reverse=True)
-        return unique[:5]
+
+        # Ensure we return a full list (up to top_n). If fewer than top_n
+        # signals scored >=50, lower the bar so the dashboard stays populated.
+        if len(all_signals) < top_n:
+            for sym in ordered:
+                if sym in seen:
+                    continue
+                result = self._analyze_vwap_symbol(sym)
+                if result and result['type'] != 'NONE':
+                    seen.add(sym)
+                    result['signal_type'] = 'BUY CE' if result['type'] == 'LONG' else 'BUY PE'
+                    result['direction'] = 'bullish' if result['type'] == 'LONG' else 'bearish'
+                    all_signals.append(result)
+                elif result and result.get('price'):
+                    fb = self._fallback_signal(result)
+                    if fb:
+                        seen.add(sym)
+                        all_signals.append(fb)
+                if len(all_signals) >= top_n:
+                    break
+
+        all_signals.sort(key=lambda x: x['score'], reverse=True)
+        return all_signals[:top_n]
+
+    def _fallback_signal(self, result: dict) -> dict:
+        """Directional fallback so NIFTY/BANKNIFTY always show in opportunities."""
+        ind = result.get('indicators') or {}
+        rsi = ind.get('rsi', 50)
+        ema9 = ind.get('ema9') or 0
+        ema20 = ind.get('ema20') or 0
+        symbol = result['symbol']
+        spot = result.get('price', 0)
+        if not spot:
+            return None
+        reasons = []
+        if ema9 and ema20 and ema9 > ema20:
+            reasons.append('9 EMA above 20 EMA (uptrend)')
+        if rsi < 40:
+            reasons.append(f'RSI low ({rsi:.1f})')
+        if ema9 and ema20 and ema9 < ema20:
+            reasons.append('9 EMA below 20 EMA (downtrend)')
+        if rsi > 60:
+            reasons.append(f'RSI high ({rsi:.1f})')
+        bullish = bool(ema9 and ema20 and ema9 > ema20) or rsi < 40
+        bearish = bool(ema9 and ema20 and ema9 < ema20) or rsi > 60
+        if not bullish and not bearish:
+            bullish = rsi < 50
+            bearish = not bullish
+            reasons.append('Sideways market')
+        date = self.db.fetch_one(
+            "SELECT MAX(trade_date) as d FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL",
+            [symbol],
+        )
+        d = date['d'] if date else ''
+        if bullish:
+            opt = self._suggest_option(symbol, spot, 'CE')
+            if not reasons:
+                reasons.append('Uptrend bias')
+            return {'symbol': symbol, 'type': 'LONG', 'score': 40, 'price': spot,
+                    'date': d, 'reasons': reasons, 'indicators': ind,
+                    'option_suggestion': opt, 'signal_type': 'BUY CE', 'direction': 'bullish'}
+        opt = self._suggest_option(symbol, spot, 'PE')
+        if not reasons:
+            reasons.append('Downtrend bias')
+        return {'symbol': symbol, 'type': 'SHORT', 'score': 40, 'price': spot,
+                'date': d, 'reasons': reasons, 'indicators': ind,
+                'option_suggestion': opt, 'signal_type': 'BUY PE', 'direction': 'bearish'}
 
     def _get_historical(self, symbol: str) -> list:
         rows = self.db.fetch_all(
