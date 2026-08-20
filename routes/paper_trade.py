@@ -60,6 +60,7 @@ def get_open_trades():
                 "sl": t["trade"]["stop_loss"],
                 "tp": t["trade"]["target"],
                 "trade_mode": t["trade"].get("trade_mode", "paper"),
+                "entry_date": t["trade"].get("entry_date", ""),
             }
             for t in positions
         ],
@@ -70,9 +71,9 @@ def get_open_trades():
 def place_trade(req: PlaceTradeRequest):
     if req.entry_price <= 0 or req.strike <= 0:
         return {"error": "Enter valid strike and premium"}
-    adj_premium = TransactionCosts.apply_fill_slippage(req.entry_price, req.transaction_type)
+    adj_premium = TransactionCosts.apply_fill_slippage(req.entry_price, req.transaction_type, is_live=True)
     lot_size = get_lot_size(req.symbol)
-    costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL")
+    costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
     trade_model = TradeModel()
     tid = trade_model.insert_trade({
         "symbol": req.symbol,

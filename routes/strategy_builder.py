@@ -33,6 +33,7 @@ def run_backtest(req: BacktestRequest):
         historical, req.symbol, req.start_date, req.end_date,
         req.indicators, req.entry_conditions, req.exit_conditions,
         req.legs, req.advanced, req.risk,
+        is_live=False,
     )
     if not result.get("success"):
         return {"error": result.get("error", "Backtest failed")}

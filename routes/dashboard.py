@@ -74,10 +74,15 @@ def get_portfolio():
                 "entry_price": t["trade"]["entry_price"],
                 "current_price": t["current_price"],
                 "pnl": t["unrealized_pnl"],
+                "pnl_pct": t["unrealized_pct"],
                 "sl": t["trade"]["stop_loss"],
                 "tp": t["trade"]["target"],
                 "status": t["trade"]["status"],
                 "trade_mode": t["trade"].get("trade_mode", "paper"),
+                "qty": t["trade"].get("quantity", 1),
+                "lot_size": t["trade"].get("lot_size", 50),
+                "entry_date": t["trade"].get("entry_date", ""),
+                "expiry_date": t["trade"].get("expiry_date", ""),
             }
             for t in positions
         ],
@@ -96,16 +101,20 @@ def get_trade_history():
         "trades": [
             {
                 "id": t["id"],
-                "date": t["entry_date"],
+                "entry_date": t["entry_date"],
+                "exit_date": t.get("exit_date", ""),
                 "symbol": t["symbol"],
                 "option_type": t["option_type"],
                 "strike": t["strike_price"],
+                "transaction_type": t["transaction_type"],
                 "entry": t["entry_price"],
                 "exit": t.get("exit_price", 0),
                 "pnl": t["pnl"],
                 "pnl_formatted": format_currency(t["pnl"]),
+                "status": t.get("exit_status", "closed"),
+                "qty": t.get("quantity", 1),
             }
-            for t in closed[:30]
+            for t in closed[:50]
         ],
     }
 

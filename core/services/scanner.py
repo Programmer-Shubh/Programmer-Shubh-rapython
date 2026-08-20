@@ -80,7 +80,8 @@ class OptionScanner:
                     result['direction'] = 'bullish' if result['type'] == 'LONG' else 'bearish'
                     all_signals.append(result)
                 elif result and result.get('price'):
-                    fb = self._fallback_signal(result)
+                    # AI-enhanced fallback using available indicators
+                    fb = self._ai_fallback_signal(result)
                     if fb:
                         seen.add(sym)
                         all_signals.append(fb)
@@ -89,6 +90,121 @@ class OptionScanner:
 
         all_signals.sort(key=lambda x: x['score'], reverse=True)
         return all_signals[:top_n]
+
+    def _ai_fallback_signal(self, result: dict) -> dict:
+        """AI-enhanced fallback using 5 advanced indicators when VWAP signals are insufficient."""
+        ind = result.get('indicators') or {}
+        rsi = ind.get('rsi', 50)
+        ema9 = ind.get('ema9') or 0
+        ema20 = ind.get('ema20') or 0
+        symbol = result['symbol']
+        spot = result.get('price', 0)
+        if not spot:
+            return None
+        reasons = []
+        if ema9 and ema20 and ema9 > ema20:
+            reasons.append('9 EMA above 20 EMA (uptrend)')
+        if rsi < 40:
+            reasons.append(f'RSI low ({rsi:.1f})')
+        if ema9 and ema20 and ema9 < ema20:
+            reasons.append('9 EMA below 20 EMA (downtrend)')
+        if rsi > 60:
+            reasons.append(f'RSI high ({rsi:.1f})')
+        
+        # AI indicator analysis
+        kama = ind.get('kama')
+        hmm_regime = ind.get('hmm_regime')
+        ml_rsi = ind.get('ml_rsi')
+        ml_signal = ind.get('ml_signal')
+        
+        ai_bullish = 0
+        ai_bearish = 0
+        ai_reasons = []
+        
+        # KAMA trend
+        if kama and len(kama) > 1:
+            try:
+                kama_slope = float(kama[-1]) - float(kama[-2])
+                if kama_slope > 0:
+                    ai_bullish += 1
+                    ai_reasons.append('KAMA rising')
+                elif kama_slope < 0:
+                    ai_bearish += 1
+                    ai_reasons.append('KAMA falling')
+            except (ValueError, TypeError, IndexError):
+                pass
+        
+        # HMM Regime
+        hmm_bullish = False
+        hmm_bearish = False
+        if hmm_regime:
+            try:
+                states = hmm_regime.get('state_sequence', [])
+                if states and len(states) > 0:
+                    last_state = states[-1]
+                    if last_state == 'Bullish':
+                        hmm_bullish = True
+                    elif last_state == 'Bearish':
+                        hmm_bearish = True
+            except (TypeError, IndexError):
+                pass
+        if hmm_bullish:
+            ai_bullish += 2
+            ai_reasons.append('HMM Bullish')
+        if hmm_bearish:
+            ai_bearish += 2
+            ai_reasons.append('HMM Bearish')
+        
+        # ML-RSI
+        mlrsi_val = 50
+        if ml_rsi and isinstance(ml_rsi, dict):
+            rsi_data = ml_rsi.get('rsi', [50]*100)
+            if rsi_data and len(rsi_data) > 0:
+                mlrsi_val = float(rsi_data[-1])
+        if mlrsi_val < 30:
+            ai_bullish += 1
+            ai_reasons.append(f'ML-RSI oversold ({mlrsi_val:.1f})')
+        elif mlrsi_val > 70:
+            ai_bearish += 1
+            ai_reasons.append(f'ML-RSI overbought ({mlrsi_val:.1f})')
+        
+        # ML Signal Filter
+        ml_prob = 0.5
+        if ml_signal and isinstance(ml_signal, dict):
+            prob_data = ml_signal.get('probability', [0.5]*100)
+            if prob_data and len(prob_data) > 0:
+                ml_prob = float(prob_data[-1])
+        if ml_prob > 0.6:
+            ai_bullish += 1
+            ai_reasons.append(f'ML prob {ml_prob:.2f} bullish')
+        elif ml_prob < 0.4:
+            ai_bearish += 1
+            ai_reasons.append(f'ML prob {ml_prob:.2f} bearish')
+        
+        # Combine
+        bullish = bool(ema9 and ema20 and ema9 > ema20) or rsi < 40 or ai_bullish >= ai_bearish
+        bearish = bool(ema9 and ema20 and ema9 < ema20) or rsi > 60 or ai_bearish > ai_bullish
+        
+        if not bullish and not bearish:
+            bullish = rsi < 50
+            bearish = not bullish
+            reasons.append('Sideways market')
+        
+        reasons.extend(ai_reasons)
+        
+        if bullish:
+            opt = self._suggest_option(symbol, spot, 'CE')
+            if not reasons:
+                reasons.append('Uptrend bias')
+            return {'symbol': symbol, 'type': 'LONG', 'score': 40, 'price': spot,
+                    'date': result.get('date', ''), 'reasons': reasons, 'indicators': ind,
+                    'option_suggestion': opt, 'signal_type': 'BUY CE', 'direction': 'bullish'}
+        opt = self._suggest_option(symbol, spot, 'PE')
+        if not reasons:
+            reasons.append('Downtrend bias')
+        return {'symbol': symbol, 'type': 'SHORT', 'score': 40, 'price': spot,
+                'date': result.get('date', ''), 'reasons': reasons, 'indicators': ind,
+                'option_suggestion': opt, 'signal_type': 'BUY PE', 'direction': 'bearish'}
 
     def _fallback_signal(self, result: dict) -> dict:
         """Directional fallback so NIFTY/BANKNIFTY always show in opportunities."""

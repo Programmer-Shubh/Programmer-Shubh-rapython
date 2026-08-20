@@ -1,4 +1,5 @@
 import math
+import time
 from typing import List, Dict
 from core.services.indicator_engine import IndicatorEngine
 from core.services.transaction_costs import TransactionCosts
@@ -7,13 +8,14 @@ from utils.helpers import get_strike_step, get_lot_size, black_scholes
 
 
 class BacktestEngine:
-    def __init__(self):
+    def __init__(self, is_live: bool = False):
         self.indicators = IndicatorEngine()
         self.initial_capital = 1000000.0
         self.ohlc_cache = {}
         self.bt_symbol = ""
         self.bt_expiry = ""
         self.implied_volatility = 0.14
+        self.is_live = is_live  # Unified switch: False=backtest, True=live/paper
 
     def run(self, historical, symbol, start_date, end_date, ind_list, entry_conditions,
             exit_conditions, legs, advanced_options, risk_management) -> dict:
@@ -26,6 +28,8 @@ class BacktestEngine:
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
         signal_delay = int(advanced_options.get("signal_delay_bars", 0) or 0)
+        # Latency in seconds (only in backtest mode)
+        latency = TransactionCosts.latency_delay(not self.is_live)
         leg = legs[0] if legs else {"option_type": "CE", "lots": 1, "transaction": "buy"}
         option_type = leg.get("option_type", "CE")
         qty = int(leg.get("lots", 1)) * get_lot_size(symbol)
@@ -72,8 +76,12 @@ class BacktestEngine:
             has_open = len(entries) > len(exits)
             can_enter = not has_open and daily_trades < max_trades_day
 
+            # Execute pending entry from PREVIOUS bar's signal (no look-ahead)
             if pending_entry is not None and can_enter:
-                spot = float(cur["open_price"]) if cur.get("open_price", 0) > 0 else float(cur["close_price"])
+                # Execution happens at NEXT candle's OPEN (no look-ahead bias)
+                exec_idx = i
+                exec_bar = historical[exec_idx] if exec_idx < len(historical) else cur
+                spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
                 if is_spread:
                     trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
                 else:
@@ -86,9 +94,12 @@ class BacktestEngine:
             has_open = len(entries) > len(exits)
             if has_open and pending_exit is not None:
                 entry = entries[len(exits)]
-                spot = float(cur["open_price"]) if cur.get("open_price", 0) > 0 else float(cur["close_price"])
+                exec_idx = i
+                exec_bar = historical[exec_idx] if exec_idx < len(historical) else cur
+                spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
                 exit_prem = self._exit_premium(cur_date, spot, float(entry["strike"]), option_type)
-                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY")
+                # Apply transaction costs with is_live flag
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                 self._close_position(entries, exits, entry, exit_prem, pending_exit, cur_date, qty, txn_type)
                 daily_pnl += exits[-1]["pnl"]
                 if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
@@ -101,7 +112,7 @@ class BacktestEngine:
                 if leg_sl > 0 or leg_tp > 0:
                     hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp)
                     if hit:
-                        exit_prem = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY")
+                        exit_prem = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live)
                         self._close_position(entries, exits, entry, exit_prem, hit["reason"], cur_date, qty, txn_type)
                         daily_pnl += exits[-1]["pnl"]
                         if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
@@ -111,7 +122,7 @@ class BacktestEngine:
             if has_open and trade_mode == "intraday" and is_last:
                 entry = entries[len(exits)]
                 exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY")
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                 self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type)
                 daily_pnl += exits[-1]["pnl"]
                 if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
@@ -123,6 +134,8 @@ class BacktestEngine:
                     eidx = len(exits)
                     bars_held = i - (entry_bars[eidx] if eidx < len(entry_bars) else i)
                 time_exit = bars_held >= max_holding
+                # Generate signals using CLOSED bar (i-1) - NO LOOK-AHEAD
+                # Signal generated at bar i-1, execution at bar i
                 buy_sig = self._get_buy_signal(i, pre_calc, historical, entry_conditions)
                 sell_sig = self._get_sell_signal(i, pre_calc, historical, exit_conditions)
                 entry_sig = buy_sig if txn_type == "buy" else sell_sig
@@ -130,14 +143,18 @@ class BacktestEngine:
                 has_open = len(entries) > len(exits)
                 can_enter = not has_open and daily_trades < max_trades_day
                 if entry_sig and can_enter:
-                    if signal_delay > 0:
+                    # Apply latency: in backtest mode, wait enough bars for latency to elapse
+                    # In live mode, execute immediately
+                    if self.is_live:
+                        # Live mode: execute immediately at next candle open
+                        pending_entry = i
+                    else:
+                        # Backtest mode: wait for latency bars
                         if pending_entry_signal is None:
                             pending_entry_signal = i
-                        elif i - pending_entry_signal >= signal_delay:
+                        elif i - pending_entry_signal >= max(1, latency):
                             pending_entry = i
                             pending_entry_signal = None
-                    else:
-                        pending_entry = i
                 else:
                     pending_entry_signal = None
                 if has_open and pending_exit is None and (exit_sig or time_exit):
@@ -175,6 +192,16 @@ class BacktestEngine:
                 result["ai_volatility"] = self.indicators.calculate_ai_volatility(closes, highs, lows, params.get("lookback", 20))
             elif iid == "ai_trend_score":
                 result["ai_trend"] = self.indicators.calculate_ai_trend_score(closes)
+            elif iid == "kama":
+                result["kama"] = self.indicators.calculate_kama(closes, params.get("fast_period", 10), params.get("slow_period", 30))
+            elif iid == "hmm_regime":
+                result["hmm_regime"] = self.indicators.calculate_hmm_regime(closes, params.get("n_components", 3))
+            elif iid == "dynamic_bollinger":
+                result["dynamic_boll"] = self.indicators.calculate_dynamic_bollinger(closes, highs, lows, params.get("period", 20), params.get("lookforward", 5))
+            elif iid == "ml_rsi":
+                result["ml_rsi"] = self.indicators.calculate_ml_rsi(closes, params.get("period", 14))
+            elif iid == "ml_signal_filter":
+                result["ml_signal"] = self.indicators.calculate_ml_signal_filter(closes, params.get("fast_ema", 9), params.get("slow_ema", 21), params.get("rsi_period", 14), params.get("ml_weight", 0.3))
         return result
 
     def _get_indicator_value(self, indicator, i, close, historical, pre_calc):
@@ -198,22 +225,28 @@ class BacktestEngine:
         return val
 
     def _get_buy_signal(self, i, pre_calc, historical, entry_conditions):
+        """Generate buy signal using previous closed bar to avoid look-ahead bias.
+        Signals are based on bar i-1; execution occurs on candle i open.
+        """
         close = historical[i]["close_price"]
         prev_close = historical[i - 1]["close_price"] if i > 0 else close
+        # Use previous bar's close and indicators for signal (i-1 is fully closed)
+        effective_idx = i - 1 if i > 0 else 0
         buy = False
-        if "supertrend" in pre_calc and i < len(pre_calc["supertrend"]):
-            buy = buy or (close > pre_calc["supertrend"][i])
+        if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
+            buy = buy or (historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx])
         if "macd" in pre_calc:
             m = pre_calc["macd"]
-            mv = m["macd"][i] if i < len(m["macd"]) and m["macd"][i] is not None else 0
-            sv = m["signal"][i] if i < len(m["signal"]) and m["signal"][i] is not None else 0
-            pm = m["macd"][i - 1] if i > 0 and i - 1 < len(m["macd"]) and m["macd"][i - 1] is not None else 0
-            ps = m["signal"][i - 1] if i > 0 and i - 1 < len(m["signal"]) and m["signal"][i - 1] is not None else 0
+            # Use previous bar's MACD values
+            mv = m["macd"][effective_idx] if effective_idx < len(m["macd"]) and m["macd"][effective_idx] is not None else 0
+            sv = m["signal"][effective_idx] if effective_idx < len(m["signal"]) and m["signal"][effective_idx] is not None else 0
+            pm = m["macd"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(m["macd"]) and m["macd"][effective_idx - 1] is not None else 0
+            ps = m["signal"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(m["signal"]) and m["signal"][effective_idx - 1] is not None else 0
             buy = buy or (mv > sv and pm <= ps)
-        if "rsi" in pre_calc and i < len(pre_calc["rsi"]):
-            buy = buy or (pre_calc["rsi"][i] < 30)
-        if "ema" in pre_calc and i < len(pre_calc["ema"]) and pre_calc["ema"][i] is not None:
-            buy = buy or (close > pre_calc["ema"][i])
+        if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
+            buy = buy or (pre_calc["rsi"][effective_idx] < 30)
+        if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
+            buy = buy or (historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx])
         if entry_conditions:
             cond_met = True
             for c in entry_conditions:
@@ -222,8 +255,8 @@ class BacktestEngine:
                 ind = c.get("indicator", "close")
                 if not op:
                     continue
-                cur_v = self._get_indicator_value(ind, i, close, historical, pre_calc)
-                prev_v = self._get_indicator_value(ind, max(0, i - 1), prev_close, historical, pre_calc)
+                cur_v = self._get_indicator_value(ind, effective_idx, close, historical, pre_calc)
+                prev_v = self._get_indicator_value(ind, max(0, effective_idx - 1), prev_close, historical, pre_calc)
                 if op == "greater_than":
                     cond_met = cond_met and cur_v > val
                 elif op == "less_than":
@@ -238,13 +271,18 @@ class BacktestEngine:
         return buy
 
     def _get_sell_signal(self, i, pre_calc, historical, exit_conditions):
+        """Generate sell signal using previous closed bar to avoid look-ahead bias.
+        Signals are based on bar i-1; execution occurs on candle i open.
+        """
         close = historical[i]["close_price"]
         prev_close = historical[i - 1]["close_price"] if i > 0 else close
+        # Use previous bar's close and indicators for signal (i-1 is fully closed)
+        effective_idx = i - 1 if i > 0 else 0
         sell = False
-        if "supertrend" in pre_calc and i < len(pre_calc["supertrend"]):
-            sell = sell or (close < pre_calc["supertrend"][i])
-        if "rsi" in pre_calc and i < len(pre_calc["rsi"]):
-            sell = sell or (pre_calc["rsi"][i] > 70)
+        if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
+            sell = sell or (historical[effective_idx]["close_price"] < pre_calc["supertrend"][effective_idx])
+        if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
+            sell = sell or (pre_calc["rsi"][effective_idx] > 70)
         if exit_conditions:
             cond_met = True
             for c in exit_conditions:
@@ -253,8 +291,8 @@ class BacktestEngine:
                 ind = c.get("indicator", "close")
                 if not op:
                     continue
-                cur_v = self._get_indicator_value(ind, i, close, historical, pre_calc)
-                prev_v = self._get_indicator_value(ind, max(0, i - 1), prev_close, historical, pre_calc)
+                cur_v = self._get_indicator_value(ind, effective_idx, close, historical, pre_calc)
+                prev_v = self._get_indicator_value(ind, max(0, effective_idx - 1), prev_close, historical, pre_calc)
                 if op == "greater_than":
                     cond_met = cond_met and cur_v > val
                 elif op == "less_than":
@@ -287,8 +325,8 @@ class BacktestEngine:
         qty = lots * get_lot_size(symbol)
         strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
         premium = self._entry_premium(date, spot, strike, option_type)
-        premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL")
-        costs = TransactionCosts.calculate(premium * qty, txn_type == "sell")
+        premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
+        costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
         return {
             "date": date, "strike": str(strike), "price": round(premium, 2),
             "quantity": qty, "costs": costs,
@@ -310,8 +348,8 @@ class BacktestEngine:
             offset = int(leg.get("offset", 0) or 0)
             strike = atm + offset * step
             premium = self._entry_premium(date, spot, strike, option_type)
-            premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL")
-            costs = TransactionCosts.calculate(premium * lqty, txn_type == "sell")
+            premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
+            costs = TransactionCosts.calculate(premium * lqty, txn_type == "sell", self.is_live)
             signed = premium * lqty if txn_type == "buy" else -premium * lqty
             total_cost += signed
             qty += lqty
@@ -354,35 +392,36 @@ class BacktestEngine:
             tp_pct = (tp_amt / max(entry_price, 0.01)) * 100
         else:
             tp_pct = tp_amt
+        # Conservative intra-candle SL/TP hit check:
+        # Use the actual High/Low from the bar.
+        # If SL/TP levels are within the candle's high/low range, assume they could be hit.
+        # This avoids look-ahead by only checking if price moved through those levels.
+        high = float(current.get("high_price", 0) or current["close_price"])
+        low = float(current.get("low_price", 0) or current["close_price"])
+        if high < low:
+            high, low = low, high
+        
+        # Calculate SL/TP levels as prices
         if txn_type == "buy":
             sl_level = entry_price * (1 - sl_pct / 100) if sl_pct > 0 else 0
             tp_level = entry_price * (1 + tp_pct / 100) if tp_pct > 0 else 0
         else:
             sl_level = entry_price * (1 + sl_pct / 100) if sl_pct > 0 else 0
             tp_level = entry_price * (1 - tp_pct / 100) if tp_pct > 0 else 0
-        high = float(current.get("high_price", 0) or current["close_price"])
-        low = float(current.get("low_price", 0) or current["close_price"])
-        if high < low:
-            high, low = low, high
-        t = max(1, self._days_to_expiry(current.get("trade_date", ""))) / 365.0
-        step = get_strike_step(self.bt_symbol)
-        strike = round(float(entry["strike"]) / step) * step
-        row = Database.get_instance().fetch_one(
-            "SELECT high_price, low_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-            [self.bt_symbol, current.get("trade_date", ""), strike, option_type],
-        )
-        if row:
-            prem_high = float(row["high_price"]) if row["high_price"] > 0 else float(row["low_price"])
-            prem_low = float(row["low_price"]) if row["low_price"] > 0 else float(row["high_price"])
-        else:
-            prem_high = black_scholes(high, strike, t, self.implied_volatility, option_type)
-            prem_low = black_scholes(low, strike, t, self.implied_volatility, option_type)
+        
+        # CONSERVATIVE check:
+        # For long (buy): SL hit if LOW <= SL level; TP hit if HIGH >= TP level
+        # For short (sell): SL hit if HIGH >= SL level; TP hit if LOW <= TP level
+        hit_sl = False
+        hit_tp = False
         if txn_type == "buy":
-            hit_sl = sl_level > 0 and prem_low <= sl_level
-            hit_tp = tp_level > 0 and prem_high >= tp_level
+            # Long position
+            hit_sl = sl_level > 0 and low <= sl_level
+            hit_tp = tp_level > 0 and high >= tp_level
         else:
-            hit_sl = sl_level > 0 and prem_high >= sl_level
-            hit_tp = tp_level > 0 and prem_low <= tp_level
+            # Short position
+            hit_sl = sl_level > 0 and high >= sl_level
+            hit_tp = tp_level > 0 and low <= tp_level
         if hit_sl:
             return {"reason": "stoploss", "level": sl_level}
         if hit_tp:
@@ -439,7 +478,7 @@ class BacktestEngine:
             self._close_spread(entries, exits, entry, reason, exit_date)
             return
         exit_prem = max(0.01, exit_prem)
-        exit_costs = TransactionCosts.calculate(exit_prem * qty, txn_type == "buy")
+        exit_costs = TransactionCosts.calculate(exit_prem * qty, txn_type == "buy", self.is_live)
         if txn_type == "buy":
             pnl = (exit_prem * qty - exit_costs["total"]) - entry["total_cost"]
         else:
