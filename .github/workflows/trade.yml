@@ -36,15 +36,19 @@ jobs:
         env:
           MARKET_MODE: auto
           DB_PATH: ./data/ratrade.db
+          PYTHONPATH: .
         run: python scripts/auto_scan.py
 
       - name: Run Auto Trade Logic (SL/TP checks)
         env:
           MARKET_MODE: auto
           DB_PATH: ./data/ratrade.db
+          PYTHONPATH: .
         run: python scripts/auto_trade.py
 
       - name: Smoke-test API Server
+        env:
+          PYTHONPATH: .
         run: |
           timeout 30 uvicorn main:app --host 127.0.0.1 --port 8000 &
           sleep 8
