@@ -76,6 +76,7 @@ def get_portfolio():
                 "sl": t["trade"]["stop_loss"],
                 "tp": t["trade"]["target"],
                 "status": t["trade"]["status"],
+                "trade_mode": t["trade"].get("trade_mode", "paper"),
             }
             for t in positions
         ],

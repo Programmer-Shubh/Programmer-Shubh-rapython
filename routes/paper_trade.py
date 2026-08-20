@@ -31,6 +31,11 @@ class UpdateSLTPRequest(BaseModel):
     target: float
 
 
+class TradeModeRequest(BaseModel):
+    trade_id: int
+    trade_mode: str
+
+
 @router.get("/open")
 def get_open_trades():
     trade_model = TradeModel()
@@ -54,6 +59,7 @@ def get_open_trades():
                 "pnl": t["unrealized_pnl"],
                 "sl": t["trade"]["stop_loss"],
                 "tp": t["trade"]["target"],
+                "trade_mode": t["trade"].get("trade_mode", "paper"),
             }
             for t in positions
         ],
@@ -96,6 +102,20 @@ def update_sltp(req: UpdateSLTPRequest):
     trade_model = TradeModel()
     trade_model.update_management(req.trade_id, req.stop_loss, req.target, "OFF")
     return {"status": "updated", "trade_id": req.trade_id}
+
+
+@router.delete("/{trade_id}")
+def delete_trade(trade_id: int):
+    trade_model = TradeModel()
+    trade_model.delete_trade(trade_id)
+    return {"status": "deleted", "trade_id": trade_id}
+
+
+@router.post("/mode")
+def set_trade_mode(req: TradeModeRequest):
+    trade_model = TradeModel()
+    trade_model.set_trade_mode(req.trade_id, req.trade_mode)
+    return {"status": "mode_updated", "trade_id": req.trade_id, "trade_mode": req.trade_mode}
 
 
 @router.get("/history")

@@ -100,6 +100,15 @@ class TradeModel:
             [exit_price, exit_date, exit_costs["total"], pnl, pnl_pct, exit_status, trade_id],
         )
 
+    def delete_trade(self, trade_id: int) -> int:
+        return self.db.execute("DELETE FROM paper_trades WHERE id=?", [trade_id])
+
+    def set_trade_mode(self, trade_id: int, trade_mode: str) -> int:
+        return self.db.execute(
+            "UPDATE paper_trades SET trade_mode=?, updated_at=datetime('now') WHERE id=?",
+            [trade_mode, trade_id],
+        )
+
     def update_management(self, trade_id: int, stop_loss: float, target: float, auto_action: str) -> int:
         return self.db.execute(
             "UPDATE paper_trades SET stop_loss=?, target=?, auto_action=?, updated_at=datetime('now') WHERE id=?",
