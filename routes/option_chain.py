@@ -28,6 +28,12 @@ def get_dates(symbol: str):
     return {"dates": bhav.get_dates(symbol)[:30]}
 
 
+@router.get("/symbols")
+def get_symbols():
+    bhav = BhavcopyModel()
+    return {"symbols": bhav.get_symbols()}
+
+
 @router.get("/expiries/{symbol}/{date}")
 def get_expiries(symbol: str, date: str):
     bhav = BhavcopyModel()
@@ -67,6 +73,15 @@ def get_chain(symbol: str, date: str, expiry: str):
             "pe_vol": pe.get(strike, {}).get("vol", 0),
         })
     return {"symbol": symbol, "date": date, "expiry": expiry, "spot": spot, "atm": atm, "rows": rows}
+
+
+@router.get("/live/{symbol}")
+def get_live_chain(symbol: str):
+    live = LiveMarketData()
+    data = live.fetch_live_option_chain(symbol.upper())
+    if not data:
+        return {"error": "Could not fetch live data from NiftyTrader"}
+    return data
 
 
 @router.post("/place-trade")

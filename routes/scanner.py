@@ -1,48 +1,26 @@
 from fastapi import APIRouter
-from core.models.bhavcopy_model import BhavcopyModel
-from core.services.live_market_data import LiveMarketData
-from core.services.indicator_engine import IndicatorEngine
-from utils.helpers import get_strike_step
+from core.services.scanner import OptionScanner
 
 router = APIRouter()
 
 
 @router.get("/vwap/{symbol}")
 def vwap_scanner(symbol: str):
-    bhav = BhavcopyModel()
-    dates = bhav.get_dates(symbol)
-    if not dates:
-        return {"error": "No data"}
-    date = dates[0]
-    expiries = bhav.get_expiries(symbol, date)
-    if not expiries:
-        return {"error": "No expiries"}
-    chain = bhav.get_option_chain(symbol, date, expiries[0])
-    if not chain:
-        return {"error": "No chain data"}
-    live = LiveMarketData()
-    spot = live.get_spot_price(symbol)
-    step = get_strike_step(symbol)
-    atm = round(spot / step) * step if spot > 0 else 0
-    results = []
-    ce_data = [r for r in chain if r["option_type"] == "CE"]
-    for r in sorted(ce_data, key=lambda x: x["strike_price"]):
-        strike = r["strike_price"]
-        if strike < atm:
-            continue
-        oi = r.get("oi", 0)
-        vol = r.get("volume", 0)
-        signal = "NEUTRAL"
-        if vol > 1000 and oi > 5000:
-            signal = "BULLISH" if strike > atm else "BEARISH"
-        elif vol > 500:
-            signal = "WATCH"
-        results.append({"strike": strike, "ltp": r.get("close_price", 0), "oi": oi, "volume": vol, "signal": signal, "distance": int(strike - atm)})
-    return {"symbol": symbol, "date": date, "spot": spot, "results": results}
+    scanner = OptionScanner()
+    result = scanner._analyze_vwap_symbol(symbol)
+    return result
+
+
+@router.get("/st-macd/{symbol}")
+def st_macd_scanner(symbol: str):
+    scanner = OptionScanner()
+    result = scanner._analyze_symbol(symbol)
+    return result
 
 
 @router.get("/oi/{symbol}")
 def oi_analysis(symbol: str):
+    from core.models.bhavcopy_model import BhavcopyModel
     bhav = BhavcopyModel()
     dates = bhav.get_dates(symbol)
     if not dates:
@@ -69,6 +47,8 @@ def oi_analysis(symbol: str):
 
 @router.get("/breakout/{symbol}")
 def breakout_scanner(symbol: str):
+    from core.services.indicator_engine import IndicatorEngine
+    from core.models.bhavcopy_model import BhavcopyModel
     bhav = BhavcopyModel()
     ind = IndicatorEngine()
     dates = bhav.get_dates(symbol)
@@ -93,3 +73,17 @@ def breakout_scanner(symbol: str):
         "signal": "OVERBOUGHT" if rsi and rsi[-1] > 70 else ("OVERSOLD" if rsi and rsi[-1] < 30 else "NEUTRAL"),
         "prices": prices,
     }
+
+
+@router.get("/scan-all")
+def scan_all():
+    scanner = OptionScanner()
+    st_result = scanner.scan()
+    vwap_result = scanner.scan_vwap()
+    return {"st_macd": st_result, "vwap": vwap_result}
+
+
+@router.get("/opportunities")
+def top_opportunities():
+    scanner = OptionScanner()
+    return {"opportunities": scanner.get_top_opportunities()}

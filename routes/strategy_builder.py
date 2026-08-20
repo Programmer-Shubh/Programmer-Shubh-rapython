@@ -23,7 +23,7 @@ class BacktestRequest(BaseModel):
 @router.post("/run")
 def run_backtest(req: BacktestRequest):
     bhav = BhavcopyModel()
-    historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, True)
+    historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
     if not historical:
         return {"error": f"No data for {req.symbol} between {req.start_date} and {req.end_date}"}
     if len(historical) > 120:
@@ -39,6 +39,7 @@ def run_backtest(req: BacktestRequest):
     m = result["metrics"]
     return {
         "success": True,
+        "engine": result.get("engine", "engine"),
         "metrics": {
             "initial_capital": m["initial_capital"],
             "final_capital": m["final_capital"],
@@ -57,16 +58,5 @@ def run_backtest(req: BacktestRequest):
         },
         "equity_curve": m.get("equity_curve", []),
         "monthly_pnl": m.get("monthly_pnl", {}),
-        "trade_list": [
-            {
-                "entry_date": t["entry"]["date"],
-                "exit_date": t["exit"]["date"] if t.get("exit") else None,
-                "strike": t["entry"]["strike"],
-                "entry_price": t["entry"]["price"],
-                "exit_price": t["exit"]["price"] if t.get("exit") else None,
-                "pnl": t["pnl"],
-                "pnl_formatted": format_currency(t["pnl"]),
-            }
-            for t in m.get("trade_list", [])
-        ],
+        "trade_list": m.get("trade_list", []),
     }

@@ -24,6 +24,8 @@ class BacktestEngine:
         use_trailing = advanced_options.get("trailing_sl", False)
         max_holding = int(advanced_options.get("max_holding_bars", 20))
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
+        daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
+        signal_delay = int(advanced_options.get("signal_delay_bars", 0) or 0)
         leg = legs[0] if legs else {"option_type": "CE", "lots": 1, "transaction": "buy"}
         option_type = leg.get("option_type", "CE")
         qty = int(leg.get("lots", 1)) * get_lot_size(symbol)
@@ -43,9 +45,14 @@ class BacktestEngine:
         entries, exits, entry_bars = [], [], []
         pending_entry = None
         pending_exit = None
+        pending_entry_signal = None
         daily_trades = 0
+        daily_pnl = 0.0
+        kill_switch_on = False
         last_date = ""
         min_bars = min(15, max(1, len(historical) - 2))
+        legs = legs if legs else [{"option_type": "CE", "lots": 1, "transaction": "buy"}]
+        is_spread = len(legs) > 1
 
         for i in range(min_bars, len(historical)):
             cur = historical[i]
@@ -55,22 +62,23 @@ class BacktestEngine:
 
             if cur_date != last_date:
                 daily_trades = 0
+                daily_pnl = 0.0
+                kill_switch_on = False
                 last_date = cur_date
+
+            if kill_switch_on:
+                continue
 
             has_open = len(entries) > len(exits)
             can_enter = not has_open and daily_trades < max_trades_day
 
             if pending_entry is not None and can_enter:
                 spot = float(cur["open_price"]) if cur.get("open_price", 0) > 0 else float(cur["close_price"])
-                strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
-                premium = self._entry_premium(cur_date, spot, strike, option_type)
-                premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL")
-                costs = TransactionCosts.calculate(premium * qty, txn_type == "sell")
-                entries.append({
-                    "date": cur_date, "strike": str(strike), "price": round(premium, 2),
-                    "quantity": qty, "costs": costs,
-                    "total_cost": round(premium * qty + costs["total"], 2), "type": txn_type,
-                })
+                if is_spread:
+                    trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
+                else:
+                    trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
+                entries.append(trade)
                 entry_bars.append(i)
                 daily_trades += 1
                 pending_entry = None
@@ -82,6 +90,9 @@ class BacktestEngine:
                 exit_prem = self._exit_premium(cur_date, spot, float(entry["strike"]), option_type)
                 exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY")
                 self._close_position(entries, exits, entry, exit_prem, pending_exit, cur_date, qty, txn_type)
+                daily_pnl += exits[-1]["pnl"]
+                if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
+                    kill_switch_on = True
                 pending_exit = None
 
             has_open = len(entries) > len(exits)
@@ -92,6 +103,9 @@ class BacktestEngine:
                     if hit:
                         exit_prem = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY")
                         self._close_position(entries, exits, entry, exit_prem, hit["reason"], cur_date, qty, txn_type)
+                        daily_pnl += exits[-1]["pnl"]
+                        if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
+                            kill_switch_on = True
 
             has_open = len(entries) > len(exits)
             if has_open and trade_mode == "intraday" and is_last:
@@ -99,6 +113,9 @@ class BacktestEngine:
                 exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
                 exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY")
                 self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type)
+                daily_pnl += exits[-1]["pnl"]
+                if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
+                    kill_switch_on = True
 
             if nxt is not None:
                 bars_held = 0
@@ -113,7 +130,16 @@ class BacktestEngine:
                 has_open = len(entries) > len(exits)
                 can_enter = not has_open and daily_trades < max_trades_day
                 if entry_sig and can_enter:
-                    pending_entry = i
+                    if signal_delay > 0:
+                        if pending_entry_signal is None:
+                            pending_entry_signal = i
+                        elif i - pending_entry_signal >= signal_delay:
+                            pending_entry = i
+                            pending_entry_signal = None
+                    else:
+                        pending_entry = i
+                else:
+                    pending_entry_signal = None
                 if has_open and pending_exit is None and (exit_sig or time_exit):
                     pending_exit = "condition" if exit_sig else "time"
 
@@ -254,6 +280,55 @@ class BacktestEngine:
             offset = 0
         return atm + offset
 
+    def _enter_single(self, date, spot, symbol, leg, strike_sel, delta_target, otm_dist):
+        option_type = leg.get("option_type", "CE")
+        txn_type = leg.get("transaction", "buy").lower()
+        lots = int(leg.get("lots", 1))
+        qty = lots * get_lot_size(symbol)
+        strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
+        premium = self._entry_premium(date, spot, strike, option_type)
+        premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL")
+        costs = TransactionCosts.calculate(premium * qty, txn_type == "sell")
+        return {
+            "date": date, "strike": str(strike), "price": round(premium, 2),
+            "quantity": qty, "costs": costs,
+            "total_cost": round(premium * qty + costs["total"], 2),
+            "type": txn_type, "legs": [{"option_type": option_type, "strike": strike, "type": txn_type, "lots": lots}],
+        }
+
+    def _enter_spread(self, date, spot, symbol, legs, strike_sel, delta_target, otm_dist):
+        step = get_strike_step(symbol)
+        atm = round(spot / step) * step
+        leg_details = []
+        total_cost = 0.0
+        qty = 0
+        for leg in legs:
+            option_type = leg.get("option_type", "CE")
+            txn_type = leg.get("transaction", "buy").lower()
+            lots = int(leg.get("lots", 1))
+            lqty = lots * get_lot_size(symbol)
+            offset = int(leg.get("offset", 0) or 0)
+            strike = atm + offset * step
+            premium = self._entry_premium(date, spot, strike, option_type)
+            premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL")
+            costs = TransactionCosts.calculate(premium * lqty, txn_type == "sell")
+            signed = premium * lqty if txn_type == "buy" else -premium * lqty
+            total_cost += signed
+            qty += lqty
+            leg_details.append({
+                "option_type": option_type, "strike": strike, "type": txn_type,
+                "lots": lots, "quantity": lqty, "premium": round(premium, 2),
+                "costs": costs, "signed_value": round(signed, 2),
+            })
+        net_premium = abs(total_cost)
+        return {
+            "date": date, "strike": str(leg_details[0]["strike"]), "price": round(net_premium, 2),
+            "quantity": qty, "costs": {"total": sum(l["costs"]["total"] for l in leg_details), **leg_details[0]["costs"]},
+            "total_cost": round(total_cost + sum(l["costs"]["total"] for l in leg_details), 2),
+            "type": "spread", "legs": leg_details,
+            "is_spread": True,
+        }
+
     def _find_delta_strike(self, spot, symbol, option_type, target_delta):
         step = get_strike_step(symbol)
         best = round(spot / step) * step
@@ -360,6 +435,9 @@ class BacktestEngine:
             return 7
 
     def _close_position(self, entries, exits, entry, exit_prem, reason, exit_date, qty, txn_type):
+        if entry.get("is_spread"):
+            self._close_spread(entries, exits, entry, reason, exit_date)
+            return
         exit_prem = max(0.01, exit_prem)
         exit_costs = TransactionCosts.calculate(exit_prem * qty, txn_type == "buy")
         if txn_type == "buy":
@@ -370,6 +448,45 @@ class BacktestEngine:
             "date": exit_date, "strike": entry["strike"], "price": round(exit_prem, 2),
             "quantity": qty, "exit_costs": exit_costs, "reason": reason, "pnl": round(pnl, 2),
         })
+
+    def _close_spread(self, entries, exits, entry, reason, exit_date):
+        exit_costs_total = 0.0
+        exit_value = 0.0
+        for leg in entry.get("legs", []):
+            option_type = leg["option_type"]
+            strike = leg["strike"]
+            lqty = leg["quantity"]
+            spot = self._close_spot_for_date(exit_date)
+            prem = self._close_premium(exit_date, spot, strike, option_type)
+            prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY")
+            costs = TransactionCosts.calculate(prem * lqty, leg["type"] == "buy")
+            exit_costs_total += costs["total"]
+            if leg["type"] == "buy":
+                exit_value += prem * lqty
+            else:
+                exit_value -= prem * lqty
+        entry_value = sum(l["signed_value"] for l in entry["legs"])
+        pnl = (exit_value - exit_costs_total) - entry["total_cost"]
+        exits.append({
+            "date": exit_date, "strike": entry["strike"], "price": round(abs(exit_value), 2),
+            "quantity": entry["quantity"], "exit_costs": {"total": round(exit_costs_total, 2)},
+            "reason": reason, "pnl": round(pnl, 2), "is_spread": True,
+        })
+
+    def _close_spot_for_date(self, bar_date):
+        row = Database.get_instance().fetch_one(
+            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND option_type IS NULL",
+            [self.bt_symbol, bar_date],
+        )
+        if row and row["close_price"]:
+            return float(row["close_price"])
+        row2 = Database.get_instance().fetch_one(
+            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND option_type='CE' ORDER BY ABS(strike_price - (SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND option_type IS NULL)) LIMIT 1",
+            [self.bt_symbol, bar_date, self.bt_symbol, bar_date],
+        )
+        if row2 and row2["close_price"]:
+            return float(row2["close_price"])
+        return 0
 
     def _build_result(self, symbol, start_date, end_date, entries, exits):
         equity = [self.initial_capital]
@@ -393,7 +510,17 @@ class BacktestEngine:
                     win_amounts.append(pnl)
                 else:
                     loss_amounts.append(abs(pnl))
-                trade_list.append({"entry": entry, "exit": exit, "pnl": pnl})
+                entry_data = entry if isinstance(entry, dict) else {"date": entry.get("date", ""), "strike": entry.get("strike", ""), "price": entry.get("price", 0)}
+                exit_data = exit if isinstance(exit, dict) else {"date": exit.get("date", ""), "price": exit.get("price", 0)} if exit else {"date": "", "price": 0}
+                trade_list.append({
+                    "entry_date": entry_data.get("date", ""),
+                    "exit_date": exit_data.get("date", "") if exit_data else "",
+                    "strike": entry_data.get("strike", ""),
+                    "entry_price": entry_data.get("price", 0),
+                    "exit_price": exit_data.get("price", 0) if exit_data else 0,
+                    "pnl": pnl,
+                    "pnl_formatted": f"₹{pnl:.2f}"
+                })
             equity.append(capital)
         total_return = capital - self.initial_capital
         total_return_pct = (total_return / self.initial_capital) * 100
@@ -405,7 +532,7 @@ class BacktestEngine:
         sharpe = self._sharpe(equity)
         monthly_pnl = {}
         for t in trade_list:
-            m = t["entry"]["date"][:7]
+            m = t["entry_date"][:7]
             monthly_pnl[m] = monthly_pnl.get(m, 0) + t["pnl"]
         return {
             "success": True,

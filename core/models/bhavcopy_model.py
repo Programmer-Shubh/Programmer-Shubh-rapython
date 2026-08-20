@@ -30,6 +30,12 @@ class BhavcopyModel:
             "count": row["cnt"] or 0,
         }
 
+    def get_symbols(self) -> list:
+        rows = self.db.fetch_all(
+            "SELECT DISTINCT symbol FROM bhavcopy_data ORDER BY symbol",
+        )
+        return [r["symbol"] for r in rows]
+
     def get_by_symbol(self, symbol: str, start_date: str, end_date: str, include_options: bool = True) -> list:
         if include_options:
             return self.db.fetch_all(
@@ -38,7 +44,7 @@ class BhavcopyModel:
                 [symbol, start_date, end_date],
             )
         return self.db.fetch_all(
-            "SELECT * FROM bhavcopy_data WHERE symbol=? AND trade_date BETWEEN ? AND ? ORDER BY trade_date",
+            "SELECT * FROM bhavcopy_data WHERE symbol=? AND trade_date BETWEEN ? AND ? AND option_type IS NULL ORDER BY trade_date",
             [symbol, start_date, end_date],
         )
 

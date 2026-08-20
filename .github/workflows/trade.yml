@@ -1,13 +1,20 @@
 name: Market Hours Auto Trade
+
 on:
   schedule:
-    # Monday-Friday, every 5 minutes during market hours (9:15 AM - 3:30 PM IST)
-    - cron: '*/5 3-10 * * 1-5'   # UTC times (IST = UTC+5:30)
+    # Every 5 minutes, Mon-Fri, during IST market hours (9:15 AM - 3:30 PM IST = 3:45 - 10:00 UTC)
+    # GitHub Actions minimum cron interval is 5 minutes. Cron runs in UTC.
+    - cron: '*/5 3-10 * * 1-5'
   workflow_dispatch:
 
+concurrency:
+  group: market-trade
+  cancel-in-progress: false
+
 jobs:
-  run-scanner:
+  run-market-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -27,22 +34,24 @@ jobs:
           DB_PATH: ./data/ratrade.db
         run: python scripts/auto_scan.py
 
-      - name: Run Auto Trade Logic
+      - name: Run Auto Trade Logic (SL/TP checks)
         env:
           MARKET_MODE: auto
           DB_PATH: ./data/ratrade.db
         run: python scripts/auto_trade.py
 
-      - name: Start API Server
+      - name: Smoke-test API Server
         run: |
-          uvicorn main:app --host 0.0.0.0 --port 8000 &
-          sleep 5
-          curl -f http://localhost:8000/health || exit 1
+          timeout 30 uvicorn main:app --host 127.0.0.1 --port 8000 &
+          sleep 8
+          curl -sf http://127.0.0.1:8000/health && echo "API OK"
 
-      - name: Upload results
+      - name: Upload run logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trade-results-${{ github.run_number }}
-          path: ./data/logs/
-          retention-days: 30
+          name: market-logs-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            data/logs/
+            data/*.log
+          retention-days: 14

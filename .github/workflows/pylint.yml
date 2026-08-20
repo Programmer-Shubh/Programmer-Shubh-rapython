@@ -18,4 +18,4 @@ jobs:
         pip install pylint
     - name: Analysing the code with pylint
       run: |
-        pylint --disable=C0114,C0115,C0116,C0103,C0301,C0411,W0611,E0401 app.py core/ pages/ utils/ scripts/
+        pylint --disable=C0114,C0115,C0116,C0103,C0301,C0411,W0611,E0401 main.py core/ routes/ utils/ scripts/

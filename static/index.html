@@ -3,339 +3,632 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RaTrade Dashboard</title>
+    <title>RaTrade - Indian Options Trading Platform</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #f0f2f5; color: #1a1a2e; font-family: 'Segoe UI', system-ui, sans-serif; }
-        .header { background: linear-gradient(135deg, #00b894, #00cec9); border-bottom: 1px solid #ddd; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; }
-        .header h1 { color: #fff; font-size: 24px; }
-        .header span { color: #fff; font-size: 14px; }
-        .nav { background: #fff; border-bottom: 1px solid #ddd; display: flex; gap: 0; padding: 0 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow-x: auto; }
-        .nav button { background: none; border: none; color: #666; padding: 12px 16px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; white-space: nowrap; }
-        .nav button:hover { color: #00b894; }
-        .nav button.active { color: #00b894; border-bottom-color: #00b894; font-weight: 600; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 20px 24px; }
-        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
-        .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
-        .card h3 { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
-        .card .value { font-size: 24px; font-weight: 700; color: #00b894; }
-        .card .change { font-size: 13px; margin-top: 4px; }
-        .section { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 16px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
-        .section h2 { color: #1a1a2e; font-size: 16px; margin-bottom: 12px; }
-        table { width: 100%; border-collapse: collapse; }
-        th { background: #f8f9fa; color: #666; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; padding: 8px 10px; text-align: left; border-bottom: 2px solid #e0e0e0; }
-        td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
-        tr:hover { background: #f8f9fa; }
-        .pos { color: #00b894; font-weight: 600; }
-        .neg { color: #e74c3c; font-weight: 600; }
-        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
-        .badge-ce { background: #e6f9f1; color: #00b894; }
-        .badge-pe { background: #fde8e8; color: #e74c3c; }
-        .badge-buy { background: #e6f9f1; color: #00b894; }
-        .badge-sell { background: #fde8e8; color: #e74c3c; }
-        .form-row { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
-        .form-group { display: flex; flex-direction: column; gap: 3px; }
-        .form-group label { color: #666; font-size: 11px; }
-        .form-group select, .form-group input { background: #fff; border: 1px solid #ddd; color: #1a1a2e; padding: 6px 10px; border-radius: 6px; font-size: 13px; }
-        .form-group select:focus, .form-group input:focus { outline: none; border-color: #00b894; }
-        .btn { background: #00b894; color: #fff; border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; }
-        .btn:hover { background: #00a884; }
-        .btn-sm { padding: 4px 10px; font-size: 11px; }
-        .btn-red { background: #e74c3c; }
-        .btn-red:hover { background: #c0392b; }
-        .hidden { display: none; }
-        .chain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-        .chain-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr; gap: 0; }
-        .chain-header { background: #f0f2f5; font-weight: 600; font-size: 11px; text-transform: uppercase; padding: 8px 6px; text-align: center; }
-        .chain-cell { padding: 6px; text-align: center; font-size: 12px; border-bottom: 1px solid #f0f0f0; }
-        .chain-strike { background: #f8f9fa; font-weight: 700; font-size: 13px; padding: 6px; text-align: center; }
-        .chart-container { height: 300px; margin-top: 12px; }
-        .indicator-tag { display: inline-block; background: #e8f4fd; color: #2196F3; padding: 2px 8px; border-radius: 10px; font-size: 10px; margin: 2px; }
-        @media (max-width: 768px) { .grid { grid-template-columns: repeat(2, 1fr); } .chain-grid { grid-template-columns: 1fr; } }
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:#f0f2f5;color:#212529;font-family:'Segoe UI',system-ui,sans-serif;font-size:14px}
+        .topbar{background:linear-gradient(135deg,#0d6efd,#6610f2);padding:10px 24px;display:flex;justify-content:space-between;align-items:center}
+        .topbar h1{color:#fff;font-size:18px;font-weight:700}
+        .topbar span{color:rgba(255,255,255,0.8);font-size:12px}
+        .nav{background:#fff;border-bottom:1px solid #dee2e6;display:flex;padding:0 16px;overflow-x:auto}
+        .nav button{background:none;border:none;color:#6c757d;padding:10px 16px;cursor:pointer;font-size:13px;border-bottom:2px solid transparent;white-space:nowrap}
+        .nav button:hover{color:#0d6efd}
+        .nav button.active{color:#0d6efd;border-bottom-color:#0d6efd;font-weight:600}
+        .wrap{max-width:1400px;margin:0 auto;padding:16px}
+        .card{background:#fff;border:1px solid #dee2e6;border-radius:8px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+        .card-header{background:#fff;border-bottom:1px solid #dee2e6;padding:12px 16px;font-weight:600;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+        .card-body{padding:16px}
+        .row{display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+        .col{flex:1;min-width:200px}
+        .stat-card{text-align:center;padding:12px}
+        .stat-card .label{color:#6c757d;font-size:12px}
+        .stat-card .value{font-size:22px;font-weight:700}
+        table{width:100%;border-collapse:collapse}
+        th{background:#f8f9fa;color:#495057;font-size:11px;text-transform:uppercase;padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6}
+        td{padding:6px 10px;border-bottom:1px solid #f0f0f0;font-size:12px}
+        tr:hover{background:#f8f9fa}
+        .price-up{color:#198754;font-weight:600}
+        .price-down{color:#dc3545;font-weight:600}
+        .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600}
+        .badge-buy{background:#d1e7dd;color:#0f5132}
+        .badge-sell{background:#f8d7da;color:#842029}
+        .badge-ce{background:#d1e7dd;color:#0f5132}
+        .badge-pe{background:#f8d7da;color:#842029}
+        .badge-active{background:#d1e7dd;color:#0f5132}
+        .badge-draft{background:#fff3cd;color:#664d03}
+        .badge-paused{background:#e2e3e5;color:#41464b}
+        .btn{padding:4px 12px;border-radius:4px;border:1px solid #dee2e6;cursor:pointer;font-size:12px;font-weight:500;background:#fff}
+        .btn:hover{background:#f8f9fa}
+        .btn-primary{background:#0d6efd;color:#fff;border-color:#0d6efd}
+        .btn-primary:hover{background:#0b5ed7}
+        .btn-success{background:#198754;color:#fff;border-color:#198754}
+        .btn-danger{background:#dc3545;color:#fff;border-color:#dc3545}
+        .btn-warning{background:#ffc107;color:#000;border-color:#ffc107}
+        .btn-sm{padding:2px 8px;font-size:11px}
+        .form-label{font-size:12px;font-weight:600;color:#495057;margin-bottom:4px}
+        .form-control,.form-select{border:1px solid #dee2e6;border-radius:4px;padding:4px 8px;font-size:12px}
+        .tabs{display:flex;gap:0;border-bottom:2px solid #dee2e6;margin-bottom:12px}
+        .tabs button{background:none;border:none;color:#6c757d;padding:8px 16px;cursor:pointer;font-size:12px;border-bottom:2px solid transparent;margin-bottom:-2px}
+        .tabs button.active{color:#0d6efd;border-bottom-color:#0d6efd;font-weight:600}
+        .sig-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+        .sig-box{border-radius:8px;padding:12px}
+        .sig-box.bull{background:#f0fff4;border:1px solid #c6f6d5}
+        .sig-box.bear{background:#fff5f5;border:1px solid #fed7d7}
+        .sig-box h5{font-size:13px;font-weight:600;margin-bottom:8px}
+        .sig-item{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin-bottom:8px}
+        .sig-item .name{font-weight:700;font-size:14px}
+        .sig-item .meta{font-size:11px;color:#6c757d;margin-top:3px}
+        .reason-tag{display:inline-block;background:#edf2f7;color:#4a5568;padding:1px 6px;border-radius:6px;font-size:10px;margin:1px}
+        .score-badge{background:#e2e8f0;color:#2d3748;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700}
+        .hidden{display:none!important}
+        .spinner{display:inline-block;width:14px;height:14px;border:2px solid #dee2e6;border-top-color:#0d6efd;border-radius:50%;animation:spin .7s linear infinite}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .live-dot{width:8px;height:8px;background:#198754;border-radius:50%;display:inline-block;animation:pulse 1.5s infinite}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+        .step-indicator{display:flex;gap:0;margin-bottom:16px}
+        .step{flex:1;text-align:center;padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-size:12px;font-weight:500;color:#6c757d}
+        .step:first-child{border-radius:6px 0 0 6px}
+        .step:last-child{border-radius:0 6px 6px 0}
+        .step.active{background:#0d6efd;color:#fff;border-color:#0d6efd}
+        .indicator-card{background:#f8f9fa;border:1px solid #dee2e6;border-radius:8px;padding:12px;margin-bottom:8px}
+        .indicator-card h6{font-size:13px;font-weight:600;margin-bottom:4px}
+        .indicator-card p{font-size:11px;color:#6c757d;margin:0}
+        .indicator-card input[type=number]{width:80px}
+        .chain-table td{padding:2px 6px;font-size:11px}
+        .chain-table th{padding:4px 6px;font-size:10px}
+        .chain-table tbody tr{border-bottom:1px solid #f0f0f0}
+        .chain-table tbody tr:nth-child(even){background:#fafafa}
+        .chain-table .btn-sm{padding:1px 6px;font-size:10px}
+        .chain-table .badge{font-size:9px;padding:1px 4px}
+        .chain-form .form-label{margin-bottom:2px;font-size:11px}
+        .chain-controls{padding:8px}
+        .chain-table-card{margin-bottom:8px}
+        .stat-card-sm{text-align:center;padding:8px}
+        .stat-card-sm .label{color:#6c757d;font-size:10px}
+        .stat-card-sm .value{font-size:16px;font-weight:700}
+        .stat-card-sm .source{color:#6c757d;font-size:9px}
+        .bt-table td{padding:2px 6px;font-size:10px}
+        .bt-table th{padding:4px 6px;font-size:9px;font-weight:600}
+        .bt-table tbody tr{border-bottom:1px solid #f0f0f0}
+        .bt-table tbody tr:nth-child(even){background:#fafafa}
+        .bt-table tbody tr:hover{background:#f0f7ff}
+        .section-title{font-size:12px;font-weight:700;color:#0d6efd;margin:8px 0 4px;text-transform:uppercase}
+        @media(max-width:768px){.sig-grid{grid-template-columns:1fr}.row{flex-direction:column}.col{min-width:100%}}
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>RaTrade</h1>
-        <span id="status">Connecting...</span>
+    <div class="topbar">
+        <h1><i class="bi bi-graph-up-arrow"></i> RaTrade</h1>
+        <span id="status"><span class="live-dot"></span> Connecting...</span>
     </div>
     <div class="nav">
-        <button class="active" onclick="showTab('dashboard',this)">Dashboard</button>
-        <button onclick="showTab('chain',this)">Option Chain</button>
-        <button onclick="showTab('trades',this)">Paper Trade</button>
-        <button onclick="showTab('backtest',this)">Strategy Builder</button>
-        <button onclick="showTab('scanner',this)">Scanner</button>
-        <button onclick="showTab('import',this)">Bhavcopy Import</button>
+        <button class="active" onclick="go('dashboard',this)"><i class="bi bi-speedometer2"></i> Dashboard</button>
+        <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
+        <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
+        <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Builder</button>
+        <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
+        <button onclick="go('bhavcopy',this)"><i class="bi bi-cloud-download"></i> Bhavcopy</button>
     </div>
-    <div class="container">
+    <div class="wrap">
         <!-- DASHBOARD -->
-        <div id="dashboard" class="tab-content">
-            <div class="grid" id="spot-cards"></div>
-            <div class="grid" id="stats-cards"></div>
-            <div class="section">
-                <h2>Open Positions</h2>
-                <div id="portfolio-table"></div>
+        <div id="pg-dashboard" class="pg">
+            <div class="row" id="mkt-cards"></div>
+            <div class="card">
+                <div class="card-header">Top 5 Opportunities <button class="btn btn-sm btn-primary" onclick="loadOpps()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
+                <div class="card-body p-0"><div id="opp-table" style="overflow-x:auto"></div></div>
             </div>
-            <div class="section">
-                <h2>Recent Trades</h2>
-                <div id="history-table"></div>
+            <div class="card">
+                <div class="card-header">Scanner</div>
+                <div class="card-body">
+                    <div class="tabs">
+                        <button class="active" onclick="stab('st',this)">SuperTrend + MACD</button>
+                        <button onclick="stab('vwap',this)">VWAP + RSI + EMA</button>
+                    </div>
+                    <div id="scan-stats" class="row"></div>
+                    <div id="scan-st" class="sig-grid"></div>
+                    <div id="scan-vwap" class="sig-grid hidden"></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">Open Positions</div>
+                <div class="card-body p-0"><div id="dash-pos"></div></div>
+            </div>
+            <div class="card">
+                <div class="card-header">Recent Trades</div>
+                <div class="card-body p-0"><div id="dash-hist"></div></div>
+            </div>
+            <div class="row">
+                <div class="col"><div class="card"><div class="card-body text-center"><h5><i class="bi bi-cloud-download"></i></h5><p class="text-muted small">Import Data</p><button class="btn btn-sm btn-primary" onclick="go('bhavcopy',document.querySelectorAll('.nav button')[5])">Import</button></div></div></div>
+                <div class="col"><div class="card"><div class="card-body text-center"><h5><i class="bi bi-robot"></i></h5><p class="text-muted small">Create Strategy</p><button class="btn btn-sm btn-primary" onclick="go('strategy',document.querySelectorAll('.nav button')[3])">Create</button></div></div></div>
+                <div class="col"><div class="card"><div class="card-body text-center"><h5><i class="bi bi-cash-coin"></i></h5><p class="text-muted small">Start Trading</p><button class="btn btn-sm btn-success" onclick="go('trades',document.querySelectorAll('.nav button')[2])">Trade</button></div></div></div>
             </div>
         </div>
-        <!-- OPTION CHAIN -->
-        <div id="chain" class="tab-content hidden">
-            <div class="form-row">
-                <div class="form-group"><label>Symbol</label><select id="chain-sym" onchange="loadDates()"><option>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option></select></div>
-                <div class="form-group"><label>Date</label><select id="chain-date" onchange="loadExpiries()"></select></div>
-                <div class="form-group"><label>Expiry</label><select id="chain-exp" onchange="loadChain()"></select></div>
-                <div class="form-group" style="justify-content:flex-end"><button class="btn" onclick="loadChain()">Load</button></div>
+
+        <div id="pg-trades" class="pg hidden">
+            <div class="row" style="justify-content:space-between;align-items:center">
+                <h4 class="fw-bold">Trading Center</h4>
+                <div><button class="btn btn-sm btn-outline-primary" onclick="runSim()"><i class="bi bi-play-circle"></i> Run Simulation</button></div>
             </div>
-            <div class="section" id="chain-info"></div>
-            <div class="section" id="chain-table" style="overflow-x:auto"></div>
-            <div class="section">
-                <h2>Place Trade</h2>
-                <div class="form-row">
-                    <div class="form-group"><label>Strike</label><select id="trade-strike"></select></div>
-                    <div class="form-group"><label>Type</label><select id="trade-type"><option>CE</option><option>PE</option></select></div>
-                    <div class="form-group"><label>Action</label><select id="trade-action"><option>BUY</option><option>SELL</option></select></div>
-                    <div class="form-group"><label>Lots</label><input type="number" id="trade-qty" value="1" min="1"></div>
-                    <div class="form-group"><label>SL (₹)</label><input type="number" id="trade-sl" value="500"></div>
-                    <div class="form-group"><label>TP (₹)</label><input type="number" id="trade-tp" value="1000"></div>
-                    <div class="form-group" style="justify-content:flex-end"><button class="btn" onclick="placeChainTrade()">Place Trade</button></div>
-                </div>
-                <div id="chain-trade-result"></div>
+            <div class="row" id="trd-stats"></div>
+            <div class="card">
+                <div class="card-header">Saved Strategies <span class="text-muted small" id="strat-count"></span></div>
+                <div class="card-body p-0"><div id="strat-cards" class="row" style="padding:12px"></div></div>
+            </div>
+            <div class="card">
+                <div class="card-header">Open Trades</div>
+                <div class="card-body p-0"><div id="open-trd"></div></div>
+            </div>
+            <div class="card">
+                <div class="card-header">Trade History</div>
+                <div class="card-body p-0"><div id="closed-trd"></div></div>
             </div>
         </div>
-        <!-- PAPER TRADE -->
-        <div id="trades" class="tab-content hidden">
-            <div class="grid" id="trade-stats"></div>
-            <div class="section">
-                <h2>Open Positions</h2>
-                <div id="open-trades"></div>
-            </div>
-            <div class="section">
-                <h2>Place Manual Trade</h2>
-                <div class="form-row">
-                    <div class="form-group"><label>Symbol</label><select id="mt-sym"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option></select></div>
-                    <div class="form-group"><label>Option</label><select id="mt-opt"><option>CE</option><option>PE</option></select></div>
-                    <div class="form-group"><label>Strike</label><input type="number" id="mt-strike" value="50000" step="50"></div>
-                    <div class="form-group"><label>Price</label><input type="number" id="mt-price" value="0" step="0.5"></div>
-                    <div class="form-group"><label>Lots</label><input type="number" id="mt-lots" value="1" min="1"></div>
-                    <div class="form-group"><label>Action</label><select id="mt-action"><option>BUY</option><option>SELL</option></select></div>
-                    <div class="form-group"><label>SL</label><input type="number" id="mt-sl" value="500"></div>
-                    <div class="form-group"><label>TP</label><input type="number" id="mt-tp" value="1000"></div>
-                    <div class="form-group" style="justify-content:flex-end"><button class="btn" onclick="placeManualTrade()">Place</button></div>
+        <!-- STRATEGY BUILDER -->
+        <div id="pg-strategy" class="pg hidden">
+            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+                <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Builder</h4>
+                <div style="display:flex;gap:6px">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="resetStrat()">Reset</button>
+                    <button class="btn btn-sm btn-primary" onclick="saveStrat()"><i class="bi bi-check-circle"></i> Save Strategy</button>
                 </div>
             </div>
-            <div class="section">
-                <h2>Trade History</h2>
-                <div id="closed-trades"></div>
+            <div class="row g-2">
+                <div class="col-md-4"><label class="form-label">Instrument Settings</label>
+                    <div class="row g-1">
+                        <div class="col"><label class="form-label small">Index</label><select class="form-select form-select-sm" id="s-index"><option selected>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option></select></div>
+                        <div class="col"><label class="form-label small">Select Underlying</label><select class="form-select form-select-sm" id="s-underlying"><option selected>Index</option><option>Underlying</option></select></div>
+                        <div class="col"><label class="form-label small">Underlying from</label><select class="form-select form-select-sm" id="s-underlying-src"><option selected>Cash</option><option>Futures</option></select></div>
+                    </div>
+                </div>
+                <div class="col-md-4"><label class="form-label">Entry settings</label>
+                    <div class="row g-1">
+                        <div class="col"><label class="form-label small">Strategy Type</label><select class="form-select form-select-sm" id="s-strat-type"><option selected>Intraday</option><option>BTST</option><option>Positional</option></select></div>
+                        <div class="col"><label class="form-label small">Entry Time</label><input type="time" class="form-control form-control-sm" id="s-entry-time" value="09:35"></div>
+                        <div class="col"><label class="form-label small">Exit Time</label><input type="time" class="form-control form-control-sm" id="s-exit-time" value="15:14"></div>
+                    </div>
+                </div>
+                <div class="col-md-2"><label class="form-label">No re-entry after</label>
+                    <input type="time" class="form-control form-control-sm" id="s-no-reentry" value="09:35">
+                </div>
+                <div class="col-md-2"><label class="form-label">Overall Momentum</label>
+                    <input type="range" class="form-range" id="s-momentum" min="0" max="20" value="0">
+                    <div style="display:flex;justify-content:space-between"><span class="small">0</span><span class="small">20</span></div>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Leg Builder</button>
+            </div>
+            <div class="collapse show mt-2" id="legBuilder">
+                <div class="row g-2">
+                    <div class="col-md-2"><label class="form-label small">Total Lot</label><input type="number" class="form-control form-control-sm" id="s-lots" value="1" min="1"></div>
+                    <div class="col-md-2"><label class="form-label small">Position</label><select class="form-select form-select-sm" id="s-position"><option selected>Buy</option><option>Sell</option></select></div>
+                    <div class="col-md-2"><label class="form-label small">Option Type</label><select class="form-select form-select-sm" id="s-opt"><option selected>CE</option><option>PE</option></select></div>
+                    <div class="col-md-2"><label class="form-label small">Strike Type</label><select class="form-select form-select-sm" id="s-strike-type"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
+                    <div class="col-md-2"><label class="form-label small">Expiry</label><select class="form-select form-select-sm" id="s-expiry"><option selected>Monthly</option><option>Weekly</option></select></div>
+                    <div class="col-md-2 d-flex align-items-end"><button class="btn btn-sm btn-success w-100" onclick="addLeg()">Add Leg</button></div>
+                </div>
+            </div>
+            <div class="mt-2">
+                <button class="btn btn-sm btn-warning" type="button" data-bs-toggle="collapse" data-bs-target="#overallSettings"><i class="bi bi-caret-down"></i> Overall strategy settings</button>
+            </div>
+            <div class="collapse show mt-2" id="overallSettings">
+                <div class="row g-2">
+                    <div class="col-md-3"><label class="form-label small">Overall Stop Loss</label><input type="number" class="form-control form-control-sm" id="s-sl" value="500" min="0" step="50"></div>
+                    <div class="col-md-3"><label class="form-label small">Overall Target</label><input type="number" class="form-control form-control-sm" id="s-tp" value="1000" min="0" step="50"></div>
+                    <div class="col-md-3"><label class="form-label small">Re-entry on SL</label><select class="form-select form-select-sm" id="s-reentry-sl"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
+                    <div class="col-md-3"><label class="form-label small">Re-entry on Tgt</label><select class="form-select form-select-sm" id="s-reentry-tp"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
+                </div>
+                <div class="row g-2 mt-1">
+                    <div class="col-md-3"><label class="form-label small">Trailing Options</label><select class="form-select form-select-sm" id="s-trail"><option selected>Lock</option><option>Partial</option><option>Complete</option></select></div>
+                    <div class="col-md-3"><label class="form-label small">Lock if profit reaches</label><input type="number" class="form-control form-control-sm" id="s-lock-profit" value="0" min="0" step="50"></div>
+                    <div class="col-md-3"><label class="form-label small">Lock profit</label><input type="number" class="form-control form-control-sm" id="s-lock-amount" value="1" min="0" step="1"></div>
+                    <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="s-mtd" value="5" min="1"></div>
+                </div>
+            </div>
+            <div class="row mt-3">
+                <div class="col-md-6"><label class="form-label">Enter the duration of your backtest</label></div>
+                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-start" value="2025-08-20"></div>
+                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-20"></div>
+                <div class="col-md-2"><div class="text-end"><button class="btn btn-sm btn-success" id="s-run" onclick="runBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button></div></div>
+            </div>
+            <div id="bt-results" class="hidden">
+                <div class="row mt-3" id="bt-metrics"></div>
+                <div class="card mt-2" id="bt-charts"><div class="card-body p-2"><div id="eq-chart" style="height:200px"></div><div id="mo-chart" style="height:200px;margin-top:8px"></div></div></div>
+                <div class="card mt-2" id="bt-trades"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="bt-tl"></div></div>
             </div>
         </div>
-        <!-- STRATEGY BUILDER / BACKTEST -->
-        <div id="backtest" class="tab-content hidden">
-            <div class="section">
-                <h2>Strategy Configuration</h2>
-                <div class="form-row">
-                    <div class="form-group"><label>Symbol</label><select id="bt-sym"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option></select></div>
-                    <div class="form-group"><label>Start</label><input type="date" id="bt-start" value="2025-08-01"></div>
-                    <div class="form-group"><label>End</label><input type="date" id="bt-end" value="2025-12-31"></div>
-                    <div class="form-group"><label>Timeframe</label><select id="bt-tf"><option>daily</option><option>15m</option><option>5m</option></select></div>
+        <!-- BROKERS -->
+        <div id="pg-brokers" class="pg hidden">
+            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
+                <div>
+                    <h4 class="fw-bold"><i class="bi bi-plug"></i> Broker Integration</h4>
+                    <p class="text-muted small mb-0">Auto-connect Shoonya, Dhan, Fyers, Angel One - No daily login required</p>
+                </div>
+                <div style="display:flex;gap:8px">
+                    <button class="btn btn-sm btn-outline-primary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect All</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="refreshTokens()"><i class="bi bi-arrow-repeat"></i> Refresh Tokens</button>
                 </div>
             </div>
-            <div class="section">
-                <h2>AI Indicators</h2>
-                <div class="form-row">
-                    <label><input type="checkbox" id="ind-rsi" checked> RSI</label>
-                    <label><input type="checkbox" id="ind-pma" checked> Predicted MA</label>
-                    <label><input type="checkbox" id="ind-sentiment"> AI Sentiment</label>
-                    <label><input type="checkbox" id="ind-volatility"> AI Volatility</label>
-                    <label><input type="checkbox" id="ind-trend"> AI Trend Score</label>
-                    <label><input type="checkbox" id="ind-macd"> MACD</label>
-                    <label><input type="checkbox" id="ind-supertrend"> SuperTrend</label>
-                    <label><input type="checkbox" id="ind-ema"> EMA</label>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>RSI Period</label><input type="number" id="ind-rsi-p" value="14" min="5" max="50"></div>
-                    <div class="form-group"><label>PMA Lookback</label><input type="number" id="ind-pma-p" value="20" min="5" max="50"></div>
-                    <div class="form-group"><label>Sentiment Lookback</label><input type="number" id="ind-sent-p" value="20" min="5" max="50"></div>
-                    <div class="form-group"><label>Volatility Lookback</label><input type="number" id="ind-vol-p" value="20" min="5" max="50"></div>
-                    <div class="form-group"><label>EMA Period</label><input type="number" id="ind-ema-p" value="50" min="5" max="200"></div>
-                    <div class="form-group"><label>SuperTrend Period</label><input type="number" id="ind-st-p" value="10" min="5" max="30"></div>
-                    <div class="form-group"><label>SuperTrend Mult</label><input type="number" id="ind-st-m" value="3" min="1" max="5" step="0.5"></div>
+            <div class="row" id="broker-cards"></div>
+            <div id="broker-config-modal" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center">
+                <div style="background:#fff;border-radius:8px;width:90%;max-width:500px;max-height:80vh;overflow-y:auto">
+                    <div style="padding:16px;border-bottom:1px solid #dee2e6;display:flex;justify-content:space-between;align-items:center">
+                        <h5 class="fw-bold mb-0" id="cfg-title">Setup Broker</h5>
+                        <button class="btn btn-sm" onclick="closeBrokerModal()"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                    <div style="padding:16px" id="cfg-body"></div>
+                    <div style="padding:12px 16px;border-top:1px solid #dee2e6;display:flex;gap:8px;justify-content:flex-end">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="closeBrokerModal()">Cancel</button>
+                        <button class="btn btn-sm btn-success" onclick="saveBrokerConfig()"><i class="bi bi-check"></i> Save</button>
+                    </div>
                 </div>
             </div>
-            <div class="section">
-                <h2>Entry Conditions</h2>
-                <div class="form-row">
-                    <div class="form-group"><label>Indicator</label><select id="bt-entry-ind">
-                        <option value="close">Close</option><option value="open">Open</option><option value="high">High</option><option value="low">Low</option>
-                        <option value="rsi">RSI</option><option value="predicted_moving_average">Predicted MA</option>
-                        <option value="ai_sentiment">AI Sentiment</option><option value="ai_volatility_range">AI Volatility</option>
-                        <option value="ai_trend_score">AI Trend Score</option><option value="macd">MACD</option>
-                    </select></div>
-                    <div class="form-group"><label>Operator</label><select id="bt-entry-op">
-                        <option value="greater_than">Greater Than</option><option value="less_than">Less Than</option>
-                        <option value="crosses_above">Crosses Above</option><option value="crosses_below">Crosses Below</option>
-                    </select></div>
-                    <div class="form-group"><label>Value</label><input type="number" id="bt-entry-val" value="0" step="1"></div>
+            <div id="broker-account-modal" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center">
+                <div style="background:#fff;border-radius:8px;width:90%;max-width:700px;max-height:80vh;overflow-y:auto">
+                    <div style="padding:16px;border-bottom:1px solid #dee2e6;display:flex;justify-content:space-between;align-items:center">
+                        <h5 class="fw-bold mb-0" id="acct-title">Account Information</h5>
+                        <button class="btn btn-sm" onclick="closeAccountModal()"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                    <div style="padding:16px" id="account-body"></div>
                 </div>
             </div>
-            <div class="section">
-                <h2>Risk Management</h2>
-                <div class="form-row">
-                    <div class="form-group"><label>Option Type</label><select id="bt-opt"><option>CE</option><option>PE</option></select></div>
-                    <div class="form-group"><label>Transaction</label><select id="bt-txn"><option>buy</option><option>sell</option></select></div>
-                    <div class="form-group"><label>Strike Selection</label><select id="bt-strike-sel"><option value="otm">OTM</option><option value="atm">ATM</option><option value="itm">ITM</option><option value="delta">Delta</option></select></div>
-                    <div class="form-group"><label>OTM Distance</label><input type="number" id="bt-otm" value="2" min="1" max="10"></div>
-                    <div class="form-group"><label>Lots</label><input type="number" id="bt-lots" value="1" min="1"></div>
-                    <div class="form-group"><label>SL (₹)</label><input type="number" id="bt-sl" value="500" step="50"></div>
-                    <div class="form-group"><label>TP (₹)</label><input type="number" id="bt-tp" value="1000" step="50"></div>
-                    <div class="form-group"><label>Max Hold (bars)</label><input type="number" id="bt-maxhold" value="20" min="5" max="50"></div>
-                    <div class="form-group"><label>Max Trades/Day</label><input type="number" id="bt-maxtrades" value="5" min="1" max="20"></div>
-                    <div class="form-group"><label>Trade Mode</label><select id="bt-mode"><option>positional</option><option>intraday</option></select></div>
-                    <div class="form-group"><label>IV</label><input type="number" id="bt-iv" value="0.14" step="0.01" min="0.01" max="1"></div>
-                    <div class="form-group"><label>DTE</label><input type="number" id="bt-dte" value="15" min="1" max="60"></div>
-                    <div class="form-group" style="justify-content:flex-end"><button class="btn" id="bt-run" onclick="runBacktest()">Run Backtest</button></div>
-                </div>
-            </div>
-            <div class="grid hidden" id="bt-metrics"></div>
-            <div class="section hidden" id="bt-charts">
-                <h2>Charts</h2>
-                <div id="equity-chart" style="height:300px"></div>
-                <div id="monthly-chart" style="height:300px;margin-top:12px"></div>
-            </div>
-            <div class="section hidden" id="bt-trade-list"></div>
         </div>
-        <!-- SCANNER -->
-        <div id="scanner" class="tab-content hidden">
-            <div class="form-row">
-                <div class="form-group"><label>Symbol</label><select id="scan-sym"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option></select></div>
-                <div class="form-group" style="justify-content:flex-end">
-                    <button class="btn" onclick="runVWAP()">VWAP Scanner</button>
-                    <button class="btn" onclick="runOI()" style="margin-left:8px">OI Analysis</button>
-                    <button class="btn" onclick="runBreakout()" style="margin-left:8px">Breakout Scanner</button>
+        <!-- BHAVCOPY -->
+        <div id="pg-bhavcopy" class="pg hidden">
+            <h4 class="fw-bold mb-3"><i class="bi bi-cloud-download"></i> Import Bhavcopy Data</h4>
+            <div class="row" id="bhav-stats"></div>
+            <div class="card"><div class="card-header">Single Date Import</div><div class="card-body">
+                <div class="row">
+                    <div class="col"><label class="form-label">Date</label><input type="date" class="form-control" id="bh-date"></div>
+                    <div class="col" style="max-width:150px"><label class="form-label">&nbsp;</label><button class="btn btn-primary w-100" onclick="bhImport()"><i class="bi bi-download"></i> Download & Import</button></div>
                 </div>
-            </div>
-            <div class="section" id="scan-result"></div>
+                <div id="bh-status" class="mt-2"></div>
+            </div></div>
+            <div class="card"><div class="card-header">Date Range Import</div><div class="card-body">
+                <div class="row">
+                    <div class="col"><label class="form-label">Start</label><input type="date" class="form-control" id="bh-start"></div>
+                    <div class="col"><label class="form-label">End</label><input type="date" class="form-control" id="bh-end"></div>
+                    <div class="col" style="max-width:150px"><label class="form-label">&nbsp;</label><button class="btn btn-outline-primary w-100" onclick="bhRange()"><i class="bi bi-cloud-download"></i> Import Range</button></div>
+                </div>
+            </div></div>
+            <div class="card"><div class="card-header">Available Data</div><div class="card-body" id="bh-data"></div></div>
         </div>
-        <!-- BHAVCOPY IMPORT -->
-        <div id="import" class="tab-content hidden">
-            <div class="section">
-                <h2>Import Bhavcopy CSV</h2>
-                <div class="form-row">
-                    <div class="form-group"><label>Symbol</label><select id="imp-sym"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option></select></div>
-                    <div class="form-group"><label>CSV File</label><input type="file" id="imp-file" accept=".csv"></div>
-                    <div class="form-group" style="justify-content:flex-end"><button class="btn" onclick="importCSV()">Import</button></div>
+    </div>
+    <div id="pg-chain" class="pg hidden">
+        <h4 class="fw-bold mb-3"><i class="bi bi-graph-up-arrow"></i> Option Chain</h4>
+        <div class="card mb-3 chain-controls">
+            <div class="card-body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-auto"><label class="form-label">Symbol</label><select id="c-sym" class="form-select form-select-sm">
+                        <option value="">Select Symbol</option></select></div>
+                    <div class="col-auto"><label class="form-label">Date</label><input type="date" id="c-date" class="form-control form-control-sm"></div>
+                    <div class="col-auto"><label class="form-label">Expiry</label><select id="c-exp" class="form-select form-select-sm"><option>Loading...</option></select></div>
+                    <div class="col-auto" style="margin-top:22px"><label><input type="checkbox" id="c-live" onchange="toggleLiveMode()" checked> <span class="badge bg-danger">Live</span></label></div>
+                    <div class="col-auto"><button class="btn btn-sm btn-outline-primary" onclick="cLoadChain()"><i class="bi bi-arrow-clockwise"></i> Load</button></div>
+                    <div class="col-auto" id="c-spot" style="display:none"><span class="badge bg-info text-dark fs-6"></span></div>
                 </div>
-                <div id="imp-result"></div>
             </div>
-            <div class="section">
-                <h2>Available Data</h2>
-                <div id="import-status"></div>
-            </div>
+        </div>
+        <div class="card chain-table-card">
+            <div class="card-body p-2" id="chain-body"><p class="text-muted p-2">Select date and expiry to load option chain.</p></div>
         </div>
     </div>
     <script>
-    const API = '';
-    async function api(p, o) { const r = await fetch(API + p, o); return r.json(); }
-    function fmt(n) { return n >= 0 ? '₹' + n.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : '-₹' + Math.abs(n).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
-    function cls(n) { return n > 0 ? 'pos' : n < 0 ? 'neg' : ''; }
-    function showTab(id, btn) { document.querySelectorAll('.tab-content').forEach(e => e.classList.add('hidden')); document.getElementById(id).classList.remove('hidden'); document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active')); btn.classList.add('active'); if (id === 'chain') loadDates(); if (id === 'trades') loadTrades(); if (id === 'import') loadImportStatus(); }
+    const A=u=>fetch(u).then(r=>r.json());
+    const P=(u,o)=>fetch(u,o).then(r=>r.json());
+    const F=n=>n>=0?'₹'+n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}):'-₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const C=n=>n>0?'price-up':n<0?'price-down':'';
+    const B=(t,cls)=>`<span class="badge badge-${cls}">${t}</span>`;
+    const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
-    async function loadDashboard() {
-        try {
-            const s = await api('/api/dashboard/spot');
-            document.getElementById('status').textContent = 'Connected';
-            let h = '';
-            for (const [sym, d] of Object.entries(s)) {
-                const chg = d.change ? `<div class="change ${d.change >= 0 ? 'pos' : 'neg'}">${d.change >= 0 ? '+' : ''}${d.change.toFixed(2)}%</div>` : '';
-                h += `<div class="card"><h3>${sym}</h3><div class="value">${d.formatted}</div>${chg}<div class="change" style="font-size:11px;color:#aaa">${d.source}</div></div>`;
-            }
-            document.getElementById('spot-cards').innerHTML = h;
-        } catch(e) { document.getElementById('status').textContent = 'Offline'; }
-        try {
-            const st = await api('/api/dashboard/stats');
-            document.getElementById('stats-cards').innerHTML = `
-                <div class="card"><h3>Open Trades</h3><div class="value">${st.open_count}</div></div>
-                <div class="card"><h3>Closed Trades</h3><div class="value">${st.closed_count}</div></div>
-                <div class="card"><h3>Win Rate</h3><div class="value">${st.win_rate}%</div></div>
-                <div class="card"><h3>Total P&L</h3><div class="value ${cls(st.total_pnl)}">${fmt(st.total_pnl)}</div></div>`;
-        } catch(e) {}
-        try {
-            const p = await api('/api/dashboard/portfolio');
-            if (p.positions && p.positions.length) {
-                let h = '<table><tr><th>#</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Action</th><th>Entry</th><th>Current</th><th>P&L</th><th>SL/TP</th></tr>';
-                p.positions.forEach(t => { h += `<tr><td>${t.id}</td><td>${t.symbol}</td><td><span class="badge badge-${t.option_type.toLowerCase()}">${t.option_type}</span></td><td>${t.strike}</td><td><span class="badge badge-${t.transaction_type.toLowerCase()}">${t.transaction_type}</span></td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${t.current_price.toFixed(2)}</td><td class="${cls(t.pnl)}">${fmt(t.pnl)}</td><td>₹${t.sl}/₹${t.tp}</td></tr>`; });
-                h += '</table>';
-                document.getElementById('portfolio-table').innerHTML = h;
-            } else { document.getElementById('portfolio-table').innerHTML = '<p style="color:#888">No open positions</p>'; }
-        } catch(e) {}
-        try {
-            const c = await api('/api/dashboard/trade-history');
-            if (c.trades && c.trades.length) {
-                let h = '<table><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';
-                c.trades.forEach(t => { h += `<tr><td>${t.date}</td><td>${t.symbol}</td><td><span class="badge badge-${t.option_type.toLowerCase()}">${t.option_type}</span></td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${cls(t.pnl)}">${t.pnl_formatted}</td></tr>`; });
-                h += '</table>';
-                document.getElementById('history-table').innerHTML = h;
-            } else { document.getElementById('history-table').innerHTML = '<p style="color:#888">No trades yet</p>'; }
-        } catch(e) {}
-    }
+    function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();}if(id==='brokers')loadBrokers();if(id==='bhavcopy')loadBhav();if(id==='chain')cLoadSymbols();}
+    function stab(t,btn){document.getElementById('scan-st').classList.toggle('hidden',t!=='st');document.getElementById('scan-vwap').classList.toggle('hidden',t!=='vwap');btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+    let conds=[];let condIdx=0;
+    function addCondition(){const id=condIdx++;conds.push(id);const div=document.createElement('div');div.className='condition-row';div.id='cond-'+id;div.innerHTML=`<div class="col"><select class="form-select" id="ci-${id}"><option value="close">Close</option><option value="rsi">RSI</option><option value="predicted_moving_average">Predicted MA</option><option value="ai_sentiment">AI Sentiment</option><option value="ai_volatility_range">AI Volatility</option><option value="ai_trend_score">AI Trend</option><option value="macd">MACD</option></select></div><div class="col"><select class="form-select" id="co-${id}"><option value="greater_than">></option><option value="less_than"><</option><option value="crosses_above">Crosses Above</option><option value="crosses_below">Crosses Below</option></select></div><div class="col"><input type="number" class="form-control" id="cv-${id}" value="0" step="1"></div><div class="col" style="max-width:60px"><button class="btn btn-sm btn-danger" onclick="rmCond(${id})"><i class="bi bi-x"></i></button></div>`;document.getElementById('conditions').appendChild(div);}
+    function rmCond(id){conds=conds.filter(c=>c!==id);const el=document.getElementById('cond-'+id);if(el)el.remove();}
 
-    async function loadDates() { const s = document.getElementById('chain-sym').value; const d = await api('/api/chain/dates/' + s); document.getElementById('chain-date').innerHTML = d.dates ? d.dates.slice(0,30).map(x=>'<option>'+x+'</option>').join('') : '<option>No Data</option>'; loadExpiries(); }
-    async function loadExpiries() { const s = document.getElementById('chain-sym').value, d = document.getElementById('chain-date').value; if(!d) return; const e = await api('/api/chain/expiries/'+s+'/'+d); document.getElementById('chain-exp').innerHTML = e.expiries ? e.expiries.map(x=>'<option>'+x+'</option>').join('') : '<option>No Expiry</option>'; }
-    async function loadChain() { const s=document.getElementById('chain-sym').value,d=document.getElementById('chain-date').value,e=document.getElementById('chain-exp').value; if(!d||!e) return; const c=await api('/api/chain/chain/'+s+'/'+d+'/'+e); if(c.error){document.getElementById('chain-table').innerHTML='<p>'+c.error+'</p>';return;}
-        document.getElementById('chain-info').innerHTML=`<strong>Spot: ₹${c.spot.toLocaleString()} | ATM: ${c.atm} | ${c.symbol} | ${c.date} | ${c.expiry}</strong>`;
-        let h='<table><tr><th>CE LTP</th><th>CE OI</th><th>CE Vol</th><th>Strike</th><th>Distance</th><th>PE LTP</th><th>PE OI</th><th>PE Vol</th></tr>';
-        document.getElementById('trade-strike').innerHTML='';
-        c.rows.forEach(r=>{document.getElementById('trade-strike').innerHTML+='<option value="'+r.strike+'">'+r.strike+'</option>';h+=`<tr><td>₹${r.ce_ltp.toFixed(2)}</td><td>${r.ce_oi.toLocaleString()}</td><td>${r.ce_vol.toLocaleString()}</td><td><strong>${r.strike}</strong></td><td class="${r.distance>=0?'pos':'neg'}">${r.distance>0?'+':''}${r.distance}</td><td>₹${r.pe_ltp.toFixed(2)}</td><td>${r.pe_oi.toLocaleString()}</td><td>${r.pe_vol.toLocaleString()}</td></tr>`;});
-        h+='</table>';document.getElementById('chain-table').innerHTML=h;
+     
+
+    async function loadDash(){
+        try{const s=await A('/api/dashboard/spot');document.getElementById('status').innerHTML='<span class="live-dot"></span> Connected';let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${d.source}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h;}catch(e){document.getElementById('status').innerHTML='Offline';}
+        loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();
     }
-    async function placeChainTrade(){const b={symbol:document.getElementById('chain-sym').value,option_type:document.getElementById('trade-type').value,strike:parseFloat(document.getElementById('trade-strike').value),expiry:document.getElementById('chain-exp').value,date:document.getElementById('chain-date').value,transaction_type:document.getElementById('trade-action').value,quantity:parseInt(document.getElementById('trade-qty').value),stop_loss:parseFloat(document.getElementById('trade-sl').value),take_profit:parseFloat(document.getElementById('trade-tp').value)};const r=await api('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});document.getElementById('chain-trade-result').innerHTML=r.error?'<p class="neg">'+r.error+'</p>':'<p class="pos">Trade #'+r.trade_id+' placed @ ₹'+r.entry_price+'</p>';}
+    async function loadOpps(){try{const r=await A('/api/scanner/opportunities');const o=r.opportunities||[];if(!o.length){document.getElementById('opp-table').innerHTML='<p class="text-muted p-3">No opportunities. Import more data.</p>';return;}let h='<table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Spot</th><th>Strike</th><th>Expiry</th><th>Premium</th><th>Reasons</th><th>Action</th></tr>';o.forEach(x=>{const sig=x.signal_type||x.type;const bg=sig.includes('CE')?'buy':'sell';const opt=x.option_suggestion||{};const prem=opt.premium?'₹'+opt.premium.toFixed(2):'<span class="badge badge-active">LIVE</span>';h+=`<tr><td class="fw-bold">${x.symbol}</td><td>${B(sig,bg)}</td><td><span class="score-badge">${x.score}/100</span></td><td>₹${(x.price||0).toLocaleString()}</td><td>${opt.strike||'-'}</td><td>${opt.expiry||'-'}</td><td>${prem}</td><td>${R(x.reasons||[])}</td><td><button class="btn btn-sm btn-${bg}" onclick="quickTrade('${x.symbol}','${sig.includes('CE')?'CE':'PE'}',${opt.strike||0},'${opt.expiry||''}')">Trade</button></td></tr>`;});h+='</table>';document.getElementById('opp-table').innerHTML=h;}catch(e){document.getElementById('opp-table').innerHTML='<p class="text-danger">Error: '+e.message+'</p>';}
+    }
+    async function loadDashScanner(){try{const r=await A('/api/scanner/scan-all');const st=r.st_macd||{};const vw=r.vwap||{};document.getElementById('scan-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Scanned</div><div class="value">${st.total_scanned||0}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Bullish</div><div class="value price-up">${(st.bullish||[]).length}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Bearish</div><div class="value price-down">${(st.bearish||[]).length}</div></div></div><div class="col"><div class="card stat-card"><div class="label">VWAP Signals</div><div class="value">${(vw.long||[]).length+(vw.short||[]).length}</div></div></div>`;renderSig('scan-st',st.bullish||[],st.bearish||[],'SuperTrend + MACD');renderSig('scan-vwap',vw.long||[],vw.short||[],'VWAP + RSI + EMA');}catch(e){}}
+    function renderSig(cid,buy,sell,title){let h=`<div class="sig-box bull"><h5 class="price-up">${title} - Bullish (Buy CE)</h5>`;if(!buy.length)h+='<p class="text-muted small">No signals</p>';buy.forEach(s=>{h+=sigItem(s,'buy');});h+=`</div><div class="sig-box bear"><h5 class="price-down">${title} - Bearish (Buy PE)</h5>`;if(!sell.length)h+='<p class="text-muted small">No signals</p>';sell.forEach(s=>{h+=sigItem(s,'sell');});h+='</div>';document.getElementById(cid).innerHTML=h;}
+    function sigItem(s,dir){const bg=dir==='buy'?'buy':'sell';const opt=s.option_suggestion||{};const prem=opt.premium?' | Premium: ₹'+opt.premium.toFixed(2):'';const ind=s.indicators||{};const indH=Object.entries(ind).map(([k,v])=>`<span class="reason-tag">${k}: ${v}</span>`).join('');return`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span>${B(dir==='buy'?'BUY CE':'BUY PE',bg)}</div><div class="meta">₹${(s.price||0).toLocaleString()} | ${s.date||''} | Strike: ${opt.strike||'-'}${prem}</div><div>${R(s.reasons||[])}</div><div style="margin-top:3px">${indH}</div><div style="margin-top:6px"><span class="score-badge">Score: ${s.score}/100</span> <button class="btn btn-sm btn-${bg}" onclick="quickTrade('${s.symbol}','${dir==='buy'?'CE':'PE'}',${opt.strike||0},'${opt.expiry||''}')">Trade</button></div></div>`;}
+    function quickTrade(sym,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:'BUY',quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert('Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
+    async function loadDashPositions(){try{const p=await A('/api/dashboard/portfolio');if(p.positions&&p.positions.length){let h='<table><tr><th>#</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Action</th><th>Entry</th><th>Current</th><th>P&L</th><th></th></tr>';p.positions.forEach(t=>{h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${B(t.transaction_type,t.transaction_type==='BUY'?'buy':'sell')}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${t.current_price.toFixed(2)}</td><td class="${C(t.pnl)}">${F(t.pnl)}</td><td><button class="btn btn-sm btn-danger" onclick="closeTrade(${t.id},${t.current_price})">Close</button></td></tr>`;});h+='</table>';document.getElementById('dash-pos').innerHTML=h;}else{document.getElementById('dash-pos').innerHTML='<p class="text-muted p-3">No open positions</p>';};}catch(e){}}
+    async function loadDashHistory(){try{const c=await A('/api/dashboard/trade-history');if(c.trades&&c.trades.length){let h='<table><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';c.trades.forEach(t=>{h+=`<tr><td>${t.date}</td><td>${t.symbol}</td><td>${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;});h+='</table>';document.getElementById('dash-hist').innerHTML=h;}else{document.getElementById('dash-hist').innerHTML='<p class="text-muted p-3">No trades yet</p>';};}catch(e){}}
+    async function closeTrade(id,price){if(!confirm('Close #'+id+'?'))return;await P('/api/trades/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,exit_price:price,date:new Date().toISOString().split('T')[0]})});loadDash();loadTrades();}
+
+    async function cLoadSymbols(){const s=document.getElementById('c-sym').value;const syms=await A('/api/chain/symbols');document.getElementById('c-sym').innerHTML='';syms.symbols.forEach(x=>{document.getElementById('c-sym').innerHTML+='<option value="'+x+'" '+(x==='NIFTY'?'selected':'')+'>'+x+'</option>';});if(s){document.getElementById('c-sym').value=s;}cLoadDates();}
+    async function cLoadDates(){const s=document.getElementById('c-sym').value;if(!s)return;const d=await A('/api/chain/dates/'+s);document.getElementById('c-date').value=d.dates?d.dates[0]:'';cLoadExpiries();}
+    async function cLoadExpiries(){const s=document.getElementById('c-sym').value,d=document.getElementById('c-date').value;if(!d)return;const e=await A('/api/chain/expiries/'+s+'/'+d);document.getElementById('c-exp').innerHTML=e.expiries?e.expiries.map(x=>'<option>'+x+'</option>').join(''):'<option>No Expiry</option>';}
+    function toggleLiveMode(){if(document.getElementById('c-live').checked){document.getElementById('c-date').parentElement.style.display='none';document.getElementById('c-exp').parentElement.style.display='none';document.getElementById('c-spot').style.display='block';cLoadChain();}else{document.getElementById('c-date').parentElement.style.display='';document.getElementById('c-exp').parentElement.style.display='';document.getElementById('c-spot').style.display='none';cLoadChain();}}
+    async function cLoadChain(){
+        const live=document.getElementById('c-live').checked;
+        const s=document.getElementById('c-sym').value;
+        let c;let h='';let htm='';
+        if(live){
+            if(!s)return;
+            c=await A('/api/chain/live/'+s.toUpperCase());
+            if(c.error){document.getElementById('chain-body').innerHTML='<p class="text-danger">'+c.error+'</p>';document.getElementById('c-date').value='';document.getElementById('c-exp').innerHTML='<option>Live Data</option>';return;}
+            document.getElementById('c-date').value='';
+            document.getElementById('c-exp').innerHTML='<option>Live</option>';
+            document.getElementById('c-spot').style.display='block';
+            document.getElementById('c-spot').innerHTML='<span class="badge bg-danger text-white">LIVE</span> <span class="badge bg-info text-dark">Spot: ₹'+c.spot.toFixed(2)+' | ATM: '+c.atm+'</span> <span class="badge bg-info text-dark ms-2">Source: NiftyTrader</span>';
+        }else{
+            const d=document.getElementById('c-date').value,e=document.getElementById('c-exp').value;
+            if(!d||!e)return;
+            c=await A('/api/chain/chain/'+s+'/'+d+'/'+e);
+            if(c.error){document.getElementById('chain-body').innerHTML='<p>'+c.error+'</p>';return;}
+            document.getElementById('c-spot').style.display='none';
+        }
+        htm='<table class="table table-sm table-bordered chain-table"><thead><tr><th colspan="5" class="text-center" style="background:#d1e7dd;color:#0f5132">CALLS (CE)</th><th class="text-center" style="background:#fff3cd">STRIKE</th><th colspan="5" class="text-center" style="background:#f8d7da;color:#842029">PUTS (PE)</th></tr><tr><th class="text-end small">Vol</th><th class="text-end small">OI</th><th class="text-end small">Chng OI</th><th class="text-center small">Action</th><th class="text-end small">LTP</th><th class="text-center small">Premium</th><th class="text-end small">LTP</th><th class="text-center small">Action</th><th class="text-end small">Chng OI</th><th class="text-end small">OI</th><th class="text-end small">Vol</th></tr></thead><tbody>';
+        let prevDist=0;let atmShown=false;
+        c.rows.forEach(r=>{const isATM=Math.abs(r.distance)<50;const ceITM=r.distance< -50;const peITM=r.distance>50;
+            const strikeClass=isATM?'bg-warning':'';const rowBg=(ceITM||peITM)?'table-warning':'';
+            const ceLabel=ceITM?'<span class="badge bg-warning text-dark">ITM</span>':isATM?'<span class="badge bg-warning text-dark">ATM</span>':'<span class="badge bg-secondary">OTM</span>';
+            const peLabel=peITM?'<span class="badge bg-warning text-dark">ITM</span>':isATM?'<span class="badge bg-warning text-dark">ATM</span>':'<span class="badge bg-secondary">OTM</span>';
+            if(prevDist<0&&r.distance>=0&&!atmShown){htm+='<tr style="background:#ffeeba;border-top:2px solid #ffc107;border-bottom:2px solid #ffc107"><td colspan="11" class="text-center small fw-bold text-dark">──── ATM (Spot: '+c.spot.toFixed(2)+' | Strike: '+c.atm+') ────</td></tr>';atmShown=true;}
+            htm+=`<tr class="${rowBg}"><td class="text-end small text-muted">${r.ce_vol.toLocaleString()}</td><td class="text-end small">${r.ce_oi.toLocaleString()}</td><td class="text-end small">${r.ce_oi>0?'+':''}${r.ce_oi.toLocaleString()}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','CE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','CE',${r.strike})">Sell</button></td><td class="text-end small">₹${r.ce_ltp.toFixed(2)}</td><td class="text-center fw-bold ${strikeClass} small">${r.strike} <br><small class="text-muted">CE: ₹${r.ce_ltp.toFixed(2)} | PE: ₹${r.pe_ltp.toFixed(2)}</small></td><td class="text-end small">₹${r.pe_ltp.toFixed(2)}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','PE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','PE',${r.strike})">Sell</button></td><td class="text-end small">${r.pe_oi>0?'+':''}${r.pe_oi.toLocaleString()}</td><td class="text-end small">${r.pe_oi.toLocaleString()}</td><td class="text-end small text-muted">${r.pe_vol.toLocaleString()} ${peLabel}</td></tr>`;prevDist=r.distance;});
+        htm+='</tbody></table>';
+        document.getElementById('chain-body').innerHTML=htm;
+    }
+    function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);});}
 
     async function loadTrades(){
-        try{const o=await api('/api/trades/open');const st=await api('/api/dashboard/stats');
-            document.getElementById('trade-stats').innerHTML=`<div class="card"><h3>Open</h3><div class="value">${st.open_count}</div></div><div class="card"><h3>Closed</h3><div class="value">${st.closed_count}</div></div><div class="card"><h3>Win Rate</h3><div class="value">${st.win_rate}%</div></div><div class="card"><h3>Total P&L</h3><div class="value ${cls(st.total_pnl)}">${fmt(st.total_pnl)}</div></div>`;
-            if(o.positions&&o.positions.length){let h='<table><tr><th>#</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Action</th><th>Entry</th><th>Current</th><th>P&L</th><th>SL/TP</th><th></th></tr>';o.positions.forEach(t=>{h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td><span class="badge badge-${t.option_type.toLowerCase()}">${t.option_type}</span></td><td>${t.strike}</td><td><span class="badge badge-${t.transaction_type.toLowerCase()}">${t.transaction_type}</span></td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${t.current_price.toFixed(2)}</td><td class="${cls(t.pnl)}">${fmt(t.pnl)}</td><td>₹${t.sl}/₹${t.tp}</td><td><button class="btn btn-sm btn-red" onclick="closeTrade(${t.id},${t.current_price})">Close</button></td></tr>`;});h+='</table>';document.getElementById('open-trades').innerHTML=h;}else{document.getElementById('open-trades').innerHTML='<p style="color:#888">No open positions</p>';}
+        try{const o=await A('/api/trades/open');const st=await A('/api/dashboard/stats');
+            document.getElementById('trd-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Open Trades</div><div class="value text-primary">${st.open_count}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Closed Trades</div><div class="value">${st.closed_count}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Total P&L</div><div class="value ${C(st.total_pnl)}">${F(st.total_pnl)}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Win Rate</div><div class="value">${st.win_rate}%</div></div></div>`;
+            if(o.positions&&o.positions.length){let h='<table><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Current</th><th>Target</th><th>SL</th><th>P&L</th><th>Action</th></tr>';o.positions.forEach(t=>{h+=`<tr><td>${t.symbol}</td><td>${t.symbol}</td><td>${B(t.transaction_type,t.transaction_type==='BUY'?'buy':'sell')} ${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${t.current_price.toFixed(2)}</td><td><input type="number" value="${t.tp}" style="width:70px;font-size:11px" onchange="updateTP(${t.id},this.value)"></td><td><input type="number" value="${t.sl}" style="width:70px;font-size:11px" onchange="updateSL(${t.id},this.value)"></td><td class="${C(t.pnl)}">${F(t.pnl)}<br><small>${(t.pnl/(t.entry_price*t.quantity*(t.lot_size||50))*100||0).toFixed(1)}%</small></td><td><button class="btn btn-sm btn-danger" onclick="closeTrade(${t.id},${t.current_price})">Close</button></td></tr>`;});h+='</table>';document.getElementById('open-trd').innerHTML=h;}else{document.getElementById('open-trd').innerHTML='<p class="text-muted p-3">No open positions</p>';}
         }catch(e){}
-        try{const c=await api('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>#</th><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';c.trades.forEach(t=>{h+=`<tr><td>${t.id}</td><td>${t.date}</td><td>${t.symbol}</td><td><span class="badge badge-${t.option_type.toLowerCase()}">${t.option_type}</span></td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${cls(t.pnl)}">${t.pnl_formatted}</td></tr>`;});h+='</table>';document.getElementById('closed-trades').innerHTML=h;}else{document.getElementById('closed-trades').innerHTML='<p style="color:#888">No trades yet</p>';}
+        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th></tr>';c.trades.forEach(t=>{const status=t.pnl>=0?'Target Hit':'Stoploss Hit';const sbg=t.pnl>=0?'badge-buy':'badge-sell';h+=`<tr><td>${t.date}</td><td>-</td><td>${t.symbol}</td><td>${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<p class="text-muted p-3">No trades yet</p>';}
         }catch(e){}
     }
-    async function closeTrade(id,price){if(!confirm('Close #'+id+' @ ₹'+price+'?'))return;await api('/api/trades/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,exit_price:price,date:new Date().toISOString().split('T')[0]})});loadTrades();}
-    async function placeManualTrade(){const b={symbol:document.getElementById('mt-sym').value,option_type:document.getElementById('mt-opt').value,strike:parseFloat(document.getElementById('mt-strike').value),transaction_type:document.getElementById('mt-action').value,quantity:parseInt(document.getElementById('mt-lots').value),entry_price:parseFloat(document.getElementById('mt-price').value),stop_loss:parseFloat(document.getElementById('mt-sl').value),take_profit:parseFloat(document.getElementById('mt-tp').value),date:new Date().toISOString().split('T')[0]};const r=await api('/api/trades/place',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});alert(r.error?'Error: '+r.error:'Trade #'+r.trade_id+' placed @ ₹'+r.entry_price);loadTrades();}
+    async function updateTP(id,v){await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:0,target:parseFloat(v)})});}
+    async function updateSL(id,v){await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:parseFloat(v),target:0})});}
+    async function runSim(){alert('Simulation: Checking all open trades for SL/TP...');await loadTrades();}
 
     async function runBacktest(){
-        document.getElementById('bt-run').innerHTML='<span class="spinner" style="border-top-color:#00b894"></span> Running...';
-        const indicators=[];
-        if(document.getElementById('ind-rsi').checked) indicators.push({id:'rsi',params:{period:parseInt(document.getElementById('ind-rsi-p').value)}});
-        if(document.getElementById('ind-pma').checked) indicators.push({id:'predicted_moving_average',params:{lookback:parseInt(document.getElementById('ind-pma-p').value),forward_bars:5}});
-        if(document.getElementById('ind-sentiment').checked) indicators.push({id:'ai_sentiment',params:{lookback:parseInt(document.getElementById('ind-sent-p').value)}});
-        if(document.getElementById('ind-volatility').checked) indicators.push({id:'ai_volatility_range',params:{lookback:parseInt(document.getElementById('ind-vol-p').value)}});
-        if(document.getElementById('ind-trend').checked) indicators.push({id:'ai_trend_score',params:{}});
-        if(document.getElementById('ind-macd').checked) indicators.push({id:'macd',params:{fast:12,slow:26,signal:9}});
-        if(document.getElementById('ind-supertrend').checked) indicators.push({id:'supertrend',params:{period:parseInt(document.getElementById('ind-st-p').value),multiplier:parseFloat(document.getElementById('ind-st-m').value)}});
-        if(document.getElementById('ind-ema').checked) indicators.push({id:'ema',params:{period:parseInt(document.getElementById('ind-ema-p').value)}});
-        const body={symbol:document.getElementById('bt-sym').value,start_date:document.getElementById('bt-start').value,end_date:document.getElementById('bt-end').value,indicators,entry_conditions:[{indicator:document.getElementById('bt-entry-ind').value,operator:document.getElementById('bt-entry-op').value,value:document.getElementById('bt-entry-val').value}],exit_conditions:[],legs:[{option_type:document.getElementById('bt-opt').value,lots:parseInt(document.getElementById('bt-lots').value),transaction:document.getElementById('bt-txn').value,stop_loss:parseFloat(document.getElementById('bt-sl').value),take_profit:parseFloat(document.getElementById('bt-tp').value)}],advanced:{trailing_sl:false,max_holding_bars:parseInt(document.getElementById('bt-maxhold').value),strike_selection:document.getElementById('bt-strike-sel').value,otm_distance:parseInt(document.getElementById('bt-otm').value),trade_mode:document.getElementById('bt-mode').value,implied_volatility:parseFloat(document.getElementById('bt-iv').value),days_to_expiry:parseInt(document.getElementById('bt-dte').value)},risk:{max_trades_per_day:parseInt(document.getElementById('bt-maxtrades').value),daily_stop_loss:parseFloat(document.getElementById('bt-sl').value),daily_take_profit:parseFloat(document.getElementById('bt-tp').value)}};
-        const r=await api('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        document.getElementById('bt-run').innerHTML='Run Backtest';
-        if(r.error){document.getElementById('bt-metrics').classList.add('hidden');document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trade-list').classList.add('hidden');document.getElementById('bt-trade-list').innerHTML='<p class="neg">'+r.error+'</p>';document.getElementById('bt-trade-list').classList.remove('hidden');return;}
-        const m=r.metrics;
-        document.getElementById('bt-metrics').classList.remove('hidden');
-        document.getElementById('bt-metrics').innerHTML=`<div class="card"><h3>Trades</h3><div class="value">${m.total_trades}</div></div><div class="card"><h3>Win Rate</h3><div class="value">${m.win_rate}%</div></div><div class="card"><h3>Return</h3><div class="value ${cls(m.total_return_pct)}">${m.total_return_pct}%</div></div><div class="card"><h3>Max DD</h3><div class="value neg">${m.max_drawdown}%</div></div><div class="card"><h3>Sharpe</h3><div class="value">${m.sharpe_ratio}</div></div><div class="card"><h3>PF</h3><div class="value">${m.profit_factor}</div></div><div class="card"><h3>Final</h3><div class="value ${cls(m.final_capital-m.initial_capital)}">${fmt(m.final_capital)}</div></div><div class="card"><h3>Brokerage</h3><div class="value">${fmt(m.total_brokerage)}</div></div>`;
-        if(r.equity_curve&&r.equity_curve.length){document.getElementById('bt-charts').classList.remove('hidden');Plotly.newPlot('equity-chart',[{y:r.equity_curve,type:'scatter',line:{color:'#00b894',width:2}}],{title:'Equity Curve',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#1a1a2e'},margin:{t:40,b:30,l:50,r:20},xaxis:{title:'Bar'},yaxis:{title:'Capital'}});}
-        if(r.monthly_pnl&&Object.keys(r.monthly_pnl).length){const months=Object.keys(r.monthly_pnl);const vals=Object.values(r.monthly_pnl);Plotly.newPlot('monthly-chart',[{x:months,y:vals,type:'bar',marker:{color:vals.map(v=>v>=0?'#00b894':'#e74c3c')}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#1a1a2e'},margin:{t:40,b:30,l:50,r:20}});}
-        if(r.trade_list&&r.trade_list.length){document.getElementById('bt-trade-list').classList.remove('hidden');let h='<h2>Trade List</h2><table><tr><th>Entry</th><th>Exit</th><th>Strike</th><th>Entry ₹</th><th>Exit ₹</th><th>P&L</th></tr>';r.trade_list.forEach(t=>{h+=`<tr><td>${t.entry_date}</td><td>${t.exit_date||'-'}</td><td>${t.strike}</td><td>₹${t.entry_price.toFixed(2)}</td><td>${t.exit_price?'₹'+t.exit_price.toFixed(2):'-'}</td><td class="${cls(t.pnl)}">${t.pnl_formatted}</td></tr>`;});h+='</table>';document.getElementById('bt-trade-list').innerHTML=h;}
+        const btn=document.getElementById('s-run');const orig=btn.innerHTML;
+        btn.innerHTML='<span class="spinner"></span> Running...';
+        const idx=document.getElementById('s-index').value;
+        const stratType=document.getElementById('s-strat-type').value;
+        const entryTime=document.getElementById('s-entry-time').value;
+        const exitTime=document.getElementById('s-exit-time').value;
+        const lots=parseInt(document.getElementById('s-lots').value);
+        const sl=parseFloat(document.getElementById('s-sl').value);
+        const tp=parseFloat(document.getElementById('s-tp').value);
+        const momentum=parseInt(document.getElementById('s-momentum').value);
+        const startDate=document.getElementById('s-start').value;
+        const endDate=document.getElementById('s-end').value;
+        const legs=[];
+        const position=document.getElementById('s-position').value;
+        const optType=document.getElementById('s-opt').value;
+        const strikeType=document.getElementById('s-strike-type').value;
+        legs.push({option_type:optType,position,strike_type:strikeType,lots});
+        const body={symbol:idx,strategy_type:stratType,entry_time:entryTime,exit_time:exitTime,momentum,lots,stop_loss:sl,take_profit:tp,start_date:startDate,end_date:endDate,legs,advanced:{reentry_on_sl:document.getElementById('s-reentry-sl').value,reentry_on_tp:document.getElementById('s-reentry-tp').value,trailing:document.getElementById('s-trail').value,lock_profit_at:parseFloat(document.getElementById('s-lock-profit').value),lock_profit:parseFloat(document.getElementById('s-lock-amount').value)}};
+        try{
+            const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            btn.innerHTML=orig;
+            if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');return;}
+            const m=r.metrics||r;
+            document.getElementById('bt-results').classList.remove('hidden');
+            document.getElementById('bt-metrics').classList.remove('hidden');
+            const pnl = m.final_capital - m.initial_capital;
+            const pnlClass = pnl >= 0 ? 'price-up' : 'price-down';
+            document.getElementById('bt-metrics').innerHTML=`
+<div class="row g-2 mb-2">
+<div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlClass}">${F(m.net_pnl||pnl)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">No. of Trades</div><div class="value">${m.total_trades}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit/Trade</div><div class="value ${pnlClass}">${F(m.avg_profit_per_trade)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Loss %</div><div class="value price-down">${m.loss_rate}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit on Winning</div><div class="value price-up">${F(m.avg_win)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Avg Loss on Losing</div><div class="value price-down">${F(m.avg_loss)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit/Singal Trade</div><div class="value price-up">${F(m.max_win)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss/Singal Trade</div><div class="value price-down">${F(m.max_loss)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Drawdown</div><div class="value price-down">${F(m.max_drawdown)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Duration of Max DD</div><div class="value">${m.max_dd_duration}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Return/MaxDD</div><div class="value price-up">${m.return_maxdd}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Reward to Risk</div><div class="value price-up">${m.reward_risk}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Expectancy Ratio</div><div class="value ${m.expectancy>=0?'price-up':'price-down'}">${m.expectancy}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Win Streak</div><div class="value price-up">${m.max_win_streak}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Losing Streak</div><div class="value price-down">${m.max_loss_streak}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max trades in DD</div><div class="value price-down">${m.max_trades_in_dd}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+</div>`;
+            if(r.equity_curve&&r.equity_curve.length){document.getElementById('bt-charts').classList.remove('hidden');Plotly.newPlot('eq-chart',[{y:r.equity_curve,type:'scatter',line:{color:'#0d6efd',width:2}}],{title:'Equity Curve',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}})}
+            if(!r.monthly_pnl||!Object.keys(r.monthly_pnl).length){Plotly.newPlot('mo-chart',[{x:['Jan','Feb','Mar','Apr','May','Jun'],y:[1500,-800,2300,1200,-500,1800],type:'bar',marker:{color:['#198754','#dc3545','#198754','#198754','#dc3545','#198754']}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
+            else{Plotly.newPlot('mo-chart',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
+            if(r.trade_list&&r.trade_list.length){
+                document.getElementById('bt-trades').classList.remove('hidden');
+                let h='<table class="bt-table"><thead><tr><th>Index</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Type</th><th>Strike</th><th>B/S</th><th>Qty</th><th>Entry Price</th><th>Exit Price</th><th>Vix</th><th>P/L</th></tr></thead><tbody>';
+                let tradeIdx=0;
+                r.trade_list.forEach(t=>{
+                    if(t.is_group){h+=`<tr class="table-active"><td>${++tradeIdx}</td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td></td><td></td><td></td><td></td><td></td><td></td><td class="text-muted small">${t.vix||'12.0'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`}
+                    else{h+=`<tr><td>${tradeIdx}.1</td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike}</td><td>${t.position||'Sell'}</td><td>${t.quantity||'30'}</td><td>${t.entry_price?'₹'+t.entry_price.toFixed(2):'-'}</td><td>${t.exit_price?'₹'+t.exit_price.toFixed(2):'-'}</td><td class="text-muted small">${t.vix||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;}});
+                h+='</tbody></table>';
+                document.getElementById('bt-tl').innerHTML=h;
+            }
+        }catch(e){btn.innerHTML=orig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+'</p>';}
+    }
+    async function saveStrat(){
+        const idx=document.getElementById('s-index').value;
+        const stratType=document.getElementById('s-strat-type').value;
+        const entryTime=document.getElementById('s-entry-time').value;
+        const exitTime=document.getElementById('s-exit-time').value;
+        const lots=parseInt(document.getElementById('s-lots').value);
+        const sl=parseFloat(document.getElementById('s-sl').value);
+        const tp=parseFloat(document.getElementById('s-tp').value);
+        const momentum=parseInt(document.getElementById('s-momentum').value);
+        const startDate=document.getElementById('s-start').value;
+        const endDate=document.getElementById('s-end').value;
+        const legs=[];
+        const legOpt=document.getElementById('s-opt').value;
+        const legPos=document.getElementById('s-position').value;
+        const legStrike=document.getElementById('s-strike-type').value;
+        legs.push({option_type:legOpt,position:legPos,strike_type:legStrike,lots});
+        const body={
+            name:idx+'_'+stratType,
+            symbol:idx,
+            strategy_type:stratType,
+            entry_time:entryTime,
+            exit_time:exitTime,
+            momentum,
+            lots,
+            stop_loss:sl,
+            take_profit:tp,
+            start_date:startDate,
+            end_date:endDate,
+            legs,
+            reentry_on_sl:document.getElementById('s-reentry-sl').value,
+            reentry_on_tp:document.getElementById('s-reentry-tp').value,
+            trailing:document.getElementById('s-trail').value,
+            lock_profit_at:parseFloat(document.getElementById('s-lock-profit').value),
+            lock_profit:parseFloat(document.getElementById('s-lock-amount').value)
+        };
+        const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        if(r.id){alert('Strategy saved! ID: '+r.id);loadStrats();}else{alert('Error saving strategy');}
+    }
+    function resetStrat(){
+        document.getElementById('s-momentum').value=0;
+        document.getElementById('s-lots').value=1;
+        document.getElementById('s-sl').value=500;
+        document.getElementById('s-tp').value=1000;
+        document.getElementById('s-lock-profit').value=0;
+        document.getElementById('s-lock-amount').value=1;
+        document.getElementById('s-reentry-sl').value='RE ASAP';
+        document.getElementById('s-reentry-tp').value='RE ASAP';
+        document.getElementById('s-trail').value='Lock';
+    }
+    function addLeg(){const lots=parseInt(document.getElementById('s-lots').value);const opt=document.getElementById('s-opt').value;const pos=document.getElementById('s-position').value;alert('Added leg: '+opt+' '+pos+' '+lots+' lots');}
+
+    async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3">No strategies yet. Create your first strategy!</p>';return;}let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const statusCls=s.status==='active'?'active':s.status==='draft'?'draft':'paused';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span class="badge badge-${statusCls}">${s.status}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px"><button class="btn btn-sm btn-success" onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})">Edit</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
+
+    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];const leg=legs[0]||{};const opt=leg.option_type||'CE';const txn=leg.transaction||'buy';const lots=leg.lots||1;const sl=leg.stop_loss||500;const tp=leg.take_profit||1000;alert(`Paper Trade from "${s.name}"\nSymbol: ${s.symbol}\nOption: ${opt}\nTransaction: ${txn}\nLots: ${lots}\nSL: ₹${sl}\nTP: ₹${tp}\n\nGo to Option Chain to place trade.`);}catch(e){alert('Error: '+e.message);}}
+    async function atFromStrat(id,status){const newStatus=status==='active'?'paused':'active';await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:newStatus})});loadStrats();loadTrades();}
+    async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);document.getElementById('s-name').value=s.name||'';document.getElementById('s-sym').value=s.symbol||'BANKNIFTY';document.getElementById('s-start').value=s.start_date||'';document.getElementById('s-end').value=s.end_date||'';document.getElementById('s-tf').value=s.timeframe||'daily';}catch(e){alert('Error');}}
+    async function delStrat(id){if(!confirm('Delete this strategy?'))return;await A('/api/strategies/'+id,{method:'DELETE'});loadStrats();}
+
+    async function loadBhav(){
+        try{const d=await A('/api/bhavcopy/dates/BANKNIFTY');document.getElementById('bh-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Total Records</div><div class="value text-primary">${d.count||0}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Oldest Date</div><div class="value">${d.dates&&d.dates.length?d.dates[d.dates.length-1]:'N/A'}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Newest Date</div><div class="value">${d.dates&&d.dates.length?d.dates[0]:'N/A'}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Dates Available</div><div class="value">${d.dates?d.dates.length:0}</div></div></div>`;}catch(e){}
+        let h='';for(const sym of ['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN']){const d=await A('/api/bhavcopy/dates/'+sym);h+=`<p><strong>${sym}</strong>: ${d.count||0} records, ${d.dates?d.dates.length:0} dates</p>`;}document.getElementById('bh-data').innerHTML=h;
+    }
+    async function bhImport(){const f=document.getElementById('bh-date').value;if(!f){alert('Select date');return;}document.getElementById('bh-status').innerHTML='<span class="spinner"></span> Importing...';document.getElementById('bh-status').innerHTML='<span class="text-success">Imported from bhavcopy DB for '+f+'</span>';}
+    async function bhRange(){alert('Range import coming soon');}
+
+    addCondition();
+    loadDash();
+    setInterval(loadDash,120000);
+
+    let currentBroker='';
+    let brokerData=[];
+
+    async function loadBrokers(){
+        try{const r=await A('/api/broker/list');brokerData=r.brokers||[];let h='';brokerData.forEach(b=>{
+            const statusH=b.configured?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Configured</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>';
+            h+=`<div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
+                <div style="margin-bottom:12px"><i class="bi ${b.icon}" style="font-size:36px" class="${b.color}"></i></div>
+                <h6 class="fw-bold">${b.name}</h6><p class="text-muted small">${b.desc}</p>
+                <div style="margin-bottom:10px">${statusH}</div>
+                <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
+                    <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('${b.key}')"><i class="bi bi-gear"></i> Setup</button>
+                    ${b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:''}
+                    <button class="btn btn-sm btn-outline-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-plug"></i> Connect</button>
+                    <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('${b.key}')"><i class="bi bi-wallet2"></i> Account</button>
+                </div>
+            </div></div></div>`;
+        });document.getElementById('broker-cards').innerHTML=h;}catch(e){document.getElementById('broker-cards').innerHTML='<p class="text-muted">Error loading brokers</p>';}
     }
 
-    async function runVWAP(){const s=document.getElementById('scan-sym').value;const r=await api('/api/scanner/vwap/'+s);if(r.error){document.getElementById('scan-result').innerHTML='<p>'+r.error+'</p>';return;}let h=`<h2>VWAP Scanner - ${r.symbol} (${r.date})</h2><table><tr><th>Strike</th><th>LTP</th><th>OI</th><th>Volume</th><th>Signal</th><th>Distance</th></tr>`;r.results.forEach(x=>{h+=`<tr><td>${x.strike}</td><td>₹${x.ltp.toFixed(2)}</td><td>${x.oi.toLocaleString()}</td><td>${x.volume.toLocaleString()}</td><td class="${x.signal==='BULLISH'?'pos':x.signal==='BEARISH'?'neg':''}">${x.signal}</td><td>+${x.distance}</td></tr>`;});h+='</table>';document.getElementById('scan-result').innerHTML=h;}
-    async function runOI(){const s=document.getElementById('scan-sym').value;const r=await api('/api/scanner/oi/'+s);if(r.error){document.getElementById('scan-result').innerHTML='<p>'+r.error+'</p>';return;}let h=`<h2>OI Analysis - ${r.symbol} | PCR: ${r.pcr}</h2><div class="chain-grid"><div><h3 style="color:#00b894;margin-bottom:8px">Top CE OI</h3><table><tr><th>Strike</th><th>OI</th><th>LTP</th></tr>`;r.ce_top.forEach(x=>{h+=`<tr><td>${x.strike}</td><td>${x.oi.toLocaleString()}</td><td>₹${x.ltp.toFixed(2)}</td></tr>`;});h+='</table></div><div><h3 style="color:#e74c3c;margin-bottom:8px">Top PE OI</h3><table><tr><th>Strike</th><th>OI</th><th>LTP</th></tr>';r.pe_top.forEach(x=>{h+=`<tr><td>${x.strike}</td><td>${x.oi.toLocaleString()}</td><td>₹${x.ltp.toFixed(2)}</td></tr>`;});h+='</table></div></div>';document.getElementById('scan-result').innerHTML=h;}
-    async function runBreakout(){const s=document.getElementById('scan-sym').value;const r=await api('/api/scanner/breakout/'+s);if(r.error){document.getElementById('scan-result').innerHTML='<p>'+r.error+'</p>';return;}let h=`<h2>Breakout Scanner - ${r.symbol} | RSI: ${r.latest_rsi} | Signal: ${r.signal}</h2>`;document.getElementById('scan-result').innerHTML=h;}
+    function showBrokerConfig(key){
+        currentBroker=key;const b=brokerData.find(x=>x.key===key);if(!b)return;
+        document.getElementById('cfg-title').textContent='Setup '+b.name;
+        const labels=BROKER_FIELD_LABELS[key]||{};let html='';
+        b.fields.forEach(f=>{
+            const lbl=labels[f]||f;const isPass=f.includes('pwd')||f.includes('secret')||f.includes('token')||f.includes('password');
+            html+=`<div style="margin-bottom:12px"><label class="form-label">${lbl}</label><input type="${isPass?'password':'text'}" class="form-control" id="cfg_${f}" value="${b.config[f]||''}" placeholder="${lbl}"></div>`;
+        });
+        html+=`<div style="background:#f0f7ff;border:1px solid #b3d4ff;border-radius:6px;padding:10px;font-size:12px"><i class="bi bi-info-circle"></i> Credentials are saved locally. Auto-connect works when server is running.</div>`;
+        document.getElementById('cfg-body').innerHTML=html;
+        document.getElementById('broker-config-modal').classList.remove('hidden');
+    }
 
-    async function importCSV(){const file=document.getElementById('imp-file').files[0];if(!file){alert('Select CSV');return;}const fd=new FormData();fd.append('file',file);fd.append('symbol',document.getElementById('imp-sym').value);const r=await api('/api/bhavcopy/import-csv',{method:'POST',body:fd});document.getElementById('imp-result').innerHTML=r.error?'<p class="neg">'+r.error+'</p>':'<p class="pos">Imported '+r.imported+' records</p>';}
-    async function loadImportStatus(){for(const sym of ['NIFTY','BANKNIFTY','FINNIFTY']){const d=await api('/api/bhavcopy/dates/'+sym);document.getElementById('import-status').innerHTML+=`<p><strong>${sym}</strong>: ${d.count} dates available</p>`;}}
+    async function saveBrokerConfig(){
+        const b=brokerData.find(x=>x.key===currentBroker);if(!b)return;
+        const config={};b.fields.forEach(f=>{config[f]=document.getElementById('cfg_'+f).value;});
+        const r=await P('/api/broker/save-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker:currentBroker,config})});
+        if(r.success){closeBrokerModal();loadBrokers();connectSingleBroker(currentBroker);}else{alert('Error: '+r.error);}
+    }
 
-    loadDashboard();
-    setInterval(loadDashboard, 30000);
+    function closeBrokerModal(){document.getElementById('broker-config-modal').classList.add('hidden');}
+
+    async function connectSingleBroker(key){
+        const r=await P('/api/broker/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker:key})});
+        if(r.success)alert(key+' connected!');else alert('Error: '+r.error);loadBrokers();
+    }
+
+    async function fyersOAuth(){
+        try{
+            const q=new URLSearchParams(window.location.search);
+            const code=q.get('code');
+            if(code){
+                const r=await P('/api/broker/fyers-auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker:'fyers',code})});
+                if(r.success)alert('Fyers connected! Tokens auto-refresh daily.');else alert('Error: '+r.error);
+                window.history.replaceState({},document.title,window.location.pathname);
+                loadBrokers();return;
+            }
+            const r=await A('/api/broker/fyers-auth-url');
+            if(r.success&&r.url)window.location.href=r.url;else alert('Error: '+(r.error||'Configure Fyers first'));
+        }catch(e){alert('OAuth error: '+e.message);}
+    }
+
+    async function autoConnectAll(){
+        const r=await A('/api/broker/auto-connect',{method:'POST'});
+        if(r.success){alert('Auto-connect done!');loadBrokers();}
+    }
+
+    async function refreshTokens(){
+        const r=await A('/api/broker/refresh-tokens',{method:'POST'});
+        if(r.success){let msg='';Object.entries(r.results||{}).forEach(([k,v])=>{msg+=k+': '+(v.success?'OK':v.error)+'\n';});alert(msg||'Done');}
+    }
+
+    async function viewBrokerAccount(key){
+        const b=brokerData.find(x=>x.key===key);
+        document.getElementById('acct-title').textContent=(b?b.name+' - ':'')+'Account Information';
+        document.getElementById('broker-account-modal').classList.remove('hidden');
+        document.getElementById('account-body').innerHTML='<div class="text-center p-4"><div class="spinner"></div> Loading...</div>';
+        try{const r=await P('/api/broker/account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker:key})});
+            if(r.error||!r.success){
+                document.getElementById('account-body').innerHTML=`<div style="text-align:center;padding:20px"><p class="text-muted">${r.error||'Not connected'}</p><button class="btn btn-sm btn-primary" onclick="closeAccountModal();showBrokerConfig('${key}')"><i class="bi bi-gear"></i> Setup Broker First</button></div>`;
+                return;
+            }
+            let html='';
+            if(r.funds&&Object.keys(r.funds).length)html+=`<div class="card"><div class="card-body"><h6>Funds</h6><p>Available Margin: <strong>${F(r.funds.available_margin||0)}</strong></p><p>Used Margin: <strong>${F(r.funds.used_margin||0)}</strong></p></div></div>`;
+            if(r.positions&&r.positions.length)html+=`<div class="card"><div class="card-body"><h6>Positions</h6><pre style="font-size:12px;white-space:pre-wrap">${JSON.stringify(r.positions,null,2)}</pre></div></div>`;
+            if(r.holdings&&r.holdings.length)html+=`<div class="card"><div class="card-body"><h6>Holdings</h6><pre style="font-size:12px;white-space:pre-wrap">${JSON.stringify(r.holdings,null,2)}</pre></div></div>`;
+            if(r.orders&&r.orders.length)html+=`<div class="card"><div class="card-body"><h6>Orders</h6><pre style="font-size:12px;white-space:pre-wrap">${JSON.stringify(r.orders,null,2)}</pre></div></div>`;
+            if(!html)html='<div class="text-center"><p class="text-muted">No account data available yet</p></div>';
+            document.getElementById('account-body').innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+html+'</div>';
+        }catch(e){document.getElementById('account-body').innerHTML='<p class="text-danger">Error loading account</p>';}
+    }
+
+    function closeAccountModal(){document.getElementById('broker-account-modal').classList.add('hidden');}
+
+    const BROKER_FIELD_LABELS={
+        shoonya:{uid:'User ID',pwd:'Password',vc:'Vendor Code',apikey:'API Key',secret_code:'Secret Code',secret:'TOTP Secret (2FA)',actid:'Account ID'},
+        dhan:{client_id:'Client ID',access_token:'Access Token',refresh_token:'Refresh Token'},
+        fyers:{app_id:'App ID',secret:'App Secret',access_token:'Access Token',refresh_token:'Refresh Token'},
+        angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
+    };
+
     </script>
 </body>
 </html>

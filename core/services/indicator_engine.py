@@ -148,3 +148,30 @@ class IndicatorEngine:
         from utils.helpers import normal_cdf
         delta = normal_cdf(d1)
         return delta if option_type == "CE" else delta - 1
+
+    def calculate_vwap(self, data: List[Dict], period: int = 20, multiplier: float = 2.0) -> Dict:
+        n = len(data)
+        vwap = [None] * n
+        upper1 = [None] * n
+        lower1 = [None] * n
+        upper2 = [None] * n
+        lower2 = [None] * n
+        for i in range(period - 1, n):
+            cum_pv = 0.0
+            cum_vol = 0.0
+            sum_sq = 0.0
+            for j in range(i - period + 1, i + 1):
+                typical = (data[j]['high_price'] + data[j]['low_price'] + data[j]['close_price']) / 3.0
+                vol = data[j].get('volume', 1) or 1
+                cum_pv += typical * vol
+                cum_vol += vol
+            vwap[i] = cum_pv / cum_vol if cum_vol > 0 else data[i]['close_price']
+            for j in range(i - period + 1, i + 1):
+                typical = (data[j]['high_price'] + data[j]['low_price'] + data[j]['close_price']) / 3.0
+                sum_sq += (typical - vwap[i]) ** 2
+            std = math.sqrt(sum_sq / period) if period > 0 else 0
+            upper1[i] = vwap[i] + std
+            lower1[i] = vwap[i] - std
+            upper2[i] = vwap[i] + multiplier * std
+            lower2[i] = vwap[i] - multiplier * std
+        return {'vwap': vwap, 'upper1': upper1, 'lower1': lower1, 'upper2': upper2, 'lower2': lower2}
