@@ -28,7 +28,7 @@ app.include_router(paper_trade.router, prefix="/api/trades", tags=["Paper Trade"
 app.include_router(strategy_builder.router, prefix="/api/backtest", tags=["Strategy Builder"])
 app.include_router(bhavcopy_import.router, prefix="/api/bhavcopy", tags=["Bhavcopy Import"])
 app.include_router(scanner.router, prefix="/api/scanner", tags=["Scanner"])
-app.include_router(broker.router, prefix="/api/broker", tags=["Broker"])
+app.include_router(broker.router, prefix="/api/broker", tags=["Brokers"])
 
 
 @app.get("/")
