@@ -94,9 +94,19 @@ def place_trade(req: TradeRequest):
     ce_data = {r["strike_price"]: r for r in chain if r["option_type"] == "CE"}
     pe_data = {r["strike_price"]: r for r in chain if r["option_type"] == "PE"}
     chain_row = ce_data.get(req.strike) if req.option_type == "CE" else pe_data.get(req.strike)
-    premium = chain_row.get("close_price", 0) if chain_row else 0
+    premium = float(chain_row.get("close_price", 0)) if chain_row else 0
+    # If no DB premium, try live (may fail on Render - NSE blocked)
     if premium <= 0:
-        premium = live.get_option_ltp(req.symbol, req.strike, req.option_type) or 0
+        live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type)
+        premium = live_premium if live_premium and live_premium > 0 else 0
+    # If still no premium, fall back to latest close price from DB as estimate
+    if premium <= 0:
+        latest = bhav.fetch_one(
+            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+            [req.symbol],
+        )
+        if latest and latest['close_price']:
+            premium = float(latest['close_price']) * 0.01  # 1% of spot as estimated premium
     if premium <= 0:
         return {"error": "No premium data for this strike"}
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type)
