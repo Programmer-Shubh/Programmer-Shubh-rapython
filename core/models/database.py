@@ -111,8 +111,8 @@ class Database:
                 );
 
                 CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT,
+                    setting_key TEXT PRIMARY KEY,
+                    setting_value TEXT,
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
             """)
