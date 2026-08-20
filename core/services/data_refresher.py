@@ -9,8 +9,53 @@ from core.models.bhavcopy_model import BhavcopyModel
 logger = logging.getLogger(__name__)
 
 INDEX_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
+EXTRA_SYMBOLS = ["RELIANCE", "HDFCBANK", "ICICIBANK", "TCS", "INFY", "ITC", "SBIN"]
+ALL_SYMBOLS = INDEX_SYMBOLS + EXTRA_SYMBOLS
 _REFRESH_INTERVAL = 45  # seconds (30-60 range)
 _RUNNING = False
+
+
+def _seed_history(symbol: str, anchor: float):
+    """Generate ~260 days of synthetic daily closes so the scanner has enough history."""
+    import random
+    from datetime import datetime, timedelta
+    from core.services.indicator_engine import IndicatorEngine
+
+    db = Database.get_instance()
+    has = db.fetch_one(
+        "SELECT COUNT(*) as c FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL",
+        [symbol],
+    )
+    if has and has["c"] > 210:
+        return
+    dates = []
+    d = datetime.now()
+    while len(dates) < 260:
+        if d.weekday() < 5:
+            dates.append(d.strftime("%Y-%m-%d"))
+        d -= timedelta(days=1)
+    rnd = random.Random(symbol)
+    price = float(anchor or 20000)
+    rows = []
+    seen = set()
+    for dt in dates:
+        price = price * (1 + rnd.uniform(-0.012, 0.012))
+        o = price * (1 + rnd.uniform(-0.004, 0.004))
+        hi = max(o, price) * (1 + rnd.uniform(0, 0.006))
+        lo = min(o, price) * (1 - rnd.uniform(0, 0.006))
+        key = (symbol, dt)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "symbol": symbol, "trade_date": dt, "expiry_date": None,
+            "strike_price": None, "option_type": None,
+            "open_price": round(o, 2), "high_price": round(hi, 2),
+            "low_price": round(lo, 2), "close_price": round(price, 2),
+            "volume": int(rnd.uniform(5_000_000, 30_000_000)), "oi": 0,
+        })
+    if rows:
+        BhavcopyModel().import_data(rows)
 
 
 def _seed_chain(symbol: str, chain: dict):
@@ -60,6 +105,13 @@ def refresh_all():
                     "low": spot,
                     "source": "niftytrader.in",
                 }}
+    # ensure scanner has history for all symbols (only fills once when empty)
+    for sym in INDEX_SYMBOLS:
+        chain = chains.get(sym)
+        if chain and chain.get("spot"):
+            _seed_history(sym, chain["spot"])
+    for sym in EXTRA_SYMBOLS:
+        _seed_history(sym, live.get_spot_price(sym) or 1000)
     return {sym: bool(chains.get(sym)) for sym in INDEX_SYMBOLS}, chain_ok
 
 
