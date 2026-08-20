@@ -1,8 +1,4 @@
-- name: Run Market Scanner
-  run: python scripts/auto_scan.py
-  env:
-    PYTHONPATH: .
-: Market Hours Auto Trade
+# Market Hours Auto Trade
 
 on:
   schedule:
