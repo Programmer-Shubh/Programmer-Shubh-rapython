@@ -1,4 +1,6 @@
 import os
+import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,7 +9,19 @@ from core.models.database import Database
 
 os.environ.setdefault("DB_PATH", os.path.join(os.path.dirname(__file__), "data", "ratrade.db"))
 
-app = FastAPI(title="RaTrade API", version="1.0.0")
+
+async def _start_background_refresh():
+    from core.services.data_refresher import run_refresh_loop
+    asyncio.get_running_loop().create_task(run_refresh_loop())
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _start_background_refresh()
+    yield
+
+
+app = FastAPI(title="RaTrade API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

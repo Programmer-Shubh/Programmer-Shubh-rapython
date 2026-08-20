@@ -78,7 +78,9 @@ def get_chain(symbol: str, date: str, expiry: str):
 @router.get("/live/{symbol}")
 def get_live_chain(symbol: str):
     live = LiveMarketData()
-    data = live.fetch_live_option_chain(symbol.upper())
+    data = live.get_live_chain_cached(symbol)
+    if not data:
+        data = live.fetch_live_option_chain(symbol.upper())
     if not data:
         return {"error": "Could not fetch live data from NiftyTrader"}
     return data

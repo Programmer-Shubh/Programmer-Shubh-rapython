@@ -12,9 +12,10 @@ def get_spots():
     live = LiveMarketData()
     symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
     result = {}
+    live_data_map = live.get_live_spots_cached(symbols)
     for sym in symbols:
         spot = live.get_spot_price(sym)
-        live_data = live.fetch_live_from_nse(sym)
+        live_data = live_data_map.get(sym)
         if live_data:
             result[sym] = {
                 "spot": live_data["spot"],
