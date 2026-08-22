@@ -37,6 +37,23 @@ def import_csv(file: UploadFile = File(...), symbol: str = "BANKNIFTY"):
     return {"imported": count, "symbol": symbol}
 
 
+@router.post("/auto-seed")
+def auto_seed():
+    """Auto-seed 6 months (260 days) for all F&O indices + stocks - no manual CSV needed."""
+    from core.services.data_refresher import refresh_all
+    try:
+        refresh_all()
+    except Exception as e:
+        return {"seeded": 0, "error": str(e)}
+    from core.services.data_refresher import ALL_SYMBOLS
+    bhav = BhavcopyModel()
+    counts = {}
+    for sym in ALL_SYMBOLS:
+        dates = bhav.get_dates(sym)
+        counts[sym] = len(dates)
+    return {"seeded": len(ALL_SYMBOLS), "counts": counts}
+
+
 @router.get("/data/{symbol}/{date}")
 def get_data(symbol: str, date: str):
     bhav = BhavcopyModel()
