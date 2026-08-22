@@ -1,0 +1,15 @@
+# Koyeb deployment config - https://app.koyeb.com
+# Alternative to render.yaml - Koyeb uses Buildpack/Docker automatically
+# No extra config needed if using GitHub auto-deploy, but keep for reference
+
+# Koyeb Service Settings (set in dashboard):
+# Service Type: Web Service
+# Builder: Dockerfile (recommended) or Buildpack (Python)
+# GitHub: https://github.com/Programmer-Shubh/Programmer-Shubh-rapython
+# Branch: main
+# Build Command: (Dockerfile handles it) or pip install -r requirements.txt
+# Run Command: uvicorn main:app --host 0.0.0.0 --port $PORT
+# Port: 8000 (http)
+# Health Check: /health
+# Env Vars: PYTHON_VERSION=3.11.9, DB_PATH=/app/data/ratrade.db
+# Volume (optional for persistence): mount /app/data size 1GB
