@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{width:320px;font-family:Segoe UI,sans-serif;padding:14px}
+h3{margin:0 0 8px;color:#0d6efd}
+input{width:100%;padding:8px;border:1px solid #dee2e6;border-radius:6px;margin:6px 0}
+button{width:100%;padding:8px;background:#0d6efd;color:#fff;border:0;border-radius:6px;cursor:pointer}
+small{color:#6c757d}
+</style></head><body>
+<h3>RaTrade Webhook</h3>
+<p><small>Paste your RaTrade webhook URL (works with TradingView FREE):</small></p>
+<input id="url" placeholder="https://ratrade.onrender.com/api/webhook/free">
+<button id="save">Save</button>
+<p id="msg" style="color:#198754;font-size:12px"></p>
+<hr>
+<p><small>1. Save URL → 2. TradingView → Create Alert → Webhook (now enabled in Free) → paste same URL → Create<br>Email hack: Free alert Email ON → Pipedream/IFTTT → POST to /api/webhook/email</small></p>
+<script>
+chrome.storage.sync.get(['ratrade_webhook_url'], r=>{ document.getElementById('url').value = r.ratrade_webhook_url || 'https://ratrade.onrender.com/api/webhook/free'; });
+document.getElementById('save').onclick=()=>{
+  const v=document.getElementById('url').value.trim();
+  chrome.storage.sync.set({ratrade_webhook_url:v},()=>{document.getElementById('msg').innerText='Saved! Webhook unlocked on TradingView.';});
+};
+</script>
+</body></html>

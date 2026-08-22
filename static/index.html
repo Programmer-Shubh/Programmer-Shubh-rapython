@@ -112,6 +112,7 @@
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Builder</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
         <button onclick="go('bhavcopy',this)"><i class="bi bi-cloud-download"></i> Bhavcopy</button>
+        <button onclick="go('webhook',this)"><i class="bi bi-broadcast"></i> Webhook Free</button>
     </div>
     <div class="wrap">
         <!-- DASHBOARD -->
@@ -335,6 +336,40 @@
             </div></div>
             <div class="card"><div class="card-header">Available Data</div><div class="card-body" id="bh-data"></div></div>
         </div>
+        <!-- WEBHOOK FREE (Stoxo/NextLevel style + Email hack + Live WS) -->
+        <div id="pg-webhook" class="pg hidden">
+            <h4 class="fw-bold mb-3"><i class="bi bi-broadcast"></i> Webhook Free — TradingView → Broker (Stoxo/NextLevel style)</h4>
+            <div class="card"><div class="card-body">
+                <div class="row g-2">
+                    <div class="col-md-6"><div class="card" style="border:1px solid #0d6efd"><div class="card-header bg-primary text-white"><i class="bi bi-puzzle"></i> 1. Chrome Extension (FREE TradingView)</div><div class="card-body">
+                        <p class="small">TradingView Free me webhook lock hota — ye extension Free me unlock karta (Stoxo jaisa).</p>
+                        <div class="d-flex gap-2">
+                            <a href="/static/extension/manifest.json" download class="btn btn-sm btn-primary"><i class="bi bi-download"></i> Download Extension (.zip)</a>
+                            <button class="btn btn-sm btn-outline-primary" onclick="window.open('/static/extension/content.js','_blank')">View Source</button>
+                        </div>
+                        <ol class="small mt-2"><li>Download → unzip → <code>chrome://extensions</code> → Developer mode ON → Load unpacked → <code>static/extension</code></li><li>TradingView → Create Alert → Webhook URL paste: <code id="wh-url">https://ratrade.onrender.com/api/webhook/free</code> <button class="btn btn-sm btn-outline-secondary" onclick="navigator.clipboard.writeText(document.getElementById('wh-url').innerText)">Copy</button></li><li>Message: <code>{"symbol":"NIFTY","action":"BUY","strike":24500,"type":"CE"}</code></li></ol>
+                    </div></div></div>
+                    <div class="col-md-6"><div class="card" style="border:1px solid #198754"><div class="card-header bg-success text-white"><i class="bi bi-envelope"></i> 2. Email Hack (Pipedream/IFTTT Free)</div><div class="card-body">
+                        <p class="small">Free alert → Email ON → Pipedream/IFTTT free 2 webhooks → POST to:</p>
+                        <div class="input-group input-group-sm mb-2"><input class="form-control" id="em-url" value="https://ratrade.onrender.com/api/webhook/email" readonly><button class="btn btn-outline-success" onclick="navigator.clipboard.writeText(document.getElementById('em-url').value)">Copy</button></div>
+                        <p class="small">Email body: <code>BUY NIFTY 24500 CE</code> ya JSON. Pipedream: Trigger Email → Action HTTP POST → URL above.</p>
+                        <button class="btn btn-sm btn-outline-success" onclick="testEmailWebhook()">Test Email Webhook</button> <span id="em-res" class="small"></span>
+                    </div></div></div>
+                </div>
+                <div class="card mt-3"><div class="card-header"><i class="bi bi-lightning"></i> Live WebSocket <span class="badge bg-danger"> &lt;50ms</span> <small class="text-muted">NSE tick via niftytrader.in → ws:// + bhavcopy fallback</small> <span id="ws-status" class="badge bg-secondary">Offline</span></div><div class="card-body">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-auto"><button class="btn btn-sm btn-success" onclick="startWS()">Connect WS</button> <button class="btn btn-sm btn-outline-secondary" onclick="stopWS()">Stop</button></div>
+                        <div class="col"><small class="text-muted">WS URL: <code id="ws-url">wss://ratrade.onrender.com/api/ws/live</code> (local: <code>ws://localhost:8000/api/ws/live</code>)</small></div>
+                    </div>
+                    <div id="ws-ticks" class="mt-2" style="font-size:12px"></div>
+                    <pre id="ws-log" style="max-height:120px;overflow:auto;background:#f8f9fa;padding:8px;font-size:11px"></pre>
+                </div></div>
+                <div class="card mt-2"><div class="card-header">Quick Test Webhook</div><div class="card-body">
+                    <div class="row g-2"><div class="col"><input id="wh-sym" class="form-control form-control-sm" value="NIFTY" placeholder="Symbol"></div><div class="col"><select id="wh-act" class="form-select form-select-sm"><option>BUY</option><option>SELL</option></select></div><div class="col"><input id="wh-strike" class="form-control form-control-sm" value="24500" placeholder="Strike"></div><div class="col"><select id="wh-type" class="form-select form-select-sm"><option>CE</option><option>PE</option></select></div><div class="col"><button class="btn btn-sm btn-primary" onclick="testFreeWebhook()">Send Free Webhook</button></div></div>
+                    <div id="wh-res" class="mt-2 small"></div>
+                </div></div>
+            </div></div>
+        </div>
     </div>
     <div id="pg-chain" class="pg hidden">
         <h4 class="fw-bold mb-3"><i class="bi bi-graph-up-arrow"></i> Option Chain</h4>
@@ -345,7 +380,7 @@
                         <option value="">Select Symbol</option></select></div>
                     <div class="col-auto"><label class="form-label">Date</label><input type="date" id="c-date" class="form-control form-control-sm"></div>
                     <div class="col-auto"><label class="form-label">Expiry</label><select id="c-exp" class="form-select form-select-sm"><option>Loading...</option></select></div>
-                    <div class="col-auto" style="margin-top:22px"><label><input type="checkbox" id="c-live" onchange="toggleLiveMode()" checked> <span class="badge bg-danger">Live</span></label></div>
+                    <div class="col-auto" style="margin-top:22px"><label><input type="checkbox" id="c-live" onchange="toggleLiveMode()"> <span class="badge bg-danger">Live</span></label></div>
                     <div class="col-auto"><button class="btn btn-sm btn-outline-primary" onclick="cLoadChain()"><i class="bi bi-arrow-clockwise"></i> Load</button></div>
                     <div class="col-auto" id="c-spot" style="display:none"><span class="badge bg-info text-dark fs-6"></span></div>
                 </div>
@@ -364,7 +399,7 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='bhavcopy')loadBhav();if(id==='chain')cLoadSymbols();if(id==='strategy')loadStrategySymbols();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='bhavcopy')loadBhav();if(id==='chain')cLoadSymbols();if(id==='strategy')loadStrategySymbols();if(id==='webhook')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -685,6 +720,12 @@
     }
     async function bhImport(){const f=document.getElementById('bh-date').value;if(!f){alert('Select date');return;}document.getElementById('bh-status').innerHTML='<span class="spinner"></span> Importing...';try{const r=await P('/api/bhavcopy/auto-seed',{method:'POST'});document.getElementById('bh-status').innerHTML='<span class="text-success">Auto-seeded 6 months for all F&O ('+r.seeded+' symbols) — refresh page</span>';loadBhav();}catch(e){document.getElementById('bh-status').innerHTML='<span class="text-success">Imported from bhavcopy DB for '+f+'</span>';}}
     async function bhRange(){try{const r=await P('/api/bhavcopy/auto-seed',{method:'POST'});alert('Auto-seeded '+r.seeded+' symbols for 6 months');loadBhav();}catch(e){alert('Range import coming soon');}}
+    function initWebhook(){document.getElementById('wh-url').innerText = location.origin + '/api/webhook/free'; document.getElementById('em-url').value = location.origin + '/api/webhook/email'; document.getElementById('ws-url').innerText = (location.protocol==='https:'?'wss://':'ws://')+location.host+'/api/ws/live';}
+    async function testFreeWebhook(){const body={symbol:document.getElementById('wh-sym').value, action:document.getElementById('wh-act').value, strike:parseFloat(document.getElementById('wh-strike').value), type:document.getElementById('wh-type').value}; const r=await P('/api/webhook/free',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); document.getElementById('wh-res').innerHTML = r.success?'<span class="price-up">Order #'+r.trade_id+' '+r.action+' '+r.symbol+' '+r.strike+r.type+' @ ₹'+r.entry_price+'</span>':'<span class="price-down">'+r.error+'</span>'; loadTrades();}
+    async function testEmailWebhook(){const r=await P('/api/webhook/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:"BUY NIFTY 24500 CE"})}); document.getElementById('em-res').innerHTML = r.success?'<span class="price-up">Email hack OK #'+r.trade_id+'</span>':'<span class="price-down">'+r.error+'</span>';}
+    let _ws=null;
+    function startWS(){if(_ws) _ws.close(); const url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/api/ws/live'; _ws=new WebSocket(url); _ws.onopen=()=>{document.getElementById('ws-status').innerHTML='Online'; document.getElementById('ws-status').className='badge bg-success'; document.getElementById('ws-log').innerText+='Connected '+url+'\n';}; _ws.onmessage=e=>{try{const d=JSON.parse(e.data); if(d.ticks){let h='';for(const [sym,t] of Object.entries(d.ticks)){h+=sym+': ₹'+t.spot+' ('+t.source+') | ';} document.getElementById('ws-ticks').innerHTML=h; document.getElementById('ws-log').innerText=(new Date().toLocaleTimeString()+' '+JSON.stringify(d.ticks).slice(0,120)+'\n')+document.getElementById('ws-log').innerText.slice(0,800);}}catch(e){}}; _ws.onclose=()=>{document.getElementById('ws-status').innerHTML='Offline'; document.getElementById('ws-status').className='badge bg-secondary';}; _ws.onerror=()=>{document.getElementById('ws-log').innerText+='WS error\n';};}
+    function stopWS(){if(_ws){_ws.close(); _ws=null;}}
 
     // Quant: auto-fill backtest dates to last 6 months (Nifty options need sufficient history)
     (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-6); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e){}})();

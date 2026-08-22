@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "RaTrade - Free TradingView Webhook",
+  "version": "1.0.0",
+  "description": "Unlock TradingView webhook in FREE plan & send signals directly to RaTrade broker (like Stoxo/NextLevelBot) + Email hack",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["https://www.tradingview.com/*", "https://*.tradingview.com/*", "https://ratrade.onrender.com/*", "http://localhost:8000/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "RaTrade Webhook"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.tradingview.com/*", "https://*.tradingview.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": { "service_worker": "background.js" },
+  "icons": { "16": "icon.png", "48": "icon.png", "128": "icon.png" }
+}
