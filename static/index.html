@@ -344,8 +344,8 @@
         </div>
     </div>
     <script>
-    const A=u=>fetch(u).then(r=>r.json());
-    const P=(u,o)=>fetch(u,o).then(r=>r.json());
+    const A=async u=>{const r=await fetch(u);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
+    const P=async (u,o)=>{const r=await fetch(u,o);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
     const F=n=>n>=0?'₹'+n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}):'-₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
     const C=n=>n>0?'price-up':n<0?'price-down':'';
     const B=(t,cls)=>`<span class="badge badge-${cls}">${t}</span>`;

@@ -22,22 +22,27 @@ class BacktestRequest(BaseModel):
 
 @router.post("/run")
 def run_backtest(req: BacktestRequest):
-    bhav = BhavcopyModel()
-    historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
-    if not historical:
-        return {"error": f"No data for {req.symbol} between {req.start_date} and {req.end_date}"}
-    if len(historical) > 120:
-        historical = historical[-120:]
-    engine = BacktestEngine()
-    result = engine.run(
-        historical, req.symbol, req.start_date, req.end_date,
-        req.indicators, req.entry_conditions, req.exit_conditions,
-        req.legs, req.advanced, req.risk,
-        is_live=False,
-    )
-    if not result.get("success"):
-        return {"error": result.get("error", "Backtest failed")}
-    m = result["metrics"]
+    try:
+        bhav = BhavcopyModel()
+        historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
+        if not historical:
+            return {"error": f"No data for {req.symbol} between {req.start_date} and {req.end_date}"}
+        if len(historical) > 120:
+            historical = historical[-120:]
+        engine = BacktestEngine(is_live=False)
+        result = engine.run(
+            historical, req.symbol, req.start_date, req.end_date,
+            req.indicators, req.entry_conditions, req.exit_conditions,
+            req.legs, req.advanced, req.risk,
+            is_live=False,
+        )
+        if not result.get("success"):
+            return {"error": result.get("error", "Backtest failed")}
+        m = result["metrics"]
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Internal error: {str(e)}"}
     return {
         "success": True,
         "engine": result.get("engine", "engine"),

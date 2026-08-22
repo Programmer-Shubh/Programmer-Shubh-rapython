@@ -18,7 +18,9 @@ class BacktestEngine:
         self.is_live = is_live  # Unified switch: False=backtest, True=live/paper
 
     def run(self, historical, symbol, start_date, end_date, ind_list, entry_conditions,
-            exit_conditions, legs, advanced_options, risk_management) -> dict:
+            exit_conditions, legs, advanced_options, risk_management, is_live: bool = None) -> dict:
+        if is_live is not None:
+            self.is_live = is_live
         self._reset()
         self.bt_symbol = symbol
         self.bt_expiry = legs[0].get("expiry_date", "") if legs else ""
