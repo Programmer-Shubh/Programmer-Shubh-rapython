@@ -109,9 +109,9 @@ def place_trade(req: TradeRequest):
             premium = float(latest['close_price']) * 0.01  # 1% of spot as estimated premium
     if premium <= 0:
         return {"error": "No premium data for this strike"}
-    adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type)
+    adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
     lot_size = get_lot_size(req.symbol)
-    costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL")
+    costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
     trade_model = TradeModel()
     trade_id = trade_model.insert_trade({
         "symbol": req.symbol,

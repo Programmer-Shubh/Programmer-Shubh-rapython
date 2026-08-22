@@ -30,8 +30,8 @@ class BacktestEngine:
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
         signal_delay = int(advanced_options.get("signal_delay_bars", 0) or 0)
-        # Latency in seconds (only in backtest mode)
-        latency = TransactionCosts.latency_delay(not self.is_live)
+        # Latency in seconds (only in backtest mode) - unified is_live switch
+        latency = TransactionCosts.latency_delay(self.is_live)
         leg = legs[0] if legs else {"option_type": "CE", "lots": 1, "transaction": "buy"}
         option_type = leg.get("option_type", "CE")
         qty = int(leg.get("lots", 1)) * get_lot_size(symbol)
@@ -227,13 +227,13 @@ class BacktestEngine:
         return val
 
     def _get_buy_signal(self, i, pre_calc, historical, entry_conditions):
-        """Generate buy signal using previous closed bar to avoid look-ahead bias.
-        Signals are based on bar i-1; execution occurs on candle i open.
+        """Generate buy signal using closed bar to avoid look-ahead bias.
+        Signals are based on bar i (just closed); execution occurs on next candle i+1 open.
         """
         close = historical[i]["close_price"]
         prev_close = historical[i - 1]["close_price"] if i > 0 else close
-        # Use previous bar's close and indicators for signal (i-1 is fully closed)
-        effective_idx = i - 1 if i > 0 else 0
+        # Use current closed bar's close and indicators for signal (i is fully closed)
+        effective_idx = i
         buy = False
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
             buy = buy or (historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx])
@@ -273,13 +273,13 @@ class BacktestEngine:
         return buy
 
     def _get_sell_signal(self, i, pre_calc, historical, exit_conditions):
-        """Generate sell signal using previous closed bar to avoid look-ahead bias.
-        Signals are based on bar i-1; execution occurs on candle i open.
+        """Generate sell signal using closed bar to avoid look-ahead bias.
+        Signals are based on bar i (just closed); execution occurs on next candle i+1 open.
         """
         close = historical[i]["close_price"]
         prev_close = historical[i - 1]["close_price"] if i > 0 else close
-        # Use previous bar's close and indicators for signal (i-1 is fully closed)
-        effective_idx = i - 1 if i > 0 else 0
+        # Use current closed bar's close and indicators for signal (i is fully closed)
+        effective_idx = i
         sell = False
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
             sell = sell or (historical[effective_idx]["close_price"] < pre_calc["supertrend"][effective_idx])
@@ -499,8 +499,8 @@ class BacktestEngine:
             lqty = leg["quantity"]
             spot = self._close_spot_for_date(exit_date)
             prem = self._close_premium(exit_date, spot, strike, option_type)
-            prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY")
-            costs = TransactionCosts.calculate(prem * lqty, leg["type"] == "buy")
+            prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY", self.is_live)
+            costs = TransactionCosts.calculate(prem * lqty, leg["type"] == "buy", self.is_live)
             exit_costs_total += costs["total"]
             if leg["type"] == "buy":
                 exit_value += prem * lqty

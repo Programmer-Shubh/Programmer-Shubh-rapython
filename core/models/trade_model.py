@@ -86,8 +86,8 @@ class TradeModel:
         qty = trade["quantity"]
         is_sell = trade["transaction_type"] == "BUY"
         closing_side = "SELL" if is_sell else "BUY"
-        exit_price = max(0.01, TransactionCosts.apply_fill_slippage(exit_price, closing_side))
-        exit_costs = TransactionCosts.calculate(exit_price * qty * lot, is_sell)
+        exit_price = max(0.01, TransactionCosts.apply_fill_slippage(exit_price, closing_side, is_live=True))
+        exit_costs = TransactionCosts.calculate(exit_price * qty * lot, is_sell, is_live=True)
         if trade["transaction_type"] == "BUY":
             gross_pnl = (exit_price - trade["entry_price"]) * qty * lot
         else:
