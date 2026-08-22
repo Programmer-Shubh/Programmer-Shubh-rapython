@@ -11,8 +11,8 @@ class OptionScanner:
 
     def scan(self, symbols=None) -> dict:
         if symbols is None:
-            symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'RELIANCE', 'HDFCBANK',
-                       'ICICIBANK', 'TCS', 'INFY', 'ITC', 'SBIN']
+            # Full F&O list - indices + all stocks (NSE F&O 180+ but use available DB + master list)
+            symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA']
         bullish = []
         bearish = []
         for sym in symbols:
@@ -27,8 +27,7 @@ class OptionScanner:
 
     def scan_vwap(self, symbols=None) -> dict:
         if symbols is None:
-            symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'RELIANCE', 'HDFCBANK',
-                       'ICICIBANK', 'TCS', 'INFY', 'ITC', 'SBIN']
+            symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA']
         long_signals = []
         short_signals = []
         for sym in symbols:
@@ -43,11 +42,20 @@ class OptionScanner:
 
     def get_top_opportunities(self, symbols=None, top_n: int = 5) -> list:
         if symbols is None:
-            symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'RELIANCE', 'HDFCBANK',
-                       'ICICIBANK', 'TCS', 'INFY', 'ITC', 'SBIN',
-                       'HUL', 'LT', 'AXISBANK', 'KOTAKBANK', 'ASIANPAINT']
-        # Always analyse index symbols first so NIFTY/BANKNIFTY option trades appear.
+            # Full F&O universe - ensure stocks are scanned equally, not just indices
+            symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA']
+        # Mix indices + stocks equally - shuffle ordered to avoid indices always winning
+        # Prioritize but allow stocks to rank higher via score
         index_priority = ['NIFTY', 'BANKNIFTY', 'FINNIFTY']
+        # If DB has few symbols, also fetch dynamic symbols from bhavcopy_data
+        try:
+            db_syms = self.db.fetch_all("SELECT DISTINCT symbol FROM bhavcopy_data WHERE option_type IS NULL ORDER BY symbol")
+            db_sym_list = [r['symbol'] for r in db_syms]
+            for s in db_sym_list:
+                if s not in symbols:
+                    symbols.append(s)
+        except Exception:
+            pass
         ordered = index_priority + [s for s in symbols if s not in index_priority]
         vwap_result = self.scan_vwap(ordered)
         all_signals = []
@@ -89,7 +97,18 @@ class OptionScanner:
                     break
 
         all_signals.sort(key=lambda x: x['score'], reverse=True)
-        return all_signals[:top_n]
+        top = all_signals[:top_n]
+        # Ensure dashboard shows stocks too, not just indices - if top is all indices, mix in best stock
+        indices_set = {'NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'}
+        if top and all(s['symbol'] in indices_set for s in top):
+            # Find best stock signal outside top
+            stock_candidates = [s for s in all_signals[top_n:] if s['symbol'] not in indices_set]
+            if stock_candidates:
+                # Replace last 2 indices with top 2 stocks
+                stock_candidates.sort(key=lambda x: x['score'], reverse=True)
+                top = top[:max(0, top_n-2)] + stock_candidates[:2]
+                top.sort(key=lambda x: x['score'], reverse=True)
+        return top[:top_n]
 
     def _ai_fallback_signal(self, result: dict) -> dict:
         """AI-enhanced fallback using 5 advanced indicators when VWAP signals are insufficient.

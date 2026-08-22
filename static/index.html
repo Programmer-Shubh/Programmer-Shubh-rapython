@@ -179,9 +179,9 @@
             <div class="row g-2">
                 <div class="col-md-4"><label class="form-label">Instrument Settings</label>
                     <div class="row g-1">
-                        <div class="col"><label class="form-label small">Index</label><select class="form-select form-select-sm" id="s-index"><option selected>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option></select></div>
-                        <div class="col"><label class="form-label small">Select Underlying</label><select class="form-select form-select-sm" id="s-underlying"><option selected>Index</option><option>Underlying</option></select></div>
-                        <div class="col"><label class="form-label small">Underlying from</label><select class="form-select form-select-sm" id="s-underlying-src"><option selected>Cash</option><option>Futures</option></select></div>
+                        <div class="col"><label class="form-label small">Symbol (All F&O)</label><select class="form-select form-select-sm" id="s-index"><option>Loading...</option></select></div>
+                        <div class="col"><label class="form-label small">Select Underlying</label><select class="form-select form-select-sm" id="s-underlying"><option selected>Index</option><option>Stock</option><option>Underlying</option></select></div>
+                        <div class="col"><label class="form-label small">Underlying from</label><select class="form-select form-select-sm" id="s-underlying-src"><option selected>Cash</option><option>Futures</option><option>Spot</option></select></div>
                     </div>
                 </div>
                 <div class="col-md-4"><label class="form-label">Entry settings</label>
@@ -364,7 +364,19 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();}if(id==='brokers')loadBrokers();if(id==='bhavcopy')loadBhav();if(id==='chain')cLoadSymbols();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='bhavcopy')loadBhav();if(id==='chain')cLoadSymbols();if(id==='strategy')loadStrategySymbols();}
+    async function loadStrategySymbols(){
+        try{
+            const s=await A('/api/chain/symbols');
+            const sel=document.getElementById('s-index');
+            if(!sel || !s.symbols) return;
+            const current=sel.value;
+            // Full F&O master list fallback if DB has few symbols
+            const master=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','LT','AXISBANK','KOTAKBANK','HINDUNILVR','BHARTIARTL','MARUTI','M&M','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','TITAN','BAJAJFINSV','NESTLEIND','APOLLOHOSP','UPL','HEROMOTOCO'];
+            let syms=[...new Set([...(s.symbols||[]), ...master])].sort();
+            sel.innerHTML=syms.map(x=>`<option value="${x}" ${x===current?'selected':''}>${x}</option>`).join('');
+        }catch(e){console.error('Failed to load symbols',e);}
+    }
     function stab(t,btn){document.getElementById('scan-st').classList.toggle('hidden',t!=='st');document.getElementById('scan-vwap').classList.toggle('hidden',t!=='vwap');btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
     let conds=[];let condIdx=0;
     function addCondition(){const id=condIdx++;conds.push(id);const div=document.createElement('div');div.className='condition-row';div.id='cond-'+id;div.innerHTML=`<div class="col"><select class="form-select" id="ci-${id}"><option value="close">Close</option><option value="rsi">RSI</option><option value="predicted_moving_average">Predicted MA</option><option value="ai_sentiment">AI Sentiment</option><option value="ai_volatility_range">AI Volatility</option><option value="ai_trend_score">AI Trend</option><option value="macd">MACD</option></select></div><div class="col"><select class="form-select" id="co-${id}"><option value="greater_than">></option><option value="less_than"><</option><option value="crosses_above">Crosses Above</option><option value="crosses_below">Crosses Below</option></select></div><div class="col"><input type="number" class="form-control" id="cv-${id}" value="0" step="1"></div><div class="col" style="max-width:60px"><button class="btn btn-sm btn-danger" onclick="rmCond(${id})"><i class="bi bi-x"></i></button></div>`;const parent=document.getElementById('conditions');if(parent)parent.appendChild(div);}
@@ -384,7 +396,35 @@
     function quickTrade(sym,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:'BUY',quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert('Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
     function quickStrat(sym,action,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
     function stratBtnsForTrade(t){const opt=t.option_type||'CE';const bull=(opt==='CE');return bull?`<button class="btn btn-sm btn-buy" onclick="quickStrat('${t.symbol}','BUY','CE',${t.strike},'')">Buy Call</button> <button class="btn btn-sm btn-sell" onclick="quickStrat('${t.symbol}','SELL','PE',${t.strike},'')">Sell Put</button>`:`<button class="btn btn-sm btn-sell" onclick="quickStrat('${t.symbol}','BUY','PE',${t.strike},'')">Buy Put</button> <button class="btn btn-sm btn-buy" onclick="quickStrat('${t.symbol}','SELL','CE',${t.strike},'')">Sell Call</button>`;}
-    async function loadDashPositions(){try{const p=await A('/api/dashboard/portfolio');if(p.positions&&p.positions.length){let h='<table><tr><th>#</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Action</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';p.positions.forEach(t=>{const isLive=t.trade_mode==='live';h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${B(t.transaction_type,t.transaction_type==='BUY'?'buy':'sell')}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${t.current_price.toFixed(2)}</td><td class="${C(t.pnl)}">${F(t.pnl)}</td><td>${stratBtnsForTrade(t)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${t.current_price})">Close</button></td></tr>`;});h+='</table>';document.getElementById('dash-pos').innerHTML=h;}else{document.getElementById('dash-pos').innerHTML='<p class="text-muted p-3">No open positions</p>';};}catch(e){}}
+    let _lastDashPosHTML = null;
+    async function loadDashPositions(){
+        try{
+            const p=await A('/api/dashboard/portfolio');
+            if(p.positions&&p.positions.length){
+                let h='<table><tr><th>#</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Action</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
+                p.positions.forEach(t=>{
+                    const isLive=t.trade_mode==='live';
+                    const curPrice = (t.current_price!=null? t.current_price : t.entry_price);
+                    const pnl = (t.pnl!=null? t.pnl : 0);
+                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${B(t.transaction_type,t.transaction_type==='BUY'?'buy':'sell')}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${stratBtnsForTrade(t)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
+                });
+                h+='</table>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
+            }else{
+                // Keep last HTML if we had trades before, avoid flicker to "No positions" on transient error
+                if(_lastDashPosHTML && document.getElementById('dash-pos').innerHTML.includes('<table>')){
+                    // keep previous, do not overwrite
+                } else {
+                    document.getElementById('dash-pos').innerHTML='<p class="text-muted p-3">No open positions</p>';
+                }
+            }
+        }catch(e){
+            console.error('loadDashPositions failed',e);
+            // Do not clear table on error - keep last known trades visible
+            if(!document.getElementById('dash-pos').innerHTML.trim() || document.getElementById('dash-pos').innerHTML.includes('No open')){
+                // keep as is
+            }
+        }
+    }
     async function loadDashHistory(){try{const c=await A('/api/dashboard/trade-history');if(c.trades&&c.trades.length){let h='<table><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';c.trades.forEach(t=>{h+=`<tr><td>${t.date}</td><td>${t.symbol}</td><td>${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td>${stratBtnsForTrade(t)}</td></tr>`;});h+='</table>';document.getElementById('dash-hist').innerHTML=h;}else{document.getElementById('dash-hist').innerHTML='<p class="text-muted p-3">No trades yet</p>';};}catch(e){}}
     async function closeTrade(id,price){if(!confirm('Close #'+id+'?'))return;await P('/api/trades/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,exit_price:price,date:new Date().toISOString().split('T')[0]})});loadDash();loadTrades();}
     async function deleteTrade(id){if(!confirm('Delete trade #'+id+'? This cannot be undone.'))return;const r=await P('/api/trades/'+id,{method:'DELETE'});if(!r.error)loadTrades();else alert('Error: '+r.error);}
@@ -426,11 +466,27 @@
     }
     function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);});}
 
+    let _lastOpenTrdHTML = null;
     async function loadTrades(){
         try{const o=await A('/api/trades/open');const st=await A('/api/dashboard/stats');
             document.getElementById('trd-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Open Trades</div><div class="value text-primary">${st.open_count}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Closed Trades</div><div class="value">${st.closed_count}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Total P&L</div><div class="value ${C(st.total_pnl)}">${F(st.total_pnl)}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Win Rate</div><div class="value">${st.win_rate}%</div></div></div>`;
-            if(o.positions&&o.positions.length){let h='<table><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Current</th><th>Target</th><th>SL</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';o.positions.forEach(t=>{const isLive=t.trade_mode==='live';h+=`<tr><td>${t.symbol}</td><td>${t.symbol}</td><td>${B(t.transaction_type,t.transaction_type==='BUY'?'buy':'sell')} ${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${t.current_price.toFixed(2)}</td><td><input type="number" value="${t.tp}" style="width:70px;font-size:11px" onchange="updateTP(${t.id},this.value)"></td><td><input type="number" value="${t.sl}" style="width:70px;font-size:11px" onchange="updateSL(${t.id},this.value)"></td><td class="${C(t.pnl)}">${F(t.pnl)}<br><small>${(t.pnl/(t.entry_price*t.quantity*(t.lot_size||50))*100||0).toFixed(1)}%</small></td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${t.current_price})">Close</button></td></tr>`;});h+='</table>';document.getElementById('open-trd').innerHTML=h;}else{document.getElementById('open-trd').innerHTML='<p class="text-muted p-3">No open positions</p>';}
-        }catch(e){}
+            if(o.positions&&o.positions.length){
+                let h='<table><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Current</th><th>Target</th><th>SL</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
+                o.positions.forEach(t=>{
+                    const isLive=t.trade_mode==='live';
+                    const cur = (t.current_price!=null? t.current_price : t.entry_price);
+                    const pnl = (t.pnl!=null? t.pnl : 0);
+                    h+=`<tr><td>${t.symbol}</td><td>${t.symbol}</td><td>${B(t.transaction_type,t.transaction_type==='BUY'?'buy':'sell')} ${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${cur.toFixed(2)}</td><td><input type="number" value="${t.tp}" style="width:70px;font-size:11px" onchange="updateTP(${t.id},this.value)"></td><td><input type="number" value="${t.sl}" style="width:70px;font-size:11px" onchange="updateSL(${t.id},this.value)"></td><td class="${C(pnl)}">${F(pnl)}<br><small>${(pnl/(t.entry_price*t.quantity*(t.lot_size||50))*100||0).toFixed(1)}%</small></td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${cur})">Close</button></td></tr>`;
+                });
+                h+='</table>';document.getElementById('open-trd').innerHTML=h;_lastOpenTrdHTML=h;
+            }else{
+                if(_lastOpenTrdHTML && document.getElementById('open-trd').innerHTML.includes('<table>')){
+                    // keep previous trades visible - avoid flicker when other tab clicked
+                } else {
+                    document.getElementById('open-trd').innerHTML='<p class="text-muted p-3">No open positions</p>';
+                }
+            }
+        }catch(e){ console.error('loadTrades failed',e); }
         try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=t.pnl>=0?'Target Hit':'Stoploss Hit';const sbg=t.pnl>=0?'badge-buy':'badge-sell';h+=`<tr><td>${t.date}</td><td>-</td><td>${t.symbol}</td><td>${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<p class="text-muted p-3">No trades yet</p>';}
         }catch(e){}
     }
@@ -633,6 +689,7 @@
     (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-6); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e){}})();
     addCondition();
     loadDash();
+    loadStrategySymbols();
     setInterval(loadDash,120000);
 
     let currentBroker='';
