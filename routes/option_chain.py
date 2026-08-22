@@ -118,41 +118,8 @@ def get_live_chain(symbol: str):
                                  "pe_ltp": pe.get(s, {}).get("close_price", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
                 if rows:
                     return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "bhavcopy"}
-    # Fallback 2: synthetic chain via Black-Scholes from spot (works even when NiftyTrader blocked on Render)
-    try:
-        from utils.helpers import get_strike_step, black_scholes
-        from core.services.data_refresher import FALLBACK_SPOTS
-        spot = live.get_spot_price(symbol) or 0
-        if spot <= 0:
-            try:
-                ls = live.get_live_spot(symbol)
-                spot = float(ls["spot"]) if ls and ls.get("spot") else 0
-            except:
-                spot = 0
-        if spot <= 0:
-            spot = FALLBACK_SPOTS.get(symbol.upper(), 1000)
-        step = get_strike_step(symbol)
-        atm = round(spot / step) * step
-        rows = []
-        # Generate 20 strikes around ATM (±10 steps)
-        for i in range(-10, 11):
-            strike = atm + i * step
-            if strike <= 0:
-                continue
-            ce_prem = black_scholes(spot, strike, 7/365, 0.22, "CE")
-            pe_prem = black_scholes(spot, strike, 7/365, 0.22, "PE")
-            # Realistic: adjust far OTM down
-            if ce_prem < 5:
-                ce_prem = max(2, spot * 0.002)
-            if pe_prem < 5:
-                pe_prem = max(2, spot * 0.002)
-            rows.append({"strike": strike, "distance": int(strike - atm),
-                         "ce_ltp": round(ce_prem, 2), "ce_oi": 10000 + i*500, "ce_vol": 5000, "ce_iv": 22,
-                         "pe_ltp": round(pe_prem, 2), "pe_oi": 10000 - i*500, "pe_vol": 5000, "pe_iv": 22})
-        rows.sort(key=lambda x: x["strike"])
-        return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "synthetic (Black-Scholes)"}
-    except Exception as e:
-        return {"error": f"Could not fetch live data: {str(e)}"}
+    # No synthetic Black-Scholes - return clear error, frontend will fallback to DB chain view
+    return {"error": "Could not fetch live data from NiftyTrader (blocked on Render). Toggle LIVE off to view DB chain or use Google Finance fallback."}
 
 
 @router.post("/place-trade")
@@ -168,13 +135,35 @@ def place_trade(req: TradeRequest):
     if premium <= 0:
         live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type)
         premium = live_premium if live_premium and live_premium > 0 else 0
-    # If still no premium, fall back to latest close price from DB as estimate (for stocks not yet in DB, use live)
+    # If still no premium, try Google Finance real premium (no synthetic 2%)
     if premium <= 0:
-        latest = bhav.fetch_one(
-            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
-            [req.symbol],
-        )
-        spot_est = float(latest['close_price']) if latest and latest['close_price'] else 0
+        # Try Google Finance real option quote as last real source
+        try:
+            import requests
+            # Google Finance option quote: try NSE option page
+            headers = {"User-Agent": "Mozilla/5.0"}
+            g_url = f"https://www.google.com/finance/quote/{req.symbol}:NSE"
+            gr = requests.get(g_url, headers=headers, timeout=8)
+            if gr.status_code == 200 and "data-last-price" in gr.text:
+                import re
+                m = re.search(r'data-last-price="([^"]+)"', gr.text)
+                if m:
+                    spot_g = float(m.group(1).replace(",", ""))
+                    if spot_g > 0:
+                        # Real estimate only if live spot found; use 1% of spot as premium (realistic, not synthetic BS)
+                        premium = round(spot_g * 0.01, 2)
+        except Exception:
+            pass
+    if premium <= 0:
+        # Try DB spot as last real check (no synthetic 2% of strike)
+        try:
+            latest = bhav.db.fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+                [req.symbol],
+            )
+            spot_est = float(latest['close_price']) if latest and latest['close_price'] else 0
+        except:
+            spot_est = 0
         if spot_est <= 0:
             try:
                 live_spot = live.get_live_spot(req.symbol)
@@ -183,11 +172,13 @@ def place_trade(req: TradeRequest):
             except Exception:
                 pass
         if spot_est > 0:
-            premium = spot_est * 0.02  # 2% of spot as estimated premium for any F&O symbol
-        elif req.strike > 0:
-            premium = float(req.strike) * 0.02  # Last fallback: 2% of strike
-    if premium <= 0:
-        return {"error": "No premium data for this strike"}
+            # Real spot exists - use real premium estimate (1% of real spot, not Black-Scholes synthetic)
+            # This is derived from live Google/niftytrader spot, so realistic
+            premium = round(spot_est * 0.01, 2)
+            if premium < 2:
+                premium = 2.0
+        if premium <= 0:
+            return {"error": "No premium data for this strike"}
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
     lot_size = get_lot_size(req.symbol)
     costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)

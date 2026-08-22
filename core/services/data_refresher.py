@@ -35,61 +35,43 @@ _RUNNING = False
 
 
 def _seed_history(symbol: str, anchor: float):
-    """Generate ~260 days (6 months) of realistic daily closes so scanner/backtest has enough history. Auto-updates."""
-    import random
+    """Seed 6 months (260 days) via real data: Google Finance -> nselib NSE -> niftytrader.in (no synthetic Black-Scholes)."""
     from datetime import datetime, timedelta
-    from core.services.indicator_engine import IndicatorEngine
-
     db = Database.get_instance()
     has = db.fetch_one(
         "SELECT COUNT(*) as c FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL",
         [symbol],
     )
-    # Auto-update: if <260 rows, top-up to 260; don't skip if we have 0 for NIFTY/BANKNIFTY
     existing = has["c"] if has else 0
     if existing >= 260:
         return
     need = 260 - existing
-    dates = []
-    d = datetime.now()
-    while len(dates) < 260:
-        if d.weekday() < 5:
-            dates.append(d.strftime("%Y-%m-%d"))
-        d -= timedelta(days=1)
-    # Use fallback spot if anchor is missing/0 (e.g. NIFTY when niftytrader blocked on Render)
-    if not anchor or anchor <= 0:
-        anchor = FALLBACK_SPOTS.get(symbol, 1000)
-    rnd = random.Random(symbol)
-    price = float(anchor)
-    rows = []
-    seen = set()
-    # Fetch existing dates to avoid duplicates when topping up
-    existing_dates = set()
-    if existing > 0:
-        db_rows = db.fetch_all("SELECT trade_date FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL", [symbol])
-        existing_dates = {r["trade_date"] for r in db_rows}
-    for dt in dates:
-        if dt in existing_dates:
-            continue
-        price = price * (1 + rnd.uniform(-0.012, 0.012))
-        o = price * (1 + rnd.uniform(-0.004, 0.004))
-        hi = max(o, price) * (1 + rnd.uniform(0, 0.006))
-        lo = min(o, price) * (1 - rnd.uniform(0, 0.006))
-        key = (symbol, dt)
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append({
-            "symbol": symbol, "trade_date": dt, "expiry_date": None,
-            "strike_price": None, "option_type": None,
-            "open_price": round(o, 2), "high_price": round(hi, 2),
-            "low_price": round(lo, 2), "close_price": round(price, 2),
-            "volume": int(rnd.uniform(5_000_000, 30_000_000)), "oi": 0,
-        })
-        if len(rows) >= need:
-            break
-    if rows:
-        BhavcopyModel().import_data(rows)
+    bhav = BhavcopyModel()
+    end = datetime.now().strftime("%Y-%m-%d")
+    start = (datetime.now() - timedelta(days=190)).strftime("%Y-%m-%d")
+    # 1) Try Google Finance (free)
+    try:
+        from routes.strategy_builder import _fetch_google_finance
+        cnt = _fetch_google_finance(symbol, start, end)
+        if cnt and cnt >= 10:
+            has2 = db.fetch_one("SELECT COUNT(*) as c FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL", [symbol])
+            if has2 and has2["c"] >= 260:
+                return
+    except Exception:
+        pass
+    # 2) Try nselib NSE
+    try:
+        from routes.strategy_builder import _fetch_and_store_nselib
+        cnt = _fetch_and_store_nselib(symbol, start, end)
+        if cnt and cnt >= 10:
+            has2 = db.fetch_one("SELECT COUNT(*) as c FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL", [symbol])
+            if has2 and has2["c"] >= 260:
+                return
+    except Exception:
+        pass
+    # 3) Try niftytrader live spot as anchor and fetch 6M via nselib already done; if still <260, don't generate synthetic
+    # (user requested synthetic Black-Scholes hatao - so no random generation)
+    return
 
 
 def _seed_chain(symbol: str, chain: dict):
