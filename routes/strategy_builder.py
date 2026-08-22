@@ -21,6 +21,96 @@ class BacktestRequest(BaseModel):
     risk: dict = {}
 
 
+def _fetch_google_finance(symbol, start_date, end_date):
+    """Fetch realistic historical OHLC from Google Finance (free, no API key) via NSE:NSE mapping."""
+    try:
+        import requests, re, json
+        # Google Finance uses NSE:SYMBOL
+        q = symbol
+        # Try Google getprices endpoint (still serves for NSE)
+        # Format: https://www.google.com/finance/getprices?q=BAJFINANCE&x=NSE&i=86400&p=6M&f=d,o,h,l,c,v
+        url = f"https://www.google.com/finance/getprices?q={q}&x=NSE&i=86400&p=6M&f=d,o,h,l,c,v"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200 and "COLUMNS=" in resp.text:
+            lines = resp.text.strip().split("\n")
+            # Find header line
+            data_start = 0
+            for i, l in enumerate(lines):
+                if l.startswith("COLUMNS="):
+                    data_start = i + 1
+                    break
+            bhav = BhavcopyModel()
+            records = []
+            base_ts = None
+            for line in lines[data_start:]:
+                if not line or line.startswith("TIMEZONE"):
+                    continue
+                parts = line.split(",")
+                if len(parts) < 6:
+                    continue
+                try:
+                    # DATE field may be aXXXX or timestamp
+                    d_str = parts[0]
+                    if d_str.startswith("a"):
+                        base_ts = int(d_str[1:])
+                        ts = base_ts
+                    else:
+                        if base_ts is None:
+                            continue
+                        ts = base_ts + int(d_str) * 86400
+                    td = datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+                    # Validate date range
+                    if td < start_date or td > end_date:
+                        continue
+                    c = float(parts[1]); o = float(parts[2]); h = float(parts[3]); l = float(parts[4]); vol = int(float(parts[5]))
+                    if c <= 0:
+                        continue
+                    records.append({
+                        "symbol": symbol, "trade_date": td, "expiry_date": "",
+                        "strike_price": 0, "option_type": None,
+                        "open_price": round(o, 2), "high_price": round(h, 2),
+                        "low_price": round(l, 2), "close_price": round(c, 2),
+                        "volume": vol, "oi": 0,
+                    })
+                except Exception:
+                    continue
+            if len(records) >= 10:
+                bhav.import_data(records)
+                return len(records)
+        # Fallback: scrape Google Finance quote page for NSE
+        url2 = f"https://www.google.com/finance/quote/{q}:NSE"
+        resp2 = requests.get(url2, headers=headers, timeout=10)
+        if resp2.status_code == 200:
+            # Extract historical JSON embedded
+            m = re.search(r'\"historicalData\"\s*:\s*(\[.*?\])', resp2.text)
+            if m:
+                hist = json.loads(m.group(1))
+                bhav = BhavcopyModel()
+                records = []
+                for h in hist:
+                    try:
+                        td = h.get("date", "")[:10]
+                        o = float(h.get("open", 0)); c = float(h.get("close", 0))
+                        high = float(h.get("high", 0)); low = float(h.get("low", 0))
+                        if c <= 0:
+                            continue
+                        records.append({
+                            "symbol": symbol, "trade_date": td, "expiry_date": "",
+                            "strike_price": 0, "option_type": None,
+                            "open_price": o, "high_price": high, "low_price": low,
+                            "close_price": c, "volume": int(h.get("volume", 0) or 0), "oi": 0,
+                        })
+                    except Exception:
+                        continue
+                if len(records) >= 10:
+                    bhav.import_data(records)
+                    return len(records)
+    except Exception as e:
+        print(f"google finance fetch failed for {symbol}: {e}")
+    return 0
+
+
 def _fetch_niftytrader_live(symbol):
     """Fallback: fetch current live spot from niftytrader.in and expand to recent 90 days via spot drift."""
     try:
@@ -114,7 +204,11 @@ def run_backtest(req: BacktestRequest):
     try:
         bhav = BhavcopyModel()
         historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
-        # Priority: 1) nselib (NSE, realistic, free), 2) niftytrader.in live spot (realistic) - NO bhavcopy manual import
+        # Realistic flow: 1) Google Finance (free, no bhavcopy), 2) nselib NSE, 3) niftytrader.in live
+        if not historical:
+            count = _fetch_google_finance(req.symbol, req.start_date, req.end_date)
+            if count > 0:
+                historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
         if not historical:
             count = _fetch_and_store_nselib(req.symbol, req.start_date, req.end_date)
             if count > 0:
@@ -124,7 +218,7 @@ def run_backtest(req: BacktestRequest):
             if count > 0:
                 historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
         if not historical:
-            return {"error": f"No data available for {req.symbol}. NSE/niftytrader blocked - try NIFTY/BANKNIFTY or check symbol."}
+            return {"error": f"No data available for {req.symbol}. Google/NSE/niftytrader blocked - try again or check symbol."}
         if len(historical) > 120:
             historical = historical[-120:]
         engine = BacktestEngine(is_live=False)
