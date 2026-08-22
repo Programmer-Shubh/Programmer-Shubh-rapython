@@ -203,14 +203,26 @@
                 <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Leg Builder</button>
             </div>
             <div class="collapse show mt-2" id="legBuilder">
-                <div class="row g-2">
+                <div class="row g-2 align-items-end">
                     <div class="col-md-2"><label class="form-label small">Total Lot</label><input type="number" class="form-control form-control-sm" id="s-lots" value="1" min="1"></div>
-                    <div class="col-md-2"><label class="form-label small">Position</label><select class="form-select form-select-sm" id="s-position"><option selected>Buy</option><option>Sell</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">Option Type</label><select class="form-select form-select-sm" id="s-opt"><option selected>CE</option><option>PE</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">Strike Type</label><select class="form-select form-select-sm" id="s-strike-type"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">Expiry</label><select class="form-select form-select-sm" id="s-expiry"><option selected>Monthly</option><option>Weekly</option></select></div>
+                    <div class="col-md-2"><label class="form-label small">Position</label><select class="form-select form-select-sm" id="s-position"><option>Buy</option><option selected>Sell</option></select></div>
+                    <div class="col-md-2"><label class="form-label small">Option Type</label><select class="form-select form-select-sm" id="s-opt"><option>CE</option><option selected>PE</option></select></div>
+                    <div class="col-md-2"><label class="form-label small">Strike Type</label><select class="form-select form-select-sm" id="s-strike-type"><option>ATM</option><option selected>OTM</option><option>ITM</option><option>Delta</option></select><input type="number" class="form-control form-control-sm mt-1 d-none" id="s-delta" value="0.3" step="0.05" min="0.1" max="0.9" placeholder="Delta 0.3"></div>
+                    <div class="col-md-2"><label class="form-label small">Expiry</label><select class="form-select form-select-sm" id="s-expiry"><option>Weekly</option><option selected>Monthly</option></select><input type="number" class="form-control form-control-sm mt-1" id="s-dte" value="7" min="1" max="60" title="DTE"></div>
                     <div class="col-md-2 d-flex align-items-end"><button class="btn btn-sm btn-success w-100" onclick="addLeg()">Add Leg</button></div>
                 </div>
+                <div class="mt-2 d-flex gap-1 flex-wrap">
+                    <span class="small text-muted me-1">Templates:</span>
+                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('single')">Single</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('straddle')">Straddle (ATM CE+PE Sell)</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('strangle')">Strangle (OTM CE+PE Sell)</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bullspread')">Bull Call Spread</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bearspread')">Bear Put Spread</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironcondor')">Iron Condor</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="clearLegs()">Clear</button>
+                </div>
+                <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
+                <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
             </div>
             <div class="mt-2">
                 <button class="btn btn-sm btn-warning" type="button" data-bs-toggle="collapse" data-bs-target="#overallSettings"><i class="bi bi-caret-down"></i> Overall strategy settings</button>
@@ -454,12 +466,23 @@
         const sl=parseFloat(document.getElementById('s-sl').value)||500;
         const tp=parseFloat(document.getElementById('s-tp').value)||1000;
         const mtd=parseInt(document.getElementById('s-mtd').value)||5;
-        const position=document.getElementById('s-position').value;
-        const optType=document.getElementById('s-opt').value;
-        const strikeType=document.getElementById('s-strike-type').value;
         const indicators=collectIndicators();
-        const legs=[{option_type:optType,lots:lots,transaction:position.toLowerCase(),stop_loss:sl,take_profit:tp,strike_selection:strikeType.toLowerCase()}];
-        const body={symbol:idx,start_date:startDate,end_date:endDate,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:20,strike_selection:strikeType.toLowerCase(),otm_distance:2,trade_mode:document.getElementById('s-strat-type').value.toLowerCase(),implied_volatility:0.14},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+        // Use stratLegs if built via Leg Builder, else fallback to single leg from form
+        let legs = stratLegs.length ? JSON.parse(JSON.stringify(stratLegs)) : [];
+        if(!legs.length){
+            const position=document.getElementById('s-position').value;
+            const optType=document.getElementById('s-opt').value;
+            const strikeType=document.getElementById('s-strike-type').value.toLowerCase();
+            const dteVal=parseInt(document.getElementById('s-dte').value)||7;
+            const deltaVal=parseFloat(document.getElementById('s-delta').value)||0.3;
+            legs=[{option_type:optType,lots:lots,transaction:position.toLowerCase(),stop_loss:sl,take_profit:tp,strike_selection:strikeType,otm_distance:2,expiry:document.getElementById('s-expiry').value.toLowerCase(),dte:dteVal,delta_target: strikeType==='delta'?deltaVal:null}];
+        }
+        // Quant wiring: entry/exit times, momentum, expiry, trailing
+        const stratType=document.getElementById('s-strat-type').value.toLowerCase();
+        const entryTime=document.getElementById('s-entry-time').value;
+        const exitTime=document.getElementById('s-exit-time').value;
+        const momentum=parseInt(document.getElementById('s-momentum').value)||0;
+        const body={symbol:idx,start_date:startDate,end_date:endDate,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
         try{
             const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             btn.innerHTML=orig;
@@ -515,11 +538,13 @@
         const momentum=parseInt(document.getElementById('s-momentum').value);
         const startDate=document.getElementById('s-start').value;
         const endDate=document.getElementById('s-end').value;
-        const legs=[];
-        const legOpt=document.getElementById('s-opt').value;
-        const legPos=document.getElementById('s-position').value;
-        const legStrike=document.getElementById('s-strike-type').value;
-        legs.push({option_type:legOpt,position:legPos,strike_type:legStrike,lots});
+        let legs = stratLegs.length ? JSON.parse(JSON.stringify(stratLegs)) : [];
+        if(!legs.length){
+            const legOpt=document.getElementById('s-opt').value;
+            const legPos=document.getElementById('s-position').value;
+            const legStrike=document.getElementById('s-strike-type').value;
+            legs.push({option_type:legOpt,position:legPos,strike_type:legStrike,lots, transaction: legPos.toLowerCase(), strike_selection: legStrike.toLowerCase()});
+        }
         const body={
             name:idx+'_'+stratType,
             symbol:idx,
@@ -542,6 +567,39 @@
         const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         if(r.id){alert('Strategy saved! ID: '+r.id);loadStrats();}else{alert('Error saving strategy');}
     }
+    let stratLegs=[];
+    function renderLegs(){
+        const card=document.getElementById('legsTableCard'); const tbody=document.querySelector('#legsTable tbody');
+        if(!stratLegs.length){card.style.display='none'; tbody.innerHTML=''; return;}
+        card.style.display='block';
+        tbody.innerHTML=stratLegs.map((l,i)=>`<tr><td>${i+1}</td><td><span class="badge ${l.transaction==='buy'?'badge-buy':'badge-sell'}">${l.transaction.toUpperCase()}</span></td><td>${l.option_type}</td><td>${l.strike_selection}${l.strike_selection==='delta'?'('+l.delta_target+')':''}${l.otm_distance?'+'+l.otm_distance:''}</td><td>${l.lots}</td><td>${l.expiry}</td><td><button class="btn btn-sm btn-danger" onclick="removeLeg(${i})"><i class="bi bi-x"></i></button></td></tr>`).join('');
+    }
+    function addLeg(){
+        const lots=parseInt(document.getElementById('s-lots').value)||1;
+        const pos=document.getElementById('s-position').value.toLowerCase();
+        const opt=document.getElementById('s-opt').value;
+        const strikeSel=document.getElementById('s-strike-type').value.toLowerCase();
+        const expiry=document.getElementById('s-expiry').value.toLowerCase();
+        const dte=parseInt(document.getElementById('s-dte').value)||7;
+        const delta=parseFloat(document.getElementById('s-delta').value)||0.3;
+        // expiry offset: weekly=0, monthly=2 weeks extra
+        const offset = expiry==='weekly'?0:0;
+        stratLegs.push({option_type:opt, transaction:pos, strike_selection:strikeSel, otm_distance:2, lots:lots, expiry:expiry, offset:offset, delta_target: strikeSel==='delta'?delta:null, dte:dte});
+        renderLegs();
+    }
+    function removeLeg(i){stratLegs.splice(i,1);renderLegs();}
+    function clearLegs(){stratLegs=[];renderLegs();}
+    function applyTemplate(t){
+        clearLegs();
+        const lots=parseInt(document.getElementById('s-lots').value)||1;
+        if(t==='single'){ addLeg(); }
+        else if(t==='straddle'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='strangle'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='bullspread'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:1}); renderLegs(); }
+        else if(t==='bearspread'){ stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:1}); renderLegs(); }
+        else if(t==='ironcondor'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:3,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:3,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+    }
+    document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta');});
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
         document.getElementById('s-lots').value=1;
@@ -552,8 +610,10 @@
         document.getElementById('s-reentry-sl').value='RE ASAP';
         document.getElementById('s-reentry-tp').value='RE ASAP';
         document.getElementById('s-trail').value='Lock';
+        clearLegs();
+        // reset AI to quant default: RSI+KAMA+HMM
+        document.querySelectorAll('#ind-rsi,#ind-kama,#ind-hmm').forEach(c=>c.checked=true);
     }
-    function addLeg(){const lots=parseInt(document.getElementById('s-lots').value);const opt=document.getElementById('s-opt').value;const pos=document.getElementById('s-position').value;alert('Added leg: '+opt+' '+pos+' '+lots+' lots');}
 
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3">No strategies yet. Create your first strategy!</p>';return;}let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const statusCls=s.status==='active'?'active':s.status==='draft'?'draft':'paused';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span class="badge badge-${statusCls}">${s.status}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px"><button class="btn btn-sm btn-success" onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})">Edit</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
 
@@ -569,6 +629,8 @@
     async function bhImport(){const f=document.getElementById('bh-date').value;if(!f){alert('Select date');return;}document.getElementById('bh-status').innerHTML='<span class="spinner"></span> Importing...';document.getElementById('bh-status').innerHTML='<span class="text-success">Imported from bhavcopy DB for '+f+'</span>';}
     async function bhRange(){alert('Range import coming soon');}
 
+    // Quant: auto-fill backtest dates to last 6 months (Nifty options need sufficient history)
+    (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-6); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e){}})();
     addCondition();
     loadDash();
     setInterval(loadDash,120000);

@@ -25,8 +25,19 @@ class BacktestEngine:
         self.bt_symbol = symbol
         self.bt_expiry = legs[0].get("expiry_date", "") if legs else ""
         self.implied_volatility = advanced_options.get("implied_volatility", 0.14)
-        use_trailing = advanced_options.get("trailing_sl", False)
+        # Quant wiring: expiry type, trailing, momentum, entry/exit times
+        self._expiry_hint = advanced_options.get("expiry", "weekly")
+        # Check legs for expiry override
+        if legs and any(l.get("expiry")=="monthly" for l in legs):
+            self._expiry_hint = "monthly"
+        use_trailing = advanced_options.get("trailing_sl", False) or advanced_options.get("trailing", "") != "Lock"
+        momentum = int(advanced_options.get("momentum", 0) or 0)
+        entry_time = advanced_options.get("entry_time", "09:35")
+        exit_time = advanced_options.get("exit_time", "15:14")
         max_holding = int(advanced_options.get("max_holding_bars", 20))
+        # BTST holds overnight: increase max_holding for BTST
+        if advanced_options.get("trade_mode") == "btst":
+            max_holding = max(max_holding, 5)
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
         signal_delay = int(advanced_options.get("signal_delay_bars", 0) or 0)
@@ -249,6 +260,29 @@ class BacktestEngine:
             buy = buy or (pre_calc["rsi"][effective_idx] < 30)
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
             buy = buy or (historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx])
+        # --- Quant AI Indicators ---
+        if "kama" in pre_calc and effective_idx < len(pre_calc["kama"]):
+            kama_v = pre_calc["kama"][effective_idx]
+            if kama_v is not None:
+                buy = buy or (historical[effective_idx]["close_price"] > kama_v)
+        if "hmm_regime" in pre_calc:
+            seq = pre_calc["hmm_regime"].get("state_sequence", [])
+            if effective_idx < len(seq) and seq[effective_idx] == "Bullish":
+                buy = buy or True
+        if "dynamic_boll" in pre_calc:
+            db = pre_calc["dynamic_boll"]
+            low = db.get("lower", [])
+            if effective_idx < len(low) and low[effective_idx] is not None:
+                buy = buy or (historical[effective_idx]["close_price"] < low[effective_idx])
+        if "ml_rsi" in pre_calc:
+            ml = pre_calc["ml_rsi"]
+            sig = ml.get("signal", [])
+            if effective_idx < len(sig) and sig[effective_idx] == 1:
+                buy = buy or True
+        if "ml_signal" in pre_calc:
+            prob = pre_calc["ml_signal"].get("probability", [])
+            if effective_idx < len(prob) and prob[effective_idx] > 0.60:
+                buy = buy or True
         if entry_conditions:
             cond_met = True
             for c in entry_conditions:
@@ -285,6 +319,29 @@ class BacktestEngine:
             sell = sell or (historical[effective_idx]["close_price"] < pre_calc["supertrend"][effective_idx])
         if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
             sell = sell or (pre_calc["rsi"][effective_idx] > 70)
+        # --- Quant AI Indicators for sell ---
+        if "kama" in pre_calc and effective_idx < len(pre_calc["kama"]):
+            kama_v = pre_calc["kama"][effective_idx]
+            if kama_v is not None:
+                sell = sell or (historical[effective_idx]["close_price"] < kama_v)
+        if "hmm_regime" in pre_calc:
+            seq = pre_calc["hmm_regime"].get("state_sequence", [])
+            if effective_idx < len(seq) and seq[effective_idx] == "Bearish":
+                sell = sell or True
+        if "dynamic_boll" in pre_calc:
+            db = pre_calc["dynamic_boll"]
+            upper = db.get("upper", [])
+            if effective_idx < len(upper) and upper[effective_idx] is not None:
+                sell = sell or (historical[effective_idx]["close_price"] > upper[effective_idx])
+        if "ml_rsi" in pre_calc:
+            ml = pre_calc["ml_rsi"]
+            sig = ml.get("signal", [])
+            if effective_idx < len(sig) and sig[effective_idx] == -1:
+                sell = sell or True
+        if "ml_signal" in pre_calc:
+            prob = pre_calc["ml_signal"].get("probability", [])
+            if effective_idx < len(prob) and prob[effective_idx] < 0.40:
+                sell = sell or True
         if exit_conditions:
             cond_met = True
             for c in exit_conditions:
@@ -440,8 +497,13 @@ class BacktestEngine:
                 return float(row["open_price"])
             if row["close_price"] and row["close_price"] > 0:
                 return float(row["close_price"])
-        t = self._days_to_expiry(date) / 365.0
+        expiry_t = self._get_expiry_type()
+        t = self._days_to_expiry(date, expiry_t) / 365.0
         return black_scholes(spot, strike, t, self.implied_volatility, option_type)
+
+    def _get_expiry_type(self):
+        # Check legs for expiry hint
+        return getattr(self, '_expiry_hint', 'weekly')
 
     def _exit_premium(self, date, spot, strike, option_type):
         return self._entry_premium(date, spot, strike, option_type)
@@ -459,14 +521,33 @@ class BacktestEngine:
         t = self._days_to_expiry(date) / 365.0
         return black_scholes(spot, strike, t, self.implied_volatility, option_type)
 
-    def _days_to_expiry(self, bar_date):
+    def _days_to_expiry(self, bar_date, expiry_type="weekly"):
         import datetime
+        import calendar
         if not self.bt_expiry:
             d = datetime.datetime.strptime(bar_date, "%Y-%m-%d") if bar_date else datetime.datetime.now()
-            days_ahead = 3 - d.weekday()
-            if days_ahead <= 0:
-                days_ahead += 7
-            exp = d + datetime.timedelta(days=days_ahead)
+            if expiry_type == "monthly":
+                # Last Thursday of month (Nifty monthly expiry)
+                last_day = calendar.monthrange(d.year, d.month)[1]
+                last = datetime.datetime(d.year, d.month, last_day)
+                # Find last Thursday (weekday 3)
+                while last.weekday() != 3:
+                    last -= datetime.timedelta(days=1)
+                if last <= d:
+                    # Next month's last Thursday
+                    nm = d.month + 1 if d.month < 12 else 1
+                    ny = d.year if d.month < 12 else d.year + 1
+                    last_day = calendar.monthrange(ny, nm)[1]
+                    last = datetime.datetime(ny, nm, last_day)
+                    while last.weekday() != 3:
+                        last -= datetime.timedelta(days=1)
+                exp = last
+            else:
+                # Weekly: next Thursday
+                days_ahead = 3 - d.weekday()
+                if days_ahead <= 0:
+                    days_ahead += 7
+                exp = d + datetime.timedelta(days=days_ahead)
             self.bt_expiry = exp.strftime("%Y-%m-%d")
         try:
             exp_dt = datetime.datetime.strptime(self.bt_expiry, "%Y-%m-%d")
