@@ -19,7 +19,12 @@ class Database:
 
     def __init__(self):
         if Database._db_path is None:
-            Database._db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "ratrade.db")
+            # Allow override via env (Render persistent disk) else local data folder
+            env_path = os.environ.get("DB_PATH")
+            if env_path:
+                Database._db_path = env_path
+            else:
+                Database._db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "ratrade.db")
         os.makedirs(os.path.dirname(Database._db_path), exist_ok=True)
         self._path = Database._db_path
 

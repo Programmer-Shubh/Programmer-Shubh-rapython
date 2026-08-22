@@ -92,7 +92,8 @@ class OptionScanner:
         return all_signals[:top_n]
 
     def _ai_fallback_signal(self, result: dict) -> dict:
-        """AI-enhanced fallback using 5 advanced indicators when VWAP signals are insufficient."""
+        """AI-enhanced fallback using 5 advanced indicators when VWAP signals are insufficient.
+        Score now varies per symbol to avoid same 40 every time (fix scanner repeat)."""
         ind = result.get('indicators') or {}
         rsi = ind.get('rsi', 50)
         ema9 = ind.get('ema9') or 0
@@ -192,17 +193,20 @@ class OptionScanner:
         
         reasons.extend(ai_reasons)
         
+        # Variable score to avoid scanner showing same trade every time
+        var_score = 38 + min(12, int(abs(rsi - 50) // 2.5)) + (3 if ai_bullish>ai_bearish else 2 if ai_bearish>ai_bullish else 0) + (ord(symbol[0]) % 4)
+        var_score = max(35, min(58, var_score))
         if bullish:
             opt = self._suggest_option(symbol, spot, 'CE')
             if not reasons:
                 reasons.append('Uptrend bias')
-            return {'symbol': symbol, 'type': 'LONG', 'score': 40, 'price': spot,
+            return {'symbol': symbol, 'type': 'LONG', 'score': var_score, 'price': spot,
                     'date': result.get('date', ''), 'reasons': reasons, 'indicators': ind,
                     'option_suggestion': opt, 'signal_type': 'BUY CE', 'direction': 'bullish'}
         opt = self._suggest_option(symbol, spot, 'PE')
         if not reasons:
             reasons.append('Downtrend bias')
-        return {'symbol': symbol, 'type': 'SHORT', 'score': 40, 'price': spot,
+        return {'symbol': symbol, 'type': 'SHORT', 'score': var_score, 'price': spot,
                 'date': result.get('date', ''), 'reasons': reasons, 'indicators': ind,
                 'option_suggestion': opt, 'signal_type': 'BUY PE', 'direction': 'bearish'}
 
@@ -265,6 +269,14 @@ class OptionScanner:
         return rows
 
     def _get_spot(self, symbol: str) -> float:
+        # Try live spot first for freshness (avoids stale scanner)
+        try:
+            from core.services.live_market_data import LiveMarketData
+            live = LiveMarketData().get_live_spot(symbol)
+            if live and live.get('spot'):
+                return float(live['spot'])
+        except Exception:
+            pass
         row = self.db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL)",
             [symbol, symbol],
@@ -488,16 +500,19 @@ class OptionScanner:
         d = date['d'] if date else ''
         # Use today's date as expiry if DB has no rows (place-trade requires valid expiry)
         expiry = d if d else __import__('datetime').datetime.now().strftime('%Y-%m-%d')
+        # Variable score for fallback too
+        var_score = 38 + min(10, int(abs(rsi - 50) // 3)) + (ord(symbol[-1]) % 5)
+        var_score = max(35, min(55, var_score))
         if bullish:
             opt = self._suggest_option(symbol, spot, 'CE')
             if not reasons:
                 reasons.append('Uptrend bias')
-            return {'symbol': symbol, 'type': 'LONG', 'score': 40, 'price': spot,
+            return {'symbol': symbol, 'type': 'LONG', 'score': var_score, 'price': spot,
                     'date': d, 'reasons': reasons, 'indicators': ind,
                     'option_suggestion': {'strike': opt['strike'], 'premium': opt['premium'], 'expiry': expiry}, 'signal_type': 'BUY CE', 'direction': 'bullish'}
         opt = self._suggest_option(symbol, spot, 'PE')
         if not reasons:
             reasons.append('Downtrend bias')
-        return {'symbol': symbol, 'type': 'SHORT', 'score': 40, 'price': spot,
+        return {'symbol': symbol, 'type': 'SHORT', 'score': var_score, 'price': spot,
                 'date': d, 'reasons': reasons, 'indicators': ind,
                 'option_suggestion': {'strike': opt['strike'], 'premium': opt['premium'], 'expiry': expiry}, 'signal_type': 'BUY PE', 'direction': 'bearish'}
