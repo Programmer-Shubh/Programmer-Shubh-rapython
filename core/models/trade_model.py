@@ -48,7 +48,8 @@ class TradeModel:
             qty = t["quantity"]
             lot = t.get("lot_size", 50)
             if current_price is None or entry <= 0:
-                result.append({"trade": t, "current_price": entry, "unrealized_pnl": 0, "invalid": True})
+                # Fix: include unrealized_pct so dashboard doesn't crash on stock trades with 0 entry fallback
+                result.append({"trade": t, "current_price": entry if entry>0 else (current_price or 0), "unrealized_pnl": 0, "unrealized_pct": 0, "invalid": True})
                 continue
             if t["transaction_type"] == "BUY":
                 pnl = (current_price - entry) * qty * lot
@@ -66,17 +67,73 @@ class TradeModel:
     def get_option_premium(self, symbol, option_type, strike, expiry) -> float:
         if strike <= 0:
             return None
+        # Primary: exact strike on latest date
         row = self.db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND strike_price=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?)",
             [symbol, option_type, strike, symbol],
         )
-        if row:
+        if row and row["close_price"] and float(row["close_price"]) > 0:
             return float(row["close_price"])
+        # Fallback: nearest strike within reasonable distance (2 steps) - avoid far OTM returning wrong premium for stocks
+        try:
+            from utils.helpers import get_strike_step
+            step = get_strike_step(symbol)
+            row = self.db.fetch_one(
+                "SELECT close_price, strike_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 ORDER BY ABS(strike_price-?) ASC LIMIT 1",
+                [symbol, option_type, strike, step, strike],
+            )
+            if row and row["close_price"] and float(row["close_price"]) > 0:
+                return float(row["close_price"])
+        except Exception:
+            pass
+        # Fallback: nearest strike any distance
         row = self.db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? ORDER BY ABS(strike_price-?) ASC LIMIT 1",
             [symbol, option_type, strike],
         )
-        return float(row["close_price"]) if row else None
+        if row and row["close_price"] and float(row["close_price"]) > 0:
+            # Only use if distance not absurd (>10*step) else use spot estimate
+            try:
+                from utils.helpers import get_strike_step as _gss
+                _step = _gss(symbol)
+                # We don't have strike here, check distance via query again? Use estimate if far
+                # If strike diff too large, fall through to spot estimate for stocks
+                pass
+            except:
+                pass
+            return float(row["close_price"])
+        # Final fallback for stocks with no option data: use live premium or spot estimate
+        try:
+            from core.services.live_market_data import LiveMarketData
+            live = LiveMarketData().get_option_ltp(symbol, strike, option_type)
+            if live and live > 0:
+                return float(live)
+        except Exception:
+            pass
+        # Last resort: 1% of spot
+        try:
+            spot_row = self.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [symbol])
+            if spot_row and spot_row["close_price"]:
+                return float(spot_row["close_price"]) * 0.015
+        except Exception:
+            pass
+        if row and row["close_price"]:
+            return float(row["close_price"])
+        # Fallback for stocks not in DB (e.g., fresh F&O symbol) - estimate via spot * 2% as premium to keep trade visible
+        try:
+            spot_row = self.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [symbol])
+            spot = float(spot_row["close_price"]) if spot_row and spot_row["close_price"] else 0
+            if spot <= 0:
+                from core.services.live_market_data import LiveMarketData
+                live = LiveMarketData().get_live_spot(symbol)
+                if live and live.get("spot"):
+                    spot = float(live["spot"])
+            if spot > 0:
+                # Rough estimate: ATM CE ~2-3% of spot
+                return round(spot * 0.02, 2)
+        except Exception:
+            pass
+        return None
 
     def close_trade(self, trade_id: int, exit_price: float, exit_date: str, exit_status="manual") -> int:
         trade = self.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [trade_id])

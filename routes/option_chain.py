@@ -99,14 +99,24 @@ def place_trade(req: TradeRequest):
     if premium <= 0:
         live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type)
         premium = live_premium if live_premium and live_premium > 0 else 0
-    # If still no premium, fall back to latest close price from DB as estimate
+    # If still no premium, fall back to latest close price from DB as estimate (for stocks not yet in DB, use live)
     if premium <= 0:
         latest = bhav.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
             [req.symbol],
         )
-        if latest and latest['close_price']:
-            premium = float(latest['close_price']) * 0.01  # 1% of spot as estimated premium
+        spot_est = float(latest['close_price']) if latest and latest['close_price'] else 0
+        if spot_est <= 0:
+            try:
+                live_spot = live.get_live_spot(req.symbol)
+                if live_spot and live_spot.get('spot'):
+                    spot_est = float(live_spot['spot'])
+            except Exception:
+                pass
+        if spot_est > 0:
+            premium = spot_est * 0.02  # 2% of spot as estimated premium for any F&O symbol
+        elif req.strike > 0:
+            premium = float(req.strike) * 0.02  # Last fallback: 2% of strike
     if premium <= 0:
         return {"error": "No premium data for this strike"}
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)

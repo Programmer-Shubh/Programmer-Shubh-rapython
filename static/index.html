@@ -217,7 +217,7 @@
                     <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('straddle')">Straddle (ATM CE+PE Sell)</button>
                     <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('strangle')">Strangle (OTM CE+PE Sell)</button>
                     <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bullspread')">Bull Call Spread</button>
-                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bearspread')">Bear Put Spread</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bearspread')">Bear Call Spread</button>
                     <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironcondor')">Iron Condor</button>
                     <button class="btn btn-sm btn-outline-secondary" onclick="clearLegs()">Clear</button>
                 </div>
@@ -651,8 +651,8 @@
         if(t==='single'){ addLeg(); }
         else if(t==='straddle'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='strangle'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
-        else if(t==='bullspread'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:1}); renderLegs(); }
-        else if(t==='bearspread'){ stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:1}); renderLegs(); }
+        else if(t==='bullspread'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:2}); renderLegs(); }
+        else if(t==='bearspread'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:2}); renderLegs(); }
         else if(t==='ironcondor'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:3,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:3,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
     }
     document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta');});
