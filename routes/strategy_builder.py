@@ -487,8 +487,6 @@ def run_master_confluence(req: MasterConfluenceRequest):
                 and c > st_val and pc <= prev_st
                 and cur_macd > cur_sig and prev_macd <= prev_sig
                 and ef > es and prev_ef <= prev_es
-                and (vwap_l2 > 0 and c <= vwap_l2 * 1.005)
-                and rsi_v < 30
                 and vol_now > vs * vol_buy_mult
                 and green):
                 buy_ce = True
@@ -498,8 +496,6 @@ def run_master_confluence(req: MasterConfluenceRequest):
                 and c < st_val and pc >= prev_st
                 and cur_macd < cur_sig and prev_macd >= prev_sig
                 and ef < es and prev_ef >= prev_es
-                and (vwap_u2 > 0 and c >= vwap_u2 * 0.995)
-                and rsi_v > 70
                 and vol_now > vs * vol_sell_mult
                 and red):
                 buy_pe = True

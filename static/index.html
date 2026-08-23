@@ -193,7 +193,7 @@
             <!-- MASTER MEGA-CONFLUENCE FORM (hidden by default) -->
             <div id="master-form" class="hidden">
                 <div class="card mt-2" style="border:2px solid #ffc107">
-                    <div class="card-header" style="background:#ffc107;color:#000"><i class="bi bi-cpu-fill"></i> <strong>Master Mega-Confluence Strategy</strong> <small class="ms-2">All 7 filters must match simultaneously on candle close</small></div>
+                    <div class="card-header" style="background:#ffc107;color:#000"><i class="bi bi-cpu-fill"></i> <strong>Master Mega-Confluence Strategy</strong> <small class="ms-2">All 8 filters must match simultaneously on candle close</small></div>
                     <div class="card-body p-2">
                         <div class="row g-2">
                             <div class="col-md-2"><label class="form-label small">Symbol</label><select class="form-select form-select-sm" id="m-sym"><option>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option></select></div>
@@ -227,7 +227,7 @@
                             <div class="col"><label class="form-label small">Sell Vol Mult</label><input type="number" class="form-control form-control-sm" id="m-vol-sell" value="1.2" step="0.1" min="1" max="3"></div>
                             <div class="col d-flex align-items-end"><button class="btn btn-sm btn-warning w-100 fw-bold" onclick="runMasterBacktest()"><i class="bi bi-play-circle"></i> Run Master Backtest</button></div>
                         </div>
-                        <div class="small text-muted mt-2">Buy CE: HMM=Bullish + Close>200EMA + Close>KAMA + ST breakout up + MACD cross up + 9EMA cross 20EMA + Price<=-2VWAP + RSI<30 + Volume>1.5x + Green candle | All conditions must match simultaneously.</div>
+                        <div class="small text-muted mt-2">Buy CE: HMM=Bullish + Close>200EMA + Close>KAMA + ST breakout up + MACD cross up + 9EMA cross 20EMA + Volume>1.5x + Green candle | Buy PE: Bearish opposite. All conditions match simultaneously.</div>
                     </div>
                 </div>
             </div>
@@ -992,7 +992,7 @@
         },{responsive:true});
     }
     function renderMasterTrades(trades){
-        if(!trades||!trades.length){document.getElementById('m-trades').innerHTML='<p class="text-muted p-3">No trades triggered. All 7 confluence filters must match simultaneously.</p>';return;}
+        if(!trades||!trades.length){document.getElementById('m-trades').innerHTML='<p class="text-muted p-3">No trades triggered. All 8 confluence filters must match simultaneously.</p>';return;}
         let h='<table class="bt-table"><thead><tr><th>#</th><th>Entry Date</th><th>Exit Date</th><th>Type</th><th>Entry</th><th>Exit</th><th>SL</th><th>TP</th><th>Regime</th><th>Exit Reason</th><th>P&L</th><th>P&L %</th></tr></thead><tbody>';
         trades.forEach(t=>{
             const cls=t.pnl>=0?'price-up':'price-down';

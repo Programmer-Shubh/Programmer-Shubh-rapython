@@ -574,7 +574,9 @@ class BacktestEngine:
                     return round(float(live["spot"]) * 0.01, 2)
             except Exception:
                 pass
-        return None
+            # Final fallback: use spot-based estimate (1% of spot as ATM premium approximation)
+            return round(spot * 0.01, 2)
+        return 1.0
 
     def _get_expiry_type(self):
         # Check legs for expiry hint
@@ -610,7 +612,9 @@ class BacktestEngine:
                     return round(float(live["spot"]) * 0.01, 2)
             except Exception:
                 pass
-        return None
+            # Final fallback: use spot-based estimate
+            return round(spot * 0.01, 2)
+        return 1.0
 
     def _days_to_expiry(self, bar_date, expiry_type="weekly"):
         import datetime
