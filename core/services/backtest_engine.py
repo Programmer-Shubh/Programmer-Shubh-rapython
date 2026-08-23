@@ -124,11 +124,10 @@ class BacktestEngine:
             has_open = len(entries) > len(exits)
             if has_open and not (trade_mode == "intraday" and is_last):
                 entry = entries[len(exits)]
-                if leg_sl > 0 or leg_tp > 0:
+                if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
                     hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp)
                     if hit:
-                        exit_prem = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live)
-                        self._close_position(entries, exits, entry, exit_prem, hit["reason"], cur_date, qty, txn_type)
+                        self._close_position(entries, exits, entry, hit["level"], hit["reason"], cur_date, qty, txn_type)
                         daily_pnl += exits[-1]["pnl"]
                         if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
                             kill_switch_on = True
@@ -136,9 +135,12 @@ class BacktestEngine:
             has_open = len(entries) > len(exits)
             if has_open and trade_mode == "intraday" and is_last:
                 entry = entries[len(exits)]
-                exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
-                self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type)
+                if entry.get("is_spread"):
+                    self._close_spread(entries, exits, entry, "intraday", cur_date)
+                else:
+                    exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                    self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type)
                 daily_pnl += exits[-1]["pnl"]
                 if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
                     kill_switch_on = True
@@ -156,16 +158,9 @@ class BacktestEngine:
                 # For spreads (multi-leg like Bear Call Spread), allow entry on either signal to avoid 0 trades when single indicator rare
                 if is_spread:
                     entry_sig = buy_sig or sell_sig
-                    # Fallback: if indicators produce rare signals (RSI>70 etc), force periodic entry to ensure backtest not empty
-                    if not entry_sig:
-                        # If no indicators at all, enter every bar (will be throttled by max_trades_day)
-                        if not pre_calc:
-                            entry_sig = True
-                        else:
-                            # For spread with indicators, allow entry every 7 bars as time-based fallback
-                            # This ensures Bear Call Spread shows trades even in sideways market
-                            entry_sig = (i % 7 == 0)
-                    exit_sig = time_exit  # Spreads exit on time/SL-TP, not opposite signal
+                    if not entry_sig and not pre_calc:
+                        entry_sig = True
+                    exit_sig = time_exit
                 else:
                     entry_sig = buy_sig if txn_type == "buy" else sell_sig
                     exit_sig = sell_sig if txn_type == "buy" else buy_sig
@@ -199,8 +194,11 @@ class BacktestEngine:
             idx = len(exits)
             entry = entries[idx]
             last = historical[-1]
-            exit_prem = self._close_premium(last["trade_date"], float(last["close_price"]), float(entry["strike"]), option_type)
-            self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type)
+            if entry.get("is_spread"):
+                self._close_spread(entries, exits, entry, "end_of_period", last["trade_date"])
+            else:
+                exit_prem = self._close_premium(last["trade_date"], float(last["close_price"]), float(entry["strike"]), option_type)
+                self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type)
 
         return self._build_result(symbol, start_date, end_date, entries, exits)
 
@@ -290,46 +288,48 @@ class BacktestEngine:
                     cond_met = cond_met and cur_v < val and prev_v >= val
             return cond_met
 
-        # PRIORITY 2: Selected indicator-based signals (OR logic - any one triggers)
-        buy = False
+        # PRIORITY 2: Selected indicator-based signals (AND logic - all must match for confluence)
+        if not pre_calc:
+            return True
+        signals = []
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
-            buy = buy or (historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx])
+            signals.append(historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx])
         if "macd" in pre_calc:
             m = pre_calc["macd"]
             mv = m["macd"][effective_idx] if effective_idx < len(m["macd"]) and m["macd"][effective_idx] is not None else 0
             sv = m["signal"][effective_idx] if effective_idx < len(m["signal"]) and m["signal"][effective_idx] is not None else 0
             pm = m["macd"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(m["macd"]) and m["macd"][effective_idx - 1] is not None else 0
             ps = m["signal"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(m["signal"]) and m["signal"][effective_idx - 1] is not None else 0
-            buy = buy or (mv > sv and pm <= ps)
+            signals.append(mv > sv and pm <= ps)
         if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
-            buy = buy or (pre_calc["rsi"][effective_idx] < 30)
+            signals.append(pre_calc["rsi"][effective_idx] < 30)
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
-            buy = buy or (historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx])
+            signals.append(historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx])
         if "kama" in pre_calc and effective_idx < len(pre_calc["kama"]):
             kama_v = pre_calc["kama"][effective_idx]
             if kama_v is not None:
-                buy = buy or (historical[effective_idx]["close_price"] > kama_v)
+                signals.append(historical[effective_idx]["close_price"] > kama_v)
         if "hmm_regime" in pre_calc:
             seq = pre_calc["hmm_regime"].get("state_sequence", [])
-            if effective_idx < len(seq) and seq[effective_idx] == "Bullish":
-                buy = buy or True
+            if effective_idx < len(seq):
+                signals.append(seq[effective_idx] == "Bullish")
         if "dynamic_boll" in pre_calc:
             db = pre_calc["dynamic_boll"]
             low = db.get("lower", [])
             if effective_idx < len(low) and low[effective_idx] is not None:
-                buy = buy or (historical[effective_idx]["close_price"] < low[effective_idx])
+                signals.append(historical[effective_idx]["close_price"] < low[effective_idx])
         if "ml_rsi" in pre_calc:
             ml = pre_calc["ml_rsi"]
             sig = ml.get("signal", [])
-            if effective_idx < len(sig) and sig[effective_idx] == 1:
-                buy = buy or True
+            if effective_idx < len(sig):
+                signals.append(sig[effective_idx] == 1)
         if "ml_signal" in pre_calc:
             prob = pre_calc["ml_signal"].get("probability", [])
-            if effective_idx < len(prob) and prob[effective_idx] > 0.60:
-                buy = buy or True
-        if not pre_calc:
-            buy = True
-        return buy
+            if effective_idx < len(prob):
+                signals.append(prob[effective_idx] > 0.60)
+        if not signals:
+            return True
+        return all(signals)
 
     def _get_sell_signal(self, i, pre_calc, historical, exit_conditions):
         """Generate sell signal using closed bar to avoid look-ahead bias.
@@ -437,11 +437,9 @@ class BacktestEngine:
             txn_type = leg.get("transaction", "buy").lower()
             lots = int(leg.get("lots", 1))
             lqty = lots * get_lot_size(symbol)
-            # Quant fix: respect per-leg strike_selection/otm_distance/delta (for Bear Call Spread: Sell ATM + Buy OTM)
             leg_sel = leg.get("strike_selection", strike_sel)
             leg_delta = leg.get("delta_target", delta_target)
             leg_otm = int(leg.get("otm_distance", otm_dist) if leg.get("otm_distance") is not None else otm_dist)
-            # If legacy offset provided, use it directly; else use strike_selection logic
             if "offset" in leg and leg.get("strike_selection") is None:
                 strike = atm + int(leg.get("offset", 0) or 0) * step
             else:
@@ -449,7 +447,8 @@ class BacktestEngine:
             premium = self._entry_premium(date, spot, strike, option_type)
             premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
             costs = TransactionCosts.calculate(premium * lqty, txn_type == "sell", self.is_live)
-            signed = premium * lqty if txn_type == "buy" else -premium * lqty
+            # Correct sign: sell = +premium (credit received), buy = -premium (debit paid)
+            signed = premium * lqty if txn_type == "sell" else -premium * lqty
             total_cost += signed
             qty += lqty
             leg_details.append({
@@ -742,26 +741,50 @@ class BacktestEngine:
                     win_amounts.append(pnl)
                 else:
                     loss_amounts.append(abs(pnl))
-                leg_info = entry.get("legs", [{}])[0] if entry.get("legs") else {}
                 entry_time_str = entry.get("time", "09:35")
                 exit_time_str = exit.get("time", "15:14")
-                trade_list.append({
-                    "index": total_trades,
-                    "symbol": symbol,
-                    "entry_date": entry.get("date", ""),
-                    "entry_time": entry_time_str,
-                    "exit_date": exit.get("date", ""),
-                    "exit_time": exit_time_str,
-                    "option_type": leg_info.get("option_type", "CE"),
-                    "strike": entry.get("strike", ""),
-                    "position": "Sell" if entry.get("type") == "sell" else "Buy",
-                    "quantity": entry.get("quantity", 0),
-                    "lots": leg_info.get("lots", 1),
-                    "entry_price": entry.get("price", 0),
-                    "exit_price": exit.get("price", 0),
-                    "pnl": pnl,
-                    "pnl_formatted": f"₹{pnl:,.2f}",
-                })
+                if entry.get("is_spread"):
+                    legs_str = " + ".join(
+                        f"{'Sell' if l['type']=='sell' else 'Buy'} {l['option_type']} {l['strike']}"
+                        for l in entry.get("legs", [])
+                    )
+                    trade_list.append({
+                        "index": total_trades,
+                        "symbol": symbol,
+                        "entry_date": entry.get("date", ""),
+                        "entry_time": entry_time_str,
+                        "exit_date": exit.get("date", ""),
+                        "exit_time": exit_time_str,
+                        "option_type": "Spread",
+                        "strike": entry.get("strike", ""),
+                        "position": legs_str,
+                        "quantity": entry.get("quantity", 0),
+                        "lots": entry.get("legs", [{}])[0].get("lots", 1) if entry.get("legs") else 1,
+                        "entry_price": entry.get("price", 0),
+                        "exit_price": exit.get("price", 0),
+                        "pnl": pnl,
+                        "pnl_formatted": f"₹{pnl:,.2f}",
+                        "is_spread": True,
+                    })
+                else:
+                    leg_info = entry.get("legs", [{}])[0] if entry.get("legs") else {}
+                    trade_list.append({
+                        "index": total_trades,
+                        "symbol": symbol,
+                        "entry_date": entry.get("date", ""),
+                        "entry_time": entry_time_str,
+                        "exit_date": exit.get("date", ""),
+                        "exit_time": exit_time_str,
+                        "option_type": leg_info.get("option_type", "CE"),
+                        "strike": entry.get("strike", ""),
+                        "position": "Sell" if entry.get("type") == "sell" else "Buy",
+                        "quantity": entry.get("quantity", 0),
+                        "lots": leg_info.get("lots", 1),
+                        "entry_price": entry.get("price", 0),
+                        "exit_price": exit.get("price", 0),
+                        "pnl": pnl,
+                        "pnl_formatted": f"₹{pnl:,.2f}",
+                    })
             equity.append(capital)
         total_return = capital - self.initial_capital
         total_return_pct = (total_return / self.initial_capital) * 100
