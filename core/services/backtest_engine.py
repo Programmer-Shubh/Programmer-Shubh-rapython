@@ -34,6 +34,8 @@ class BacktestEngine:
         momentum = int(advanced_options.get("momentum", 0) or 0)
         entry_time = advanced_options.get("entry_time", "09:35")
         exit_time = advanced_options.get("exit_time", "15:14")
+        self._entry_time = entry_time
+        self._exit_time = exit_time
         max_holding = int(advanced_options.get("max_holding_bars", 20))
         # BTST holds overnight: increase max_holding for BTST
         if advanced_options.get("trade_mode") == "btst":
@@ -416,9 +418,10 @@ class BacktestEngine:
         premium = self._entry_premium(date, spot, strike, option_type)
         premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
         costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
+        entry_time = getattr(self, '_entry_time', '09:35')
         return {
             "date": date, "strike": str(strike), "price": round(premium, 2),
-            "quantity": qty, "costs": costs,
+            "quantity": qty, "costs": costs, "time": entry_time,
             "total_cost": round(premium * qty + costs["total"], 2),
             "type": txn_type, "legs": [{"option_type": option_type, "strike": strike, "type": txn_type, "lots": lots}],
         }
@@ -675,6 +678,7 @@ class BacktestEngine:
         exits.append({
             "date": exit_date, "strike": entry["strike"], "price": round(exit_prem, 2),
             "quantity": qty, "exit_costs": exit_costs, "reason": reason, "pnl": round(pnl, 2),
+            "time": "15:14",
         })
 
     def _close_spread(self, entries, exits, entry, reason, exit_date):
@@ -738,16 +742,25 @@ class BacktestEngine:
                     win_amounts.append(pnl)
                 else:
                     loss_amounts.append(abs(pnl))
-                entry_data = entry if isinstance(entry, dict) else {"date": entry.get("date", ""), "strike": entry.get("strike", ""), "price": entry.get("price", 0)}
-                exit_data = exit if isinstance(exit, dict) else {"date": exit.get("date", ""), "price": exit.get("price", 0)} if exit else {"date": "", "price": 0}
+                leg_info = entry.get("legs", [{}])[0] if entry.get("legs") else {}
+                entry_time_str = entry.get("time", "09:35")
+                exit_time_str = exit.get("time", "15:14")
                 trade_list.append({
-                    "entry_date": entry_data.get("date", ""),
-                    "exit_date": exit_data.get("date", "") if exit_data else "",
-                    "strike": entry_data.get("strike", ""),
-                    "entry_price": entry_data.get("price", 0),
-                    "exit_price": exit_data.get("price", 0) if exit_data else 0,
+                    "index": total_trades,
+                    "symbol": symbol,
+                    "entry_date": entry.get("date", ""),
+                    "entry_time": entry_time_str,
+                    "exit_date": exit.get("date", ""),
+                    "exit_time": exit_time_str,
+                    "option_type": leg_info.get("option_type", "CE"),
+                    "strike": entry.get("strike", ""),
+                    "position": "Sell" if entry.get("type") == "sell" else "Buy",
+                    "quantity": entry.get("quantity", 0),
+                    "lots": leg_info.get("lots", 1),
+                    "entry_price": entry.get("price", 0),
+                    "exit_price": exit.get("price", 0),
                     "pnl": pnl,
-                    "pnl_formatted": f"₹{pnl:.2f}"
+                    "pnl_formatted": f"₹{pnl:,.2f}",
                 })
             equity.append(capital)
         total_return = capital - self.initial_capital
