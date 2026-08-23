@@ -20,6 +20,49 @@ class BacktestRequest(BaseModel):
     legs: list = []
     advanced: dict = {}
     risk: dict = {}
+    # Frontend compatibility - flat fields from Strategy Builder UI
+    strategy_type: Optional[str] = None
+    strategy_preset: Optional[str] = None
+    entry_time: Optional[str] = None
+    exit_time: Optional[str] = None
+    momentum: Optional[int] = None
+    lots: Optional[int] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+
+def _normalize_legs(raw_legs: list, lots_fallback: int = 1) -> list:
+    if not raw_legs:
+        return [{"option_type": "CE", "transaction": "buy", "lots": lots_fallback, "strike_selection": "atm"}]
+    out = []
+    for leg in raw_legs:
+        if not isinstance(leg, dict):
+            continue
+        opt = str(leg.get("option_type", leg.get("optType", "CE")) or "CE").upper()
+        txn = str(leg.get("transaction", leg.get("position", "buy")) or "buy").lower()
+        if txn not in ("buy", "sell"):
+            txn = "buy"
+        lots_v = int(leg.get("lots", lots_fallback) or lots_fallback)
+        sel_raw = leg.get("strike_selection", leg.get("strike_type", "ATM"))
+        sel = str(sel_raw or "ATM").lower()
+        if sel not in ("atm", "otm", "itm", "delta"):
+            sel = "atm"
+        otm = leg.get("otm_distance", leg.get("otmDistance", 1 if sel == "otm" else 0))
+        try:
+            otm = int(otm)
+        except Exception:
+            otm = 1
+        entry = {"option_type": opt, "transaction": txn, "lots": lots_v, "strike_selection": sel, "otm_distance": otm}
+        if leg.get("offset") not in (None, ""):
+            try:
+                entry["offset"] = int(leg.get("offset"))
+            except Exception:
+                pass
+        if leg.get("delta_target") is not None:
+            entry["delta_target"] = leg.get("delta_target")
+        if leg.get("expiry_date"):
+            entry["expiry_date"] = leg.get("expiry_date")
+        out.append(entry)
+    return out
 
 
 def _fetch_google_finance(symbol, start_date, end_date):
@@ -204,29 +247,99 @@ def _fetch_and_store_nselib(symbol, start_date, end_date):
 def run_backtest(req: BacktestRequest):
     try:
         bhav = BhavcopyModel()
-        historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
+        symbol = (req.symbol or "NIFTY").upper()
+        start_date = req.start_date or "2025-08-01"
+        end_date = req.end_date or "2026-08-20"
+        # Merge frontend flat fields
+        advanced_in = dict(req.advanced or {})
+        risk_in = dict(req.risk or {})
+        if req.strategy_type:
+            advanced_in["trade_mode"] = str(req.strategy_type).lower()
+        if req.entry_time:
+            advanced_in["entry_time"] = req.entry_time
+        if req.exit_time:
+            advanced_in["exit_time"] = req.exit_time
+        if req.momentum is not None:
+            advanced_in["momentum"] = int(req.momentum)
+        if req.stop_loss is not None:
+            risk_in["daily_stop_loss"] = float(req.stop_loss)
+        if req.take_profit is not None:
+            risk_in["daily_take_profit"] = float(req.take_profit)
+        if "max_trades_per_day" not in risk_in:
+            risk_in["max_trades_per_day"] = 1
+        # Normalize legs + handle presets (Bear Call, Bull Put, Bear Put, Iron Condor)
+        raw_legs = req.legs or []
+        preset = (req.strategy_preset or advanced_in.get("preset") or "").lower()
+        lots_fb = req.lots or 1
+        legs = _normalize_legs(raw_legs, lots_fb)
+        # Preset expansion
+        if preset in ("bear_call_spread", "bearcall", "bear_call"):
+            otm = legs[0].get("otm_distance", 1) if legs else 1
+            opt = legs[0].get("option_type", "CE") if legs else "CE"
+            lots_v = legs[0].get("lots", lots_fb) if legs else lots_fb
+            legs = [
+                {"option_type": opt, "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm},
+                {"option_type": opt, "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm + 2},
+            ]
+        elif preset in ("bull_put_spread", "bullput", "bull_put"):
+            otm = legs[0].get("otm_distance", 1) if legs else 1
+            opt = legs[0].get("option_type", "PE") if legs and legs[0].get("option_type") == "PE" else "PE"
+            lots_v = legs[0].get("lots", lots_fb) if legs else lots_fb
+            legs = [
+                {"option_type": opt, "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm},
+                {"option_type": opt, "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm + 2},
+            ]
+        elif preset in ("bear_put_spread", "bearput", "bear_put"):
+            otm = legs[0].get("otm_distance", 1) if legs else 1
+            lots_v = legs[0].get("lots", lots_fb) if legs else lots_fb
+            legs = [
+                {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "atm", "otm_distance": 0},
+                {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm + 1},
+            ]
+        elif preset in ("iron_condor", "ironcondor"):
+            lots_v = legs[0].get("lots", lots_fb) if legs else lots_fb
+            lots_v = int(lots_v)
+            legs = [
+                {"option_type": "CE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
+                {"option_type": "CE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
+                {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
+                {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
+            ]
+        # Indicators: if empty, inject defaults for indicator-per backtest
+        indicators = req.indicators or []
+        if not indicators:
+            if preset in ("bear_call_spread", "bearcall", "bear_call", "iron_condor"):
+                indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 50}}, {"id": "supertrend", "params": {"period": 10, "multiplier": 3}}]
+            elif preset in ("bull_put_spread", "bullput"):
+                indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 50}}]
+            else:
+                indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 21}}]
+        entry_conditions = req.entry_conditions or []
+        exit_conditions = req.exit_conditions or []
+
+        historical = bhav.get_by_symbol(symbol, start_date, end_date, False)
         # Realistic flow: 1) Google Finance (free, no bhavcopy), 2) nselib NSE, 3) niftytrader.in live
         if not historical:
-            count = _fetch_google_finance(req.symbol, req.start_date, req.end_date)
+            count = _fetch_google_finance(symbol, start_date, end_date)
             if count > 0:
-                historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
+                historical = bhav.get_by_symbol(symbol, start_date, end_date, False)
         if not historical:
-            count = _fetch_and_store_nselib(req.symbol, req.start_date, req.end_date)
+            count = _fetch_and_store_nselib(symbol, start_date, end_date)
             if count > 0:
-                historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
+                historical = bhav.get_by_symbol(symbol, start_date, end_date, False)
         if not historical:
-            count = _fetch_niftytrader_live(req.symbol)
+            count = _fetch_niftytrader_live(symbol)
             if count > 0:
-                historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
+                historical = bhav.get_by_symbol(symbol, start_date, end_date, False)
         if not historical:
-            return {"error": f"No data available for {req.symbol}. Google/NSE/niftytrader blocked - try again or check symbol."}
+            return {"error": f"No data available for {symbol}. Google/NSE/niftytrader blocked - try again or check symbol."}
         if len(historical) > 120:
             historical = historical[-120:]
         engine = BacktestEngine(is_live=False)
         result = engine.run(
-            historical, req.symbol, req.start_date, req.end_date,
-            req.indicators, req.entry_conditions, req.exit_conditions,
-            req.legs, req.advanced, req.risk,
+            historical, symbol, start_date, end_date,
+            indicators, entry_conditions, exit_conditions,
+            legs, advanced_in, risk_in,
             is_live=False,
         )
         if not result.get("success"):

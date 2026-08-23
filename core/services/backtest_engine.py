@@ -235,6 +235,11 @@ class BacktestEngine:
                 result["ml_rsi"] = self.indicators.calculate_ml_rsi(closes, params.get("period", 14))
             elif iid == "ml_signal_filter":
                 result["ml_signal"] = self.indicators.calculate_ml_signal_filter(closes, params.get("fast_ema", 9), params.get("slow_ema", 21), params.get("rsi_period", 14), params.get("ml_weight", 0.3))
+            elif iid == "vwap":
+                try:
+                    result["vwap"] = self.indicators.calculate_vwap(historical, params.get("period", 20), float(params.get("multiplier", 2.0)))
+                except Exception:
+                    result["vwap"] = {}
         return result
 
     def _get_indicator_value(self, indicator, i, close, historical, pre_calc):
@@ -288,48 +293,55 @@ class BacktestEngine:
                     cond_met = cond_met and cur_v < val and prev_v >= val
             return cond_met
 
-        # PRIORITY 2: Selected indicator-based signals (AND logic - all must match for confluence)
+        # PRIORITY 2: Selected indicator-based signals (OR per indicator - any triggers, for 2-indicator backtest)
         if not pre_calc:
             return True
-        signals = []
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
-            signals.append(historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx])
+            if historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx]:
+                return True
         if "macd" in pre_calc:
             m = pre_calc["macd"]
             mv = m["macd"][effective_idx] if effective_idx < len(m["macd"]) and m["macd"][effective_idx] is not None else 0
             sv = m["signal"][effective_idx] if effective_idx < len(m["signal"]) and m["signal"][effective_idx] is not None else 0
             pm = m["macd"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(m["macd"]) and m["macd"][effective_idx - 1] is not None else 0
             ps = m["signal"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(m["signal"]) and m["signal"][effective_idx - 1] is not None else 0
-            signals.append(mv > sv and pm <= ps)
+            if mv > sv and pm <= ps:
+                return True
         if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
-            signals.append(pre_calc["rsi"][effective_idx] < 30)
+            if pre_calc["rsi"][effective_idx] < 30:
+                return True
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
-            signals.append(historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx])
+            if historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx]:
+                return True
         if "kama" in pre_calc and effective_idx < len(pre_calc["kama"]):
             kama_v = pre_calc["kama"][effective_idx]
-            if kama_v is not None:
-                signals.append(historical[effective_idx]["close_price"] > kama_v)
+            if kama_v is not None and historical[effective_idx]["close_price"] > kama_v:
+                return True
         if "hmm_regime" in pre_calc:
             seq = pre_calc["hmm_regime"].get("state_sequence", [])
-            if effective_idx < len(seq):
-                signals.append(seq[effective_idx] == "Bullish")
+            if effective_idx < len(seq) and seq[effective_idx] == "Bullish":
+                return True
         if "dynamic_boll" in pre_calc:
             db = pre_calc["dynamic_boll"]
             low = db.get("lower", [])
-            if effective_idx < len(low) and low[effective_idx] is not None:
-                signals.append(historical[effective_idx]["close_price"] < low[effective_idx])
+            if effective_idx < len(low) and low[effective_idx] is not None and historical[effective_idx]["close_price"] < low[effective_idx]:
+                return True
         if "ml_rsi" in pre_calc:
             ml = pre_calc["ml_rsi"]
             sig = ml.get("signal", [])
-            if effective_idx < len(sig):
-                signals.append(sig[effective_idx] == 1)
+            if effective_idx < len(sig) and sig[effective_idx] == 1:
+                return True
         if "ml_signal" in pre_calc:
             prob = pre_calc["ml_signal"].get("probability", [])
-            if effective_idx < len(prob):
-                signals.append(prob[effective_idx] > 0.60)
-        if not signals:
-            return True
-        return all(signals)
+            if effective_idx < len(prob) and prob[effective_idx] > 0.60:
+                return True
+        # VWAP support
+        if "vwap" in pre_calc:
+            vw = pre_calc["vwap"]
+            vwap_vals = vw.get("vwap", []) if isinstance(vw, dict) else []
+            if effective_idx < len(vwap_vals) and vwap_vals[effective_idx] is not None and historical[effective_idx]["close_price"] > vwap_vals[effective_idx]:
+                return True
+        return False
 
     def _get_sell_signal(self, i, pre_calc, historical, exit_conditions):
         """Generate sell signal using closed bar to avoid look-ahead bias.
@@ -432,15 +444,34 @@ class BacktestEngine:
         leg_details = []
         total_cost = 0.0
         qty = 0
-        for leg in legs:
-            option_type = leg.get("option_type", "CE")
-            txn_type = leg.get("transaction", "buy").lower()
-            lots = int(leg.get("lots", 1))
+        for idx, leg in enumerate(legs):
+            option_type = leg.get("option_type", leg.get("optType", "CE"))
+            # Support both 'transaction' and frontend 'position'
+            txn_type = leg.get("transaction", leg.get("position", "buy"))
+            txn_type = str(txn_type).lower()
+            if txn_type not in ("buy", "sell"):
+                txn_type = "buy"
+            lots = int(leg.get("lots", 1) or 1)
             lqty = lots * get_lot_size(symbol)
-            leg_sel = leg.get("strike_selection", strike_sel)
+            # Support both 'strike_selection' and frontend 'strike_type'
+            leg_sel_raw = leg.get("strike_selection", leg.get("strike_type", strike_sel))
+            leg_sel = str(leg_sel_raw).lower() if isinstance(leg_sel_raw, str) else strike_sel
+            if leg_sel not in ("atm", "otm", "itm", "delta"):
+                leg_sel = strike_sel
             leg_delta = leg.get("delta_target", delta_target)
-            leg_otm = int(leg.get("otm_distance", otm_dist) if leg.get("otm_distance") is not None else otm_dist)
-            if "offset" in leg and leg.get("strike_selection") is None:
+            # otm_distance handling; for spread ensure legs have distinct strikes
+            if leg.get("otm_distance") is not None:
+                leg_otm = int(leg.get("otm_distance") or 0)
+            elif leg.get("otmDistance") is not None:
+                leg_otm = int(leg.get("otmDistance") or 0)
+            else:
+                leg_otm = int(otm_dist or 2)
+                # Auto widen spread: second leg further OTM by 2 steps, 4-leg iron condor by pattern
+                if len(legs) == 2 and idx == 1:
+                    leg_otm = leg_otm + 2
+                elif len(legs) == 4 and idx in (1, 3):
+                    leg_otm = leg_otm + 2
+            if "offset" in leg and leg.get("offset") not in (None, "") and leg.get("strike_selection") is None and leg.get("strike_type") is None:
                 strike = atm + int(leg.get("offset", 0) or 0) * step
             else:
                 strike = self._select_strike(spot, symbol, option_type, leg_sel, leg_delta, leg_otm)
