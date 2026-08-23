@@ -618,23 +618,22 @@
             const pnlClass = pnl >= 0 ? 'price-up' : 'price-down';
             document.getElementById('bt-metrics').innerHTML=`
 <div class="row g-2 mb-2">
-<div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlClass}">${F(m.net_pnl||pnl)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">No. of Trades</div><div class="value">${m.total_trades}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit/Trade</div><div class="value ${pnlClass}">${F(m.avg_profit_per_trade)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Loss %</div><div class="value price-down">${m.loss_rate}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit on Winning</div><div class="value price-up">${F(m.avg_win)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Avg Loss on Losing</div><div class="value price-down">${F(m.avg_loss)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit/Singal Trade</div><div class="value price-up">${F(m.max_win)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss/Singal Trade</div><div class="value price-down">${F(m.max_loss)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Max Drawdown</div><div class="value price-down">${F(m.max_drawdown)}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Duration of Max DD</div><div class="value">${m.max_dd_duration}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Return/MaxDD</div><div class="value price-up">${m.return_maxdd}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Reward to Risk</div><div class="value price-up">${m.reward_risk}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Expectancy Ratio</div><div class="value ${m.expectancy>=0?'price-up':'price-down'}">${m.expectancy}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Max Win Streak</div><div class="value price-up">${m.max_win_streak}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Max Losing Streak</div><div class="value price-down">${m.max_loss_streak}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Max trades in DD</div><div class="value price-down">${m.max_trades_in_dd}</div><div class="source small">${m.source||'shoonya.algotest.in'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlClass}">${F(m.net_pnl||pnl)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">No. of Trades</div><div class="value">${m.total_trades}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit/Trade</div><div class="value ${pnlClass}">${F(m.avg_profit_per_trade)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}%</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Loss %</div><div class="value price-down">${m.loss_rate}%</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit on Winning</div><div class="value price-up">${F(m.avg_win)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Avg Loss on Losing</div><div class="value price-down">${F(m.avg_loss)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit/Trade</div><div class="value price-up">${F(m.max_win)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss/Trade</div><div class="value price-down">${F(m.max_loss)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Drawdown</div><div class="value price-down">${m.max_drawdown}%</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Return/MaxDD</div><div class="value price-up">${m.return_maxdd}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Reward to Risk</div><div class="value price-up">${m.reward_risk}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Expectancy</div><div class="value ${m.expectancy>=0?'price-up':'price-down'}">${m.expectancy}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Win Streak</div><div class="value price-up">${m.max_win_streak}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss Streak</div><div class="value price-down">${m.max_loss_streak}</div></div></div>
 </div>`;
             if(r.equity_curve&&r.equity_curve.length){document.getElementById('bt-charts').classList.remove('hidden');Plotly.newPlot('eq-chart',[{y:r.equity_curve,type:'scatter',line:{color:'#0d6efd',width:2}}],{title:'Equity Curve',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}})}
             if(!r.monthly_pnl||!Object.keys(r.monthly_pnl).length){Plotly.newPlot('mo-chart',[{x:['Jan','Feb','Mar','Apr','May','Jun'],y:[1500,-800,2300,1200,-500,1800],type:'bar',marker:{color:['#198754','#dc3545','#198754','#198754','#dc3545','#198754']}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
