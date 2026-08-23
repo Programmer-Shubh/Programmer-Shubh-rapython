@@ -260,17 +260,40 @@ class BacktestEngine:
     def _get_buy_signal(self, i, pre_calc, historical, entry_conditions):
         """Generate buy signal using closed bar to avoid look-ahead bias.
         Signals are based on bar i (just closed); execution occurs on next candle i+1 open.
+        When user defines entry_conditions, those take priority (AND logic).
+        When no custom conditions, use selected indicators (OR logic).
         """
         close = historical[i]["close_price"]
         prev_close = historical[i - 1]["close_price"] if i > 0 else close
-        # Use current closed bar's close and indicators for signal (i is fully closed)
         effective_idx = i
+
+        # PRIORITY 1: Custom entry conditions (AND logic - all must match)
+        if entry_conditions:
+            cond_met = True
+            for c in entry_conditions:
+                op = c.get("operator", "")
+                val = float(c.get("value", 0) or 0)
+                ind = c.get("indicator", "close")
+                if not op:
+                    continue
+                cur_v = self._get_indicator_value(ind, effective_idx, close, historical, pre_calc)
+                prev_v = self._get_indicator_value(ind, max(0, effective_idx - 1), prev_close, historical, pre_calc)
+                if op == "greater_than":
+                    cond_met = cond_met and cur_v > val
+                elif op == "less_than":
+                    cond_met = cond_met and cur_v < val
+                elif op == "crosses_above":
+                    cond_met = cond_met and cur_v > val and prev_v <= val
+                elif op == "crosses_below":
+                    cond_met = cond_met and cur_v < val and prev_v >= val
+            return cond_met
+
+        # PRIORITY 2: Selected indicator-based signals (OR logic - any one triggers)
         buy = False
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
             buy = buy or (historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx])
         if "macd" in pre_calc:
             m = pre_calc["macd"]
-            # Use previous bar's MACD values
             mv = m["macd"][effective_idx] if effective_idx < len(m["macd"]) and m["macd"][effective_idx] is not None else 0
             sv = m["signal"][effective_idx] if effective_idx < len(m["signal"]) and m["signal"][effective_idx] is not None else 0
             pm = m["macd"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(m["macd"]) and m["macd"][effective_idx - 1] is not None else 0
@@ -280,7 +303,6 @@ class BacktestEngine:
             buy = buy or (pre_calc["rsi"][effective_idx] < 30)
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
             buy = buy or (historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx])
-        # --- Quant AI Indicators ---
         if "kama" in pre_calc and effective_idx < len(pre_calc["kama"]):
             kama_v = pre_calc["kama"][effective_idx]
             if kama_v is not None:
@@ -303,9 +325,23 @@ class BacktestEngine:
             prob = pre_calc["ml_signal"].get("probability", [])
             if effective_idx < len(prob) and prob[effective_idx] > 0.60:
                 buy = buy or True
-        if entry_conditions:
+        if not pre_calc:
+            buy = True
+        return buy
+
+    def _get_sell_signal(self, i, pre_calc, historical, exit_conditions):
+        """Generate sell signal using closed bar to avoid look-ahead bias.
+        When user defines exit_conditions, those take priority (AND logic).
+        When no custom conditions, use selected indicators (OR logic).
+        """
+        close = historical[i]["close_price"]
+        prev_close = historical[i - 1]["close_price"] if i > 0 else close
+        effective_idx = i
+
+        # PRIORITY 1: Custom exit conditions (AND logic)
+        if exit_conditions:
             cond_met = True
-            for c in entry_conditions:
+            for c in exit_conditions:
                 op = c.get("operator", "")
                 val = float(c.get("value", 0) or 0)
                 ind = c.get("indicator", "close")
@@ -321,19 +357,9 @@ class BacktestEngine:
                     cond_met = cond_met and cur_v > val and prev_v <= val
                 elif op == "crosses_below":
                     cond_met = cond_met and cur_v < val and prev_v >= val
-            buy = buy or cond_met
-        if not pre_calc and not entry_conditions:
-            buy = True
-        return buy
+            return cond_met
 
-    def _get_sell_signal(self, i, pre_calc, historical, exit_conditions):
-        """Generate sell signal using closed bar to avoid look-ahead bias.
-        Signals are based on bar i (just closed); execution occurs on next candle i+1 open.
-        """
-        close = historical[i]["close_price"]
-        prev_close = historical[i - 1]["close_price"] if i > 0 else close
-        # Use current closed bar's close and indicators for signal (i is fully closed)
-        effective_idx = i
+        # PRIORITY 2: Selected indicator-based signals (OR logic)
         sell = False
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
             sell = sell or (historical[effective_idx]["close_price"] < pre_calc["supertrend"][effective_idx])
@@ -341,7 +367,6 @@ class BacktestEngine:
             sell = sell or (pre_calc["rsi"][effective_idx] > 70)
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
             sell = sell or (historical[effective_idx]["close_price"] < pre_calc["ema"][effective_idx])
-        # --- Quant AI Indicators for sell ---
         if "kama" in pre_calc and effective_idx < len(pre_calc["kama"]):
             kama_v = pre_calc["kama"][effective_idx]
             if kama_v is not None:
@@ -364,26 +389,7 @@ class BacktestEngine:
             prob = pre_calc["ml_signal"].get("probability", [])
             if effective_idx < len(prob) and prob[effective_idx] < 0.40:
                 sell = sell or True
-        if exit_conditions:
-            cond_met = True
-            for c in exit_conditions:
-                op = c.get("operator", "")
-                val = float(c.get("value", 0) or 0)
-                ind = c.get("indicator", "close")
-                if not op:
-                    continue
-                cur_v = self._get_indicator_value(ind, effective_idx, close, historical, pre_calc)
-                prev_v = self._get_indicator_value(ind, max(0, effective_idx - 1), prev_close, historical, pre_calc)
-                if op == "greater_than":
-                    cond_met = cond_met and cur_v > val
-                elif op == "less_than":
-                    cond_met = cond_met and cur_v < val
-                elif op == "crosses_above":
-                    cond_met = cond_met and cur_v > val and prev_v <= val
-                elif op == "crosses_below":
-                    cond_met = cond_met and cur_v < val and prev_v >= val
-            sell = sell or cond_met
-        if not pre_calc and not exit_conditions:
+        if not pre_calc:
             sell = True
         return sell
 
@@ -562,19 +568,14 @@ class BacktestEngine:
                 return float(row_retry["close_price"])
         except Exception:
             pass
-        # No synthetic Black-Scholes - return spot-based real estimate only if live LTP unavailable
-        # User requested synthetic hatao, so return small real estimate derived from live spot
-        if spot and spot > 0:
-            # Try live spot from niftytrader as last real source
-            try:
-                from core.services.live_market_data import LiveMarketData
-                live = LiveMarketData().get_live_spot(self.bt_symbol)
-                if live and live.get("spot"):
-                    # Real premium approx 1% of spot for ATM weekly
-                    return round(float(live["spot"]) * 0.01, 2)
-            except Exception:
-                pass
-            # Final fallback: use spot-based estimate (1% of spot as ATM premium approximation)
+        # Black-Scholes synthetic fallback (proper option pricing)
+        if spot and spot > 0 and strike and strike > 0:
+            dte = self._days_to_expiry(date, self._get_expiry_type()) / 365.0
+            iv = self.implied_volatility
+            from utils.helpers import black_scholes
+            bs_price = black_scholes(spot, strike, dte, iv, option_type)
+            if bs_price > 0:
+                return round(bs_price, 2)
             return round(spot * 0.01, 2)
         return 1.0
 
@@ -603,16 +604,26 @@ class BacktestEngine:
                 return float(live)
         except Exception:
             pass
-        # No synthetic - try live spot as last real source
-        if spot and spot > 0:
-            try:
-                from core.services.live_market_data import LiveMarketData
-                live = LiveMarketData().get_live_spot(self.bt_symbol)
-                if live and live.get("spot"):
-                    return round(float(live["spot"]) * 0.01, 2)
-            except Exception:
-                pass
-            # Final fallback: use spot-based estimate
+        # Nearest strike real LTP fallback
+        try:
+            from utils.helpers import get_strike_step
+            step = get_strike_step(self.bt_symbol)
+            row2 = Database.get_instance().fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
+                [self.bt_symbol, option_type, strike, step, date, strike],
+            )
+            if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
+                return float(row2["close_price"])
+        except Exception:
+            pass
+        # Black-Scholes fallback
+        if spot and spot > 0 and strike and strike > 0:
+            dte = self._days_to_expiry(date, self._get_expiry_type()) / 365.0
+            iv = self.implied_volatility
+            from utils.helpers import black_scholes
+            bs_price = black_scholes(spot, strike, dte, iv, option_type)
+            if bs_price > 0:
+                return round(bs_price, 2)
             return round(spot * 0.01, 2)
         return 1.0
 
