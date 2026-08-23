@@ -113,7 +113,6 @@
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
         <button onclick="go('bhavcopy',this)"><i class="bi bi-cloud-download"></i> Bhavcopy</button>
         <button onclick="go('webhook',this)"><i class="bi bi-broadcast"></i> Webhook Free</button>
-        <button onclick="openTutorial()"><i class="bi bi-play-circle"></i> Tutorial</button>
     </div>
     <div class="wrap">
         <!-- DASHBOARD -->
@@ -121,10 +120,10 @@
             <div class="card" style="border:2px solid #0d6efd;background:linear-gradient(135deg,#eef2ff,#f0f9ff)">
                 <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
                     <div>
-                        <h5 style="margin:0;color:#0d6efd"><i class="bi bi-play-circle-fill"></i> RaTrade Tutorial - Step by Step Guide</h5>
+                        <h5 style="margin:0;color:#0d6efd"><i class="bi bi-book"></i> RaTrade Tutorial - Step by Step Guide</h5>
                         <p style="margin:4px 0 0;color:#6c757d;font-size:13px">Backtest, TradingView Connect, Broker Setup, Live Trading - Sab kuch sikhe!</p>
                     </div>
-                    <button class="btn btn-primary" onclick="openTutorial()"><i class="bi bi-play-fill"></i> Watch Tutorial</button>
+                    <a href="/tutorial" target="_blank" class="btn btn-primary"><i class="bi bi-book-fill"></i> Open Tutorial</a>
                 </div>
             </div>
             <div class="row" id="mkt-cards"></div>
@@ -1004,51 +1003,6 @@
         document.getElementById('m-trades').innerHTML=h;
     }
 
-    function openTutorial(){
-        document.getElementById('tutorialModal').style.display='flex';
-        var vid=document.getElementById('tutorialPlayer');
-        var ph=document.getElementById('tutorialPlaceholder');
-        if(vid&&vid.error){ph.style.display='flex';vid.style.display='none';}
-    }
-    function closeTutorial(){
-        document.getElementById('tutorialModal').style.display='none';
-        var vid=document.getElementById('tutorialPlayer');
-        if(vid){vid.pause();vid.currentTime=0;}
-    }
-    document.addEventListener('DOMContentLoaded',function(){
-        var vid=document.getElementById('tutorialPlayer');
-        var ph=document.getElementById('tutorialPlaceholder');
-        if(vid){
-            vid.addEventListener('error',function(){ph.style.display='flex';vid.style.display='none';});
-            vid.addEventListener('loadedmetadata',function(){ph.style.display='none';vid.style.display='block';});
-        }
-    });
-
     </script>
-
-    <div id="tutorialModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;justify-content:center;align-items:center;padding:20px">
-        <div style="background:#1e293b;border-radius:12px;max-width:800px;width:100%;max-height:90vh;overflow:hidden;position:relative">
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #334155">
-                <h5 style="margin:0;color:#fff;font-size:16px"><i class="bi bi-play-circle-fill" style="color:#0d6efd"></i> RaTrade Tutorial - Step by Step</h5>
-                <button onclick="closeTutorial()" style="background:none;border:none;color:#94a3b8;font-size:24px;cursor:pointer">&times;</button>
-            </div>
-            <div id="tutorialVideoWrap" style="background:#000;position:relative;width:100%">
-                <video id="tutorialPlayer" controls preload="metadata" style="width:100%;max-height:70vh;display:block" poster="">
-                    <source src="/static/videos/tutorial.mp4" type="video/mp4">
-                </video>
-                <div id="tutorialPlaceholder" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;flex-direction:column;justify-content:center;align-items:center;background:#0f172a;color:#94a3b8;text-align:center;padding:40px">
-                    <i class="bi bi-camera-video" style="font-size:60px;color:#334155;margin-bottom:16px"></i>
-                    <h4 style="color:#e2e8f0;margin-bottom:8px">Video Tutorial Coming Soon!</h4>
-                    <p style="font-size:14px;max-width:400px;margin-bottom:16px">Step-by-step guide: Backtest, TradingView Connect, Broker Setup, Live Trading.</p>
-                    <p style="font-size:12px;color:#64748b;margin-bottom:12px">Video banakar <code>static/videos/tutorial.mp4</code> mein upload kare</p>
-                    <a href="/tutorial" target="_blank" style="color:#38bdf8;text-decoration:none;font-size:14px"><i class="bi bi-book"></i> Read Text Tutorial Instead</a>
-                </div>
-            </div>
-            <div style="padding:12px 20px;border-top:1px solid #334155;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                <a href="/tutorial" target="_blank" class="btn btn-sm" style="background:#334155;color:#e2e8f0;border:none;text-decoration:none"><i class="bi bi-book"></i> Full Text Guide</a>
-                <span style="color:#64748b;font-size:11px;margin-left:auto">Video banao: OBS Studio (free) se record karo</span>
-            </div>
-        </div>
-    </div>
 </body>
 </html>
