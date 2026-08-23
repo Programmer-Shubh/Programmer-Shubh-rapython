@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RaTrade Tutorial - Step by Step Guide</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif}
+        .topbar{background:linear-gradient(135deg,#0d6efd,#6610f2);padding:16px 24px;display:flex;justify-content:space-between;align-items:center}
+        .topbar h1{color:#fff;font-size:22px;font-weight:700}
+        .topbar a{color:#fff;text-decoration:none;font-size:14px}
+        .container{max-width:900px;margin:0 auto;padding:24px 16px}
+        .section{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin-bottom:24px}
+        .section h2{color:#38bdf8;font-size:20px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+        .section h3{color:#f59e0b;font-size:16px;margin:16px 0 8px}
+        .step{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:16px;margin-bottom:12px}
+        .step-num{background:#0d6efd;color:#fff;width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;margin-right:8px}
+        .step p{color:#cbd5e1;font-size:14px;line-height:1.7;margin:8px 0 0 36px}
+        .step code{background:#334155;color:#38bdf8;padding:2px 6px;border-radius:4px;font-size:13px}
+        .highlight{background:#1e3a5f;border-left:4px solid #38bdf8;padding:12px 16px;border-radius:0 8px 8px 0;margin:12px 0;font-size:13px;color:#e2e8f0}
+        .warning{background:#422006;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:0 8px 8px 0;margin:12px 0;font-size:13px;color:#fde68a}
+        .success{background:#052e16;border-left:4px solid #22c55e;padding:12px 16px;border-radius:0 8px 8px 0;margin:12px 0;font-size:13px;color:#bbf7d0}
+        .badge-tag{display:inline-block;background:#334155;color:#38bdf8;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin:2px}
+        .feature-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+        .feature-box{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;text-align:center}
+        .feature-box i{font-size:28px;color:#38bdf8;margin-bottom:6px}
+        .feature-box h4{color:#e2e8f0;font-size:13px;margin:0}
+        .feature-box p{color:#94a3b8;font-size:11px;margin:4px 0 0}
+        .checklist{list-style:none;padding:0}
+        .checklist li{padding:6px 0;font-size:13px;color:#cbd5e1;display:flex;align-items:flex-start;gap:8px}
+        .checklist li::before{content:"✓";color:#22c55e;font-weight:700;flex-shrink:0}
+        .toc{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:16px;margin-bottom:24px}
+        .toc h3{color:#f59e0b;font-size:14px;margin-bottom:8px}
+        .toc a{color:#38bdf8;text-decoration:none;font-size:13px;display:block;padding:4px 0}
+        .toc a:hover{text-decoration:underline}
+        @media(max-width:768px){.feature-grid{grid-template-columns:1fr}.container{padding:16px 8px}}
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1><i class="bi bi-graph-up-arrow"></i> RaTrade Tutorial</h1>
+        <a href="/"><i class="bi bi-arrow-left"></i> Back to Dashboard</a>
+    </div>
+    <div class="container">
+
+        <div class="toc">
+            <h3><i class="bi bi-list-ul"></i> Quick Navigation</h3>
+            <a href="#overview">1. RaTrade Kya Hai? (Overview)</a>
+            <a href="#backtest">2. Backtest Strategy Kaise Chalaye</a>
+            <a href="#master">3. Master Mega-Confluence Strategy</a>
+            <a href="#tradingview">4. TradingView Free Connect Kaise Kare</a>
+            <a href="#broker">5. Broker Add Kaise Kare</a>
+            <a href="#optionchain">6. Option Chain Kaise Dekhe</a>
+            <a href="#webhook">7. Webhook Setup (Email + Chrome Extension)</a>
+            <a href="#trades">8. Live Trades Kaise Kare</a>
+            <a href="#tips">9. Pro Tips aur Best Practices</a>
+        </div>
+
+        <!-- SECTION 1: OVERVIEW -->
+        <div class="section" id="overview">
+            <h2><i class="bi bi-info-circle"></i> 1. RaTrade Kya Hai?</h2>
+            <p style="color:#cbd5e1;font-size:14px;line-height:1.7">
+                RaTrade ek <strong>Indian Options Trading Platform</strong> hai jo NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY aur 50+ F&O stocks ke liye 
+                <strong>automated trading strategies</strong> provide karta hai. Ye <strong>100% free</strong> hai aur aapko TradingView, broker integration, 
+                aur real-time data sab kuch ek jagah milta hai.
+            </p>
+            <div class="feature-grid">
+                <div class="feature-box">
+                    <i class="bi bi-bar-chart-line"></i>
+                    <h4>Backtest Engine</h4>
+                    <p>Purani data pe strategy test karo</p>
+                </div>
+                <div class="feature-box">
+                    <i class="bi bi-broadcast"></i>
+                    <h4>Free Webhooks</h4>
+                    <p>TradingView se signals lo bina paid subscription ke</p>
+                </div>
+                <div class="feature-box">
+                    <i class="bi bi-plug"></i>
+                    <h4>Broker Integration</h4>
+                    <p>Angel, Zerodha, Shoonya, Dhan se connect karo</p>
+                </div>
+                <div class="feature-box">
+                    <i class="bi bi-graph-up"></i>
+                    <h4>Live Data</h4>
+                    <p>Real-time option chain aur market data</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 2: BACKTEST -->
+        <div class="section" id="backtest">
+            <h2><i class="bi bi-clock-history"></i> 2. Backtest Strategy Kaise Chalaye</h2>
+            
+            <div class="step">
+                <span class="step-num">1</span><strong>Strategy Builder Tab Pe Jaye</strong>
+                <p>Dashboard pe <code>Strategy Builder</code> tab pe click kare. Ye top navigation mein hai.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">2</span><strong>Symbol Chune</strong>
+                <p>Dropdown se koi bhi symbol select kare: <span class="badge-tag">NIFTY</span> <span class="badge-tag">BANKNIFTY</span> <span class="badge-tag">FINNIFTY</span> <span class="badge-tag">RELIANCE</span> <span class="badge-tag">TCS</span> etc.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">3</span><strong>Dates Set Kare</strong>
+                <p><code>Start Date</code> aur <code>End Date</code> choose kare. Jitna purana data hoga, utna better backtest hoga.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">4</span><strong>Indicators Configure Kare</strong>
+                <p>Apni strategy ke hisaab se indicators set kare:</p>
+                <ul class="checklist">
+                    <li><strong>EMA (9/20):</strong> Short-term trend ke liye</li>
+                    <li><strong>RSI (14):</strong> Overbought/Oversold ke liye</li>
+                    <li><strong>MACD (12/26/9):</strong> Momentum ke liye</li>
+                    <li><strong>SuperTrend (10/3):</strong> Trend direction ke liye</li>
+                    <li><strong>VWAP:</strong> Volume-weighted average price</li>
+                </ul>
+            </div>
+            <div class="step">
+                <span class="step-num">5</span><strong>Entry/Exit Rules Set Kare</strong>
+                <p>Buy/Sell conditions define kare. Jab sab conditions same time pe match ho, tab trade lega.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">6</span><strong>Backtest Run Kare</strong>
+                <p><code>Run Backtest</code> button pe click kare. 2-5 second mein results aa jayenge.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">7</span><strong>Results Dekhe</strong>
+                <p>Results mein dikhega:</p>
+                <ul class="checklist">
+                    <li><strong>Total P&L:</strong> Kitna profit/loss hua</li>
+                    <li><strong>Win Rate:</strong> Kitne trade profitable rahe</li>
+                    <li><strong>Max Drawdown:</strong> Maximum kitna niche gaya</li>
+                    <li><strong>Sharpe Ratio:</strong> Risk-adjusted returns</li>
+                    <li><strong>Trade Log:</strong> Har trade ka detailed record</li>
+                </ul>
+            </div>
+
+            <div class="highlight">
+                <strong>Pro Tip:</strong> Pehle <strong>Master Mega-Confluence</strong> mode try kare jo 7 indicators ka combination use karta hai. 
+                Ye most profitable strategy hai jo automatically CE/PE decide karta hai!
+            </div>
+        </div>
+
+        <!-- SECTION 3: MASTER STRATEGY -->
+        <div class="section" id="master">
+            <h2><i class="bi bi-robot"></i> 3. Master Mega-Confluence Strategy</h2>
+            
+            <p style="color:#cbd5e1;font-size:14px;line-height:1.7;margin-bottom:16px">
+                Ye RaTrade ki <strong>sabse powerful strategy</strong> hai jo <strong>7 indicators ka strict confluence</strong> use karti hai. 
+                Jab bhi 7 mein se 7 conditions same time pe match ho, tabhi trade leti hai — isliye ye highly accurate hai.
+            </p>
+
+            <h3>7 Confluence Filters:</h3>
+            <div class="step">
+                <span class="step-num">1</span><strong>HMM Regime Detection</strong>
+                <p>Market ko 3 states mein classify karta hai: <span class="badge-tag" style="background:#052e16;color:#22c55e">Bullish</span> <span class="badge-tag" style="background:#422006;color:#f59e0b">Sideways</span> <span class="badge-tag" style="background:#450a0a;color:#ef4444">Bearish</span></p>
+            </div>
+            <div class="step">
+                <span class="step-num">2</span><strong>200 EMA + KAMA Trend</strong>
+                <p>Price 200 EMA aur KAMA dono ke upar ho (Buy CE) ya dono ke neeche ho (Buy PE)</p>
+            </div>
+            <div class="step">
+                <span class="step-num">3</span><strong>SuperTrend Breakout</strong>
+                <p>Price SuperTrend ke upar break kare (CE) ya neeche break kare (PE)</p>
+            </div>
+            <div class="step">
+                <span class="step-num">4</span><strong>MACD Crossover</strong>
+                <p>MACD line Signal line ko cross kare — upward (CE) ya downward (PE)</p>
+            </div>
+            <div class="step">
+                <span class="step-num">5</span><strong>EMA 9/20 Crossover</strong>
+                <p>Fast EMA (9) Slow EMA (20) ko cross kare</p>
+            </div>
+            <div class="step">
+                <span class="step-num">6</span><strong>VWAP + RSI Extreme</strong>
+                <p>VWAP lower band pe + RSI &lt; 30 (oversold = CE) ya VWAP upper band pe + RSI &gt; 70 (overbought = PE)</p>
+            </div>
+            <div class="step">
+                <span class="step-num">7</span><strong>Volume Confirmation</strong>
+                <p>Volume SMA se 1.5x (Buy CE) ya 1.2x (Buy PE) zyada ho — fake signals filter hote hai</p>
+            </div>
+
+            <h3>Master Strategy Kaise Chalaye:</h3>
+            <div class="step">
+                <span class="step-num">1</span><strong>Strategy Builder</strong> mein <code>Master Mega-Confluence</code> mode select kare
+            </div>
+            <div class="step">
+                <span class="step-num">2</span><strong>Indicator Defaults</strong> customize kare (ya default rehne de)
+            </div>
+            <div class="step">
+                <span class="step-num">3</span><strong>SL %</strong> (Stop Loss) aur <strong>Risk:Reward</strong> ratio set kare
+            </div>
+            <div class="step">
+                <span class="step-num">4</span><strong>Intraday</strong> ya <strong>Positional</strong> mode choose kare
+            </div>
+            <div class="step">
+                <span class="step-num">5</span><code>Run Master Backtest</code> pe click kare
+            </div>
+
+            <div class="success">
+                <strong>Result:</strong> Interactive Plotly chart milega jisme SuperTrend, 200 EMA, KAMA, VWAP bands sab dikhega. 
+                Green arrow = Buy CE, Red arrow = Buy PE. Entry/SL/TP lines bhi dikhengi!
+            </div>
+        </div>
+
+        <!-- SECTION 4: TRADINGVIEW -->
+        <div class="section" id="tradingview">
+            <h2><i class="bi bi-tv"></i> 4. TradingView Free Connect Kaise Kare</h2>
+            
+            <div class="warning">
+                <strong>Important:</strong> TradingView Free plan pe direct webhook nahi milta. RaTrade ka Chrome Extension use karo — 
+                ye TradingView Free ke alerts ko automatically webhook mein convert karta hai!
+            </div>
+
+            <h3>Step 1: Chrome Extension Install Kare</h3>
+            <div class="step">
+                <span class="step-num">1</span><strong>Extension Folder Download Kare</strong>
+                <p>Website pe <code>Webhook Free</code> tab pe jaye aur <code>Download Extension</code> button se folder save kare.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">2</span><strong>Chrome Extensions Page Khole</strong>
+                <p>Chrome mein <code>chrome://extensions</code> type kare aur Enter dabaye.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">3</span><strong>Developer Mode ON Kare</strong>
+                <p>Top-right corner mein <code>Developer mode</code> ka toggle ON kare.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">4</span><strong>Load Unpacked Extension</strong>
+                <p><code>Load unpacked</code> pe click kare aur download kiya hua folder select kare.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">5</span><strong>Extension Pin Kare</strong>
+                <p>Chrome toolbar mein puzzle icon pe click kare aur RaTrade extension ko pin kare.</p>
+            </div>
+
+            <h3>Step 2: TradingView Alert Setup Kare</h3>
+            <div class="step">
+                <span class="step-num">1</span><strong>TradingView Khole</strong>
+                <p><code>tradingview.com</code> pe jaye aur apna chart open kare.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">2</span><strong>Alert Create Kare</strong>
+                <p>Chart pe <code>Alert</code> (bell icon) pe click kare. Condition set kare (jaise EMA crossover).</p>
+            </div>
+            <div class="step">
+                <span class="step-num">3</span><strong>Webhook URL Dale</strong>
+                <p>Alert settings mein <code>Webhook URL</code> mein dale:</p>
+                <div class="highlight" style="margin:8px 0">
+                    <code>https://ratrade.onrender.com/api/webhook/free</code>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-num">4</span><strong>Message Format Dale</strong>
+                <p>Alert message mein ye likhe (example):</p>
+                <div class="highlight" style="margin:8px 0">
+                    <code>BUY NIFTY 24500 CE ENTRY 150 SL 140 TP 170</code>
+                </div>
+                <p>Ya JSON format mein:</p>
+                <div class="highlight" style="margin:8px 0">
+                    <code>{"action":"BUY","symbol":"NIFTY","strike":24500,"type":"CE","entry":150,"sl":140,"tp":170}</code>
+                </div>
+            </div>
+            <div class="step">
+                <span class="step-num">5</span><strong>Alert Save Kare</strong>
+                <p><code>Create</code> pe click kare. Jab alert trigger hoga, Chrome Extension automatically webhook bhej dega!</p>
+            </div>
+
+            <div class="success">
+                <strong>Verification:</strong> Extension icon pe click kare — "Connected to RaTrade" dikhega. 
+                Alert trigger hone pe extension icon pe badge count badhega.
+            </div>
+        </div>
+
+        <!-- SECTION 5: BROKER -->
+        <div class="section" id="broker">
+            <h2><i class="bi bi-plug"></i> 5. Broker Add Kaise Kare</h2>
+            
+            <p style="color:#cbd5e1;font-size:14px;line-height:1.7;margin-bottom:16px">
+                RaTrade <strong>4 brokers</strong> ko support karta hai. Aap ek ya sabhi brokers add kar sakte hai.
+            </p>
+
+            <h3>Supported Brokers:</h3>
+            <div class="feature-grid">
+                <div class="feature-box">
+                    <i class="bi bi-building"></i>
+                    <h4>Angel One</h4>
+                    <p>API Key + Secret + PIN</p>
+                </div>
+                <div class="feature-box">
+                    <i class="bi bi-building"></i>
+                    <h4>Zerodha (Kite)</h4>
+                    <p>API Key + Secret + Access Token</p>
+                </div>
+                <div class="feature-box">
+                    <i class="bi bi-building"></i>
+                    <h4>Shoonya (Finvasia)</h4>
+                    <p>API Key + Secret + Session</p>
+                </div>
+                <div class="feature-box">
+                    <i class="bi bi-building"></i>
+                    <h4>Dhan</h4>
+                    <p>Client ID + Access Token</p>
+                </div>
+            </div>
+
+            <h3>Broker Add Karne Ka Tarika:</h3>
+            <div class="step">
+                <span class="step-num">1</span><strong>Brokers Tab Pe Jaye</strong>
+                <p>Top navigation mein <code>Brokers</code> tab pe click kare.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">2</span><strong>Broker Select Kare</strong>
+                <p>Dropdown se apna broker chune (Angel, Zerodha, Shoonya, ya Dhan).</p>
+            </div>
+            <div class="step">
+                <span class="step-num">3</span><strong>API Credentials Dale</strong>
+                <p>Broker ki website se API credentials copy karke boxes mein paste kare:</p>
+                <ul class="checklist">
+                    <li><strong>API Key:</strong> Broker ke developer portal se milega</li>
+                    <li><strong>API Secret:</strong> Secret key jo registration ke waqt mili</li>
+                    <li><strong>PIN / Access Token:</strong> Login credentials ya generated token</li>
+                </ul>
+            </div>
+            <div class="step">
+                <span class="step-num">4</span><strong>Connect Pe Click Kare</strong>
+                <p><code>Connect</code> button pe click kare. Green "Connected" status dikhna chahiye.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">5</span><strong>Test Order Place Kare</strong>
+                <p><code>Test Order</code> se ek chhota sa order lagake check kare ki sab sahi kaam kar raha hai.</p>
+            </div>
+
+            <div class="warning">
+                <strong>Warning:</strong> Pehle <strong>Paper Trading</strong> (virtual money) se start kare. Direct real money se trade na kare. 
+                Broker credentials kisi ko share na kare!
+            </div>
+        </div>
+
+        <!-- SECTION 6: OPTION CHAIN -->
+        <div class="section" id="optionchain">
+            <h2><i class="bi bi-grid-3x3"></i> 6. Option Chain Kaise Dekhe</h2>
+            
+            <div class="step">
+                <span class="step-num">1</span><strong>Option Chain Tab Pe Jaye</strong>
+                <p>Navigation mein <code>Option Chain</code> tab pe click kare.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">2</span><strong>Symbol Select Kare</strong>
+                <p>Dropdown se symbol chune. 11 symbols available hai jo database mein stored hai.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">3</span><strong>Expiry Date Chune</strong>
+                <p>Jo expiry chahiye wo select kare. Current week ya next week.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">4</span><strong>Chain Data Dekhe</strong>
+                <p>CE aur PE dono sides ka data dikhega — Last Price, Bid/Ask, OI, Volume sab.</p>
+            </div>
+
+            <div class="highlight">
+                <strong>LIVE Mode:</strong> Agar aap <code>LIVE</code> checkbox ON kare to real-time data aayega. 
+                OFF rehne pe database ka cached data dikhega (fast + free).
+            </div>
+        </div>
+
+        <!-- SECTION 7: WEBHOOK -->
+        <div class="section" id="webhook">
+            <h2><i class="bi bi-broadcast"></i> 7. Webhook Setup (2 Methods)</h2>
+            
+            <h3>Method 1: Chrome Extension (TradingView Free)</h3>
+            <div class="step">
+                <span class="step-num">1</span>Chrome Extension install kare (upar Step 4 mein bataya)
+            </div>
+            <div class="step">
+                <span class="step-num">2</span>TradingView alert ka webhook URL: <code>https://ratrade.onrender.com/api/webhook/free</code>
+            </div>
+            <div class="step">
+                <span class="step-num">3</span>Alert message mein BUY/SELL signal likhe
+            </div>
+
+            <h3>Method 2: Email Webhook (Pipedream/IFTTT Free)</h3>
+            <div class="step">
+                <span class="step-num">1</span><strong>Pipedream</strong> ya <strong>IFTTT</strong> pe free account banaye
+            </div>
+            <div class="step">
+                <span class="step-num">2</span>Webhook workflow banaye jo email forward kare
+            </div>
+            <div class="step">
+                <span class="step-num">3</span>Webhook URL: <code>https://ratrade.onrender.com/api/webhook/email</code>
+            </div>
+            <div class="step">
+                <span class="step-num">4</span>Email body mein signal message likhe (JSON ya plain text)
+            </div>
+
+            <div class="highlight">
+                <strong>Supported Formats:</strong> Dono webhooks mein ye formats accept hote hai:
+                <br>• Plain text: <code>BUY NIFTY 24500 CE ENTRY 150 SL 140 TP 170</code>
+                <br>• JSON: <code>{"action":"BUY","symbol":"NIFTY","strike":24500,"type":"CE"}</code>
+                <br>• Key-value: <code>action=BUY symbol=NIFTY strike=24500 type=CE</code>
+            </div>
+        </div>
+
+        <!-- SECTION 8: LIVE TRADES -->
+        <div class="section" id="trades">
+            <h2><i class="bi bi-cash-stack"></i> 8. Live Trades Kaise Kare</h2>
+            
+            <div class="step">
+                <span class="step-num">1</span><strong>Broker Connect Kare</strong>
+                <p>Pehle Brokers tab mein broker add aur connect kare.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">2</span><strong>Trading Center Tab Jaye</strong>
+                <p><code>Trading Center</code> tab pe click kare.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">3</span><strong>Manual Order Place Kare</strong>
+                <p>Symbol, CE/PE, Strike, Quantity type karke <code>Buy CE</code> ya <code>Buy PE</code> button se order lagaye.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">4</span><strong>Open Positions Dekhe</strong>
+                <p>Current positions dikhegi — Entry price, Current price, P&L live update hoga.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">5</span><strong>Close Position</strong>
+                <p>Profit ya loss mein <code>Close</code> button se position square off kare.</p>
+            </div>
+
+            <div class="success">
+                <strong>Auto Trading:</strong> Webhook ke through bhi automatic trade place hota hai. 
+                Signal aate hi broker se order execute ho jayega!
+            </div>
+        </div>
+
+        <!-- SECTION 9: PRO TIPS -->
+        <div class="section" id="tips">
+            <h2><i class="bi bi-lightbulb"></i> 9. Pro Tips aur Best Practices</h2>
+            
+            <div class="step">
+                <span class="step-num">!</span><strong>Capital Management</strong>
+                <p>Ek trade mein apne capital ka <strong>2% se zyada risk na le</strong>. Agar ₹1,00,000 hai to ek trade mein max ₹2,000 ka risk.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">!</span><strong>Backtest Before Live</strong>
+                <p>Hamesha pehle backtest kare, phir paper trading kare, tab jaake real money se trade kare.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">!</span><strong>Market Hours</strong>
+                <p>Indian market 9:15 AM se 3:30 PM tak chalta hai. Intraday trades 3:15 PM se pehle close kar le.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">!</span><strong>News Events Avoid Kare</strong>
+                <p>Budget, RBI policy, quarterly results ke waqt trading avoid kare — volatility bahut zyada hoti hai.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">!</span><strong>Slippage Factor</strong>
+                <p>Backtest mein 0.5-1% slippage ka buffer rakhe. Real market mein exact price nahi milta.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">!</span><strong>Emotion Control</strong>
+                <p>Loss ke baad revenge trading na kare. Strategy pe trust rakhe aur system follow kare.</p>
+            </div>
+            <div class="step">
+                <span class="step-num">!</span><strong>Regular Review</strong>
+                <p>Hafte mein ek baar apne trades ka review kare. Kya kaam kiya, kya nahi — patterns samjhe.</p>
+            </div>
+        </div>
+
+        <div style="text-align:center;padding:32px 0;color:#64748b;font-size:13px">
+            <p>RaTrade - Indian Options Trading Platform</p>
+            <p style="margin-top:8px">Made with ❤️ for Indian Traders</p>
+            <a href="/" style="color:#38bdf8;text-decoration:none;margin-top:12px;display:inline-block">
+                <i class="bi bi-arrow-left"></i> Back to Dashboard
+            </a>
+        </div>
+    </div>
+</body>
+</html>

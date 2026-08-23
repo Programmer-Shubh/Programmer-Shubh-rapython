@@ -1,18 +1,19 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from core.models.bhavcopy_model import BhavcopyModel
 from core.services.backtest_engine import BacktestEngine
 from utils.helpers import format_currency
 import datetime
+import re
 
 router = APIRouter()
 
 
 class BacktestRequest(BaseModel):
-    symbol: str = "BANKNIFTY"
-    start_date: str = "2024-08-01"
-    end_date: str = "2025-01-31"
+    symbol: str = "NIFTY"
+    start_date: str = "2025-08-01"
+    end_date: str = "2026-08-20"
     indicators: list = []
     entry_conditions: list = []
     exit_conditions: list = []
@@ -258,3 +259,318 @@ def run_backtest(req: BacktestRequest):
         "monthly_pnl": m.get("monthly_pnl", {}),
         "trade_list": m.get("trade_list", []),
     }
+
+
+class MasterConfluenceRequest(BaseModel):
+    symbol: str = "NIFTY"
+    start_date: str = "2025-08-01"
+    end_date: str = "2026-08-20"
+    sl_pct: float = 2.0
+    tp_rr: float = 2.0
+    indicators: dict = {}
+    trade_mode: str = "intraday"
+
+
+@router.post("/master")
+def run_master_confluence(req: MasterConfluenceRequest):
+    try:
+        from core.services.indicator_engine import IndicatorEngine
+        from utils.helpers import get_strike_step, get_lot_size
+        import math
+
+        bhav = BhavcopyModel()
+        historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
+        if not historical:
+            count = _fetch_google_finance(req.symbol, req.start_date, req.end_date)
+            if count > 0:
+                historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
+        if not historical:
+            count = _fetch_and_store_nselib(req.symbol, req.start_date, req.end_date)
+            if count > 0:
+                historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
+        if not historical:
+            count = _fetch_niftytrader_live(req.symbol)
+            if count > 0:
+                historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
+        if not historical:
+            return {"error": f"No data for {req.symbol}. Google/NSE/niftytrader blocked."}
+        if len(historical) > 120:
+            historical = historical[-120:]
+
+        ind = IndicatorEngine()
+        ind_params = req.indicators or {}
+        closes = [h["close_price"] for h in historical]
+        highs = [h["high_price"] for h in historical]
+        lows = [h["low_price"] for h in historical]
+        volumes = [h.get("volume", 1) or 1 for h in historical]
+
+        ema_long_p = int(ind_params.get("ema_long", 200))
+        kama_fast = int(ind_params.get("kama_fast", 10))
+        kama_slow = int(ind_params.get("kama_slow", 30))
+        st_period = int(ind_params.get("supertrend_period", 10))
+        st_mult = float(ind_params.get("supertrend_multiplier", 3))
+        macd_fast = int(ind_params.get("macd_fast", 12))
+        macd_slow = int(ind_params.get("macd_slow", 26))
+        macd_sig = int(ind_params.get("macd_signal", 9))
+        ema_fast_p = int(ind_params.get("ema_fast", 9))
+        ema_slow_p = int(ind_params.get("ema_slow", 20))
+        vwap_period = int(ind_params.get("vwap_period", 20))
+        vwap_mult = float(ind_params.get("vwap_multiplier", 2))
+        rsi_period = int(ind_params.get("rsi_period", 14))
+        vol_sma_p = int(ind_params.get("volume_sma", 20))
+        vol_buy_mult = float(ind_params.get("volume_buy_mult", 1.5))
+        vol_sell_mult = float(ind_params.get("volume_sell_mult", 1.2))
+
+        ema_long = ind.calculate_ema(closes, ema_long_p)
+        kama_vals = ind.calculate_kama(closes, kama_fast, kama_slow)
+        supertrend = ind.calculate_supertrend(historical, st_period, st_mult)
+        macd_data = ind.calculate_macd(closes, macd_fast, macd_slow, macd_sig)
+        ema_f = ind.calculate_ema(closes, ema_fast_p)
+        ema_s = ind.calculate_ema(closes, ema_slow_p)
+        vwap_data = ind.calculate_vwap(historical, vwap_period, vwap_mult)
+        rsi_vals = ind.calculate_rsi(closes, rsi_period)
+        hmm_data = ind.calculate_hmm_regime(closes, int(ind_params.get("hmm_n_components", 3)))
+        hmm_seq = hmm_data.get("state_sequence", [])
+
+        vol_sma = [None] * len(volumes)
+        for i in range(vol_sma_p - 1, len(volumes)):
+            vol_sma[i] = sum(volumes[i - vol_sma_p + 1:i + 1]) / vol_sma_p
+
+        trades = []
+        equity = [1000000.0]
+        capital = 100000.0
+        initial_capital = 100000.0
+        wins = 0
+        total_pnl = 0.0
+        max_dd = 0.0
+        peak = initial_capital
+        sl_pct = req.sl_pct
+        tp_rr = req.tp_rr
+        lot = get_lot_size(req.symbol)
+        step = get_strike_step(req.symbol)
+
+        chart_dates = [h["trade_date"] for h in historical]
+        chart_opens = [h["open_price"] for h in historical]
+        chart_highs = highs[:]
+        chart_lows = lows[:]
+        chart_closes = closes[:]
+        chart_volumes = volumes[:]
+        chart_st = supertrend[:]
+        chart_ema200 = ema_long[:]
+        chart_kama = kama_vals[:]
+        chart_vwap_u2 = vwap_data.get("upper2", [None] * len(closes))
+        chart_vwap_l2 = vwap_data.get("lower2", [None] * len(closes))
+        chart_macd = macd_data.get("macd", [None] * len(closes))
+        chart_macd_sig = macd_data.get("signal", [None] * len(closes))
+        chart_rsi = rsi_vals[:]
+        chart_hmm = [str(hmm_seq[i]) if i < len(hmm_seq) else "Sideways" for i in range(len(closes))]
+        chart_entries = []
+
+        min_bars = max(ema_long_p, st_period, macd_slow + macd_sig, vol_sma_p, 30)
+        open_trade = None
+
+        for i in range(min_bars, len(historical)):
+            if open_trade is not None:
+                entry_price = open_trade["entry_prem"]
+                entry_idx = open_trade["entry_idx"]
+                bar_high = highs[i]
+                bar_low = lows[i]
+                bar_close = closes[i]
+                bar_open = chart_opens[i]
+
+                if open_trade["option_type"] == "CE":
+                    sl_level = entry_price * (1 - sl_pct / 100)
+                    tp_level = entry_price * (1 + (sl_pct * tp_rr) / 100)
+                    hit_sl = bar_low <= sl_level
+                    hit_tp = bar_high >= tp_level
+                else:
+                    sl_level = entry_price * (1 + sl_pct / 100)
+                    tp_level = entry_price * (1 - (sl_pct * tp_rr) / 100)
+                    hit_sl = bar_high >= sl_level
+                    hit_tp = bar_low <= tp_level
+
+                is_last = (i == len(historical) - 1) or (chart_dates[i] != chart_dates[i + 1] if i + 1 < len(historical) else True)
+
+                exit_price = None
+                exit_reason = None
+                if hit_sl:
+                    exit_price = sl_level
+                    exit_reason = "SL"
+                elif hit_tp:
+                    exit_price = tp_level
+                    exit_reason = "TP"
+                elif req.trade_mode == "intraday" and is_last:
+                    exit_price = bar_close
+                    exit_reason = "intraday_close"
+                elif i - entry_idx >= 10:
+                    exit_price = bar_close
+                    exit_reason = "max_hold"
+
+                if exit_price is not None:
+                    if open_trade["option_type"] == "CE":
+                        pnl = (exit_price - entry_price) * lot * open_trade["lots"]
+                    else:
+                        pnl = (entry_price - exit_price) * lot * open_trade["lots"]
+                    total_pnl += pnl
+                    capital += pnl
+                    if pnl > 0:
+                        wins += 1
+                    if capital > peak:
+                        peak = capital
+                    dd = (peak - capital) / peak * 100 if peak > 0 else 0
+                    if dd > max_dd:
+                        max_dd = dd
+                    trades.append({
+                        "id": len(trades) + 1,
+                        "entry_date": open_trade["date"],
+                        "exit_date": chart_dates[i],
+                        "option_type": open_trade["option_type"],
+                        "entry_price": round(entry_price, 2),
+                        "exit_price": round(exit_price, 2),
+                        "sl_level": round(open_trade["sl_level"], 2),
+                        "tp_level": round(open_trade["tp_level"], 2),
+                        "regime": open_trade["regime"],
+                        "exit_reason": exit_reason,
+                        "pnl": round(pnl, 2),
+                        "pnl_pct": round(pnl / initial_capital * 100, 4),
+                    })
+                    equity.append(capital)
+                    chart_entries.append({
+                        "entry_idx": entry_idx,
+                        "exit_idx": i,
+                        "option_type": open_trade["option_type"],
+                        "entry_price": entry_price,
+                        "exit_price": exit_price,
+                        "entry_date": open_trade["date"],
+                        "exit_date": chart_dates[i],
+                        "pnl": round(pnl, 2),
+                    })
+                    open_trade = None
+                continue
+
+            c = closes[i]
+            pc = closes[i - 1]
+            regime = hmm_seq[i] if i < len(hmm_seq) else "Sideways"
+
+            st_val = supertrend[i] if i < len(supertrend) else 0
+            prev_st = supertrend[i - 1] if i > 0 and i - 1 < len(supertrend) else 0
+            ml = macd_data.get("macd", [None] * len(closes))
+            ms = macd_data.get("signal", [None] * len(closes))
+            cur_macd = ml[i] if i < len(ml) and ml[i] is not None else 0
+            cur_sig = ms[i] if i < len(ms) and ms[i] is not None else 0
+            prev_macd = ml[i - 1] if i > 0 and i - 1 < len(ml) and ml[i - 1] is not None else 0
+            prev_sig = ms[i - 1] if i > 0 and i - 1 < len(ms) and ms[i - 1] is not None else 0
+
+            ef = ema_f[i] if i < len(ema_f) and ema_f[i] is not None else 0
+            es = ema_s[i] if i < len(ema_s) and ema_s[i] is not None else 0
+            prev_ef = ema_f[i - 1] if i > 0 and i - 1 < len(ema_f) and ema_f[i - 1] is not None else 0
+            prev_es = ema_s[i - 1] if i > 0 and i - 1 < len(ema_s) and ema_s[i - 1] is not None else 0
+
+            vwap_u2 = chart_vwap_u2[i] if i < len(chart_vwap_u2) and chart_vwap_u2[i] is not None else 0
+            vwap_l2 = chart_vwap_l2[i] if i < len(chart_vwap_l2) and chart_vwap_l2[i] is not None else 0
+            rsi_v = chart_rsi[i] if i < len(chart_rsi) and chart_rsi[i] is not None else 50
+
+            el = ema_long[i] if i < len(ema_long) and ema_long[i] is not None else 0
+            kv = chart_kama[i] if i < len(chart_kama) and chart_kama[i] is not None else 0
+
+            vol_now = volumes[i]
+            vs = vol_sma[i] if i < len(vol_sma) and vol_sma[i] is not None else vol_now
+
+            green = c > chart_opens[i]
+            red = c < chart_opens[i]
+
+            buy_ce = False
+            buy_pe = False
+
+            if (regime == "Bullish"
+                and c > el and c > kv
+                and c > st_val and pc <= prev_st
+                and cur_macd > cur_sig and prev_macd <= prev_sig
+                and ef > es and prev_ef <= prev_es
+                and (vwap_l2 > 0 and c <= vwap_l2 * 1.005)
+                and rsi_v < 30
+                and vol_now > vs * vol_buy_mult
+                and green):
+                buy_ce = True
+
+            if (regime == "Bearish"
+                and c < el and c < kv
+                and c < st_val and pc >= prev_st
+                and cur_macd < cur_sig and prev_macd >= prev_sig
+                and ef < es and prev_ef >= prev_es
+                and (vwap_u2 > 0 and c >= vwap_u2 * 0.995)
+                and rsi_v > 70
+                and vol_now > vs * vol_sell_mult
+                and red):
+                buy_pe = True
+
+            if buy_ce or buy_pe:
+                opt_type = "CE" if buy_ce else "PE"
+                strike = round(c / step) * step
+                entry_prem = c * 0.01
+                sl_level = entry_prem * (1 - sl_pct / 100)
+                tp_level = entry_prem * (1 + (sl_pct * tp_rr) / 100)
+                open_trade = {
+                    "date": chart_dates[i],
+                    "entry_idx": i,
+                    "strike": strike,
+                    "option_type": opt_type,
+                    "entry_prem": entry_prem,
+                    "sl_level": sl_level,
+                    "tp_level": tp_level,
+                    "lots": 1,
+                    "regime": regime,
+                }
+
+        n = len(trades)
+        win_rate = (wins / n * 100) if n > 0 else 0
+        avg_pnl = total_pnl / n if n > 0 else 0
+        sharpe = 0.0
+        if len(equity) > 1:
+            rets = [(equity[j] - equity[j - 1]) / max(equity[j - 1], 1) for j in range(1, len(equity))]
+            mean_r = sum(rets) / len(rets) if rets else 0
+            var_r = sum((r - mean_r) ** 2 for r in rets) / max(len(rets) - 1, 1) if rets else 1
+            std_r = math.sqrt(var_r)
+            sharpe = (mean_r / std_r) * math.sqrt(252) if std_r > 0 else 0
+
+        return {
+            "success": True,
+            "metrics": {
+                "initial_capital": initial_capital,
+                "final_capital": round(capital, 2),
+                "total_return": round(capital - initial_capital, 2),
+                "total_return_pct": round((capital - initial_capital) / initial_capital * 100, 4),
+                "win_rate": round(win_rate, 2),
+                "max_drawdown": round(max_dd, 2),
+                "profit_factor": round(wins / max(n - wins, 1) * 100, 2) if n > 0 else 0,
+                "sharpe_ratio": round(sharpe, 4),
+                "total_trades": n,
+                "winning_trades": wins,
+                "losing_trades": n - wins,
+                "avg_pnl": round(avg_pnl, 2),
+                "total_pnl": round(total_pnl, 2),
+            },
+            "trades": trades,
+            "chart": {
+                "dates": chart_dates,
+                "opens": chart_opens,
+                "highs": chart_highs,
+                "lows": chart_lows,
+                "closes": chart_closes,
+                "volumes": chart_volumes,
+                "supertrend": [round(v, 2) if v else None for v in chart_st],
+                "ema200": [round(v, 2) if v else None for v in chart_ema200],
+                "kama": [round(v, 2) if v else None for v in chart_kama],
+                "vwap_upper2": [round(v, 2) if v else None for v in chart_vwap_u2],
+                "vwap_lower2": [round(v, 2) if v else None for v in chart_vwap_l2],
+                "macd_line": [round(v, 4) if v else None for v in chart_macd],
+                "macd_signal_line": [round(v, 4) if v else None for v in chart_macd_sig],
+                "rsi": [round(v, 2) if v else None for v in chart_rsi],
+                "hmm_regimes": chart_hmm,
+            },
+            "chart_entries": chart_entries,
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Master backtest error: {str(e)}"}

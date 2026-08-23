@@ -52,6 +52,11 @@ def root():
     return FileResponse(os.path.join(os.path.dirname(__file__), "static", "index.html"))
 
 
+@app.get("/tutorial")
+def tutorial():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "tutorial.html"))
+
+
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 
 
