@@ -112,20 +112,11 @@
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Builder</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
         <button onclick="go('bhavcopy',this)"><i class="bi bi-cloud-download"></i> Bhavcopy</button>
-        <button onclick="go('webhook',this)"><i class="bi bi-broadcast"></i> Webhook Free</button>
+        <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
     </div>
     <div class="wrap">
         <!-- DASHBOARD -->
         <div id="pg-dashboard" class="pg">
-            <div class="card" style="border:2px solid #0d6efd;background:linear-gradient(135deg,#eef2ff,#f0f9ff)">
-                <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-                    <div>
-                        <h5 style="margin:0;color:#0d6efd"><i class="bi bi-book"></i> RaTrade Tutorial - Step by Step Guide</h5>
-                        <p style="margin:4px 0 0;color:#6c757d;font-size:13px">Backtest, TradingView Connect, Broker Setup, Live Trading - Sab kuch sikhe!</p>
-                    </div>
-                    <a href="/tutorial" target="_blank" class="btn btn-primary"><i class="bi bi-book-fill"></i> Open Tutorial</a>
-                </div>
-            </div>
             <div class="row" id="mkt-cards"></div>
             <div class="card">
                 <div class="card-header">Top 5 Opportunities <button class="btn btn-sm btn-primary" onclick="loadOpps()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
@@ -182,62 +173,10 @@
             <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
                 <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Builder</h4>
                 <div style="display:flex;gap:6px;align-items:center">
-                    <div class="btn-group btn-group-sm">
-                        <button class="btn btn-outline-primary active" id="mode-custom-btn" onclick="setStratMode('custom')">Custom</button>
-                        <button class="btn btn-outline-warning" id="mode-master-btn" onclick="setStratMode('master')">Master Mega-Confluence</button>
-                    </div>
                     <button class="btn btn-sm btn-outline-secondary" onclick="resetStrat()">Reset</button>
                     <button class="btn btn-sm btn-primary" onclick="saveStrat()"><i class="bi bi-check-circle"></i> Save</button>
                 </div>
             </div>
-            <!-- MASTER MEGA-CONFLUENCE FORM (hidden by default) -->
-            <div id="master-form" class="hidden">
-                <div class="card mt-2" style="border:2px solid #ffc107">
-                    <div class="card-header" style="background:#ffc107;color:#000"><i class="bi bi-cpu-fill"></i> <strong>Master Mega-Confluence Strategy</strong> <small class="ms-2">All 8 filters must match simultaneously on candle close</small></div>
-                    <div class="card-body p-2">
-                        <div class="row g-2">
-                            <div class="col-md-2"><label class="form-label small">Symbol</label><select class="form-select form-select-sm" id="m-sym"><option>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option></select></div>
-                            <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" class="form-control form-control-sm" id="m-start" value="2025-08-01"></div>
-                            <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" class="form-control form-control-sm" id="m-end" value="2026-08-20"></div>
-                            <div class="col-md-2"><label class="form-label small">SL %</label><input type="number" class="form-control form-control-sm" id="m-sl" value="2.0" step="0.5" min="0.5" max="10"></div>
-                            <div class="col-md-2"><label class="form-label small">Risk:Reward</label><input type="number" class="form-control form-control-sm" id="m-rr" value="2.0" step="0.5" min="0.5" max="10"></div>
-                            <div class="col-md-2"><label class="form-label small">Mode</label><select class="form-select form-select-sm" id="m-mode"><option value="intraday">Intraday</option><option value="positional">Positional</option></select></div>
-                        </div>
-                        <div class="row g-2 mt-2">
-                            <div class="col"><label class="form-label small">HMM States</label><input type="number" class="form-control form-control-sm" id="m-hmm" value="3" min="2" max="5"></div>
-                            <div class="col"><label class="form-label small">200 EMA</label><input type="number" class="form-control form-control-sm" id="m-ema200" value="200" min="50" max="500"></div>
-                            <div class="col"><label class="form-label small">KAMA Fast</label><input type="number" class="form-control form-control-sm" id="m-kama-f" value="10" min="2" max="50"></div>
-                            <div class="col"><label class="form-label small">KAMA Slow</label><input type="number" class="form-control form-control-sm" id="m-kama-s" value="30" min="10" max="100"></div>
-                            <div class="col"><label class="form-label small">ST Period</label><input type="number" class="form-control form-control-sm" id="m-st-p" value="10" min="5" max="30"></div>
-                            <div class="col"><label class="form-label small">ST Mult</label><input type="number" class="form-control form-control-sm" id="m-st-m" value="3" step="0.5" min="1" max="5"></div>
-                        </div>
-                        <div class="row g-2 mt-2">
-                            <div class="col"><label class="form-label small">MACD Fast</label><input type="number" class="form-control form-control-sm" id="m-macd-f" value="12" min="5" max="30"></div>
-                            <div class="col"><label class="form-label small">MACD Slow</label><input type="number" class="form-control form-control-sm" id="m-macd-s" value="26" min="15" max="50"></div>
-                            <div class="col"><label class="form-label small">MACD Signal</label><input type="number" class="form-control form-control-sm" id="m-macd-sig" value="9" min="3" max="20"></div>
-                            <div class="col"><label class="form-label small">EMA Fast (9/20)</label><input type="number" class="form-control form-control-sm" id="m-ema-f" value="9" min="3" max="30"></div>
-                            <div class="col"><label class="form-label small">EMA Slow (9/20)</label><input type="number" class="form-control form-control-sm" id="m-ema-s" value="20" min="10" max="50"></div>
-                            <div class="col"><label class="form-label small">RSI Period</label><input type="number" class="form-control form-control-sm" id="m-rsi" value="14" min="5" max="30"></div>
-                        </div>
-                        <div class="row g-2 mt-2">
-                            <div class="col"><label class="form-label small">VWAP Period</label><input type="number" class="form-control form-control-sm" id="m-vwap-p" value="20" min="5" max="50"></div>
-                            <div class="col"><label class="form-label small">VWAP Mult</label><input type="number" class="form-control form-control-sm" id="m-vwap-m" value="2" step="0.5" min="1" max="4"></div>
-                            <div class="col"><label class="form-label small">Vol SMA</label><input type="number" class="form-control form-control-sm" id="m-vol-sma" value="20" min="5" max="50"></div>
-                            <div class="col"><label class="form-label small">Buy Vol Mult</label><input type="number" class="form-control form-control-sm" id="m-vol-buy" value="1.5" step="0.1" min="1" max="3"></div>
-                            <div class="col"><label class="form-label small">Sell Vol Mult</label><input type="number" class="form-control form-control-sm" id="m-vol-sell" value="1.2" step="0.1" min="1" max="3"></div>
-                            <div class="col d-flex align-items-end"><button class="btn btn-sm btn-warning w-100 fw-bold" onclick="runMasterBacktest()"><i class="bi bi-play-circle"></i> Run Master Backtest</button></div>
-                        </div>
-                        <div class="small text-muted mt-2">Buy CE: HMM=Bullish + Close>200EMA + Close>KAMA + ST breakout up + MACD cross up + 9EMA cross 20EMA + Volume>1.5x + Green candle | Buy PE: Bearish opposite. All conditions match simultaneously.</div>
-                    </div>
-                </div>
-            </div>
-            <!-- MASTER RESULTS (hidden by default) -->
-            <div id="master-results" class="hidden">
-                <div class="row mt-3" id="m-metrics"></div>
-                <div class="card mt-2"><div class="card-body p-2"><div id="m-chart" style="height:400px"></div></div></div>
-                <div class="card mt-2"><div class="card-header py-1"><strong class="small"><i class="bi bi-list-columns-reverse"></i> Master Trade Log</strong></div><div class="card-body p-0" id="m-trades"></div></div>
-            </div>
-            <!-- CUSTOM STRATEGY FORM (original, hidden in master mode) -->
             <div id="custom-form">
                 <div class="col-md-4"><label class="form-label">Instrument Settings</label>
                     <div class="row g-1">
@@ -398,39 +337,71 @@
             </div></div>
             <div class="card"><div class="card-header">Available Data</div><div class="card-body" id="bh-data"></div></div>
         </div>
-        <!-- WEBHOOK FREE (Stoxo/NextLevel style + Email hack + Live WS) -->
-        <div id="pg-webhook" class="pg hidden">
-            <h4 class="fw-bold mb-3"><i class="bi bi-broadcast"></i> Webhook Free — TradingView → Broker (Stoxo/NextLevel style)</h4>
-            <div class="card"><div class="card-body">
-                <div class="row g-2">
-                    <div class="col-md-6"><div class="card" style="border:1px solid #0d6efd"><div class="card-header bg-primary text-white"><i class="bi bi-puzzle"></i> 1. Chrome Extension (FREE TradingView)</div><div class="card-body">
-                        <p class="small">TradingView Free me webhook lock hota — ye extension Free me unlock karta (Stoxo jaisa).</p>
-                        <div class="d-flex gap-2">
-                            <a href="/static/extension/manifest.json" download class="btn btn-sm btn-primary"><i class="bi bi-download"></i> Download Extension (.zip)</a>
-                            <button class="btn btn-sm btn-outline-primary" onclick="window.open('/static/extension/content.js','_blank')">View Source</button>
+        <!-- EMAIL ALERTS - Multi-Platform (NextLevelBot Style) -->
+        <div id="pg-alerts" class="pg hidden">
+            <h4 class="fw-bold mb-3"><i class="bi bi-envelope-at"></i> Email Alerts — Chartink / Gocharting / Investing.com</h4>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <div class="card" style="border:2px solid #0d6efd">
+                        <div class="card-header bg-primary text-white"><i class="bi bi-gear"></i> Alert Configuration</div>
+                        <div class="card-body">
+                            <div class="mb-2"><label class="form-label small fw-bold">Email Forwarding URL</label>
+                                <div class="input-group input-group-sm"><input class="form-control" id="alert-url" readonly value="Loading..."><button class="btn btn-outline-primary" onclick="navigator.clipboard.writeText(document.getElementById('alert-url').value)">Copy</button></div>
+                                <small class="text-muted">Pipedream/IFTTT se is URL pe forward kare</small>
+                            </div>
+                            <div class="mb-2"><label class="form-label small fw-bold">Supported Sources</label>
+                                <div><span class="badge bg-info me-1">Chartink</span><span class="badge bg-success me-1">Gocharting.com</span><span class="badge bg-warning text-dark">Investing.com</span></div>
+                            </div>
+                            <hr>
+                            <div class="mb-2"><label class="form-label small fw-bold">Risk Management</label>
+                                <div class="row g-1">
+                                    <div class="col-6"><label class="form-label small">Stop Loss %</label><input type="number" class="form-control form-control-sm" id="alert-sl" value="2" step="0.5" min="0.5" max="10"></div>
+                                    <div class="col-6"><label class="form-label small">Target %</label><input type="number" class="form-control form-control-sm" id="alert-tp" value="4" step="0.5" min="0.5" max="20"></div>
+                                    <div class="col-6"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="alert-max" value="5" min="1" max="20"></div>
+                                    <div class="col-6"><label class="form-label small">Daily Loss Limit</label><input type="number" class="form-control form-control-sm" id="alert-dl" value="5000" step="500" min="0"></div>
+                                    <div class="col-6"><label class="form-label small">Trailing SL</label><select class="form-select form-select-sm" id="alert-trail"><option value="lock">Lock Profit</option><option value="partial">Partial Book</option><option value="none">None</option></select></div>
+                                    <div class="col-6"><label class="form-label small">Lock at Profit %</label><input type="number" class="form-control form-control-sm" id="alert-lock" value="1" step="0.5" min="0.5"></div>
+                                </div>
+                            </div>
+                            <button class="btn btn-sm btn-primary w-100 mt-2" onclick="saveAlertConfig()"><i class="bi bi-check-circle"></i> Save Config</button>
                         </div>
-                        <ol class="small mt-2"><li>Download → unzip → <code>chrome://extensions</code> → Developer mode ON → Load unpacked → <code>static/extension</code></li><li>TradingView → Create Alert → Webhook URL paste: <code id="wh-url">https://ratrade.onrender.com/api/webhook/free</code> <button class="btn btn-sm btn-outline-secondary" onclick="navigator.clipboard.writeText(document.getElementById('wh-url').innerText)">Copy</button></li><li>Message: <code>{"symbol":"NIFTY","action":"BUY","strike":24500,"type":"CE"}</code></li></ol>
-                    </div></div></div>
-                    <div class="col-md-6"><div class="card" style="border:1px solid #198754"><div class="card-header bg-success text-white"><i class="bi bi-envelope"></i> 2. Email Hack (Pipedream/IFTTT Free)</div><div class="card-body">
-                        <p class="small">Free alert → Email ON → Pipedream/IFTTT free 2 webhooks → POST to:</p>
-                        <div class="input-group input-group-sm mb-2"><input class="form-control" id="em-url" value="https://ratrade.onrender.com/api/webhook/email" readonly><button class="btn btn-outline-success" onclick="navigator.clipboard.writeText(document.getElementById('em-url').value)">Copy</button></div>
-                        <p class="small">Email body: <code>BUY NIFTY 24500 CE</code> ya JSON. Pipedream: Trigger Email → Action HTTP POST → URL above.</p>
-                        <button class="btn btn-sm btn-outline-success" onclick="testEmailWebhook()">Test Email Webhook</button> <span id="em-res" class="small"></span>
-                    </div></div></div>
-                </div>
-                <div class="card mt-3"><div class="card-header"><i class="bi bi-lightning"></i> Live WebSocket <span class="badge bg-danger"> &lt;50ms</span> <small class="text-muted">NSE tick via niftytrader.in → ws:// + bhavcopy fallback</small> <span id="ws-status" class="badge bg-secondary">Offline</span></div><div class="card-body">
-                    <div class="row g-2 align-items-end">
-                        <div class="col-auto"><button class="btn btn-sm btn-success" onclick="startWS()">Connect WS</button> <button class="btn btn-sm btn-outline-secondary" onclick="stopWS()">Stop</button></div>
-                        <div class="col"><small class="text-muted">WS URL: <code id="ws-url">wss://ratrade.onrender.com/api/ws/live</code> (local: <code>ws://localhost:8000/api/ws/live</code>)</small></div>
                     </div>
-                    <div id="ws-ticks" class="mt-2" style="font-size:12px"></div>
-                    <pre id="ws-log" style="max-height:120px;overflow:auto;background:#f8f9fa;padding:8px;font-size:11px"></pre>
-                </div></div>
-                <div class="card mt-2"><div class="card-header">Quick Test Webhook</div><div class="card-body">
-                    <div class="row g-2"><div class="col"><input id="wh-sym" class="form-control form-control-sm" value="NIFTY" placeholder="Symbol"></div><div class="col"><select id="wh-act" class="form-select form-select-sm"><option>BUY</option><option>SELL</option></select></div><div class="col"><input id="wh-strike" class="form-control form-control-sm" value="24500" placeholder="Strike"></div><div class="col"><select id="wh-type" class="form-select form-select-sm"><option>CE</option><option>PE</option></select></div><div class="col"><button class="btn btn-sm btn-primary" onclick="testFreeWebhook()">Send Free Webhook</button></div></div>
-                    <div id="wh-res" class="mt-2 small"></div>
-                </div></div>
-            </div></div>
+                </div>
+                <div class="col-md-8">
+                    <div class="card">
+                        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+                            <span><i class="bi bi-inbox"></i> Live Email Alerts</span>
+                            <div><span id="alert-count" class="badge bg-secondary">0</span> <button class="btn btn-sm btn-outline-primary" onclick="loadAlerts()"><i class="bi bi-arrow-clockwise"></i></button></div>
+                        </div>
+                        <div class="card-body p-0" id="alert-list" style="max-height:400px;overflow-y:auto"><p class="text-muted p-3">No alerts yet. Configure Pipedream/IFTTT to forward emails here.</p></div>
+                    </div>
+                    <div class="card mt-3">
+                        <div class="card-header"><i class="bi bi-list-check"></i> Auto-Executed Trades</div>
+                        <div class="card-body p-0" id="alert-trades" style="max-height:300px;overflow-y:auto"><p class="text-muted p-3">Trades executed from email alerts will appear here.</p></div>
+                    </div>
+                    <div class="card mt-3">
+                        <div class="card-header"><i class="bi bi-shield-check"></i> Risk Status</div>
+                        <div class="card-body">
+                            <div class="row g-2" id="risk-status">
+                                <div class="col"><div class="stat-card-sm"><div class="label">Today's P&L</div><div class="value" id="rs-pnl">₹0</div></div></div>
+                                <div class="col"><div class="stat-card-sm"><div class="label">Trades Today</div><div class="value" id="rs-trades">0</div></div></div>
+                                <div class="col"><div class="stat-card-sm"><div class="label">Daily Limit</div><div class="value" id="rs-limit">₹5,000</div></div></div>
+                                <div class="col"><div class="stat-card-sm"><div class="label">Circuit Breaker</div><div class="value" id="rs-breaker" style="color:#198754">ON</div></div></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card mt-3">
+                <div class="card-header"><i class="bi bi-info-circle"></i> How It Works (NextLevelBot Style)</div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4"><div class="step"><span class="step-num">1</span><strong>Platform Setup</strong><p class="small text-muted mt-1">Chartink/Gocharting/Investing.com pe alert banaye. Email notification ON kare.</p></div></div>
+                        <div class="col-md-4"><div class="step"><span class="step-num">2</span><strong>Forward to RaTrade</strong><p class="small text-muted mt-1">Pipedream/IFTTT (free) se email ko is URL pe forward kare. Auto-parse hoga.</p></div></div>
+                        <div class="col-md-4"><div class="step"><span class="step-num">3</span><strong>Auto-Execute</strong><p class="small text-muted mt-1">Broker se auto-order place hoga. SL/TP/Trailing sab built-in hai.</p></div></div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     <div id="pg-chain" class="pg hidden">
@@ -782,12 +753,47 @@
     }
     async function bhImport(){const f=document.getElementById('bh-date').value;if(!f){alert('Select date');return;}document.getElementById('bh-status').innerHTML='<span class="spinner"></span> Importing...';try{const r=await P('/api/bhavcopy/auto-seed',{method:'POST'});document.getElementById('bh-status').innerHTML='<span class="text-success">Auto-seeded 6 months for all F&O ('+r.seeded+' symbols) — refresh page</span>';loadBhav();}catch(e){document.getElementById('bh-status').innerHTML='<span class="text-success">Imported from bhavcopy DB for '+f+'</span>';}}
     async function bhRange(){try{const r=await P('/api/bhavcopy/auto-seed',{method:'POST'});alert('Auto-seeded '+r.seeded+' symbols for 6 months');loadBhav();}catch(e){alert('Range import coming soon');}}
-    function initWebhook(){document.getElementById('wh-url').innerText = location.origin + '/api/webhook/free'; document.getElementById('em-url').value = location.origin + '/api/webhook/email'; document.getElementById('ws-url').innerText = (location.protocol==='https:'?'wss://':'ws://')+location.host+'/api/ws/live';}
-    async function testFreeWebhook(){const body={symbol:document.getElementById('wh-sym').value, action:document.getElementById('wh-act').value, strike:parseFloat(document.getElementById('wh-strike').value), type:document.getElementById('wh-type').value}; const r=await P('/api/webhook/free',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); document.getElementById('wh-res').innerHTML = r.success?'<span class="price-up">Order #'+r.trade_id+' '+r.action+' '+r.symbol+' '+r.strike+r.type+' @ ₹'+r.entry_price+'</span>':'<span class="price-down">'+r.error+'</span>'; loadTrades();}
-    async function testEmailWebhook(){const r=await P('/api/webhook/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:"BUY NIFTY 24500 CE"})}); document.getElementById('em-res').innerHTML = r.success?'<span class="price-up">Email hack OK #'+r.trade_id+'</span>':'<span class="price-down">'+r.error+'</span>';}
-    let _ws=null;
-    function startWS(){if(_ws) _ws.close(); const url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/api/ws/live'; _ws=new WebSocket(url); _ws.onopen=()=>{document.getElementById('ws-status').innerHTML='Online'; document.getElementById('ws-status').className='badge bg-success'; document.getElementById('ws-log').innerText+='Connected '+url+'\n';}; _ws.onmessage=e=>{try{const d=JSON.parse(e.data); if(d.ticks){let h='';for(const [sym,t] of Object.entries(d.ticks)){h+=sym+': ₹'+t.spot+' ('+t.source+') | ';} document.getElementById('ws-ticks').innerHTML=h; document.getElementById('ws-log').innerText=(new Date().toLocaleTimeString()+' '+JSON.stringify(d.ticks).slice(0,120)+'\n')+document.getElementById('ws-log').innerText.slice(0,800);}}catch(e){}}; _ws.onclose=()=>{document.getElementById('ws-status').innerHTML='Offline'; document.getElementById('ws-status').className='badge bg-secondary';}; _ws.onerror=()=>{document.getElementById('ws-log').innerText+='WS error\n';};}
-    function stopWS(){if(_ws){_ws.close(); _ws=null;}}
+
+    async function loadAlerts(){
+        try{const r=await A('/api/email-alerts/list');
+        const alerts=r.alerts||[];
+        document.getElementById('alert-count').textContent=alerts.length;
+        if(!alerts.length){document.getElementById('alert-list').innerHTML='<p class="text-muted p-3">No alerts yet.</p>';return;}
+        let h='';alerts.slice().reverse().forEach(a=>{
+            const src=a.source==='chartink'?'bg-info':a.source==='gocharting'?'bg-success':'bg-warning text-dark';
+            const badge=a.action==='BUY'?'badge-buy':'badge-sell';
+            h+=`<div style="padding:8px 12px;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center">
+                <div><span class="badge ${src}">${a.source}</span> <strong>${a.symbol}</strong> ${a.strike} ${a.option_type} <span class="badge ${badge}">${a.action}</span></div>
+                <div style="font-size:11px;color:#6c757d">${a.timestamp}</div>
+            </div>`;
+        });document.getElementById('alert-list').innerHTML=h;}catch(e){}
+    }
+    async function loadAlertTrades(){
+        try{const r=await A('/api/email-alerts/trades');
+        const trades=r.trades||[];
+        if(!trades.length){document.getElementById('alert-trades').innerHTML='<p class="text-muted p-3">No trades yet.</p>';return;}
+        let h='<table class="bt-table"><thead><tr><th>#</th><th>Source</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>SL</th><th>Target</th><th>Status</th><th>P&L</th></tr></thead><tbody>';
+        trades.forEach(t=>{
+            const cls=t.pnl>=0?'price-up':'price-down';
+            const stBadge=t.status==='closed'?'badge-sell':t.status==='sl_hit'?'badge-sell':'badge-buy';
+            h+=`<tr><td>${t.id}</td><td><span class="badge bg-info">${t.source}</span></td><td>${t.symbol}</td><td>${t.option_type}</td><td>${t.strike}</td><td>₹${t.entry_price}</td><td>₹${t.sl}</td><td>₹${t.target}</td><td><span class="badge ${stBadge}">${t.status}</span></td><td class="${cls}">${t.pnl!==null?'₹'+t.pnl:'-'}</td></tr>`;
+        });h+='</tbody></table>';
+        document.getElementById('alert-trades').innerHTML=h;}catch(e){}
+    }
+    async function loadRiskStatus(){
+        try{const r=await A('/api/email-alerts/risk');
+        if(r.daily_pnl!==undefined)document.getElementById('rs-pnl').textContent='₹'+r.daily_pnl.toLocaleString('en-IN');
+        if(r.trades_today!==undefined)document.getElementById('rs-trades').textContent=r.trades_today;
+        if(r.daily_limit!==undefined)document.getElementById('rs-limit').textContent='₹'+r.daily_limit.toLocaleString('en-IN');
+        const br=document.getElementById('rs-breaker');
+        if(r.circuit_breaker===false){br.textContent='OFF';br.style.color='#dc3545';}else{br.textContent='ON';br.style.color='#198754';}
+        }catch(e){}
+    }
+    async function saveAlertConfig(){
+        const cfg={sl_pct:parseFloat(document.getElementById('alert-sl').value)||2,tp_pct:parseFloat(document.getElementById('alert-tp').value)||4,max_trades:int(document.getElementById('alert-max').value)||5,daily_loss_limit:parseFloat(document.getElementById('alert-dl').value)||5000,trailing:document.getElementById('alert-trail').value,lock_at:parseFloat(document.getElementById('alert-lock').value)||1};
+        try{await P('/api/email-alerts/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});alert('Config saved!');}catch(e){alert('Error: '+e.message);}
+    }
+    (function(){document.getElementById('alert-url').value=location.origin+'/api/webhook/email';})();
 
     // Quant: auto-fill backtest dates to last 6 months (Nifty options need sufficient history)
     (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-6); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e){}})();
@@ -896,112 +902,6 @@
         fyers:{app_id:'App ID',secret:'App Secret',access_token:'Access Token',refresh_token:'Refresh Token'},
         angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
     };
-
-    function setStratMode(mode){
-        const custom=document.getElementById('custom-form');
-        const master=document.getElementById('master-form');
-        const mRes=document.getElementById('master-results');
-        const cBtn=document.getElementById('mode-custom-btn');
-        const mBtn=document.getElementById('mode-master-btn');
-        if(mode==='master'){custom.classList.add('hidden');master.classList.remove('hidden');mRes.classList.remove('hidden');cBtn.classList.remove('active');mBtn.classList.add('active');}
-        else{custom.classList.remove('hidden');master.classList.add('hidden');mRes.classList.add('hidden');cBtn.classList.add('active');mBtn.classList.remove('active');}
-    }
-    async function runMasterBacktest(){
-        const btn=document.querySelector('#master-form .btn-warning');const orig=btn.innerHTML;
-        btn.innerHTML='<span class="spinner"></span> Running...';
-        const body={
-            symbol:document.getElementById('m-sym').value,
-            start_date:document.getElementById('m-start').value,
-            end_date:document.getElementById('m-end').value,
-            sl_pct:parseFloat(document.getElementById('m-sl').value)||2,
-            tp_rr:parseFloat(document.getElementById('m-rr').value)||2,
-            trade_mode:document.getElementById('m-mode').value,
-            indicators:{
-                hmm_n_components:parseInt(document.getElementById('m-hmm').value)||3,
-                ema_long:parseInt(document.getElementById('m-ema200').value)||200,
-                kama_fast:parseInt(document.getElementById('m-kama-f').value)||10,
-                kama_slow:parseInt(document.getElementById('m-kama-s').value)||30,
-                supertrend_period:parseInt(document.getElementById('m-st-p').value)||10,
-                supertrend_multiplier:parseFloat(document.getElementById('m-st-m').value)||3,
-                macd_fast:parseInt(document.getElementById('m-macd-f').value)||12,
-                macd_slow:parseInt(document.getElementById('m-macd-s').value)||26,
-                macd_signal:parseInt(document.getElementById('m-macd-sig').value)||9,
-                ema_fast:parseInt(document.getElementById('m-ema-f').value)||9,
-                ema_slow:parseInt(document.getElementById('m-ema-s').value)||20,
-                vwap_period:parseInt(document.getElementById('m-vwap-p').value)||20,
-                vwap_multiplier:parseFloat(document.getElementById('m-vwap-m').value)||2,
-                rsi_period:parseInt(document.getElementById('m-rsi').value)||14,
-                volume_sma:parseInt(document.getElementById('m-vol-sma').value)||20,
-                volume_buy_mult:parseFloat(document.getElementById('m-vol-buy').value)||1.5,
-                volume_sell_mult:parseFloat(document.getElementById('m-vol-sell').value)||1.2,
-            }
-        };
-        try{
-            const r=await P('/api/backtest/master',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-            btn.innerHTML=orig;
-            if(r.error){document.getElementById('master-results').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';return;}
-            const m=r.metrics;
-            document.getElementById('master-results').classList.remove('hidden');
-            const pnlCls=m.total_pnl>=0?'price-up':'price-down';
-            document.getElementById('m-metrics').innerHTML=`
-                <div class="col"><div class="card stat-card-sm"><div class="label">Total P&L</div><div class="value ${pnlCls}">${F(m.total_pnl)}</div></div></div>
-                <div class="col"><div class="card stat-card-sm"><div class="label">Win Rate</div><div class="value price-up">${m.win_rate}%</div></div></div>
-                <div class="col"><div class="card stat-card-sm"><div class="label">Max Drawdown</div><div class="value price-down">${m.max_drawdown}%</div></div></div>
-                <div class="col"><div class="card stat-card-sm"><div class="label">Total Trades</div><div class="value">${m.total_trades}</div></div></div>
-                <div class="col"><div class="card stat-card-sm"><div class="label">Sharpe</div><div class="value">${m.sharpe_ratio}</div></div></div>
-                <div class="col"><div class="card stat-card-sm"><div class="label">Avg P&L/Trade</div><div class="value ${pnlCls}">${F(m.avg_pnl)}</div></div></div>
-                <div class="col"><div class="card stat-card-sm"><div class="label">Wins</div><div class="value price-up">${m.winning_trades}</div></div></div>
-                <div class="col"><div class="card stat-card-sm"><div class="label">Losses</div><div class="value price-down">${m.losing_trades}</div></div></div>`;
-            renderMasterChart(r.chart, r.chart_entries);
-            renderMasterTrades(r.trades);
-        }catch(e){btn.innerHTML=orig;document.getElementById('master-results').innerHTML='<p class="text-danger p-3">'+e.message+'</p>';}
-    }
-    function renderMasterChart(ch, entries){
-        if(!ch||!ch.closes||!ch.closes.length)return;
-        const n=ch.closes.length;
-        const bgColors=ch.hmm_regimes.map(r=>r==='Bullish'?'rgba(25,135,84,0.08)':r==='Bearish'?'rgba(220,53,69,0.08)':'rgba(108,117,125,0.05)');
-        const shapes=[];
-        if(entries){entries.forEach(e=>{
-            const clr=e.option_type==='CE'?'#198754':'#dc3545';
-            shapes.push({type:'line',x0:e.entry_date,x1:e.entry_date,y0:e.entry_price*0.95,y1:e.entry_price*1.05,line:{color:clr,width:2,dash:'dot'}});
-            shapes.push({type:'line',x0:e.entry_date,x1:e.exit_date,y0:e.entry_price,y1:e.entry_price,line:{color:'#0d6efd',width:1}});
-            shapes.push({type:'line',x0:e.exit_date,x1:e.exit_date,y0:e.exit_price*0.95,y1:e.exit_price*1.05,line:{color:'#6c757d',width:2,dash:'dot'}});
-        });}
-        const traces=[
-            {x:ch.dates,y:ch.closes,type:'candlestick',open:ch.opens,high:ch.highs,low:ch.lows,close:ch.closes,name:'Price',increasing:{line:{color:'#198754'}},decreasing:{line:{color:'#dc3545'}}},
-            {x:ch.dates,y:ch.supertrend,type:'scatter',mode:'lines',name:'SuperTrend',line:{color:'#6f42c1',width:1.5,dash:'dot'}},
-            {x:ch.dates,y:ch.ema200,type:'scatter',mode:'lines',name:'200 EMA',line:{color:'#0d6efd',width:1.5}},
-            {x:ch.dates,y:ch.kama,type:'scatter',mode:'lines',name:'KAMA',line:{color:'#ffc107',width:1.5}},
-            {x:ch.dates,y:ch.vwap_upper2,type:'scatter',mode:'lines',name:'VWAP +2',line:{color:'#dc3545',width:1,dash:'dash'}},
-            {x:ch.dates,y:ch.vwap_lower2,type:'scatter',mode:'lines',name:'VWAP -2',line:{color:'#198754',width:1,dash:'dash'}},
-        ];
-        if(entries){
-            const ceBuy=entries.filter(e=>e.option_type==='CE');
-            const peBuy=entries.filter(e=>e.option_type==='PE');
-            if(ceBuy.length) traces.push({x:ceBuy.map(e=>e.entry_date),y:ceBuy.map(e=>e.entry_price),type:'scatter',mode:'markers',name:'Buy CE',marker:{color:'#198754',size:12,symbol:'triangle-up',line:{color:'#fff',width:1}}});
-            if(peBuy.length) traces.push({x:peBuy.map(e=>e.entry_date),y:peBuy.map(e=>e.entry_price),type:'scatter',mode:'markers',name:'Buy PE',marker:{color:'#dc3545',size:12,symbol:'triangle-down',line:{color:'#fff',width:1}}});
-        }
-        Plotly.newPlot('m-chart',traces,{
-            title:{text:'Master Mega-Confluence — '+document.getElementById('m-sym').value,font:{size:14}},
-            paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529',size:11},
-            xaxis:{type:'category',rangeslider:{visible:false},gridcolor:'#f0f0f0'},
-            yaxis:{title:'Price',gridcolor:'#f0f0f0',side:'right'},
-            margin:{t:40,b:40,l:60,r:60},
-            legend:{orientation:'h',y:1.08,font:{size:10}},
-            shapes:shapes,
-        },{responsive:true});
-    }
-    function renderMasterTrades(trades){
-        if(!trades||!trades.length){document.getElementById('m-trades').innerHTML='<p class="text-muted p-3">No trades triggered. All 8 confluence filters must match simultaneously.</p>';return;}
-        let h='<table class="bt-table"><thead><tr><th>#</th><th>Entry Date</th><th>Exit Date</th><th>Type</th><th>Entry</th><th>Exit</th><th>SL</th><th>TP</th><th>Regime</th><th>Exit Reason</th><th>P&L</th><th>P&L %</th></tr></thead><tbody>';
-        trades.forEach(t=>{
-            const cls=t.pnl>=0?'price-up':'price-down';
-            const badge=t.option_type==='CE'?'badge-ce':'badge-pe';
-            h+=`<tr><td>${t.id}</td><td>${t.entry_date}</td><td>${t.exit_date}</td><td>${B(t.option_type,badge)}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${t.exit_price.toFixed(2)}</td><td>₹${t.sl_level.toFixed(2)}</td><td>₹${t.tp_level.toFixed(2)}</td><td>${B(t.regime,t.regime==='Bullish'?'buy':t.regime==='Bearish'?'sell':'draft')}</td><td>${B(t.exit_reason,t.exit_reason==='TP'?'buy':t.exit_reason==='SL'?'sell':'draft')}</td><td class="${cls}">${F(t.pnl)}</td><td class="${cls}">${t.pnl_pct}%</td></tr>`;
-        });
-        h+='</tbody></table>';
-        document.getElementById('m-trades').innerHTML=h;
-    }
 
     </script>
 </body>

@@ -34,7 +34,7 @@ app.add_middleware(
 db = Database.get_instance()
 db.init_schema()
 
-from routes import dashboard, option_chain, paper_trade, strategy_builder, bhavcopy_import, scanner, broker, webhook, websocket
+from routes import dashboard, option_chain, paper_trade, strategy_builder, bhavcopy_import, scanner, broker, webhook, websocket, email_alerts
 
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(option_chain.router, prefix="/api/chain", tags=["Option Chain"])
@@ -43,18 +43,14 @@ app.include_router(strategy_builder.router, prefix="/api/backtest", tags=["Strat
 app.include_router(bhavcopy_import.router, prefix="/api/bhavcopy", tags=["Bhavcopy Import"])
 app.include_router(scanner.router, prefix="/api/scanner", tags=["Scanner"])
 app.include_router(broker.router, prefix="/api/broker", tags=["Brokers"])
-app.include_router(webhook.router, prefix="/api/webhook", tags=["Webhook Free"])
-app.include_router(websocket.router, prefix="/api/ws", tags=["Live WebSocket <50ms"])
+app.include_router(webhook.router, prefix="/api/webhook", tags=["Webhook"])
+app.include_router(websocket.router, prefix="/api/ws", tags=["Live WebSocket"])
+app.include_router(email_alerts.router, prefix="/api/email-alerts", tags=["Email Alerts"])
 
 
 @app.get("/")
 def root():
     return FileResponse(os.path.join(os.path.dirname(__file__), "static", "index.html"))
-
-
-@app.get("/tutorial")
-def tutorial():
-    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "tutorial.html"))
 
 
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
