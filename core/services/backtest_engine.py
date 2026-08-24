@@ -727,8 +727,11 @@ class BacktestEngine:
                 exit_value += prem * lqty
             else:
                 exit_value -= prem * lqty
-        entry_value = sum(l["signed_value"] for l in entry["legs"])
-        pnl = (exit_value - exit_costs_total) - entry["total_cost"]
+        entry_cash = sum(l["signed_value"] for l in entry["legs"])
+        # entry["total_cost"] = entry_cash + entry_brokerage (Ec)
+        entry_costs = entry["total_cost"] - entry_cash
+        # Net PnL = entry_cash (credit + / debit -) + exit_value (reverse legs) - brokerage both sides
+        pnl = entry_cash + exit_value - entry_costs - exit_costs_total
         exits.append({
             "date": exit_date, "strike": entry["strike"], "price": round(abs(exit_value), 2),
             "quantity": entry["quantity"], "exit_costs": {"total": round(exit_costs_total, 2)},

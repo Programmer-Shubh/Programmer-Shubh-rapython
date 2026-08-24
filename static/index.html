@@ -113,6 +113,7 @@
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
         <button onclick="go('bhavcopy',this)"><i class="bi bi-cloud-download"></i> Bhavcopy</button>
         <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
+        <button onclick="go('robot',this)"><i class="bi bi-robot"></i> Call/Put Robot</button>
     </div>
     <div class="wrap">
         <!-- DASHBOARD -->
@@ -403,6 +404,51 @@
                         <div class="col-md-4"><div class="step"><span class="step-num">3</span><strong>Auto-Execute</strong><p class="small text-muted mt-1">Broker se auto-order place hoga. SL/TP/Trailing sab built-in hai.</p></div></div>
                     </div>
                 </div>
+            </div>
+        </div>
+        <!-- CALL/PUT ROBOT - Simple Buy/Sell with SL/TP -->
+        <div id="pg-robot" class="pg hidden">
+            <h4 class="fw-bold mb-3"><i class="bi bi-robot"></i> Call / Put Buy Sell Robot</h4>
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-gear"></i> Robot Settings <small class="text-muted">Symbol + Order + SL/Target + Backtest</small></div>
+                <div class="card-body">
+                    <div class="row g-2">
+                        <div class="col-md-2"><label class="form-label small">Symbol</label><select id="r-sym" class="form-select form-select-sm"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option><option>RELIANCE</option><option>HDFCBANK</option><option>ICICIBANK</option><option>TCS</option><option>INFY</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY" selected>Call Buy</option><option value="CE-SELL">Call Sell</option><option value="PE-BUY">Put Buy</option><option value="PE-SELL">Put Sell</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
+                        <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="r-lots" class="form-control form-control-sm" value="1" min="1"></div>
+                        <div class="col-md-1"><label class="form-label small">Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="500" min="0" step="100"></div>
+                        <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="1000" min="0" step="100"></div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
+                        <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:14"></div>
+                        <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm"></div>
+                        <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm"></div>
+                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="1" min="1" max="10"></div>
+                        <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button class="btn btn-sm btn-success flex-fill" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
+                            <div class="d-flex gap-3 flex-wrap" style="font-size:12px">
+                                <label><input type="checkbox" id="r-ind-rsi" checked> RSI(14)</label>
+                                <label><input type="checkbox" id="r-ind-ema"> EMA(50)</label>
+                                <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(10,3) Bullish/Bearish</label>
+                                <label><input type="checkbox" id="r-ind-macd"> MACD</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="robot-results" class="hidden">
+                <div class="row mt-2" id="robot-metrics"></div>
+                <div class="card mt-2" id="robot-charts"><div class="card-body p-2"><div id="robot-eq" style="height:200px"></div><div id="robot-mo" style="height:200px;margin-top:8px"></div></div></div>
+                <div class="card mt-2" id="robot-trades"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="robot-tl"></div></div>
+            </div>
+            <div class="card mt-3">
+                <div class="card-header"><i class="bi bi-info-circle"></i> Live Robot Status</div>
+                <div class="card-body" id="robot-status"><p class="text-muted small">Robot stopped. Select symbol + order + SL/Target then Start Robot for paper trading.</p></div>
             </div>
         </div>
     </div>
@@ -797,8 +843,61 @@
         try{await P('/api/email-alerts/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});alert('Config saved!');}catch(e){alert('Error: '+e.message);}
     }
     (function(){document.getElementById('alert-url').value=location.origin+'/api/webhook/email';})();
+    // Robot: auto-fill dates
+    (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-6); const fmt=d=>d.toISOString().split('T')[0]; try{if(document.getElementById('r-start')){document.getElementById('r-start').value=fmt(s); document.getElementById('r-end').value=fmt(e);}}catch(e){}})();
+    async function robotBacktest(){
+        const sym=document.getElementById('r-sym').value;
+        const order=document.getElementById('r-order').value;
+        const [opt, txnRaw]=order.split('-');
+        const txn=txnRaw.toLowerCase();
+        const strikeType=document.getElementById('r-strike').value.toLowerCase();
+        const lots=parseInt(document.getElementById('r-lots').value)||1;
+        const sl=parseFloat(document.getElementById('r-sl').value)||500;
+        const tp=parseFloat(document.getElementById('r-tp').value)||1000;
+        const mtd=parseInt(document.getElementById('r-mtd').value)||1;
+        const s=document.getElementById('r-start').value; const e=document.getElementById('r-end').value;
+        if(!s||!e){alert('Select start and end date'); return;}
+        const indicators=[];
+        if(document.getElementById('r-ind-rsi')?.checked) indicators.push({id:'rsi',params:{period:14}});
+        if(document.getElementById('r-ind-ema')?.checked) indicators.push({id:'ema',params:{period:50}});
+        if(document.getElementById('r-ind-supertrend')?.checked) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
+        if(document.getElementById('r-ind-macd')?.checked) indicators.push({id:'macd',params:{fast:12,slow:26,signal:9}});
+        if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
+        const legs=[{option_type:opt, transaction:txn, lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
+        const entryTime=document.getElementById('r-entry').value||'09:35';
+        const exitTime=document.getElementById('r-exit').value||'15:14';
+        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20}, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
+        document.getElementById('robot-results').classList.remove('hidden');
+        document.getElementById('robot-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Running backtest...</p>';
+        try{
+            const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            if(r.error){document.getElementById('robot-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>'; return;}
+            const m=r.metrics||r;
+            const pnl=(m.final_capital||0)-(m.initial_capital||1000000);
+            const pnlC=pnl>=0?'price-up':'price-down';
+            document.getElementById('robot-metrics').innerHTML=`<div class="row g-2"><div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value">${r.symbol||sym}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlC}">${F(m.net_pnl||pnl)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Trades</div><div class="value">${m.total_trades}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}%</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Avg P/L</div><div class="value ${pnlC}">${F(m.avg_profit_per_trade||0)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max DD</div><div class="value price-down">${m.max_drawdown}%</div></div></div></div>`;
+            if(r.equity_curve&&r.equity_curve.length) Plotly.newPlot('robot-eq',[{y:r.equity_curve,type:'scatter',line:{color:'#0d6efd',width:2}}],{title:'Equity Curve - '+sym+' '+order,margin:{t:30,b:30,l:50,r:20}});
+            if(r.monthly_pnl&&Object.keys(r.monthly_pnl).length) Plotly.newPlot('robot-mo',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',margin:{t:30,b:30,l:50,r:20}}); else Plotly.newPlot('robot-mo',[{x:['No data'],y:[0],type:'bar'}],{title:'Monthly P&L'});
+            if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>B/S</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.symbol||sym}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.exit_date} ${t.exit_time||'15:14'}</td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
+        }catch(e){document.getElementById('robot-metrics').innerHTML='<p class="text-danger p-3">Error: '+e.message+'</p>';}
+    }
+    async function robotStart(){
+        const sym=document.getElementById('r-sym').value;
+        const order=document.getElementById('r-order').value;
+        const [opt, txnRaw]=order.split('-');
+        const lots=parseInt(document.getElementById('r-lots').value)||1;
+        const sl=parseFloat(document.getElementById('r-sl').value)||500;
+        const tp=parseFloat(document.getElementById('r-tp').value)||1000;
+        const strikeType=document.getElementById('r-strike').value;
+        const expiry=document.getElementById('r-expiry').value;
+        document.getElementById('robot-status').innerHTML='<p class="text-success"><span class="spinner"></span> Starting '+sym+' '+order+' '+strikeType+' '+expiry+' SL ₹'+sl+' Target ₹'+tp+'...</p>';
+        try{
+            const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym, option_type:opt, strike:0, expiry:expiry, date:new Date().toISOString().split('T')[0], transaction_type:txnRaw, quantity:lots, stop_loss:sl, take_profit:tp })});
+            if(r.error) document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+r.error+'</p>';
+            else document.getElementById('robot-status').innerHTML='<p class="text-success">Robot started! Trade #'+(r.trade_id||'')+' '+sym+' '+order+' @ ₹'+(r.entry_price||'')+' SL ₹'+sl+' Target ₹'+tp+' — check Trading Center</p>';
+        }catch(e){document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+e.message+'</p>';}
+    }
 
-    // Quant: auto-fill backtest dates to last 6 months (Nifty options need sufficient history)
     (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-6); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e){}})();
     addCondition();
     loadDash();
