@@ -12,6 +12,7 @@ class BacktestEngine:
         self.indicators = IndicatorEngine()
         self.initial_capital = 1000000.0
         self.ohlc_cache = {}
+        self.premium_cache = {}
         self.bt_symbol = ""
         self.bt_expiry = ""
         self.implied_volatility = 0.14
@@ -22,6 +23,7 @@ class BacktestEngine:
         if is_live is not None:
             self.is_live = is_live
         self._reset()
+        self.premium_cache = {}
         self.bt_symbol = symbol
         self.bt_expiry = legs[0].get("expiry_date", "") if legs else ""
         self.implied_volatility = advanced_options.get("implied_volatility", 0.14)
@@ -60,11 +62,18 @@ class BacktestEngine:
         highs = [h["high_price"] for h in historical]
         lows = [h["low_price"] for h in historical]
         pre_calc = self._pre_calc(historical, closes, highs, lows, ind_list)
+        # Store indicator modes for bullish/bearish filtering
+        self.ind_modes = {}
+        for ind in ind_list:
+            iid = ind.get("id","") if isinstance(ind, dict) else ind
+            mode = ind.get("params",{}).get("mode","both") if isinstance(ind, dict) else "both"
+            self.ind_modes[iid] = str(mode).lower()
 
         entries, exits, entry_bars = [], [], []
         pending_entry = None
         pending_exit = None
         pending_entry_signal = None
+        pending_auto_buy = None
         daily_trades = 0
         daily_pnl = 0.0
         kill_switch_on = False
@@ -97,7 +106,15 @@ class BacktestEngine:
                 exec_idx = i
                 exec_bar = historical[exec_idx] if exec_idx < len(historical) else cur
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
-                if is_spread:
+                auto_signal_exec = bool(advanced_options.get("auto_signal") or (legs and legs[0].get("transaction","").lower()=="auto"))
+                if auto_signal_exec:
+                    # Choose CE Buy on bullish (buy_sig) else PE Buy
+                    is_buy = pending_auto_buy if pending_auto_buy is not None else True
+                    auto_leg = {"option_type": "CE" if is_buy else "PE", "transaction": "buy", "lots": int(legs[0].get("lots",1) if legs else 1), "strike_selection": strike_sel, "otm_distance": otm_dist}
+                    trade = self._enter_single(cur_date, spot, symbol, auto_leg, strike_sel, delta_target, otm_dist)
+                    # Preserve auto choice for display
+                    trade["auto_choice"] = "CE-BUY" if is_buy else "PE-BUY"
+                elif is_spread:
                     trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
                 else:
                     trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
@@ -105,6 +122,7 @@ class BacktestEngine:
                 entry_bars.append(i)
                 daily_trades += 1
                 pending_entry = None
+                pending_auto_buy = None
 
             has_open = len(entries) > len(exits)
             if has_open and pending_exit is not None:
@@ -156,37 +174,60 @@ class BacktestEngine:
                 buy_sig = self._get_buy_signal(i, pre_calc, historical, entry_conditions)
                 sell_sig = self._get_sell_signal(i, pre_calc, historical, exit_conditions)
                 # For spreads (multi-leg like Bear Call Spread), allow entry on either signal to avoid 0 trades when single indicator rare
-                if is_spread:
+                # Auto-signal mode: if advanced auto_signal, pick CE on buy_sig, PE on sell_sig
+                auto_signal = bool(advanced_options.get("auto_signal") or (legs and legs[0].get("transaction","").lower()=="auto"))
+                if auto_signal:
+                    # For AUTO, entry on any signal; leg type chosen dynamically at execution
+                    entry_sig = buy_sig or sell_sig
+                    if not entry_sig and not pre_calc:
+                        entry_sig = True
+                    exit_sig = time_exit
+                elif is_spread:
                     entry_sig = buy_sig or sell_sig
                     if not entry_sig and not pre_calc:
                         entry_sig = True
                     exit_sig = time_exit
                 else:
-                    entry_sig = buy_sig if txn_type == "buy" else sell_sig
-                    exit_sig = sell_sig if txn_type == "buy" else buy_sig
+                    # Direction-aware: CE Buy = bullish (buy_sig), PE Buy = bearish (sell_sig)
+                    # CE Sell = bearish, PE Sell = bullish
+                    if option_type == "PE":
+                        entry_sig = sell_sig if txn_type == "buy" else buy_sig
+                        exit_sig = buy_sig if txn_type == "buy" else sell_sig
+                    else:
+                        entry_sig = buy_sig if txn_type == "buy" else sell_sig
+                        exit_sig = sell_sig if txn_type == "buy" else buy_sig
                 has_open = len(entries) > len(exits)
                 can_enter = not has_open and daily_trades < max_trades_day
                 if entry_sig and can_enter:
                     # Apply latency: in backtest mode, wait enough bars for latency to elapse
                     # In live mode, execute immediately
-                    # For spreads, execute immediately to ensure Bear Call Spread not stuck on 1-bar delay + reset
-                    if self.is_live or is_spread:
+                    # For spreads/auto, execute immediately to ensure not stuck on 1-bar delay
+                    if self.is_live or is_spread or auto_signal:
                         pending_entry = i
                         pending_entry_signal = None
+                        if auto_signal:
+                            pending_auto_buy = buy_sig
                     else:
                         # Backtest mode: wait for latency bars
                         if pending_entry_signal is None:
                             pending_entry_signal = i
+                            if auto_signal:
+                                pending_auto_buy = buy_sig
                         elif i - pending_entry_signal >= max(1, latency):
                             pending_entry = i
                             pending_entry_signal = None
                 else:
-                    if not is_spread:
+                    if not is_spread and not auto_signal:
                         pending_entry_signal = None
-                    else:
+                    elif auto_signal and pending_entry_signal is not None and i - pending_entry_signal > 3:
+                        pending_entry_signal = None
+                        pending_auto_buy = None
+                    elif is_spread:
                         # For spreads, keep pending signal if it was set periodic
                         if pending_entry_signal is not None and i - pending_entry_signal > 3:
                             pending_entry_signal = None
+                    else:
+                        pending_entry_signal = None
                 if has_open and pending_exit is None and (exit_sig or time_exit):
                     pending_exit = "condition" if exit_sig else "time"
 
@@ -219,12 +260,12 @@ class BacktestEngine:
                 result["pma"] = self.indicators.calculate_predicted_ma(closes, params.get("lookback", 20))
             elif iid == "predicted_neural_index":
                 result["pni"] = self.indicators.calculate_predicted_ma(closes, params.get("lookback", 14))
-            elif iid == "ai_sentiment":
-                result["ai_sentiment"] = self.indicators.calculate_ai_sentiment(closes, highs, lows, params.get("lookback", 20))
-            elif iid == "ai_volatility_range":
-                result["ai_volatility"] = self.indicators.calculate_ai_volatility(closes, highs, lows, params.get("lookback", 20))
-            elif iid == "ai_trend_score":
-                result["ai_trend"] = self.indicators.calculate_ai_trend_score(closes)
+            elif iid == "neural_network":
+                result["neural"] = self.indicators.calculate_neural_network(closes, highs, lows, params.get("period", 14))
+            elif iid == "volume_indicator":
+                result["volume"] = self.indicators.calculate_volume_indicator(historical, params.get("period", 20))
+            elif iid == "open_interest":
+                result["oi"] = self.indicators.calculate_oi_indicator(historical, params.get("period", 20))
             elif iid == "kama":
                 result["kama"] = self.indicators.calculate_kama(closes, params.get("fast_period", 10), params.get("slow_period", 30))
             elif iid == "hmm_regime":
@@ -294,10 +335,12 @@ class BacktestEngine:
             return cond_met
 
         # PRIORITY 2: Selected indicator-based signals (OR per indicator - any triggers, for 2-indicator backtest)
+        # Respect bullish/bearish mode per indicator (both by default)
+        modes = getattr(self, "ind_modes", {})
         if not pre_calc:
             return True
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
-            if historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx]:
+            if modes.get("supertrend","both") != "bearish" and historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx]:
                 return True
         if "macd" in pre_calc:
             m = pre_calc["macd"]
@@ -305,21 +348,21 @@ class BacktestEngine:
             sv = m["signal"][effective_idx] if effective_idx < len(m["signal"]) and m["signal"][effective_idx] is not None else 0
             pm = m["macd"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(m["macd"]) and m["macd"][effective_idx - 1] is not None else 0
             ps = m["signal"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(m["signal"]) and m["signal"][effective_idx - 1] is not None else 0
-            if mv > sv and pm <= ps:
+            if modes.get("macd","both") != "bearish" and mv > sv and pm <= ps:
                 return True
         if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
-            if pre_calc["rsi"][effective_idx] < 30:
+            if modes.get("rsi","both") != "bearish" and pre_calc["rsi"][effective_idx] < 30:
                 return True
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
-            if historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx]:
+            if modes.get("ema","both") != "bearish" and historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx]:
                 return True
         if "kama" in pre_calc and effective_idx < len(pre_calc["kama"]):
             kama_v = pre_calc["kama"][effective_idx]
-            if kama_v is not None and historical[effective_idx]["close_price"] > kama_v:
+            if modes.get("kama","both") != "bearish" and kama_v is not None and historical[effective_idx]["close_price"] > kama_v:
                 return True
         if "hmm_regime" in pre_calc:
             seq = pre_calc["hmm_regime"].get("state_sequence", [])
-            if effective_idx < len(seq) and seq[effective_idx] == "Bullish":
+            if seq and effective_idx < len(seq) and seq[effective_idx] == "Bullish":
                 return True
         if "dynamic_boll" in pre_calc:
             db = pre_calc["dynamic_boll"]
@@ -339,7 +382,19 @@ class BacktestEngine:
         if "vwap" in pre_calc:
             vw = pre_calc["vwap"]
             vwap_vals = vw.get("vwap", []) if isinstance(vw, dict) else []
-            if effective_idx < len(vwap_vals) and vwap_vals[effective_idx] is not None and historical[effective_idx]["close_price"] > vwap_vals[effective_idx]:
+            if modes.get("vwap","both") != "bearish" and effective_idx < len(vwap_vals) and vwap_vals[effective_idx] is not None and historical[effective_idx]["close_price"] > vwap_vals[effective_idx]:
+                return True
+        if "neural" in pre_calc:
+            sig = pre_calc["neural"].get("signal", [])
+            if modes.get("neural_network","both") != "bearish" and effective_idx < len(sig) and sig[effective_idx] == 1:
+                return True
+        if "volume" in pre_calc:
+            sig = pre_calc["volume"].get("signal", [])
+            if modes.get("volume_indicator","both") != "bearish" and effective_idx < len(sig) and sig[effective_idx] == 1:
+                return True
+        if "oi" in pre_calc:
+            sig = pre_calc["oi"].get("signal", [])
+            if modes.get("open_interest","both") != "bearish" and effective_idx < len(sig) and sig[effective_idx] == 1:
                 return True
         return False
 
@@ -373,17 +428,21 @@ class BacktestEngine:
                     cond_met = cond_met and cur_v < val and prev_v >= val
             return cond_met
 
-        # PRIORITY 2: Selected indicator-based signals (OR logic)
+        # PRIORITY 2: Selected indicator-based signals (OR logic) with bullish/bearish filter
+        modes = getattr(self, "ind_modes", {})
         sell = False
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
-            sell = sell or (historical[effective_idx]["close_price"] < pre_calc["supertrend"][effective_idx])
+            if modes.get("supertrend","both") != "bullish":
+                sell = sell or (historical[effective_idx]["close_price"] < pre_calc["supertrend"][effective_idx])
         if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
-            sell = sell or (pre_calc["rsi"][effective_idx] > 70)
+            if modes.get("rsi","both") != "bullish":
+                sell = sell or (pre_calc["rsi"][effective_idx] > 70)
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
-            sell = sell or (historical[effective_idx]["close_price"] < pre_calc["ema"][effective_idx])
+            if modes.get("ema","both") != "bullish":
+                sell = sell or (historical[effective_idx]["close_price"] < pre_calc["ema"][effective_idx])
         if "kama" in pre_calc and effective_idx < len(pre_calc["kama"]):
             kama_v = pre_calc["kama"][effective_idx]
-            if kama_v is not None:
+            if kama_v is not None and modes.get("kama","both") != "bullish":
                 sell = sell or (historical[effective_idx]["close_price"] < kama_v)
         if "hmm_regime" in pre_calc:
             seq = pre_calc["hmm_regime"].get("state_sequence", [])
@@ -402,6 +461,18 @@ class BacktestEngine:
         if "ml_signal" in pre_calc:
             prob = pre_calc["ml_signal"].get("probability", [])
             if effective_idx < len(prob) and prob[effective_idx] < 0.40:
+                sell = sell or True
+        if "neural" in pre_calc:
+            sig = pre_calc["neural"].get("signal", [])
+            if modes.get("neural_network","both") != "bullish" and effective_idx < len(sig) and sig[effective_idx] == -1:
+                sell = sell or True
+        if "volume" in pre_calc:
+            sig = pre_calc["volume"].get("signal", [])
+            if modes.get("volume_indicator","both") != "bullish" and effective_idx < len(sig) and sig[effective_idx] == -1:
+                sell = sell or True
+        if "oi" in pre_calc:
+            sig = pre_calc["oi"].get("signal", [])
+            if modes.get("open_interest","both") != "bullish" and effective_idx < len(sig) and sig[effective_idx] == -1:
                 sell = sell or True
         if not pre_calc:
             sell = True
@@ -558,6 +629,9 @@ class BacktestEngine:
         return None
 
     def _entry_premium(self, date, spot, strike, option_type):
+        key = f"{date}_{strike}_{option_type}_e"
+        if key in self.premium_cache:
+            return self.premium_cache[key]
         # 1) Real DB LTP (historical)
         row = Database.get_instance().fetch_one(
             "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
@@ -565,15 +639,21 @@ class BacktestEngine:
         )
         if row:
             if row["open_price"] and float(row["open_price"]) > 0:
-                return float(row["open_price"])
+                val = float(row["open_price"])
+                self.premium_cache[key] = val
+                return val
             if row["close_price"] and float(row["close_price"]) > 0:
-                return float(row["close_price"])
+                val = float(row["close_price"])
+                self.premium_cache[key] = val
+                return val
         # 2) Real LTP from live market (niftytrader.in) - for stocks with no DB option data
         try:
             from core.services.live_market_data import LiveMarketData
             live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type)
             if live and float(live) > 0:
-                return float(live)
+                val = float(live)
+                self.premium_cache[key] = val
+                return val
         except Exception:
             pass
         # 3) Nearest strike real LTP fallback
@@ -608,8 +688,13 @@ class BacktestEngine:
             from utils.helpers import black_scholes
             bs_price = black_scholes(spot, strike, dte, iv, option_type)
             if bs_price > 0:
-                return round(bs_price, 2)
-            return round(spot * 0.01, 2)
+                val = round(bs_price, 2)
+                self.premium_cache[key] = val
+                return val
+            val2 = round(spot * 0.01, 2)
+            self.premium_cache[key] = val2
+            return val2
+        self.premium_cache[key] = 1.0
         return 1.0
 
     def _get_expiry_type(self):
@@ -620,21 +705,30 @@ class BacktestEngine:
         return self._entry_premium(date, spot, strike, option_type)
 
     def _close_premium(self, date, spot, strike, option_type):
+        key = f"{date}_{strike}_{option_type}_c"
+        if key in self.premium_cache:
+            return self.premium_cache[key]
         row = Database.get_instance().fetch_one(
             "SELECT close_price, open_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
             [self.bt_symbol, date, strike, option_type],
         )
         if row:
             if row["close_price"] and float(row["close_price"]) > 0:
-                return float(row["close_price"])
+                val = float(row["close_price"])
+                self.premium_cache[key] = val
+                return val
             if row["open_price"] and float(row["open_price"]) > 0:
-                return float(row["open_price"])
+                val = float(row["open_price"])
+                self.premium_cache[key] = val
+                return val
         # Real live LTP fallback
         try:
             from core.services.live_market_data import LiveMarketData
             live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type)
             if live and float(live) > 0:
-                return float(live)
+                val = float(live)
+                self.premium_cache[key] = val
+                return val
         except Exception:
             pass
         # Nearest strike real LTP fallback
@@ -646,7 +740,9 @@ class BacktestEngine:
                 [self.bt_symbol, option_type, strike, step, date, strike],
             )
             if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
-                return float(row2["close_price"])
+                val = float(row2["close_price"])
+                self.premium_cache[key] = val
+                return val
         except Exception:
             pass
         # Black-Scholes fallback
@@ -656,8 +752,13 @@ class BacktestEngine:
             from utils.helpers import black_scholes
             bs_price = black_scholes(spot, strike, dte, iv, option_type)
             if bs_price > 0:
-                return round(bs_price, 2)
-            return round(spot * 0.01, 2)
+                val = round(bs_price, 2)
+                self.premium_cache[key] = val
+                return val
+            val2 = round(spot * 0.01, 2)
+            self.premium_cache[key] = val2
+            return val2
+        self.premium_cache[key] = 1.0
         return 1.0
 
     def _days_to_expiry(self, bar_date, expiry_type="weekly"):

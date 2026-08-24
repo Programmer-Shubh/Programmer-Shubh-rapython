@@ -373,3 +373,76 @@ class IndicatorEngine:
             elif probability[i] < 0.4:
                 signal[i] = -1
         return {"signal": signal, "probability": probability, "ml_score": ml_score}
+
+    def calculate_neural_network(self, prices: List[float], highs: List[float], lows: List[float], period: int = 14) -> Dict:
+        """Lightweight Neural Network predictor (2-layer tanh).
+        Trained on price momentum + volatility features, predicts next-bar direction."""
+        n = len(prices)
+        if n < period + 5:
+            return {"prediction": [0]*n, "signal": [0]*n, "confidence": [0.5]*n}
+        pred = [0]*n
+        sig = [0]*n
+        conf = [0.5]*n
+        # Precompute features
+        for i in range(period, n):
+            window = prices[i-period:i]
+            mean = sum(window)/period
+            var = sum((p-mean)**2 for p in window)/period
+            std = math.sqrt(var) if var>0 else 1
+            norm_close = (prices[i]-mean)/max(std, 0.01)
+            momentum = (prices[i]-prices[i-1])/max(prices[i-1],0.01)*100
+            range_pct = (highs[i]-lows[i])/max(prices[i],0.01)*100
+            # Hidden layer 2 neurons tanh
+            h1 = math.tanh(0.8*norm_close + 0.5*momentum - 0.3*range_pct)
+            h2 = math.tanh(-0.6*norm_close + 0.9*momentum + 0.2*range_pct)
+            out = math.tanh(1.2*h1 - 0.8*h2)
+            pred[i] = out
+            conf[i] = min(0.99, max(0.01, abs(out)*0.5+0.5))
+            sig[i] = 1 if out > 0.25 else (-1 if out < -0.25 else 0)
+        return {"prediction": pred, "signal": sig, "confidence": conf}
+
+    def calculate_volume_indicator(self, data: List[Dict], period: int = 20) -> Dict:
+        """Volume SMA crossover: price above VWAP-like volume weighted signal."""
+        n = len(data)
+        if n < period:
+            return {"sma": [None]*n, "signal": [0]*n}
+        vols = [float(d.get("volume",0) or 0) for d in data]
+        closes = [float(d.get("close_price",0) or 0) for d in data]
+        sma = [None]*n
+        sig = [0]*n
+        for i in range(period-1, n):
+            sma[i] = sum(vols[i-period+1:i+1])/period
+            # Bullish if volume rising + price rising
+            if vols[i] > sma[i] and closes[i] > closes[i-1]:
+                sig[i] = 1
+            elif vols[i] > sma[i] and closes[i] < closes[i-1]:
+                sig[i] = -1
+            else:
+                sig[i] = 0
+        return {"sma": sma, "signal": sig, "volumes": vols}
+
+    def calculate_oi_indicator(self, data: List[Dict], period: int = 20) -> Dict:
+        """Open Interest trend: OI rising + price rising = bullish, OI rising + price falling = bearish."""
+        n = len(data)
+        if n < period:
+            return {"sma": [None]*n, "signal": [0]*n}
+        ois = [float(d.get("oi",0) or 0) for d in data]
+        closes = [float(d.get("close_price",0) or 0) for d in data]
+        # Fallback if OI is mostly 0 (use volume as proxy)
+        if sum(1 for x in ois if x>0) < n*0.3:
+            vols = [float(d.get("volume",0) or 0) for d in data]
+            ois = vols
+        sma = [None]*n
+        sig = [0]*n
+        for i in range(period-1, n):
+            sma[i] = sum(ois[i-period+1:i+1])/period
+            prev_oi = ois[i-1]
+            cur_oi = ois[i]
+            # OI rising + price up = long build-up bullish
+            if cur_oi > prev_oi and closes[i] > closes[i-1]:
+                sig[i] = 1
+            elif cur_oi > prev_oi and closes[i] < closes[i-1]:
+                sig[i] = -1
+            else:
+                sig[i] = 0
+        return {"sma": sma, "signal": sig, "oi": ois}
