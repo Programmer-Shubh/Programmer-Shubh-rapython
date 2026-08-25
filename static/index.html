@@ -559,13 +559,13 @@
         try{
             const p=await A('/api/dashboard/portfolio');
             if(p.positions&&p.positions.length){
-                let h='<table><tr><th>#</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Side</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
+                let h='<table><tr><th>#</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
                 p.positions.forEach(t=>{
                     const isLive=t.trade_mode==='live';
                     const curPrice = (t.current_price!=null? t.current_price : t.entry_price);
                     const pnl = (t.pnl!=null? t.pnl : 0);
-                    const typeBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
-                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${typeBadge}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
+                    const sideBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
+                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${t.strike}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
                 });
                 h+='</table>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
             }else{
