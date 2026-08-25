@@ -586,7 +586,7 @@
             document.getElementById('c-date').value='';
             document.getElementById('c-exp').innerHTML='<option>Live</option>';
             document.getElementById('c-spot').style.display='block';
-            document.getElementById('c-spot').innerHTML='<span class="badge bg-danger text-white">LIVE</span> <span class="badge bg-info text-dark">Spot: ₹'+c.spot.toFixed(2)+' | ATM: '+c.atm+'</span> <span class="badge bg-info text-dark ms-2">Source: NiftyTrader</span>';
+            document.getElementById('c-spot').innerHTML='<span class="badge bg-danger text-white">LIVE</span> <span class="badge bg-info text-dark">Spot: \u20B9'+c.spot.toFixed(2)+' | ATM: '+c.atm+'</span> <span class="badge bg-info text-dark ms-2">Source: '+(c.source||'live')+'</span>';
         }else{
             const d=document.getElementById('c-date').value,e=document.getElementById('c-exp').value;
             if(!d||!e)return;

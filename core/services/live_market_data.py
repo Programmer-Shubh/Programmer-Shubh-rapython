@@ -17,10 +17,26 @@ _CHAIN_CACHE_TTL = 5
 _SYMBOL_MAP = {"NIFTY": "nifty", "BANKNIFTY": "banknifty", "FINNIFTY": "finnifty", "MIDCPNIFTY": "midcpnifty"}
 
 _HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Cache-Control": "max-age=0",
+}
+
+_DATA_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "application/json",
     "Referer": "https://www.niftytrader.in/",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
 }
 
 
@@ -73,20 +89,26 @@ class LiveMarketData:
     def _fetch_chain_page(self, symbol: str) -> dict:
         ephem = _SYMBOL_MAP.get(symbol.upper(), symbol.lower())
         home_url = f"https://www.niftytrader.in/nse-option-chain/{ephem}"
-        session = requests.Session()
-        session.headers.update(_HEADERS)
-        home_resp = session.get(home_url, timeout=12)
-        if home_resp.status_code != 200:
-            return None
-        build_id_match = re.search(r'"buildId":"([a-zA-Z0-9_]+)"', home_resp.text)
-        if not build_id_match:
-            return None
-        build_id = build_id_match.group(1)
-        data_url = f"https://www.niftytrader.in/_next/data/{build_id}/nse-option-chain/{ephem}.json"
-        data_resp = session.get(data_url, timeout=15)
-        if data_resp.status_code != 200:
-            return None
-        return data_resp.json()
+        for attempt in range(3):
+            try:
+                session = requests.Session()
+                session.headers.update(_HEADERS)
+                # First visit home page to get cookies + buildId
+                home_resp = session.get(home_url, timeout=12, verify=True)
+                if home_resp.status_code != 200:
+                    continue
+                build_id_match = re.search(r'"buildId":"([a-zA-Z0-9_\-]+)"', home_resp.text)
+                if not build_id_match:
+                    continue
+                build_id = build_id_match.group(1)
+                # Fetch JSON data with proper referer + cookies
+                data_url = f"https://www.niftytrader.in/_next/data/{build_id}/nse-option-chain/{ephem}.json"
+                data_resp = session.get(data_url, headers=_DATA_HEADERS, timeout=15, verify=True)
+                if data_resp.status_code == 200:
+                    return data_resp.json()
+            except Exception:
+                continue
+        return None
 
     def fetch_live_from_nse(self, symbol: str) -> dict:
         """Fetch live spot + market data for a symbol from niftytrader.in (single source)."""
