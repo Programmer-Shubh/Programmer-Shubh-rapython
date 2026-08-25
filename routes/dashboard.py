@@ -11,6 +11,47 @@ _YAHOO_INDEX_MAP = {
     "FINNIFTY": "^CNXFINANCE", "MIDCPNIFTY": "^NSEMDCP50",
 }
 
+_NSE_INDEX_MAP = {
+    "NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
+    "FINNIFTY": "NIFTY FINANCIAL SERVICES", "MIDCPNIFTY": "NIFTY MIDCAP SELECT",
+}
+
+_NSE_SPOT_CACHE = {}
+_NSE_SPOT_TTL = 30
+
+
+def _fetch_nse_spot_all():
+    """Fetch real spot prices for all indices from NSE India /api/allIndices."""
+    import time
+    now = time.time()
+    if _NSE_SPOT_CACHE and now - _NSE_SPOT_CACHE.get("_ts", 0) < _NSE_SPOT_TTL:
+        return _NSE_SPOT_CACHE
+    try:
+        import requests
+        s = requests.Session()
+        s.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+        })
+        s.get("https://www.nseindia.com/api/allIndices", timeout=10)
+        r = s.get("https://www.nseindia.com/api/allIndices", timeout=10, headers={"Accept": "application/json"})
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            for item in data:
+                idx_name = item.get("index", "")
+                for sym, nse_name in _NSE_INDEX_MAP.items():
+                    if idx_name == nse_name:
+                        _NSE_SPOT_CACHE[sym] = {
+                            "spot": float(item.get("last", 0)),
+                            "change": float(item.get("percentChange", 0)),
+                            "high": float(item.get("high", 0)),
+                            "low": float(item.get("low", 0)),
+                        }
+            _NSE_SPOT_CACHE["_ts"] = now
+    except Exception:
+        pass
+    return _NSE_SPOT_CACHE
+
 
 def _fetch_yahoo_spot(symbol: str) -> float:
     """Fetch live spot from Yahoo Finance (fast, free)."""
@@ -51,6 +92,7 @@ def get_spots():
     live = LiveMarketData()
     symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
     result = {}
+    # 1) Try live NiftyTrader cache
     live_data_map = live.get_live_spots_cached(symbols)
     for sym in symbols:
         live_data = live_data_map.get(sym)
@@ -64,6 +106,19 @@ def get_spots():
                 "source": "live",
             }
             continue
+        # 2) Try NSE India /api/allIndices (real, always works)
+        nse_data = _fetch_nse_spot_all().get(sym)
+        if nse_data and nse_data["spot"] > 0:
+            result[sym] = {
+                "spot": nse_data["spot"],
+                "formatted": f"INR {nse_data['spot']:,.2f}",
+                "change": round(nse_data["change"], 2),
+                "high": nse_data["high"],
+                "low": nse_data["low"],
+                "source": "nse",
+            }
+            continue
+        # 3) Try Yahoo Finance
         spot, source = _free_latest_spot(sym)
         if spot > 0:
             change_pct = _free_change_pct(sym, spot)
@@ -71,16 +126,13 @@ def get_spots():
                 "spot": round(spot, 2),
                 "formatted": f"INR {spot:,.2f}",
                 "change": round(change_pct, 2),
-                "high": 0,
-                "low": 0,
+                "high": 0, "low": 0,
                 "source": source,
             }
         else:
             result[sym] = {
-                "spot": None,
-                "formatted": "No Data",
-                "change": 0, "high": 0, "low": 0,
-                "source": "na",
+                "spot": None, "formatted": "No Data",
+                "change": 0, "high": 0, "low": 0, "source": "na",
             }
     return result
 
