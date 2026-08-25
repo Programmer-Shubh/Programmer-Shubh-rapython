@@ -246,7 +246,6 @@ def _fetch_and_store_nselib(symbol, start_date, end_date):
 @router.post("/run")
 def run_backtest(req: BacktestRequest):
     try:
-        bhav = BhavcopyModel()
         symbol = (req.symbol or "NIFTY").upper()
         start_date = req.start_date or "2025-08-01"
         end_date = req.end_date or "2026-08-20"
