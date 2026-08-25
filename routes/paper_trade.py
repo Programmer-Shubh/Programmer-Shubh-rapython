@@ -175,6 +175,8 @@ def get_history():
             {
                 "id": t["id"],
                 "date": t["entry_date"],
+                "entry_date": t["entry_date"],
+                "exit_date": t.get("exit_date", ""),
                 "symbol": t["symbol"],
                 "option_type": t["option_type"],
                 "strike": t["strike_price"],

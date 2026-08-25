@@ -5,7 +5,7 @@ from core.models.bhavcopy_model import BhavcopyModel
 from core.models.trade_model import TradeModel
 from core.services.live_market_data import LiveMarketData
 from core.services.transaction_costs import TransactionCosts
-from utils.helpers import get_lot_size, get_strike_step
+from utils.helpers import get_lot_size, get_strike_step, black_scholes
 
 router = APIRouter()
 
@@ -195,9 +195,15 @@ def place_trade(req: TradeRequest):
                 m = re.search(r'data-last-price="([^"]+)"', gr.text)
                 if m:
                     spot_g = float(m.group(1).replace(",", ""))
-                    if spot_g > 0:
-                        # Real estimate only if live spot found; use 1% of spot as premium (realistic, not synthetic BS)
-                        premium = round(spot_g * 0.01, 2)
+                    if spot_g > 0 and req.strike > 0:
+                        # Realistic Black-Scholes premium (weekly expiry, IV ~25%)
+                        try:
+                            expiry_days = 7
+                            if req.expiry and "monthly" in req.expiry.lower():
+                                expiry_days = 28
+                            premium = black_scholes(spot_g, req.strike, expiry_days/365, 0.25, req.option_type)
+                        except Exception:
+                            premium = round(spot_g * 0.015, 2)
         except Exception:
             pass
     if premium <= 0:
@@ -217,12 +223,30 @@ def place_trade(req: TradeRequest):
                     spot_est = float(live_spot['spot'])
             except Exception:
                 pass
-        if spot_est > 0:
-            # Real spot exists - use real premium estimate (1% of real spot, not Black-Scholes synthetic)
-            # This is derived from live Google/niftytrader spot, so realistic
-            premium = round(spot_est * 0.01, 2)
-            if premium < 2:
-                premium = 2.0
+        if spot_est > 0 and req.strike > 0:
+            # Realistic Black-Scholes premium for every option (no flat 1% synthetic)
+            try:
+                expiry_days = 7
+                if req.expiry and "monthly" in req.expiry.lower():
+                    expiry_days = 28
+                # Try parse expiry date if it's YYYY-MM-DD
+                elif req.expiry and "-" in req.expiry:
+                    try:
+                        import datetime as _dt
+                        exp_d = _dt.datetime.strptime(req.expiry, "%Y-%m-%d")
+                        today = _dt.datetime.now()
+                        diff = (exp_d - today).days
+                        if diff > 0:
+                            expiry_days = min(45, max(2, diff))
+                    except Exception:
+                        pass
+                premium = black_scholes(spot_est, req.strike, expiry_days/365, 0.25, req.option_type)
+                if premium < 1:
+                    premium = 1.0
+            except Exception:
+                premium = round(spot_est * 0.015, 2)
+                if premium < 2:
+                    premium = 2.0
         if premium <= 0:
             return {"error": "No premium data for this strike"}
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
