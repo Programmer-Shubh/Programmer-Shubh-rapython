@@ -932,20 +932,37 @@
     }
     async function robotStart(){
         const sym=document.getElementById('r-sym').value;
-        const order=document.getElementById('r-order').value;
-        let optR, txnR;
-        if(order==='AUTO'){ optR='CE'; txnR='BUY'; } else { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
+        let order=document.getElementById('r-order').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
         const sl=parseFloat(document.getElementById('r-sl').value)||500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
         const strikeType=document.getElementById('r-strike').value;
         const expiry=document.getElementById('r-expiry').value;
-        document.getElementById('robot-status').innerHTML='<p class="text-success"><span class="spinner"></span> Starting '+sym+' '+order+' '+strikeType+' '+expiry+' SL ₹'+sl+' Target ₹'+tp+'...</p>';
+        let optR, txnR;
+        if(order==='AUTO'){
+            // Auto signal: fetch live signal to decide CE vs PE
+            try{
+                const sig=await A('/api/scanner/st-macd/'+sym);
+                if(sig && sig.type==='SELL'){ optR='PE'; txnR='BUY'; order='PE-BUY (AUTO Bearish)'; }
+                else if(sig && sig.type==='BUY'){ optR='CE'; txnR='BUY'; order='CE-BUY (AUTO Bullish)'; }
+                else { // fallback to bullish
+                    const vwap=await A('/api/scanner/vwap/'+sym);
+                    if(vwap && vwap.type==='SHORT'){ optR='PE'; txnR='BUY'; order='PE-BUY (AUTO)'; } else { optR='CE'; txnR='BUY'; order='CE-BUY (AUTO)'; }
+                }
+            }catch(e){ optR='CE'; txnR='BUY'; }
+        } else { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
+        // Compute ATM strike for display (fallback if backend expects strike 0 = ATM)
+        let strikeVal=0;
         try{
-            const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym, option_type:optR, strike:0, expiry:expiry, date:new Date().toISOString().split('T')[0], transaction_type:txnR, quantity:lots, stop_loss:sl, take_profit:tp })});
+            const live=await A('/api/chain/live/'+sym);
+            if(live && live.spot && live.atm){ strikeVal=live.atm; if(document.getElementById('r-strike').value==='OTM') strikeVal = optR==='CE' ? strikeVal + (sym==='BANKNIFTY'?100:50) : strikeVal - (sym==='BANKNIFTY'?100:50); }
+        }catch(e){ strikeVal=0; }
+        document.getElementById('robot-status').innerHTML='<p class="text-success"><span class="spinner"></span> Starting '+sym+' '+order+' '+strikeType+' '+expiry+' SL ₹'+sl+' Target ₹'+tp+' (Strike '+(strikeVal||'ATM')+')...</p>';
+        try{
+            const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym, option_type:optR, strike:strikeVal, expiry:expiry, date:new Date().toISOString().split('T')[0], transaction_type:txnR, quantity:lots, stop_loss:sl, take_profit:tp })});
             if(r.error) document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+r.error+'</p>';
-            else document.getElementById('robot-status').innerHTML='<p class="text-success">Robot started! Trade #'+(r.trade_id||'')+' '+sym+' '+order+' @ ₹'+(r.entry_price||'')+' SL ₹'+sl+' Target ₹'+tp+' — check Trading Center</p>';
-        }catch(e){document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+e.message+'</p>';}
+            else document.getElementById('robot-status').innerHTML='<p class="text-success">Robot started! Trade #'+(r.trade_id||'')+' '+sym+' '+order+' @ ₹'+(r.entry_price||'')+' (Strike '+strikeVal+') SL ₹'+sl+' Target ₹'+tp+' — check Trading Center</p>';
+        }catch(e){document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+e.message+'</p>'; console.error(e);}
     }
     async function robotSave(){
         const sym=document.getElementById('r-sym').value;
