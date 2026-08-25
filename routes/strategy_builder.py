@@ -266,7 +266,7 @@ def run_backtest(req: BacktestRequest):
         if req.take_profit is not None:
             risk_in["daily_take_profit"] = float(req.take_profit)
         if "max_trades_per_day" not in risk_in:
-            risk_in["max_trades_per_day"] = 1
+            risk_in["max_trades_per_day"] = 3
         # Normalize legs + handle presets (Bear Call, Bull Put, Bear Put, Iron Condor)
         raw_legs = req.legs or []
         preset = (req.strategy_preset or advanced_in.get("preset") or "").lower()

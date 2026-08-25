@@ -10,7 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
-        body{background:#f0f2f5;color:#212529;font-family:'Segoe UI',system-ui,sans-serif;font-size:14px}
+        body{background:#f0f2f5;color:#212529;font-family:'Segoe UI',system-ui,sans-serif;font-size:15px}
         .topbar{background:linear-gradient(135deg,#0d6efd 0%,#6610f2 50%,#0dcaf0 100%);padding:10px 24px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 4px 12px rgba(13,110,253,0.3)}
         .topbar h1{color:#fff;font-size:20px;font-weight:800;letter-spacing:-0.5px;text-shadow:0 1px 2px rgba(0,0,0,0.2)}
         .topbar h1 small{font-weight:400;font-size:10px;background:rgba(255,255,255,0.2);padding:2px 6px;border-radius:10px;margin-left:8px;vertical-align:middle}
@@ -28,12 +28,12 @@
         .card-body{padding:16px}
         .row{display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap}
         .col{flex:1;min-width:200px}
-        .stat-card{text-align:center;padding:12px}
-        .stat-card .label{color:#6c757d;font-size:12px}
-        .stat-card .value{font-size:22px;font-weight:700}
+        .stat-card{text-align:center;padding:14px}
+        .stat-card .label{color:#6c757d;font-size:13px}
+        .stat-card .value{font-size:24px;font-weight:800}
         table{width:100%;border-collapse:collapse}
-        th{background:#f8f9fa;color:#495057;font-size:11px;text-transform:uppercase;padding:8px 10px;text-align:left;border-bottom:2px solid #dee2e6}
-        td{padding:6px 10px;border-bottom:1px solid #f0f0f0;font-size:12px}
+        th{background:#f8f9fa;color:#495057;font-size:13px;text-transform:uppercase;padding:10px 12px;text-align:left;border-bottom:2px solid #dee2e6}
+        td{padding:8px 12px;border-bottom:1px solid #f0f0f0;font-size:14px}
         tr:hover{background:#f8f9fa}
         .price-up{color:#198754;font-weight:600}
         .price-down{color:#dc3545;font-weight:600}
@@ -82,8 +82,8 @@
         .indicator-card h6{font-size:13px;font-weight:600;margin-bottom:4px}
         .indicator-card p{font-size:11px;color:#6c757d;margin:0}
         .indicator-card input[type=number]{width:80px}
-        .chain-table td{padding:2px 6px;font-size:11px}
-        .chain-table th{padding:4px 6px;font-size:10px}
+        .chain-table td{padding:4px 8px;font-size:13px}
+        .chain-table th{padding:6px 8px;font-size:12px}
         .chain-table tbody tr{border-bottom:1px solid #f0f0f0}
         .chain-table tbody tr:nth-child(even){background:#fafafa}
         .chain-table .btn-sm{padding:1px 6px;font-size:10px}
@@ -91,12 +91,12 @@
         .chain-form .form-label{margin-bottom:2px;font-size:11px}
         .chain-controls{padding:8px}
         .chain-table-card{margin-bottom:8px}
-        .stat-card-sm{text-align:center;padding:8px}
-        .stat-card-sm .label{color:#6c757d;font-size:10px}
-        .stat-card-sm .value{font-size:16px;font-weight:700}
-        .stat-card-sm .source{color:#6c757d;font-size:9px}
-        .bt-table td{padding:2px 6px;font-size:10px}
-        .bt-table th{padding:4px 6px;font-size:9px;font-weight:600}
+        .stat-card-sm{text-align:center;padding:10px}
+        .stat-card-sm .label{color:#6c757d;font-size:12px}
+        .stat-card-sm .value{font-size:18px;font-weight:800}
+        .stat-card-sm .source{color:#6c757d;font-size:10px}
+        .bt-table td{padding:6px 8px;font-size:13px}
+        .bt-table th{padding:6px 8px;font-size:12px;font-weight:700}
         .bt-table tbody tr{border-bottom:1px solid #f0f0f0}
         .bt-table tbody tr:nth-child(even){background:#fafafa}
         .bt-table tbody tr:hover{background:#f0f7ff}
@@ -435,7 +435,7 @@
                         <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:14"></div>
                         <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm"></div>
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm"></div>
-                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="1" min="1" max="10"></div>
+                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="3" min="1" max="10"></div>
                         <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button class="btn btn-sm btn-success flex-fill" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
                     </div>
                     <div class="row g-2 mt-2">

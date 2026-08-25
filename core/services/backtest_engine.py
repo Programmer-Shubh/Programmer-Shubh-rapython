@@ -39,6 +39,9 @@ class BacktestEngine:
         self._entry_time = entry_time
         self._exit_time = exit_time
         max_holding = int(advanced_options.get("max_holding_bars", 20))
+        # Intraday: hold max 5 bars for more trades like Quantman (positional holds longer)
+        if trade_mode == "intraday":
+            max_holding = min(max_holding, 5)
         # BTST holds overnight: increase max_holding for BTST
         if advanced_options.get("trade_mode") == "btst":
             max_holding = max(max_holding, 5)
@@ -351,7 +354,7 @@ class BacktestEngine:
             if modes.get("macd","both") != "bearish" and mv > sv and pm <= ps:
                 return True
         if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
-            if modes.get("rsi","both") != "bearish" and pre_calc["rsi"][effective_idx] < 30:
+            if modes.get("rsi","both") != "bearish" and pre_calc["rsi"][effective_idx] < 45:
                 return True
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
             if modes.get("ema","both") != "bearish" and historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx]:
@@ -436,7 +439,7 @@ class BacktestEngine:
                 sell = sell or (historical[effective_idx]["close_price"] < pre_calc["supertrend"][effective_idx])
         if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
             if modes.get("rsi","both") != "bullish":
-                sell = sell or (pre_calc["rsi"][effective_idx] > 70)
+                sell = sell or (pre_calc["rsi"][effective_idx] > 55)
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
             if modes.get("ema","both") != "bullish":
                 sell = sell or (historical[effective_idx]["close_price"] < pre_calc["ema"][effective_idx])
