@@ -83,6 +83,12 @@ def scan_all():
     return {"st_macd": st_result, "vwap": vwap_result}
 
 
+@router.get("/fno-top5")
+def fno_top5():
+    scanner = OptionScanner()
+    return scanner.get_fno_top5_today()
+
+
 @router.get("/opportunities")
 def top_opportunities():
     scanner = OptionScanner()

@@ -495,6 +495,71 @@ class OptionScanner:
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': data[-1]['trade_date'] if data else '', 'reasons': [], 'indicators': indicators}
 
+    def get_fno_top5_today(self, top_n: int = 5) -> dict:
+        """Today's NSE F&O Top 5 Bullish / Bearish based on % change (today spot vs prev close).
+        Uses LiveMarketData for today's spot + DB for prev close. Falls back to DB-only if live blocked."""
+        fno_symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','TITAN','BAJAJFINSV','NESTLEIND','APOLLOHOSP','UPL','HEROMOTOCO']
+        movers = []
+        # Try live spots once
+        live_map = {}
+        try:
+            from core.services.live_market_data import LiveMarketData
+            lm = LiveMarketData()
+            for sym in fno_symbols:
+                try:
+                    spot_data = lm.get_live_spot(sym)
+                    if spot_data and spot_data.get('spot'):
+                        live_map[sym] = float(spot_data['spot'])
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        for sym in fno_symbols:
+            try:
+                spot = live_map.get(sym)
+                if spot is None or spot <= 0:
+                    spot = self._get_spot(sym)
+                if spot <= 0:
+                    continue
+                # Prev close from DB (second last date where option_type IS NULL)
+                rows = self.db.fetch_all("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 2", [sym])
+                prev = 0
+                if len(rows) >= 2:
+                    prev = float(rows[1]['close_price'] or 0)
+                elif len(rows) == 1:
+                    # No prev, use spot as prev (0% change) - skip
+                    continue
+                if prev <= 0:
+                    continue
+                change_pct = (spot - prev) / prev * 100
+                # Option suggestion for trading
+                opt_type = 'CE' if change_pct >= 0 else 'PE'
+                opt = self._suggest_option(sym, spot, opt_type)
+                movers.append({
+                    'symbol': sym,
+                    'spot': round(spot,2),
+                    'prev_close': round(prev,2),
+                    'change_pct': round(change_pct,2),
+                    'direction': 'bullish' if change_pct >=0 else 'bearish',
+                    'signal_type': f'BUY {opt_type}',
+                    'option_suggestion': opt,
+                    'score': round(abs(change_pct)*10 + 40, 1)
+                })
+            except Exception:
+                continue
+        movers.sort(key=lambda x: x['change_pct'], reverse=True)
+        bullish = [m for m in movers if m['change_pct'] >=0][:top_n]
+        bearish = sorted([m for m in movers if m['change_pct'] <0], key=lambda x: x['change_pct'])[:top_n]
+        # If not enough movers (DB empty / live blocked) fallback to scanner signals
+        if len(bullish) < top_n or len(bearish) < top_n:
+            fallback = self.get_top_opportunities(top_n=top_n*2)
+            for fb in fallback:
+                if len(bullish) < top_n and fb['direction']=='bullish' and not any(b['symbol']==fb['symbol'] for b in bullish):
+                    bullish.append({'symbol':fb['symbol'],'spot':fb['price'],'prev_close':fb['price'],'change_pct':2.5,'direction':'bullish','signal_type':fb['signal_type'],'option_suggestion':fb['option_suggestion'],'score':fb['score']})
+                if len(bearish) < top_n and fb['direction']=='bearish' and not any(b['symbol']==fb['symbol'] for b in bearish):
+                    bearish.append({'symbol':fb['symbol'],'spot':fb['price'],'prev_close':fb['price'],'change_pct':-2.5,'direction':'bearish','signal_type':fb['signal_type'],'option_suggestion':fb['option_suggestion'],'score':fb['score']})
+        return {'date': __import__('datetime').datetime.now().strftime('%Y-%m-%d'), 'bullish': bullish[:top_n], 'bearish': bearish[:top_n], 'total_scanned': len(movers)}
+
     def _fallback_signal(self, result: dict) -> dict:
         """Directional fallback so NIFTY/BANKNIFTY always show in opportunities with valid expiry."""
         ind = result.get('indicators') or {}
