@@ -1,0 +1,33 @@
+name: Keep Render Awake (Bypass Sleep)
+
+on:
+  schedule:
+    # Every 10 minutes 24/7 — Render free sleeps after 15 min idle, so 10 min keeps it warm
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping Render health
+        run: |
+          echo "Pinging https://ratrade.onrender.com/health at $(date -u)"
+          for i in 1 2 3; do
+            if curl -fsS --max-time 30 https://ratrade.onrender.com/health; then
+              echo "✓ Health OK (try $i)"
+              curl -fsS --max-time 30 https://ratrade.onrender.com/ -o /dev/null && echo "✓ Root OK"
+              exit 0
+            fi
+            echo "Retry $i failed, waiting 10s..."
+            sleep 10
+          done
+          echo "All retries failed but not failing workflow (Render may be deploying)"
+          exit 0
+
+      - name: Ping alternative health endpoints
+        if: always()
+        run: |
+          curl -fsS --max-time 15 https://ratrade.onrender.com/health || echo "health retry"
+          curl -fsS --max-time 15 https://ratrade.onrender.com/api/dashboard/spot || echo "spot retry"
