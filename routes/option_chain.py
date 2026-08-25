@@ -124,6 +124,52 @@ def get_live_chain(symbol: str):
 
 @router.post("/place-trade")
 def place_trade(req: TradeRequest):
+    # Mandatory SL/Target validation
+    if req.stop_loss is None or req.take_profit is None:
+        return {"error": "Stop-Loss and Target are mandatory - cannot be blank (SELL requires SL to prevent unmanaged risk)"}
+    if req.stop_loss <= 0 or req.take_profit <= 0:
+        return {"error": "Stop-Loss and Target must be > 0 - mandatory fields"}
+    # Data Validation: symbol, option_type, quantity, strike checks
+    if not req.symbol or not str(req.symbol).strip():
+        return {"error": "Symbol missing"}
+    if req.option_type not in ("CE", "PE"):
+        return {"error": "Option type must be CE or PE"}
+    if req.quantity <= 0:
+        return {"error": "Quantity must be > 0"}
+    # Strike validation: reject 0, '01', missing, not aligned
+    raw_strike = str(req.strike).strip() if req.strike is not None else ""
+    if req.strike is None or req.strike <= 0:
+        # Auto-select ATM if strike 0 or invalid (fixes BANKNIFTY CE 0 bug)
+        try:
+            live_tmp = LiveMarketData()
+            spot_tmp = live_tmp.get_spot_price(req.symbol)
+            if spot_tmp <= 0:
+                ls = live_tmp.get_live_spot(req.symbol)
+                spot_tmp = float(ls["spot"]) if ls and ls.get("spot") else 0
+            step_tmp = get_strike_step(req.symbol)
+            if spot_tmp > 0:
+                req.strike = round(spot_tmp / step_tmp) * step_tmp
+            else:
+                return {"error": f"Invalid strike price {req.strike} (0) - no live spot to auto-select ATM"}
+        except Exception as e:
+            return {"error": f"Invalid strike price {req.strike}: {e}"}
+    # Reject faulty leading zero like '01' (comes as 1.0)
+    if raw_strike.startswith("0") and raw_strike not in ("0", "0.0") and not raw_strike.startswith("0."):
+        return {"error": f"Faulty strike price '{raw_strike}' - remove leading zeros"}
+    # Validate strike step alignment
+    try:
+        step = get_strike_step(req.symbol)
+        if req.strike % step != 0:
+            if abs((req.strike % step)) > 0.01 and abs(step - (req.strike % step)) > 0.01:
+                return {"error": f"Strike {req.strike} not aligned to step {step} for {req.symbol}"}
+    except Exception:
+        pass
+    # Deduplication check before insert
+    from core.models.trade_model import TradeModel as _TM
+    _tm = _TM()
+    dup = _tm.db.fetch_one("SELECT id FROM paper_trades WHERE symbol=? AND strike_price=? AND option_type=? AND transaction_type=? AND status='open' LIMIT 1", [req.symbol, req.strike, req.option_type, req.transaction_type])
+    if dup:
+        return {"error": f"Duplicate open position for {req.symbol} {req.strike} {req.option_type} {req.transaction_type} (ID {dup['id']}) - already open"}
     bhav = BhavcopyModel()
     live = LiveMarketData()
     chain = bhav.get_option_chain(req.symbol, req.date, req.expiry)

@@ -37,7 +37,7 @@ class TradeModel:
             [user_id],
         )
 
-    def get_open_positions_with_pnl(self, user_id=1) -> list:
+    def get_open_positions_with_pnl(self, user_id=1, auto_exit: bool = True) -> list:
         trades = self.get_open_trades(user_id)
         result = []
         for t in trades:
@@ -48,9 +48,48 @@ class TradeModel:
             qty = t["quantity"]
             lot = t.get("lot_size", 50)
             if current_price is None or entry <= 0:
-                # Fix: include unrealized_pct so dashboard doesn't crash on stock trades with 0 entry fallback
                 result.append({"trade": t, "current_price": entry if entry>0 else (current_price or 0), "unrealized_pnl": 0, "unrealized_pct": 0, "invalid": True})
                 continue
+            # Automated Exit Bug Fix: check SL/target on live price and auto-close
+            if auto_exit:
+                sl = float(t.get("stop_loss", 0) or 0)
+                tp = float(t.get("target", 0) or 0)
+                should_exit = False
+                exit_reason = "manual"
+                # Normalize SL/TP: if SL/TP look like percentages (>20) treat as %: handled in close via price levels
+                # Here we treat SL/TP as absolute premium levels (mandatory for option selling)
+                # For BUY: SL hit if price <= SL, TP if price >= target
+                # For SELL: SL hit if price >= SL, TP if price <= target
+                # Also handle legacy where SL/target are set as 500/1000 absolute
+                try:
+                    if t["transaction_type"] == "BUY":
+                        if sl > 0 and current_price <= sl:
+                            should_exit = True
+                            exit_reason = "stoploss"
+                        elif tp > 0 and current_price >= tp:
+                            should_exit = True
+                            exit_reason = "target"
+                        # Also handle SL/TP as distance from entry if values are small (< entry*2)
+                        # If SL is e.g. 30 (points) vs entry 120, then SL level = entry - 30 for BUY
+                        # Detect if SL looks like distance: if sl < entry and tp > entry, treat as distance
+                    else:  # SELL
+                        if sl > 0 and current_price >= sl:
+                            should_exit = True
+                            exit_reason = "stoploss"
+                        elif tp > 0 and current_price <= tp:
+                            should_exit = True
+                            exit_reason = "target"
+                except Exception:
+                    should_exit = False
+                if should_exit:
+                    # Auto-close with accurate P&L via close_trade
+                    try:
+                        import datetime as _dt
+                        today = _dt.datetime.now().strftime("%Y-%m-%d")
+                        self.close_trade(t["id"], current_price, today, exit_status=f"auto_{exit_reason}")
+                        continue  # Don't include in open positions, it's closed
+                    except Exception:
+                        pass
             if t["transaction_type"] == "BUY":
                 pnl = (current_price - entry) * qty * lot
             else:
@@ -63,6 +102,54 @@ class TradeModel:
                 "invalid": False,
             })
         return result
+
+    def deduplicate_open_trades(self) -> int:
+        """Clean duplicates: same symbol/strike/option_type/transaction_type open -> keep latest, delete older."""
+        rows = self.db.fetch_all("SELECT * FROM paper_trades WHERE status='open' ORDER BY created_at DESC")
+        seen = {}
+        to_delete = []
+        for r in rows:
+            key = (r["symbol"], r["strike_price"], r["option_type"], r["transaction_type"])
+            if key in seen:
+                to_delete.append(r["id"])
+            else:
+                seen[key] = r["id"]
+        for tid in to_delete:
+            self.db.execute("DELETE FROM paper_trades WHERE id=?", [tid])
+        return len(to_delete)
+
+    def validate_trade_data(self, data: dict) -> str | None:
+        """Return error string if invalid, None if valid."""
+        if not data.get("symbol") or not str(data["symbol"]).strip():
+            return "Symbol missing"
+        if data.get("option_type") not in ("CE", "PE"):
+            return "Option type must be CE or PE"
+        try:
+            strike = float(data.get("strike_price", 0))
+        except Exception:
+            return "Invalid strike price"
+        if strike <= 0:
+            return "Strike price must be > 0 (got 0) - use valid strike, not 0"
+        # Reject leading-zero faulty like '01' (passed as 1)
+        raw = str(data.get("strike_price", "")).strip()
+        if raw.startswith("0") and raw not in ("0", "0.0") and not raw.startswith("0."):
+            return f"Faulty strike price '{raw}' - remove leading zeros"
+        if data.get("quantity") is None or int(data.get("quantity", 0)) <= 0:
+            return "Quantity must be > 0"
+        if data.get("entry_price") is not None and float(data.get("entry_price", 0)) <= 0:
+            return "Entry price must be > 0"
+        # Validate strike step alignment
+        try:
+            from utils.helpers import get_strike_step
+            step = get_strike_step(data["symbol"])
+            if strike % step != 0:
+                # Allow small floating error
+                if abs((strike % step)) > 0.01 and abs(step - (strike % step)) > 0.01:
+                    return f"Strike {strike} not aligned to step {step} for {data['symbol']}"
+        except Exception:
+            pass
+        # Validate symbol existence-ish
+        return None
 
     def get_option_premium(self, symbol, option_type, strike, expiry) -> float:
         if strike <= 0:

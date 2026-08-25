@@ -559,12 +559,13 @@
         try{
             const p=await A('/api/dashboard/portfolio');
             if(p.positions&&p.positions.length){
-                let h='<table><tr><th>#</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Action</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
+                let h='<table><tr><th>#</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Side</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
                 p.positions.forEach(t=>{
                     const isLive=t.trade_mode==='live';
                     const curPrice = (t.current_price!=null? t.current_price : t.entry_price);
                     const pnl = (t.pnl!=null? t.pnl : 0);
-                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${B(t.transaction_type,t.transaction_type==='BUY'?'buy':'sell')}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${stratBtnsForTrade(t)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
+                    const typeBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
+                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${typeBadge}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
                 });
                 h+='</table>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
             }else{
@@ -634,7 +635,8 @@
                     const isLive=t.trade_mode==='live';
                     const cur = (t.current_price!=null? t.current_price : t.entry_price);
                     const pnl = (t.pnl!=null? t.pnl : 0);
-                    h+=`<tr><td>${t.symbol}</td><td>${t.symbol}</td><td>${B(t.transaction_type,t.transaction_type==='BUY'?'buy':'sell')} ${B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${cur.toFixed(2)}</td><td><input type="number" value="${t.tp}" style="width:70px;font-size:11px" onchange="updateTP(${t.id},this.value)"></td><td><input type="number" value="${t.sl}" style="width:70px;font-size:11px" onchange="updateSL(${t.id},this.value)"></td><td class="${C(pnl)}">${F(pnl)}<br><small>${(pnl/(t.entry_price*t.quantity*(t.lot_size||50))*100||0).toFixed(1)}%</small></td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${cur})">Close</button></td></tr>`;
+                    const typeBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
+                h+=`<tr><td>${t.entry_date||t.symbol}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${cur.toFixed(2)}</td><td><input type="number" value="${t.tp}" style="width:70px;font-size:11px" onchange="updateTP(${t.id},this.value)"></td><td><input type="number" value="${t.sl}" style="width:70px;font-size:11px" onchange="updateSL(${t.id},this.value)"></td><td class="${C(pnl)}">${F(pnl)}<br><small>${(pnl/(t.entry_price*t.quantity*(t.lot_size||50))*100||0).toFixed(1)}%</small></td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${cur})">Close</button></td></tr>`;
                 });
                 h+='</table>';document.getElementById('open-trd').innerHTML=h;_lastOpenTrdHTML=h;
             }else{
@@ -1020,6 +1022,9 @@
     loadDash();
     loadStrategySymbols();
     setInterval(loadDash,120000);
+    // NSE-like rate streaming: live positions & dashboard auto-refresh every 3s, option chain live every 2s
+    setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 3000);
+    setInterval(()=>{ try{ if(!document.getElementById('pg-chain').classList.contains('hidden') && document.getElementById('c-live') && document.getElementById('c-live').checked) cLoadChain(); }catch(e){} }, 2500);
 
     let currentBroker='';
     let brokerData=[];

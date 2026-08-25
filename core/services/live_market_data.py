@@ -5,9 +5,9 @@ import requests
 from core.models.database import Database
 
 _LIVE_CACHE = {}
-_LIVE_CACHE_TTL = 45
+_LIVE_CACHE_TTL = 5  # NSE-like streaming: refresh every 5 sec
 _CHAIN_CACHE = {}
-_CHAIN_CACHE_TTL = 45
+_CHAIN_CACHE_TTL = 5
 
 _SYMBOL_MAP = {"NIFTY": "nifty", "BANKNIFTY": "banknifty", "FINNIFTY": "finnifty", "MIDCPNIFTY": "midcpnifty"}
 
