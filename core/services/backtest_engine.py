@@ -38,12 +38,13 @@ class BacktestEngine:
         exit_time = advanced_options.get("exit_time", "15:14")
         self._entry_time = entry_time
         self._exit_time = exit_time
+        trade_mode = advanced_options.get("trade_mode", "positional")
         max_holding = int(advanced_options.get("max_holding_bars", 20))
         # Intraday: hold max 5 bars for more trades like Quantman (positional holds longer)
         if trade_mode == "intraday":
             max_holding = min(max_holding, 5)
         # BTST holds overnight: increase max_holding for BTST
-        if advanced_options.get("trade_mode") == "btst":
+        if trade_mode == "btst":
             max_holding = max(max_holding, 5)
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
