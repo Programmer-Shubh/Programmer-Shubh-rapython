@@ -123,7 +123,8 @@
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Builder</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
-        <button onclick="go('bhavcopy',this)"><i class="bi bi-cloud-download"></i> Bhavcopy</button>
+        <!-- Bhavcopy removed - data auto-fetched from Yahoo/Google free (no manual import) -->
+        <!-- <button onclick="go('bhavcopy',this)"><i class="bi bi-cloud-download"></i> Bhavcopy</button> -->
         <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
         <button onclick="go('robot',this)"><i class="bi bi-robot"></i> Call/Put Robot</button>
     </div>
@@ -333,9 +334,9 @@
                 </div>
             </div>
         </div>
-        <!-- BHAVCOPY -->
-        <div id="pg-bhavcopy" class="pg hidden">
-            <h4 class="fw-bold mb-3"><i class="bi bi-cloud-download"></i> Import Bhavcopy Data</h4>
+        <!-- BHAVCOPY REMOVED - Auto Free Data -->
+        <div id="pg-bhavcopy" class="pg hidden" style="display:none !important">
+            <h4 class="fw-bold mb-3"><i class="bi bi-cloud-download"></i> Free Data (Bhavcopy Removed) — Auto-fetched from Yahoo/Google</h4>
             <div class="row" id="bhav-stats"></div>
             <div class="card"><div class="card-header">Single Date Import</div><div class="card-body">
                 <div class="row">
@@ -501,7 +502,7 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='bhavcopy')loadBhav();if(id==='chain')cLoadSymbols();if(id==='strategy')loadStrategySymbols();if(id==='webhook')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain')cLoadSymbols();if(id==='strategy')loadStrategySymbols();if(id==='webhook')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -846,8 +847,8 @@
         const allSyms=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL'];
         let h='<p class="text-muted small">Auto-updated 6 months (260 trading days) for all F&O — indices + stocks. NiftyTrader + Google Finance fallback.</p>';for(const sym of allSyms){try{const d=await A('/api/bhavcopy/dates/'+sym);const ok=d.count>=200?'price-up':'price-down';h+=`<p><strong>${sym}</strong>: <span class="${ok}">${d.count||0} records</span>, ${d.dates?d.dates.length:0} dates</p>`;}catch(e){h+=`<p><strong>${sym}</strong>: 0 records</p>`;}}document.getElementById('bh-data').innerHTML=h;
     }
-    async function bhImport(){const f=document.getElementById('bh-date').value;if(!f){alert('Select date');return;}document.getElementById('bh-status').innerHTML='<span class="spinner"></span> Importing...';try{const r=await P('/api/bhavcopy/auto-seed',{method:'POST'});document.getElementById('bh-status').innerHTML='<span class="text-success">Auto-seeded 6 months for all F&O ('+r.seeded+' symbols) — refresh page</span>';loadBhav();}catch(e){document.getElementById('bh-status').innerHTML='<span class="text-success">Imported from bhavcopy DB for '+f+'</span>';}}
-    async function bhRange(){try{const r=await P('/api/bhavcopy/auto-seed',{method:'POST'});alert('Auto-seeded '+r.seeded+' symbols for 6 months');loadBhav();}catch(e){alert('Range import coming soon');}}
+    async function bhImport(){const f=document.getElementById('bh-date').value;if(!f){alert('Select date');return;}document.getElementById('bh-status').innerHTML='<span class="spinner"></span> Importing...';try{const r=await P('/api/bhavcopy/auto-seed',{method:'POST'});document.getElementById('bh-status').innerHTML='<span class="text-success">Auto-seeded 6 months for all F&O ('+r.seeded+' symbols) — refresh page</span>';}catch(e){document.getElementById('bh-status').innerHTML='<span class="text-success">Imported from bhavcopy DB for '+f+'</span>';}}
+    async function bhRange(){try{const r=await P('/api/bhavcopy/auto-seed',{method:'POST'});alert('Auto-seeded '+r.seeded+' symbols for 6 months');}catch(e){alert('Range import coming soon');}}
 
     async function loadAlerts(){
         try{const r=await A('/api/email-alerts/list');

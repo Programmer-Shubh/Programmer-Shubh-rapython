@@ -3,6 +3,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from core.models.database import Database
+try:
+    from core.services.free_data import fetch_yahoo_spot, fetch_google_spot
+except Exception:
+    fetch_yahoo_spot = lambda s: 0
+    fetch_google_spot = lambda s: 0
 
 _LIVE_CACHE = {}
 _LIVE_CACHE_TTL = 5  # NSE-like streaming: refresh every 5 sec
@@ -24,17 +29,39 @@ class LiveMarketData:
         self.db = Database.get_instance()
 
     def get_spot_price(self, symbol: str) -> float:
+        # Try live cache first (NSE-like streaming)
+        try:
+            live = self.get_live_spot(symbol)
+            if live and live.get("spot"):
+                return float(live["spot"])
+        except Exception:
+            pass
         row = self.db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
             [symbol, symbol],
         )
-        if row:
+        if row and row["close_price"] and float(row["close_price"]) > 0:
             return float(row["close_price"])
         row = self.db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type='CE' AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) ORDER BY ABS(strike_price - (SELECT AVG(strike_price) FROM bhavcopy_data WHERE symbol=? AND option_type='CE')) LIMIT 1",
             [symbol, symbol, symbol],
         )
-        return float(row["close_price"]) if row else 0
+        if row and row["close_price"] and float(row["close_price"]) > 0:
+            return float(row["close_price"])
+        # Free website fallback: Yahoo/Google (no bhavcopy needed)
+        try:
+            y = fetch_yahoo_spot(symbol)
+            if y and y > 0:
+                return float(y)
+        except Exception:
+            pass
+        try:
+            g = fetch_google_spot(symbol)
+            if g and g > 0:
+                return float(g)
+        except Exception:
+            pass
+        return float(row["close_price"]) if row and row["close_price"] else 0
 
     def get_option_ltp(self, symbol: str, strike: float, option_type: str) -> float:
         row = self.db.fetch_one(

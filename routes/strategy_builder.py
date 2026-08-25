@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from typing import List, Optional, Dict
-from core.models.bhavcopy_model import BhavcopyModel
 from core.services.backtest_engine import BacktestEngine
+from core.services.historical_fetcher import fetch_historical
 from utils.helpers import format_currency
 import datetime
 import re
@@ -317,22 +317,10 @@ def run_backtest(req: BacktestRequest):
         entry_conditions = req.entry_conditions or []
         exit_conditions = req.exit_conditions or []
 
-        historical = bhav.get_by_symbol(symbol, start_date, end_date, False)
-        # Realistic flow: 1) Google Finance (free, no bhavcopy), 2) nselib NSE, 3) niftytrader.in live
+        # Bhavcopy removed — use free websites: NiftyTrader, StockMojo, TradingTick, Google Finance (via HistoricalFetcher)
+        historical = fetch_historical(symbol, start_date, end_date)
         if not historical:
-            count = _fetch_google_finance(symbol, start_date, end_date)
-            if count > 0:
-                historical = bhav.get_by_symbol(symbol, start_date, end_date, False)
-        if not historical:
-            count = _fetch_and_store_nselib(symbol, start_date, end_date)
-            if count > 0:
-                historical = bhav.get_by_symbol(symbol, start_date, end_date, False)
-        if not historical:
-            count = _fetch_niftytrader_live(symbol)
-            if count > 0:
-                historical = bhav.get_by_symbol(symbol, start_date, end_date, False)
-        if not historical:
-            return {"error": f"No data available for {symbol}. Google/NSE/niftytrader blocked - try again or check symbol."}
+            return {"error": f"No data available for {symbol}. Free websites (NiftyTrader/StockMojo/TradingTick/Google) fetch failed - try different dates."}
         if len(historical) > 120:
             historical = historical[-120:]
         engine = BacktestEngine(is_live=False)
@@ -404,22 +392,9 @@ def run_master_confluence(req: MasterConfluenceRequest):
         from utils.helpers import get_strike_step, get_lot_size
         import math
 
-        bhav = BhavcopyModel()
-        historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
+        historical = fetch_historical(req.symbol, req.start_date, req.end_date)
         if not historical:
-            count = _fetch_google_finance(req.symbol, req.start_date, req.end_date)
-            if count > 0:
-                historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
-        if not historical:
-            count = _fetch_and_store_nselib(req.symbol, req.start_date, req.end_date)
-            if count > 0:
-                historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
-        if not historical:
-            count = _fetch_niftytrader_live(req.symbol)
-            if count > 0:
-                historical = bhav.get_by_symbol(req.symbol, req.start_date, req.end_date, False)
-        if not historical:
-            return {"error": f"No data for {req.symbol}. Google/NSE/niftytrader blocked."}
+            return {"error": f"No data for {req.symbol}. Free websites (NiftyTrader/StockMojo/TradingTick/Google) blocked."}
         if len(historical) > 120:
             historical = historical[-120:]
 

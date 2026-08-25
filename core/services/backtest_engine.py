@@ -650,16 +650,17 @@ class BacktestEngine:
                 val = float(row["close_price"])
                 self.premium_cache[key] = val
                 return val
-        # 2) Real LTP from live market (niftytrader.in) - for stocks with no DB option data
-        try:
-            from core.services.live_market_data import LiveMarketData
-            live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type)
-            if live and float(live) > 0:
-                val = float(live)
-                self.premium_cache[key] = val
-                return val
-        except Exception:
-            pass
+        # 2) Real LTP from live market - only in live mode to keep backtest fast and realistic via Black-Scholes
+        if self.is_live:
+            try:
+                from core.services.live_market_data import LiveMarketData
+                live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type)
+                if live and float(live) > 0:
+                    val = float(live)
+                    self.premium_cache[key] = val
+                    return val
+            except Exception:
+                pass
         # 3) Nearest strike real LTP fallback
         try:
             from utils.helpers import get_strike_step
@@ -672,19 +673,20 @@ class BacktestEngine:
                 return float(row2["close_price"])
         except Exception:
             pass
-        # 4) Try Google Finance / nselib real historical via strategy_builder fetch (no synthetic)
-        try:
-            from routes.strategy_builder import _fetch_google_finance, _fetch_and_store_nselib
-            # attempt to fetch real history for this date range on-demand
-            _fetch_google_finance(self.bt_symbol, date, date)
-            row_retry = Database.get_instance().fetch_one(
-                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-                [self.bt_symbol, date, strike, option_type],
-            )
-            if row_retry and row_retry["close_price"] and float(row_retry["close_price"]) > 0:
-                return float(row_retry["close_price"])
-        except Exception:
-            pass
+        # 4) Try Google Finance / nselib real historical via strategy_builder fetch (no synthetic) - live only
+        if self.is_live:
+            try:
+                from routes.strategy_builder import _fetch_google_finance, _fetch_and_store_nselib
+                # attempt to fetch real history for this date range on-demand
+                _fetch_google_finance(self.bt_symbol, date, date)
+                row_retry = Database.get_instance().fetch_one(
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+                    [self.bt_symbol, date, strike, option_type],
+                )
+                if row_retry and row_retry["close_price"] and float(row_retry["close_price"]) > 0:
+                    return float(row_retry["close_price"])
+            except Exception:
+                pass
         # Black-Scholes synthetic fallback (proper option pricing)
         if spot and spot > 0 and strike and strike > 0:
             dte = self._days_to_expiry(date, self._get_expiry_type()) / 365.0
@@ -725,16 +727,17 @@ class BacktestEngine:
                 val = float(row["open_price"])
                 self.premium_cache[key] = val
                 return val
-        # Real live LTP fallback
-        try:
-            from core.services.live_market_data import LiveMarketData
-            live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type)
-            if live and float(live) > 0:
-                val = float(live)
-                self.premium_cache[key] = val
-                return val
-        except Exception:
-            pass
+        # Real live LTP fallback - only in live mode
+        if self.is_live:
+            try:
+                from core.services.live_market_data import LiveMarketData
+                live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type)
+                if live and float(live) > 0:
+                    val = float(live)
+                    self.premium_cache[key] = val
+                    return val
+            except Exception:
+                pass
         # Nearest strike real LTP fallback
         try:
             from utils.helpers import get_strike_step

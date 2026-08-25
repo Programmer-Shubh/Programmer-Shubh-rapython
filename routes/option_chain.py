@@ -249,6 +249,38 @@ def place_trade(req: TradeRequest):
                     premium = 2.0
         if premium <= 0:
             return {"error": "No premium data for this strike"}
+        # Fix unrealistically low premium for ATM (DB stale 1.0) -> recompute via Black-Scholes using Yahoo live spot
+        if premium < 10:
+            try:
+                spot_chk = 0
+                # Yahoo first (most reliable free)
+                try:
+                    from core.services.free_data import fetch_yahoo_spot
+                    spot_chk = fetch_yahoo_spot(req.symbol)
+                except Exception:
+                    pass
+                if spot_chk <= 0:
+                    spot_chk = live.get_spot_price(req.symbol)
+                if spot_chk <= 0:
+                    try:
+                        ls = live.get_live_spot(req.symbol)
+                        spot_chk = float(ls["spot"]) if ls and ls.get("spot") else 0
+                    except Exception:
+                        spot_chk = 0
+                step_chk = get_strike_step(req.symbol)
+                atm_chk = round(spot_chk / step_chk) * step_chk if spot_chk > 0 else 0
+                if atm_chk > 0 and abs(req.strike - atm_chk) <= step_chk * 4:
+                    expiry_days = 7
+                    if req.expiry and "monthly" in req.expiry.lower():
+                        expiry_days = 28
+                    premium = black_scholes(spot_chk, req.strike, expiry_days/365, 0.25, req.option_type)
+                    if premium < 5:
+                        premium = max(5.0, round(spot_chk * 0.015, 2))
+                elif premium < 5:
+                    # Far OTM but premium too low, ensure minimum 5
+                    premium = max(5.0, premium)
+            except Exception:
+                pass
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
     lot_size = get_lot_size(req.symbol)
     costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)

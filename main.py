@@ -34,13 +34,12 @@ app.add_middleware(
 db = Database.get_instance()
 db.init_schema()
 
-from routes import dashboard, option_chain, paper_trade, strategy_builder, bhavcopy_import, scanner, broker, webhook, websocket, email_alerts
+from routes import dashboard, option_chain, paper_trade, strategy_builder, scanner, broker, webhook, websocket, email_alerts
 
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(option_chain.router, prefix="/api/chain", tags=["Option Chain"])
 app.include_router(paper_trade.router, prefix="/api/trades", tags=["Paper Trade"])
 app.include_router(strategy_builder.router, prefix="/api/backtest", tags=["Strategy Builder"])
-app.include_router(bhavcopy_import.router, prefix="/api/bhavcopy", tags=["Bhavcopy Import"])
 app.include_router(scanner.router, prefix="/api/scanner", tags=["Scanner"])
 app.include_router(broker.router, prefix="/api/broker", tags=["Brokers"])
 app.include_router(webhook.router, prefix="/api/webhook", tags=["Webhook"])
