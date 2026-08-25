@@ -279,6 +279,24 @@ class OptionScanner:
                ORDER BY trade_date DESC LIMIT 250""",
             [symbol],
         )
+        # Auto-fetch from free websites (NiftyTrader/StockMojo/TradingTick/Google) if DB empty
+        if len(rows) < 30:
+            try:
+                import datetime as _dt
+                end = _dt.date.today().strftime("%Y-%m-%d")
+                start = (_dt.date.today() - _dt.timedelta(days=180)).strftime("%Y-%m-%d")
+                from core.services.historical_fetcher import fetch_historical
+                data = fetch_historical(symbol, start, end)
+                if data and len(data) >= 10:
+                    from core.models.bhavcopy_model import BhavcopyModel
+                    BhavcopyModel().import_data(data)
+                    rows = self.db.fetch_all(
+                        """SELECT * FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL
+                           ORDER BY trade_date DESC LIMIT 250""",
+                        [symbol],
+                    )
+            except Exception:
+                pass
         rows.reverse()
         for r in rows:
             r['high_price'] = float(r.get('high_price', 0) or 0)

@@ -39,7 +39,7 @@ def _fetch_niftytrader_historical(symbol: str, start_date: str, end_date: str) -
         ]
         for url in urls:
             try:
-                r = requests.get(url, headers=_HEADERS, timeout=8)
+                r = requests.get(url, headers=_HEADERS, timeout=5)
                 if r.status_code == 200:
                     data = r.json() if "application/json" in r.headers.get("Content-Type","") else None
                     if data and isinstance(data, (list, dict)):
@@ -69,7 +69,7 @@ def _fetch_niftytrader_historical(symbol: str, start_date: str, end_date: str) -
                 continue
         # Fallback: scrape NiftyTrader page for embedded historical JSON
         home_url = f"https://www.niftytrader.in/nse-option-chain/{ephem}"
-        r = requests.get(home_url, headers=_HEADERS, timeout=10)
+        r = requests.get(home_url, headers=_HEADERS, timeout=6)
         if r.status_code == 200:
             m = re.search(r'"historicalData"\s*:\s*(\[.*?\])', r.text)
             if m:
@@ -102,7 +102,7 @@ def _fetch_stockmojo_historical(symbol: str, start_date: str, end_date: str) -> 
         ]
         for url in urls:
             try:
-                r = requests.get(url, headers=_HEADERS, timeout=8)
+                r = requests.get(url, headers=_HEADERS, timeout=5)
                 if r.status_code != 200: continue
                 # Try JSON
                 try:
@@ -153,7 +153,7 @@ def _fetch_tradingtick_historical(symbol: str, start_date: str, end_date: str) -
         ]
         for url in urls:
             try:
-                r = requests.get(url, headers=_HEADERS, timeout=8)
+                r = requests.get(url, headers=_HEADERS, timeout=5)
                 if r.status_code != 200: continue
                 try:
                     data = r.json()
@@ -195,7 +195,7 @@ def _fetch_google_finance(symbol: str, start_date: str, end_date: str) -> List[D
     try:
         url = f"https://www.google.com/finance/getprices?q={symbol}&x=NSE&i=86400&p=6M&f=d,o,h,l,c,v"
         headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=8)
+        r = requests.get(url, headers=headers, timeout=5)
         if r.status_code==200 and "COLUMNS=" in r.text:
             lines=r.text.strip().split("\n")
             data_start=0

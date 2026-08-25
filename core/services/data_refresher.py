@@ -35,7 +35,7 @@ _RUNNING = False
 
 
 def _seed_history(symbol: str, anchor: float):
-    """Seed 6 months (260 days) via real data: Google Finance -> nselib NSE -> niftytrader.in (no synthetic Black-Scholes)."""
+    """Seed 6 months (260 days) via free websites: NiftyTrader -> StockMojo -> TradingTick -> Google Finance -> realistic synthetic."""
     from datetime import datetime, timedelta
     db = Database.get_instance()
     has = db.fetch_one(
@@ -49,28 +49,17 @@ def _seed_history(symbol: str, anchor: float):
     bhav = BhavcopyModel()
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=190)).strftime("%Y-%m-%d")
-    # 1) Try Google Finance (free)
+    # Free websites flow (NiftyTrader/StockMojo/TradingTick/Google) via HistoricalFetcher - no bhavcopy
     try:
-        from routes.strategy_builder import _fetch_google_finance
-        cnt = _fetch_google_finance(symbol, start, end)
-        if cnt and cnt >= 10:
+        from core.services.historical_fetcher import fetch_historical
+        data = fetch_historical(symbol, start, end)
+        if data and len(data) >= 10:
+            bhav.import_data(data)
             has2 = db.fetch_one("SELECT COUNT(*) as c FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL", [symbol])
             if has2 and has2["c"] >= 260:
                 return
     except Exception:
         pass
-    # 2) Try nselib NSE
-    try:
-        from routes.strategy_builder import _fetch_and_store_nselib
-        cnt = _fetch_and_store_nselib(symbol, start, end)
-        if cnt and cnt >= 10:
-            has2 = db.fetch_one("SELECT COUNT(*) as c FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL", [symbol])
-            if has2 and has2["c"] >= 260:
-                return
-    except Exception:
-        pass
-    # 3) Try niftytrader live spot as anchor and fetch 6M via nselib already done
-    # 4) Final fallback: generate realistic OHLC from FALLBACK_SPOTS anchor (NOT Black-Scholes - just spot history for platform to function)
     anchor = FALLBACK_SPOTS.get(symbol, 1000)
     import random
     from datetime import datetime, timedelta

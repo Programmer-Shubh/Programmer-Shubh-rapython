@@ -14,7 +14,6 @@ def get_spots():
     result = {}
     live_data_map = live.get_live_spots_cached(symbols)
     for sym in symbols:
-        spot = live.get_spot_price(sym)
         live_data = live_data_map.get(sym)
         if live_data:
             result[sym] = {
@@ -25,16 +24,71 @@ def get_spots():
                 "low": live_data.get("low", 0),
                 "source": "live",
             }
-        else:
+            continue
+        # Free websites fallback (NiftyTrader/Google etc) - auto-fetch latest close and cache in DB
+        spot = _free_latest_spot(sym)
+        if spot > 0:
+            # Compute change vs prev close from DB history
+            change_pct = _free_change_pct(sym, spot)
             result[sym] = {
-                "spot": round(spot, 2) if spot > 0 else None,
-                "formatted": f"INR {spot:,.2f}" if spot > 0 else "No Data",
+                "spot": round(spot, 2),
+                "formatted": f"INR {spot:,.2f}",
+                "change": round(change_pct, 2),
+                "high": 0,
+                "low": 0,
+                "source": "free",
+            }
+        else:
+            db_spot = live.get_spot_price(sym)
+            result[sym] = {
+                "spot": round(db_spot, 2) if db_spot > 0 else None,
+                "formatted": f"INR {db_spot:,.2f}" if db_spot > 0 else "No Data",
                 "change": 0,
                 "high": 0,
                 "low": 0,
-                "source": "bhavcopy",
+                "source": "db" if db_spot > 0 else "na",
             }
     return result
+
+
+def _free_latest_spot(symbol: str) -> float:
+    """Latest spot via free sources; caches into bhavcopy_data table so scanner/trades reuse it."""
+    try:
+        bhav = BhavcopyModel()
+        row = bhav.db.fetch_one(
+            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+            [symbol],
+        )
+        if row and row["close_price"] and float(row["close_price"]) > 0:
+            return float(row["close_price"])
+        # Fetch last 10 days from free fetcher and store
+        import datetime as _dt
+        end = _dt.date.today().strftime("%Y-%m-%d")
+        start = (_dt.date.today() - _dt.timedelta(days=14)).strftime("%Y-%m-%d")
+        from core.services.historical_fetcher import fetch_historical
+        data = fetch_historical(symbol, start, end)
+        if data:
+            bhav.import_data(data)
+            return float(data[-1]["close_price"])
+    except Exception:
+        pass
+    return 0
+
+
+def _free_change_pct(symbol: str, spot: float) -> float:
+    try:
+        bhav = BhavcopyModel()
+        rows = bhav.db.fetch_all(
+            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 2",
+            [symbol],
+        )
+        if len(rows) >= 2 and rows[1]["close_price"]:
+            prev = float(rows[1]["close_price"])
+            if prev > 0:
+                return (spot - prev) / prev * 100
+    except Exception:
+        pass
+    return 0
 
 
 @router.get("/option-chain/{symbol}")
