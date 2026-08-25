@@ -930,7 +930,25 @@
             if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>B/S</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.symbol||sym}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.exit_date} ${t.exit_time||'15:14'}</td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
         }catch(e){document.getElementById('robot-metrics').innerHTML='<p class="text-danger p-3">Error: '+e.message+'</p>';}
     }
+    function isMarketOpenIST(){
+        const now=new Date();
+        const istStr=now.toLocaleString('en-US',{timeZone:'Asia/Kolkata'});
+        const ist=new Date(istStr);
+        const day=ist.getDay(); // 0 Sun, 6 Sat
+        const mins=ist.getHours()*60+ist.getMinutes();
+        const openMins=9*60+15, closeMins=15*60+30;
+        const timeStr=ist.toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'});
+        if(day===0||day===6) return {open:false, reason:`Market Closed — Weekend (Sat-Sun). Today ${ist.toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata'})} ${timeStr} IST. Market Mon-Fri 9:15-3:30 IST`};
+        if(mins<openMins) return {open:false, reason:`Market Closed — Opens at 9:15 AM IST (now ${timeStr} IST)`};
+        if(mins>closeMins) return {open:false, reason:`Market Closed — Closed at 3:30 PM IST (now ${timeStr} IST)`};
+        return {open:true};
+    }
     async function robotStart(){
+        const mkt=isMarketOpenIST();
+        if(!mkt.open){
+            document.getElementById('robot-status').innerHTML=`<p class="text-danger"><i class="bi bi-clock-history"></i> ${mkt.reason} — Trade sirf market hour me lagega (Mon-Fri 9:15-3:30 IST).</p>`;
+            return;
+        }
         const sym=document.getElementById('r-sym').value;
         let order=document.getElementById('r-order').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
