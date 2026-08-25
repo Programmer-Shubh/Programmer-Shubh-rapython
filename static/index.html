@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -106,7 +106,7 @@
 </head>
 <body>
     <div class="topbar">
-        <h1><i class="bi bi-graph-up-arrow"></i> RaTrade <small>ALGO TOP 5 â€¢ SEBI Compliant â€¢ AI Powered</small></h1>
+        <h1><i class="bi bi-graph-up-arrow"></i> RaTrade <small>ALGO TOP 5 • SEBI Compliant • AI Powered</small></h1>
         <span id="status"><span class="live-dot"></span> Connecting...</span>
     </div>
     <div class="trust-bar">
@@ -135,7 +135,7 @@
                 <div class="card-body p-0"><div id="opp-table" style="overflow-x:auto"></div></div>
             </div>
             <div class="card">
-                <div class="card-header">Today â€” NSE Future & Option Top 5 Bullish & Bearish <small class="text-muted" id="fno-date"></small> <button class="btn btn-sm btn-outline-primary" onclick="loadFnoTop5()"><i class="bi bi-arrow-clockwise"></i></button></div>
+                <div class="card-header">Today — NSE Future & Option Top 5 Bullish & Bearish <small class="text-muted" id="fno-date"></small> <button class="btn btn-sm btn-outline-primary" onclick="loadFnoTop5()"><i class="bi bi-arrow-clockwise"></i></button></div>
                 <div class="card-body p-0"><div id="fno-top5" class="sig-grid" style="padding:12px"></div></div>
             </div>
             <div class="card">
@@ -335,7 +335,7 @@
 
         <!-- EMAIL ALERTS - Multi-Platform (NextLevelBot Style) -->
         <div id="pg-alerts" class="pg hidden">
-            <h4 class="fw-bold mb-3"><i class="bi bi-envelope-at"></i> Email Alerts â€” Chartink / Gocharting / Investing.com</h4>
+            <h4 class="fw-bold mb-3"><i class="bi bi-envelope-at"></i> Email Alerts — Chartink / Gocharting / Investing.com</h4>
             <div class="row g-3">
                 <div class="col-md-4">
                     <div class="card" style="border:2px solid #0d6efd">
@@ -379,9 +379,9 @@
                         <div class="card-header"><i class="bi bi-shield-check"></i> Risk Status</div>
                         <div class="card-body">
                             <div class="row g-2" id="risk-status">
-                                <div class="col"><div class="stat-card-sm"><div class="label">Today's P&L</div><div class="value" id="rs-pnl">â‚¹0</div></div></div>
+                                <div class="col"><div class="stat-card-sm"><div class="label">Today's P&L</div><div class="value" id="rs-pnl">₹0</div></div></div>
                                 <div class="col"><div class="stat-card-sm"><div class="label">Trades Today</div><div class="value" id="rs-trades">0</div></div></div>
-                                <div class="col"><div class="stat-card-sm"><div class="label">Daily Limit</div><div class="value" id="rs-limit">â‚¹5,000</div></div></div>
+                                <div class="col"><div class="stat-card-sm"><div class="label">Daily Limit</div><div class="value" id="rs-limit">₹5,000</div></div></div>
                                 <div class="col"><div class="stat-card-sm"><div class="label">Circuit Breaker</div><div class="value" id="rs-breaker" style="color:#198754">ON</div></div></div>
                             </div>
                         </div>
@@ -411,8 +411,8 @@
                         <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
                         <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="r-lots" class="form-control form-control-sm" value="1" min="1"></div>
                         <div class="col-md-1"><label class="form-label small">Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Stop Loss (â‚¹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="500" min="0" step="100"></div>
-                        <div class="col-md-2"><label class="form-label small">Target (â‚¹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="1000" min="0" step="100"></div>
+                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="500" min="0" step="100"></div>
+                        <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="1000" min="0" step="100"></div>
                     </div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
@@ -427,7 +427,7 @@
                             <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
                             <button class="btn btn-sm btn-outline-success" onclick="robotPaperTrade()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
                             <button class="btn btn-sm btn-outline-danger" onclick="robotLiveTrade()"><i class="bi bi-lightning"></i> Live Trade</button>
-                            <span class="small text-muted ms-2">Auto (Signal) pe click karke bullishâ†’Call Buy / bearishâ†’Put Buy auto select + backtest ho jayega</span>
+                            <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
                         </div>
                     </div>
                     <div class="row g-2 mt-2">
@@ -475,7 +475,7 @@
     <script>
     const A=async u=>{const r=await fetch(u);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
     const P=async (u,o)=>{const r=await fetch(u,o);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
-    const F=n=>n>=0?'â‚¹'+n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}):'-â‚¹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const F=n=>n>=0?'₹'+n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}):'-₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
     const C=n=>n>0?'price-up':n<0?'price-down':'';
     const B=(t,cls)=>`<span class="badge badge-${cls}">${t}</span>`;
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
@@ -507,18 +507,18 @@
             document.getElementById('fno-date').textContent = r.date ? '('+r.date+')' : '';
             const bull=r.bullish||[], bear=r.bearish||[];
             let h=`<div class="sig-box bull"><h5 class="price-up">Top 5 Bullish Today (Future & Option)</h5>`;
-            if(!bull.length) h+='<p class="text-muted small">No data â€” import Bhavcopy</p>';
+            if(!bull.length) h+='<p class="text-muted small">No data - refresh or try later</p>';
             bull.forEach(s=>{
                 const opt=s.option_suggestion||{}; const chg=s.change_pct>=0?`+${s.change_pct}%`: `${s.change_pct}%`;
                 const btns = stratBtns({symbol:s.symbol, direction:'bullish', signal_type:'BUY CE', option_suggestion:opt});
-                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span><span class="badge badge-buy">${chg}</span></div><div class="meta">Spot â‚¹${(s.spot||0).toLocaleString()} | Prev â‚¹${(s.prev_close||0).toLocaleString()} | ${s.signal_type} ${opt.strike||''}</div><div style="margin-top:6px">${btns}</div></div>`;
+                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span><span class="badge badge-buy">${chg}</span></div><div class="meta">Spot ₹${(s.spot||0).toLocaleString()} | Prev ₹${(s.prev_close||0).toLocaleString()} | ${s.signal_type} ${opt.strike||''}</div><div style="margin-top:6px">${btns}</div></div>`;
             });
             h+=`</div><div class="sig-box bear"><h5 class="price-down">Top 5 Bearish Today (Future & Option)</h5>`;
             if(!bear.length) h+='<p class="text-muted small">No data</p>';
             bear.forEach(s=>{
                 const opt=s.option_suggestion||{}; const chg=`${s.change_pct}%`;
                 const btns = stratBtns({symbol:s.symbol, direction:'bearish', signal_type:'BUY PE', option_suggestion:opt});
-                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span><span class="badge badge-sell">${chg}</span></div><div class="meta">Spot â‚¹${(s.spot||0).toLocaleString()} | Prev â‚¹${(s.prev_close||0).toLocaleString()} | ${s.signal_type} ${opt.strike||''}</div><div style="margin-top:6px">${btns}</div></div>`;
+                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span><span class="badge badge-sell">${chg}</span></div><div class="meta">Spot ₹${(s.spot||0).toLocaleString()} | Prev ₹${(s.prev_close||0).toLocaleString()} | ${s.signal_type} ${opt.strike||''}</div><div style="margin-top:6px">${btns}</div></div>`;
             });
             h+='</div>';
             document.getElementById('fno-top5').innerHTML=h;
@@ -529,12 +529,12 @@
         loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();
     }
     function stratBtns(x){const bull=(x.direction==='bullish')||(!x.direction&&((x.signal_type||x.type).includes('CE')));const opt=x.option_suggestion||{};const sym=x.symbol,strike=opt.strike||0,exp=opt.expiry||'';if(bull)return`<button class="btn btn-sm btn-buy" onclick="quickStrat('${sym}','BUY','CE',${strike},'${exp}')">Buy Call</button> <button class="btn btn-sm btn-sell" onclick="quickStrat('${sym}','SELL','PE',${strike},'${exp}')">Sell Put</button>`;return`<button class="btn btn-sm btn-sell" onclick="quickStrat('${sym}','BUY','PE',${strike},'${exp}')">Buy Put</button> <button class="btn btn-sm btn-buy" onclick="quickStrat('${sym}','SELL','CE',${strike},'${exp}')">Sell Call</button>`;}
-    async function loadOpps(){try{const r=await A('/api/scanner/opportunities');const o=r.opportunities||[];if(!o.length){document.getElementById('opp-table').innerHTML='<p class="text-muted p-3">No opportunities. Import more data.</p>';return;}let h='<table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Spot</th><th>Strike</th><th>Expiry</th><th>Premium</th><th>Reasons</th><th>Action</th></tr>';o.forEach(x=>{const sig=x.signal_type||x.type;const opt=x.option_suggestion||{};const prem=opt.premium?'â‚¹'+opt.premium.toFixed(2):'<span class="badge badge-active">LIVE</span>';h+=`<tr><td class="fw-bold">${x.symbol}</td><td>${B(sig,sig.includes('CE')?'buy':'sell')}</td><td><span class="score-badge">${x.score}/100</span></td><td>â‚¹${(x.price||0).toLocaleString()}</td><td>${opt.strike||'-'}</td><td>${opt.expiry||'-'}</td><td>${prem}</td><td>${R(x.reasons||[])}</td><td style="white-space:nowrap">${stratBtns(x)}</td></tr>`;});h+='</table>';document.getElementById('opp-table').innerHTML=h;}catch(e){document.getElementById('opp-table').innerHTML='<p class="text-danger">Error: '+e.message+'</p>';}}
+    async function loadOpps(){try{const r=await A('/api/scanner/opportunities');const o=r.opportunities||[];if(!o.length){document.getElementById('opp-table').innerHTML='<p class="text-muted p-3">No opportunities. Import more data.</p>';return;}let h='<table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Spot</th><th>Strike</th><th>Expiry</th><th>Premium</th><th>Reasons</th><th>Action</th></tr>';o.forEach(x=>{const sig=x.signal_type||x.type;const opt=x.option_suggestion||{};const prem=opt.premium?'₹'+opt.premium.toFixed(2):'<span class="badge badge-active">LIVE</span>';h+=`<tr><td class="fw-bold">${x.symbol}</td><td>${B(sig,sig.includes('CE')?'buy':'sell')}</td><td><span class="score-badge">${x.score}/100</span></td><td>₹${(x.price||0).toLocaleString()}</td><td>${opt.strike||'-'}</td><td>${opt.expiry||'-'}</td><td>${prem}</td><td>${R(x.reasons||[])}</td><td style="white-space:nowrap">${stratBtns(x)}</td></tr>`;});h+='</table>';document.getElementById('opp-table').innerHTML=h;}catch(e){document.getElementById('opp-table').innerHTML='<p class="text-danger">Error: '+e.message+'</p>';}}
     async function loadDashScanner(){try{const r=await A('/api/scanner/scan-all');const st=r.st_macd||{};const vw=r.vwap||{};document.getElementById('scan-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Scanned</div><div class="value">${st.total_scanned||0}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Bullish</div><div class="value price-up">${(st.bullish||[]).length}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Bearish</div><div class="value price-down">${(st.bearish||[]).length}</div></div></div><div class="col"><div class="card stat-card"><div class="label">VWAP Signals</div><div class="value">${(vw.long||[]).length+(vw.short||[]).length}</div></div></div>`;renderSig('scan-st',st.bullish||[],st.bearish||[],'SuperTrend + MACD');renderSig('scan-vwap',vw.long||[],vw.short||[],'VWAP + RSI + EMA');}catch(e){}}
     function renderSig(cid,buy,sell,title){let h=`<div class="sig-box bull"><h5 class="price-up">${title} - Bullish (Buy CE)</h5>`;if(!buy.length)h+='<p class="text-muted small">No signals</p>';buy.forEach(s=>{h+=sigItem(s,'buy');});h+=`</div><div class="sig-box bear"><h5 class="price-down">${title} - Bearish (Buy PE)</h5>`;if(!sell.length)h+='<p class="text-muted small">No signals</p>';sell.forEach(s=>{h+=sigItem(s,'sell');});h+='</div>';document.getElementById(cid).innerHTML=h;}
-    function sigItem(s,dir){const opt=s.option_suggestion||{};const prem=opt.premium?' | Premium: â‚¹'+opt.premium.toFixed(2):'';const ind=s.indicators||{};const indH=Object.entries(ind).map(([k,v])=>`<span class="reason-tag">${k}: ${v}</span>`).join('');const d={symbol:s.symbol,direction:dir==='buy'?'bullish':'bearish',signal_type:dir==='buy'?'BUY CE':'BUY PE',option_suggestion:opt};return`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span>${B(dir==='buy'?'BUY CE':'BUY PE',dir==='buy'?'buy':'sell')}</div><div class="meta">â‚¹${(s.price||0).toLocaleString()} | ${s.date||''} | Strike: ${opt.strike||'-'}${prem}</div><div>${R(s.reasons||[])}</div><div style="margin-top:3px">${indH}</div><div style="margin-top:6px"><span class="score-badge">Score: ${s.score}/100</span></div><div style="margin-top:6px">${stratBtns(d)}</div></div>`;}
-    function quickTrade(sym,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (â‚¹):','500');const tp=prompt('TP (â‚¹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:'BUY',quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert('Trade #'+r.trade_id+' @ â‚¹'+r.entry_price);loadDashPositions();}});}
-    function quickStrat(sym,action,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (â‚¹):','500');const tp=prompt('TP (â‚¹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert(action+' Trade #'+r.trade_id+' @ â‚¹'+r.entry_price);loadDashPositions();}});}
+    function sigItem(s,dir){const opt=s.option_suggestion||{};const prem=opt.premium?' | Premium: ₹'+opt.premium.toFixed(2):'';const ind=s.indicators||{};const indH=Object.entries(ind).map(([k,v])=>`<span class="reason-tag">${k}: ${v}</span>`).join('');const d={symbol:s.symbol,direction:dir==='buy'?'bullish':'bearish',signal_type:dir==='buy'?'BUY CE':'BUY PE',option_suggestion:opt};return`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span>${B(dir==='buy'?'BUY CE':'BUY PE',dir==='buy'?'buy':'sell')}</div><div class="meta">₹${(s.price||0).toLocaleString()} | ${s.date||''} | Strike: ${opt.strike||'-'}${prem}</div><div>${R(s.reasons||[])}</div><div style="margin-top:3px">${indH}</div><div style="margin-top:6px"><span class="score-badge">Score: ${s.score}/100</span></div><div style="margin-top:6px">${stratBtns(d)}</div></div>`;}
+    function quickTrade(sym,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:'BUY',quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert('Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
+    function quickStrat(sym,action,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
     function stratBtnsForTrade(t){const opt=t.option_type||'CE';const bull=(opt==='CE');return bull?`<button class="btn btn-sm btn-buy" onclick="quickStrat('${t.symbol}','BUY','CE',${t.strike},'')">Buy Call</button> <button class="btn btn-sm btn-sell" onclick="quickStrat('${t.symbol}','SELL','PE',${t.strike},'')">Sell Put</button>`:`<button class="btn btn-sm btn-sell" onclick="quickStrat('${t.symbol}','BUY','PE',${t.strike},'')">Buy Put</button> <button class="btn btn-sm btn-buy" onclick="quickStrat('${t.symbol}','SELL','CE',${t.strike},'')">Sell Call</button>`;}
     let _lastDashPosHTML = null;
     async function loadDashPositions(){
@@ -547,7 +547,7 @@
                     const curPrice = (t.current_price!=null? t.current_price : t.entry_price);
                     const pnl = (t.pnl!=null? t.pnl : 0);
                     const sideBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
-                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${t.strike}</td><td>â‚¹${t.entry_price.toFixed(2)}</td><td>â‚¹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
+                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${t.strike}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
                 });
                 h+='</table>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
             }else{
@@ -566,7 +566,7 @@
             }
         }
     }
-    async function loadDashHistory(){try{const c=await A('/api/dashboard/trade-history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';c.trades.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>â‚¹${t.entry.toFixed(2)}</td><td>â‚¹${t.exit.toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;});h+='</table>';document.getElementById('dash-hist').innerHTML=h;}else{document.getElementById('dash-hist').innerHTML='<p class="text-muted p-3">No trades yet</p>';};}catch(e){}}
+    async function loadDashHistory(){try{const c=await A('/api/dashboard/trade-history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';c.trades.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;});h+='</table>';document.getElementById('dash-hist').innerHTML=h;}else{document.getElementById('dash-hist').innerHTML='<p class="text-muted p-3">No trades yet</p>';};}catch(e){}}
     async function closeTrade(id,price){if(!confirm('Close #'+id+'?'))return;await P('/api/trades/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,exit_price:price,date:new Date().toISOString().split('T')[0]})});loadDash();loadTrades();}
     async function deleteTrade(id){if(!confirm('Delete trade #'+id+'? This cannot be undone.'))return;const r=await P('/api/trades/'+id,{method:'DELETE'});if(!r.error)loadTrades();else alert('Error: '+r.error);}
     async function setTradeMode(id,mode){const r=await P('/api/trades/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,trade_mode:mode})});if(!r.error)loadTrades();else alert('Error: '+r.error);}
@@ -586,7 +586,7 @@
             document.getElementById('c-date').value='';
             document.getElementById('c-exp').innerHTML='<option>Live</option>';
             document.getElementById('c-spot').style.display='block';
-            document.getElementById('c-spot').innerHTML='<span class="badge bg-danger text-white">LIVE</span> <span class="badge bg-info text-dark">Spot: â‚¹'+c.spot.toFixed(2)+' | ATM: '+c.atm+'</span> <span class="badge bg-info text-dark ms-2">Source: NiftyTrader</span>';
+            document.getElementById('c-spot').innerHTML='<span class="badge bg-danger text-white">LIVE</span> <span class="badge bg-info text-dark">Spot: ₹'+c.spot.toFixed(2)+' | ATM: '+c.atm+'</span> <span class="badge bg-info text-dark ms-2">Source: NiftyTrader</span>';
         }else{
             const d=document.getElementById('c-date').value,e=document.getElementById('c-exp').value;
             if(!d||!e)return;
@@ -600,12 +600,12 @@
             const strikeClass=isATM?'bg-warning':'';const rowBg=(ceITM||peITM)?'table-warning':'';
             const ceLabel=ceITM?'<span class="badge bg-warning text-dark">ITM</span>':isATM?'<span class="badge bg-warning text-dark">ATM</span>':'<span class="badge bg-secondary">OTM</span>';
             const peLabel=peITM?'<span class="badge bg-warning text-dark">ITM</span>':isATM?'<span class="badge bg-warning text-dark">ATM</span>':'<span class="badge bg-secondary">OTM</span>';
-            if(prevDist<0&&r.distance>=0&&!atmShown){htm+='<tr style="background:#ffeeba;border-top:2px solid #ffc107;border-bottom:2px solid #ffc107"><td colspan="11" class="text-center small fw-bold text-dark">â”€â”€â”€â”€ ATM (Spot: '+c.spot.toFixed(2)+' | Strike: '+c.atm+') â”€â”€â”€â”€</td></tr>';atmShown=true;}
-            htm+=`<tr class="${rowBg}"><td class="text-end small text-muted">${r.ce_vol.toLocaleString()}</td><td class="text-end small">${r.ce_oi.toLocaleString()}</td><td class="text-end small">${r.ce_oi>0?'+':''}${r.ce_oi.toLocaleString()}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','CE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','CE',${r.strike})">Sell</button></td><td class="text-end small">â‚¹${r.ce_ltp.toFixed(2)}</td><td class="text-center fw-bold ${strikeClass} small">${r.strike} <br><small class="text-muted">CE: â‚¹${r.ce_ltp.toFixed(2)} | PE: â‚¹${r.pe_ltp.toFixed(2)}</small></td><td class="text-end small">â‚¹${r.pe_ltp.toFixed(2)}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','PE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','PE',${r.strike})">Sell</button></td><td class="text-end small">${r.pe_oi>0?'+':''}${r.pe_oi.toLocaleString()}</td><td class="text-end small">${r.pe_oi.toLocaleString()}</td><td class="text-end small text-muted">${r.pe_vol.toLocaleString()} ${peLabel}</td></tr>`;prevDist=r.distance;});
+            if(prevDist<0&&r.distance>=0&&!atmShown){htm+='<tr style="background:#ffeeba;border-top:2px solid #ffc107;border-bottom:2px solid #ffc107"><td colspan="11" class="text-center small fw-bold text-dark">──── ATM (Spot: '+c.spot.toFixed(2)+' | Strike: '+c.atm+') ────</td></tr>';atmShown=true;}
+            htm+=`<tr class="${rowBg}"><td class="text-end small text-muted">${r.ce_vol.toLocaleString()}</td><td class="text-end small">${r.ce_oi.toLocaleString()}</td><td class="text-end small">${r.ce_oi>0?'+':''}${r.ce_oi.toLocaleString()}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','CE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','CE',${r.strike})">Sell</button></td><td class="text-end small">₹${r.ce_ltp.toFixed(2)}</td><td class="text-center fw-bold ${strikeClass} small">${r.strike} <br><small class="text-muted">CE: ₹${r.ce_ltp.toFixed(2)} | PE: ₹${r.pe_ltp.toFixed(2)}</small></td><td class="text-end small">₹${r.pe_ltp.toFixed(2)}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','PE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','PE',${r.strike})">Sell</button></td><td class="text-end small">${r.pe_oi>0?'+':''}${r.pe_oi.toLocaleString()}</td><td class="text-end small">${r.pe_oi.toLocaleString()}</td><td class="text-end small text-muted">${r.pe_vol.toLocaleString()} ${peLabel}</td></tr>`;prevDist=r.distance;});
         htm+='</tbody></table>';
         document.getElementById('chain-body').innerHTML=htm;
     }
-    function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (â‚¹):','500');const tp=prompt('TP (â‚¹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else alert(action+' Trade #'+r.trade_id+' @ â‚¹'+r.entry_price);});}
+    function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);});}
 
     let _lastOpenTrdHTML = null;
     async function loadTrades(){
@@ -618,7 +618,7 @@
                     const cur = (t.current_price!=null? t.current_price : t.entry_price);
                     const pnl = (t.pnl!=null? t.pnl : 0);
                     const typeBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
-                h+=`<tr><td>${t.entry_date||t.symbol}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.quantity}</td><td>â‚¹${t.entry_price.toFixed(2)}</td><td>â‚¹${cur.toFixed(2)}</td><td><input type="number" value="${t.tp}" style="width:70px;font-size:11px" onchange="updateTP(${t.id},this.value)"></td><td><input type="number" value="${t.sl}" style="width:70px;font-size:11px" onchange="updateSL(${t.id},this.value)"></td><td class="${C(pnl)}">${F(pnl)}<br><small>${(pnl/(t.entry_price*t.quantity*(t.lot_size||50))*100||0).toFixed(1)}%</small></td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${cur})">Close</button></td></tr>`;
+                h+=`<tr><td>${t.entry_date||t.symbol}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${cur.toFixed(2)}</td><td><input type="number" value="${t.tp}" style="width:70px;font-size:11px" onchange="updateTP(${t.id},this.value)"></td><td><input type="number" value="${t.sl}" style="width:70px;font-size:11px" onchange="updateSL(${t.id},this.value)"></td><td class="${C(pnl)}">${F(pnl)}<br><small>${(pnl/(t.entry_price*t.quantity*(t.lot_size||50))*100||0).toFixed(1)}%</small></td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${cur})">Close</button></td></tr>`;
                 });
                 h+='</table>';document.getElementById('open-trd').innerHTML=h;_lastOpenTrdHTML=h;
             }else{
@@ -629,7 +629,7 @@
                 }
             }
         }catch(e){ console.error('loadTrades failed',e); }
-        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=t.pnl>=0?'Target Hit':'Stoploss Hit';const sbg=t.pnl>=0?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>â‚¹${t.entry.toFixed(2)}</td><td>â‚¹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<p class="text-muted p-3">No trades yet</p>';}
+        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=t.pnl>=0?'Target Hit':'Stoploss Hit';const sbg=t.pnl>=0?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<p class="text-muted p-3">No trades yet</p>';}
         }catch(e){}
     }
     async function updateTP(id,v){await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:0,target:parseFloat(v)})});}
@@ -718,7 +718,7 @@
                 let tradeIdx=0;
                 r.trade_list.forEach(t=>{
                     if(t.is_group){h+=`<tr class="table-active"><td>${++tradeIdx}</td><td>${t.symbol||''}</td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="text-muted small">${t.vix||'12.0'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`}
-                    else{h+=`<tr><td>${tradeIdx}.1</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike}</td><td>${t.position||'Sell'}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'â‚¹'+t.entry_price.toFixed(2):'-'}</td><td>${t.exit_price?'â‚¹'+t.exit_price.toFixed(2):'-'}</td><td class="text-muted small">${t.vix||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;}});
+                    else{h+=`<tr><td>${tradeIdx}.1</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike}</td><td>${t.position||'Sell'}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+t.entry_price.toFixed(2):'-'}</td><td>${t.exit_price?'₹'+t.exit_price.toFixed(2):'-'}</td><td class="text-muted small">${t.vix||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;}});
                 h+='</tbody></table>';
                 document.getElementById('bt-tl').innerHTML=h;
             }
@@ -814,9 +814,9 @@
         document.querySelectorAll('#ind-rsi,#ind-kama,#ind-hmm').forEach(c=>c.checked=true);
     }
 
-    async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3">No strategies yet. Create your first strategy!</p>';return;}let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const statusCls=s.status==='active'?'active':s.status==='draft'?'draft':'paused';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span class="badge badge-${statusCls}">${s.status}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} â†’ ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px"><button class="btn btn-sm btn-success" onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})">Edit</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
+    async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3">No strategies yet. Create your first strategy!</p>';return;}let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const statusCls=s.status==='active'?'active':s.status==='draft'?'draft':'paused';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span class="badge badge-${statusCls}">${s.status}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px"><button class="btn btn-sm btn-success" onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})">Edit</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
 
-    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];const leg=legs[0]||{};const opt=leg.option_type||'CE';const txn=leg.transaction||'buy';const lots=leg.lots||1;const sl=leg.stop_loss||500;const tp=leg.take_profit||1000;alert(`Paper Trade from "${s.name}"\nSymbol: ${s.symbol}\nOption: ${opt}\nTransaction: ${txn}\nLots: ${lots}\nSL: â‚¹${sl}\nTP: â‚¹${tp}\n\nGo to Option Chain to place trade.`);}catch(e){alert('Error: '+e.message);}}
+    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];const leg=legs[0]||{};const opt=leg.option_type||'CE';const txn=leg.transaction||'buy';const lots=leg.lots||1;const sl=leg.stop_loss||500;const tp=leg.take_profit||1000;alert(`Paper Trade from "${s.name}"\nSymbol: ${s.symbol}\nOption: ${opt}\nTransaction: ${txn}\nLots: ${lots}\nSL: ₹${sl}\nTP: ₹${tp}\n\nGo to Option Chain to place trade.`);}catch(e){alert('Error: '+e.message);}}
     async function atFromStrat(id,status){const newStatus=status==='active'?'paused':'active';await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:newStatus})});loadStrats();loadTrades();}
     async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);document.getElementById('s-name').value=s.name||'';document.getElementById('s-sym').value=s.symbol||'BANKNIFTY';document.getElementById('s-start').value=s.start_date||'';document.getElementById('s-end').value=s.end_date||'';document.getElementById('s-tf').value=s.timeframe||'daily';}catch(e){alert('Error');}}
     async function delStrat(id){if(!confirm('Delete this strategy?'))return;await A('/api/strategies/'+id,{method:'DELETE'});loadStrats();}
@@ -844,15 +844,15 @@
         trades.forEach(t=>{
             const cls=t.pnl>=0?'price-up':'price-down';
             const stBadge=t.status==='closed'?'badge-sell':t.status==='sl_hit'?'badge-sell':'badge-buy';
-            h+=`<tr><td>${t.id}</td><td><span class="badge bg-info">${t.source}</span></td><td>${t.symbol}</td><td>${t.option_type}</td><td>${t.strike}</td><td>â‚¹${t.entry_price}</td><td>â‚¹${t.sl}</td><td>â‚¹${t.target}</td><td><span class="badge ${stBadge}">${t.status}</span></td><td class="${cls}">${t.pnl!==null?'â‚¹'+t.pnl:'-'}</td></tr>`;
+            h+=`<tr><td>${t.id}</td><td><span class="badge bg-info">${t.source}</span></td><td>${t.symbol}</td><td>${t.option_type}</td><td>${t.strike}</td><td>₹${t.entry_price}</td><td>₹${t.sl}</td><td>₹${t.target}</td><td><span class="badge ${stBadge}">${t.status}</span></td><td class="${cls}">${t.pnl!==null?'₹'+t.pnl:'-'}</td></tr>`;
         });h+='</tbody></table>';
         document.getElementById('alert-trades').innerHTML=h;}catch(e){}
     }
     async function loadRiskStatus(){
         try{const r=await A('/api/email-alerts/risk');
-        if(r.daily_pnl!==undefined)document.getElementById('rs-pnl').textContent='â‚¹'+r.daily_pnl.toLocaleString('en-IN');
+        if(r.daily_pnl!==undefined)document.getElementById('rs-pnl').textContent='₹'+r.daily_pnl.toLocaleString('en-IN');
         if(r.trades_today!==undefined)document.getElementById('rs-trades').textContent=r.trades_today;
-        if(r.daily_limit!==undefined)document.getElementById('rs-limit').textContent='â‚¹'+r.daily_limit.toLocaleString('en-IN');
+        if(r.daily_limit!==undefined)document.getElementById('rs-limit').textContent='₹'+r.daily_limit.toLocaleString('en-IN');
         const br=document.getElementById('rs-breaker');
         if(r.circuit_breaker===false){br.textContent='OFF';br.style.color='#dc3545';}else{br.textContent='ON';br.style.color='#198754';}
         }catch(e){}
@@ -904,7 +904,7 @@
             document.getElementById('robot-metrics').innerHTML=`<div class="row g-2"><div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value">${r.symbol||sym}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlC}">${F(m.net_pnl||pnl)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Trades</div><div class="value">${m.total_trades}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}%</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Avg P/L</div><div class="value ${pnlC}">${F(m.avg_profit_per_trade||0)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max DD</div><div class="value price-down">${m.max_drawdown}%</div></div></div></div>`;
             if(r.equity_curve&&r.equity_curve.length) Plotly.newPlot('robot-eq',[{y:r.equity_curve,type:'scatter',line:{color:'#0d6efd',width:2}}],{title:'Equity Curve - '+sym+' '+order,margin:{t:30,b:30,l:50,r:20}});
             if(r.monthly_pnl&&Object.keys(r.monthly_pnl).length) Plotly.newPlot('robot-mo',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',margin:{t:30,b:30,l:50,r:20}}); else Plotly.newPlot('robot-mo',[{x:['No data'],y:[0],type:'bar'}],{title:'Monthly P&L'});
-            if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>B/S</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.symbol||sym}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.exit_date} ${t.exit_time||'15:14'}</td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>â‚¹${(t.entry_price||0).toFixed(2)}</td><td>â‚¹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'â‚¹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
+            if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>B/S</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.symbol||sym}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.exit_date} ${t.exit_time||'15:14'}</td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
         }catch(e){document.getElementById('robot-metrics').innerHTML='<p class="text-danger p-3">Error: '+e.message+'</p>';}
     }
     function isMarketOpenIST(){
@@ -915,15 +915,15 @@
         const mins=ist.getHours()*60+ist.getMinutes();
         const openMins=9*60+15, closeMins=15*60+30;
         const timeStr=ist.toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'});
-        if(day===0||day===6) return {open:false, reason:`Market Closed â€” Weekend (Sat-Sun). Today ${ist.toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata'})} ${timeStr} IST. Market Mon-Fri 9:15-3:30 IST`};
-        if(mins<openMins) return {open:false, reason:`Market Closed â€” Opens at 9:15 AM IST (now ${timeStr} IST)`};
-        if(mins>closeMins) return {open:false, reason:`Market Closed â€” Closed at 3:30 PM IST (now ${timeStr} IST)`};
+        if(day===0||day===6) return {open:false, reason:`Market Closed — Weekend (Sat-Sun). Today ${ist.toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata'})} ${timeStr} IST. Market Mon-Fri 9:15-3:30 IST`};
+        if(mins<openMins) return {open:false, reason:`Market Closed — Opens at 9:15 AM IST (now ${timeStr} IST)`};
+        if(mins>closeMins) return {open:false, reason:`Market Closed — Closed at 3:30 PM IST (now ${timeStr} IST)`};
         return {open:true};
     }
     async function robotStart(){
         const mkt=isMarketOpenIST();
         if(!mkt.open){
-            document.getElementById('robot-status').innerHTML=`<p class="text-danger"><i class="bi bi-clock-history"></i> ${mkt.reason} â€” Trade sirf market hour me lagega (Mon-Fri 9:15-3:30 IST).</p>`;
+            document.getElementById('robot-status').innerHTML=`<p class="text-danger"><i class="bi bi-clock-history"></i> ${mkt.reason} — Trade sirf market hour me lagega (Mon-Fri 9:15-3:30 IST).</p>`;
             return;
         }
         const sym=document.getElementById('r-sym').value;
@@ -952,11 +952,11 @@
             const live=await A('/api/chain/live/'+sym);
             if(live && live.spot && live.atm){ strikeVal=live.atm; if(document.getElementById('r-strike').value==='OTM') strikeVal = optR==='CE' ? strikeVal + (sym==='BANKNIFTY'?100:50) : strikeVal - (sym==='BANKNIFTY'?100:50); }
         }catch(e){ strikeVal=0; }
-        document.getElementById('robot-status').innerHTML='<p class="text-success"><span class="spinner"></span> Starting '+sym+' '+order+' '+strikeType+' '+expiry+' SL â‚¹'+sl+' Target â‚¹'+tp+' (Strike '+(strikeVal||'ATM')+')...</p>';
+        document.getElementById('robot-status').innerHTML='<p class="text-success"><span class="spinner"></span> Starting '+sym+' '+order+' '+strikeType+' '+expiry+' SL ₹'+sl+' Target ₹'+tp+' (Strike '+(strikeVal||'ATM')+')...</p>';
         try{
             const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym, option_type:optR, strike:strikeVal, expiry:expiry, date:new Date().toISOString().split('T')[0], transaction_type:txnR, quantity:lots, stop_loss:sl, take_profit:tp })});
             if(r.error) document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+r.error+'</p>';
-            else document.getElementById('robot-status').innerHTML='<p class="text-success">Robot started! Trade #'+(r.trade_id||'')+' '+sym+' '+order+' @ â‚¹'+(r.entry_price||'')+' (Strike '+strikeVal+') SL â‚¹'+sl+' Target â‚¹'+tp+' â€” check Trading Center</p>';
+            else document.getElementById('robot-status').innerHTML='<p class="text-success">Robot started! Trade #'+(r.trade_id||'')+' '+sym+' '+order+' @ ₹'+(r.entry_price||'')+' (Strike '+strikeVal+') SL ₹'+sl+' Target ₹'+tp+' — check Trading Center</p>';
         }catch(e){document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+e.message+'</p>'; console.error(e);}
     }
     async function robotSave(){
@@ -988,7 +988,7 @@
         }catch(e){
             // Fallback to paper if live endpoint not available
             await robotStart();
-            alert('Live endpoint not configured â€” started as Paper Trade');
+            alert('Live endpoint not configured — started as Paper Trade');
         }
     }
 

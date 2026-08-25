@@ -117,7 +117,7 @@ def get_live_chain(symbol: str):
                                  "ce_ltp": ce.get(s, {}).get("close_price", 0), "ce_oi": ce.get(s, {}).get("oi", 0), "ce_vol": ce.get(s, {}).get("volume", 0), "ce_iv": 0,
                                  "pe_ltp": pe.get(s, {}).get("close_price", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
                 if rows:
-                    return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "bhavcopy"}
+                    return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "db"}
     # No synthetic Black-Scholes - return clear error, frontend will fallback to DB chain view
     return {"error": "Could not fetch live data from NiftyTrader (blocked on Render). Toggle LIVE off to view DB chain or use Google Finance fallback."}
 

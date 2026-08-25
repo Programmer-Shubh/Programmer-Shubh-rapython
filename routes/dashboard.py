@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from core.models.bhavcopy_model import BhavcopyModel
+from core.models.database import Database
 from core.models.trade_model import TradeModel
 from core.services.live_market_data import LiveMarketData
 from utils.helpers import get_lot_size, format_currency
@@ -25,10 +25,8 @@ def get_spots():
                 "source": "live",
             }
             continue
-        # Free websites fallback (NiftyTrader/Google etc) - auto-fetch latest close and cache in DB
-        spot = _free_latest_spot(sym)
+        spot, source = _free_latest_spot(sym)
         if spot > 0:
-            # Compute change vs prev close from DB history
             change_pct = _free_change_pct(sym, spot)
             result[sym] = {
                 "spot": round(spot, 2),
@@ -36,7 +34,7 @@ def get_spots():
                 "change": round(change_pct, 2),
                 "high": 0,
                 "low": 0,
-                "source": "free",
+                "source": source,
             }
         else:
             db_spot = live.get_spot_price(sym)
@@ -51,34 +49,40 @@ def get_spots():
     return result
 
 
-def _free_latest_spot(symbol: str) -> float:
-    """Latest spot via free sources; caches into bhavcopy_data table so scanner/trades reuse it."""
+def _free_latest_spot(symbol: str):
+    """Latest spot via free websites; returns (spot, source). Caches in DB for reuse."""
+    db = Database.get_instance()
     try:
-        bhav = BhavcopyModel()
-        row = bhav.db.fetch_one(
+        row = db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
             [symbol],
         )
         if row and row["close_price"] and float(row["close_price"]) > 0:
-            return float(row["close_price"])
-        # Fetch last 10 days from free fetcher and store
+            return float(row["close_price"]), "db"
+    except Exception:
+        pass
+    try:
         import datetime as _dt
         end = _dt.date.today().strftime("%Y-%m-%d")
         start = (_dt.date.today() - _dt.timedelta(days=14)).strftime("%Y-%m-%d")
         from core.services.historical_fetcher import fetch_historical
         data = fetch_historical(symbol, start, end)
         if data:
-            bhav.import_data(data)
-            return float(data[-1]["close_price"])
+            last = float(data[-1]["close_price"])
+            db.execute(
+                "INSERT OR REPLACE INTO bhavcopy_data (symbol, trade_date, close_price) VALUES (?, ?, ?)",
+                [symbol, _dt.date.today().isoformat(), last],
+            )
+            return last, "free"
     except Exception:
         pass
-    return 0
+    return 0, "na"
 
 
 def _free_change_pct(symbol: str, spot: float) -> float:
     try:
-        bhav = BhavcopyModel()
-        rows = bhav.db.fetch_all(
+        db = Database.get_instance()
+        rows = db.fetch_all(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 2",
             [symbol],
         )
@@ -93,15 +97,26 @@ def _free_change_pct(symbol: str, spot: float) -> float:
 
 @router.get("/option-chain/{symbol}")
 def get_option_chain(symbol: str):
-    bhav = BhavcopyModel()
-    dates = bhav.get_dates(symbol)
+    db = Database.get_instance()
+    rows = db.fetch_all(
+        "SELECT DISTINCT trade_date FROM bhavcopy_data WHERE symbol=? ORDER BY trade_date DESC",
+        [symbol],
+    )
+    dates = [r["trade_date"] for r in rows]
     if not dates:
         return {"error": "No data imported"}
     latest = dates[0]
-    expiries = bhav.get_expiries(symbol, latest)
+    exp_rows = db.fetch_all(
+        "SELECT DISTINCT expiry_date FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND option_type IS NOT NULL ORDER BY expiry_date",
+        [symbol, latest],
+    )
+    expiries = [r["expiry_date"] for r in exp_rows]
     if not expiries:
         return {"error": "No expiries found"}
-    chain = bhav.get_option_chain(symbol, latest, expiries[0])
+    chain = db.fetch_all(
+        "SELECT * FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND expiry_date=?",
+        [symbol, latest, expiries[0]],
+    )
     if not chain:
         return {"error": "No chain data"}
     ce = [{"strike": r["strike_price"], "ltp": r["close_price"], "oi": r.get("oi", 0), "vol": r.get("volume", 0)} for r in chain if r["option_type"] == "CE"]

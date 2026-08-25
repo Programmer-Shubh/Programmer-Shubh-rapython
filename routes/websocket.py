@@ -29,7 +29,7 @@ async def ws_live(websocket: WebSocket):
                     # DB fallback
                     row = live.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [sym])
                     spot = float(row["close_price"]) if row and row["close_price"] else 0
-                    ticks[sym] = {"spot": spot, "change": 0, "ts": int(time.time()*1000), "source": "bhavcopy"}
+                    ticks[sym] = {"spot": spot, "change": 0, "ts": int(time.time()*1000), "source": "db"}
             await websocket.send_text(json.dumps({"type":"tick","ticks": ticks, "interval_ms": 45}))
             await asyncio.sleep(0.045)  # 45ms <50ms
     except WebSocketDisconnect:
@@ -58,7 +58,7 @@ async def ws_chain(websocket: WebSocket, symbol: str):
                     expiries = bhav.get_expiries(symbol, dates[0])
                     if expiries:
                         chain = bhav.get_option_chain(symbol, dates[0], expiries[0])
-                        await websocket.send_text(json.dumps({"symbol": symbol, "source":"bhavcopy", "rows": [{"strike": r["strike_price"], "ce_ltp": r["close_price"] if r["option_type"]=="CE" else 0, "pe_ltp": r["close_price"] if r["option_type"]=="PE" else 0} for r in chain[:20]]}))
+                        await websocket.send_text(json.dumps({"symbol": symbol, "source":"db", "rows": [{"strike": r["strike_price"], "ce_ltp": r["close_price"] if r["option_type"]=="CE" else 0, "pe_ltp": r["close_price"] if r["option_type"]=="PE" else 0} for r in chain[:20]]}))
             await asyncio.sleep(0.045)
     except WebSocketDisconnect:
         pass
@@ -67,4 +67,4 @@ async def ws_chain(websocket: WebSocket, symbol: str):
 
 @router.get("/stats")
 def ws_stats():
-    return {"connections": len(_connections), "interval_ms": 45, "source": "niftytrader.in + bhavcopy fallback", "latency": "<50ms"}
+    return {"connections": len(_connections), "interval_ms": 45, "source": "niftytrader.in + db fallback", "latency": "<50ms"}

@@ -71,7 +71,7 @@
         <button onclick="go('chain',this)"><i class="bi bi-diagram-3"></i> Option Chain</button>
         <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Builder</button>
-        <button onclick="go('bhavcopy',this)"><i class="bi bi-cloud-download"></i> Bhavcopy</button>
+
     </div>
     <div class="wrap">
         <!-- OPTION CHAIN -->
@@ -188,7 +188,7 @@
     }
 
     async function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();}if(id==='chain')loadChain(currentSymbol||'NIFTY');if(id==='bhavcopy')loadBhav();
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();}if(id==='chain')loadChain(currentSymbol||'NIFTY');
     }
     function stab(t,btn){document.getElementById('scan-st').classList.toggle('hidden',t!=='st');document.getElementById('scan-vwap').classList.toggle('hidden',t!=='vwap');btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
     let conds=[];let condIdx=0;
