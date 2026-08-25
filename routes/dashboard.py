@@ -6,6 +6,45 @@ from utils.helpers import get_lot_size, format_currency
 
 router = APIRouter()
 
+_YAHOO_INDEX_MAP = {
+    "NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK",
+    "FINNIFTY": "^CNXFINANCE", "MIDCPNIFTY": "^NSEMDCP50",
+}
+
+
+def _fetch_yahoo_spot(symbol: str) -> float:
+    """Fetch live spot from Yahoo Finance (fast, free)."""
+    try:
+        import requests
+        ysym = _YAHOO_INDEX_MAP.get(symbol.upper(), f"{symbol.upper()}.NS")
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?range=1d&interval=1d"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+        if r.status_code == 200:
+            meta = r.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
+            price = meta.get("regularMarketPrice") or meta.get("previousClose") or 0
+            if price and float(price) > 0:
+                return float(price)
+    except Exception:
+        pass
+    return 0
+
+
+def _fetch_google_spot(symbol: str) -> float:
+    """Scrape Google Finance for live spot price."""
+    try:
+        import requests, re
+        r = requests.get(
+            f"https://www.google.com/finance/quote/{symbol.upper()}:NSE",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=8,
+        )
+        if r.status_code == 200:
+            m = re.search(r'data-last-price="([^"]+)"', r.text)
+            if m:
+                return float(m.group(1).replace(",", ""))
+    except Exception:
+        pass
+    return 0
+
 
 @router.get("/spot")
 def get_spots():
@@ -37,20 +76,34 @@ def get_spots():
                 "source": source,
             }
         else:
-            db_spot = live.get_spot_price(sym)
             result[sym] = {
-                "spot": round(db_spot, 2) if db_spot > 0 else None,
-                "formatted": f"INR {db_spot:,.2f}" if db_spot > 0 else "No Data",
-                "change": 0,
-                "high": 0,
-                "low": 0,
-                "source": "db" if db_spot > 0 else "na",
+                "spot": None,
+                "formatted": "No Data",
+                "change": 0, "high": 0, "low": 0,
+                "source": "na",
             }
     return result
 
 
 def _free_latest_spot(symbol: str):
-    """Latest spot via free websites; returns (spot, source). Caches in DB for reuse."""
+    """Try live free sources first (Yahoo/Google), then DB fallback. Returns (spot, source)."""
+    # 1) Yahoo Finance (fastest, most reliable for indices)
+    spot = _fetch_yahoo_spot(symbol)
+    if spot > 0:
+        return spot, "yahoo"
+    # 2) Google Finance
+    spot = _fetch_google_spot(symbol)
+    if spot > 0:
+        return spot, "google"
+    # 3) NiftyTrader live via LiveMarketData
+    try:
+        live = LiveMarketData()
+        data = live.get_live_spot(symbol)
+        if data and data.get("spot") and float(data["spot"]) > 0:
+            return float(data["spot"]), "niftytrader"
+    except Exception:
+        pass
+    # 4) DB fallback (last resort)
     db = Database.get_instance()
     try:
         row = db.fetch_one(
@@ -59,21 +112,6 @@ def _free_latest_spot(symbol: str):
         )
         if row and row["close_price"] and float(row["close_price"]) > 0:
             return float(row["close_price"]), "db"
-    except Exception:
-        pass
-    try:
-        import datetime as _dt
-        end = _dt.date.today().strftime("%Y-%m-%d")
-        start = (_dt.date.today() - _dt.timedelta(days=14)).strftime("%Y-%m-%d")
-        from core.services.historical_fetcher import fetch_historical
-        data = fetch_historical(symbol, start, end)
-        if data:
-            last = float(data[-1]["close_price"])
-            db.execute(
-                "INSERT OR REPLACE INTO bhavcopy_data (symbol, trade_date, close_price) VALUES (?, ?, ?)",
-                [symbol, _dt.date.today().isoformat(), last],
-            )
-            return last, "free"
     except Exception:
         pass
     return 0, "na"

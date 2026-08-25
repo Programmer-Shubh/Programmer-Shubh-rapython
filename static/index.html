@@ -459,10 +459,10 @@
             <div class="card-body">
                 <div class="row g-2 align-items-end">
                     <div class="col-auto"><label class="form-label">Symbol</label><select id="c-sym" class="form-select form-select-sm">
-                        <option value="">Select Symbol</option></select></div>
+                        <option value="NIFTY" selected>NIFTY</option></select></div>
                     <div class="col-auto"><label class="form-label">Date</label><input type="date" id="c-date" class="form-control form-control-sm"></div>
                     <div class="col-auto"><label class="form-label">Expiry</label><select id="c-exp" class="form-select form-select-sm"><option>Loading...</option></select></div>
-                    <div class="col-auto" style="margin-top:22px"><label><input type="checkbox" id="c-live" onchange="toggleLiveMode()"> <span class="badge bg-danger">Live</span></label></div>
+                    <div class="col-auto" style="margin-top:22px"><label><input type="checkbox" id="c-live" checked onchange="toggleLiveMode()"> <span class="badge bg-danger">Live</span></label></div>
                     <div class="col-auto"><button class="btn btn-sm btn-outline-primary" onclick="cLoadChain()"><i class="bi bi-arrow-clockwise"></i> Load</button></div>
                     <div class="col-auto" id="c-spot" style="display:none"><span class="badge bg-info text-dark fs-6"></span></div>
                 </div>
@@ -481,7 +481,7 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain')cLoadSymbols();if(id==='strategy')loadStrategySymbols();if(id==='webhook')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy')loadStrategySymbols();if(id==='webhook')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -571,7 +571,7 @@
     async function deleteTrade(id){if(!confirm('Delete trade #'+id+'? This cannot be undone.'))return;const r=await P('/api/trades/'+id,{method:'DELETE'});if(!r.error)loadTrades();else alert('Error: '+r.error);}
     async function setTradeMode(id,mode){const r=await P('/api/trades/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,trade_mode:mode})});if(!r.error)loadTrades();else alert('Error: '+r.error);}
 
-    async function cLoadSymbols(){const s=document.getElementById('c-sym').value;const syms=await A('/api/chain/symbols');document.getElementById('c-sym').innerHTML='';syms.symbols.forEach(x=>{document.getElementById('c-sym').innerHTML+='<option value="'+x+'" '+(x==='NIFTY'?'selected':'')+'>'+x+'</option>';});if(s){document.getElementById('c-sym').value=s;}cLoadDates();}
+    async function cLoadSymbols(){const syms=await A('/api/chain/symbols');const sel=document.getElementById('c-sym');sel.innerHTML='';const master=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','LT','AXISBANK','KOTAKBANK','HINDUNILVR','BHARTIARTL','MARUTI','M&M','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL'];let all=[...new Set([...(syms.symbols||[]), ...master])].sort();all.forEach(x=>{sel.innerHTML+='<option value="'+x+'" '+(x==='NIFTY'?'selected':'')+'>'+x+'</option>';});document.getElementById('c-live').checked=true;toggleLiveMode();}
     async function cLoadDates(){const s=document.getElementById('c-sym').value;if(!s)return;const d=await A('/api/chain/dates/'+s);document.getElementById('c-date').value=d.dates?d.dates[0]:'';cLoadExpiries();}
     async function cLoadExpiries(){const s=document.getElementById('c-sym').value,d=document.getElementById('c-date').value;if(!d)return;const e=await A('/api/chain/expiries/'+s+'/'+d);document.getElementById('c-exp').innerHTML=e.expiries?e.expiries.map(x=>'<option>'+x+'</option>').join(''):'<option>No Expiry</option>';}
     function toggleLiveMode(){if(document.getElementById('c-live').checked){document.getElementById('c-date').parentElement.style.display='none';document.getElementById('c-exp').parentElement.style.display='none';document.getElementById('c-spot').style.display='block';cLoadChain();}else{document.getElementById('c-date').parentElement.style.display='';document.getElementById('c-exp').parentElement.style.display='';document.getElementById('c-spot').style.display='none';cLoadChain();}}

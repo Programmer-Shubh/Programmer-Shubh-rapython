@@ -1,5 +1,4 @@
 import datetime
-import random
 import requests
 import re
 import json
@@ -230,61 +229,14 @@ def _fetch_google_finance(symbol: str, start_date: str, end_date: str) -> List[D
         pass
     return []
 
-def _generate_synthetic(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """Generate realistic synthetic historical when all free sources blocked - ensures backtest always works."""
-    try:
-        from core.services.live_market_data import LiveMarketData
-        live = LiveMarketData().get_live_spot(symbol)
-        spot = float(live["spot"]) if live and live.get("spot") else 0
-    except Exception:
-        spot=0
-    if spot<=0:
-        # Fallback spots per symbol
-        defaults={"NIFTY":24500,"BANKNIFTY":52000,"FINNIFTY":24500,"MIDCPNIFTY":12500,"SENSEX":82000,"RELIANCE":2800,"HDFCBANK":1700,"ICICIBANK":1200,"TCS":3800,"INFY":1500,"ITC":450,"SBIN":800,"MARUTI":12500,"M&M":2800}
-        spot=defaults.get(symbol.upper(), 2500)
-        if symbol.upper() not in defaults:
-            # Derive from Google search? use random
-            spot=2500
-    s,e=_parse_dates(start_date,end_date)
-    # Build trading days
-    dates=[]
-    d=s
-    while d<=e:
-        if d.weekday()<5:
-            dates.append(d)
-        d+=datetime.timedelta(days=1)
-    if len(dates)>120:
-        dates=dates[-120:]
-    out=[]
-    price=spot*0.92
-    random.seed(hash(symbol) % 10000)
-    for d in dates:
-        # Realistic drift
-        drift=random.uniform(-0.015,0.015)
-        # Add trend bias small
-        o=price
-        c=price*(1+drift)
-        h=max(o,c)*(1+abs(random.uniform(0,0.004)))
-        l=min(o,c)*(1-abs(random.uniform(0,0.004)))
-        # Ensure realistic OHLC
-        out.append({"symbol":symbol,"trade_date":d.strftime("%Y-%m-%d"),"open_price":round(o,2),"high_price":round(h,2),"low_price":round(l,2),"close_price":round(c,2),"volume":random.randint(200000,800000),"oi":0})
-        price=c
-    # Scale to end at spot
-    if out:
-        factor=spot/out[-1]["close_price"] if out[-1]["close_price"] else 1
-        for r in out:
-            for k in ("open_price","high_price","low_price","close_price"):
-                r[k]=round(r[k]*factor,2)
-    return out
-
 def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """Try free sources in order: NiftyTrader -> StockMojo -> TradingTick -> Google Finance -> synthetic."""
-    symbol=symbol.upper()
+    """Try free sources in order: NiftyTrader -> StockMojo -> TradingTick -> Google Finance. Returns real data only."""
+    symbol = symbol.upper()
     for fetcher in [_fetch_niftytrader_historical, _fetch_stockmojo_historical, _fetch_tradingtick_historical, _fetch_google_finance]:
         try:
-            data=fetcher(symbol, start_date, end_date)
-            if data and len(data)>=10:
+            data = fetcher(symbol, start_date, end_date)
+            if data and len(data) >= 5:
                 return data
         except Exception:
             continue
-    return _generate_synthetic(symbol, start_date, end_date)
+    return []
