@@ -319,7 +319,7 @@ def run_backtest(req: BacktestRequest):
         # Bhavcopy removed — use free websites: NiftyTrader, StockMojo, TradingTick, Google Finance (via HistoricalFetcher)
         historical = fetch_historical(symbol, start_date, end_date)
         if not historical:
-            return {"error": f"No data available for {symbol}. Free websites (NiftyTrader/StockMojo/TradingTick/Google) fetch failed - try different dates."}
+            return {"error": f"No data available for {symbol}. NiftyTrader/StockMojo/TradingTick/Google all failed. Try different dates or import bhavcopy data."}
         if len(historical) > 120:
             historical = historical[-120:]
         engine = BacktestEngine(is_live=False)

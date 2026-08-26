@@ -92,9 +92,9 @@ def refresh_all():
         spot = chain["spot"] if chain and chain.get("spot") else 0
         if spot > 0:
             _seed_history(sym)
-    # Cache stock spots from niftytrader
+    # Cache stock spots from niftytrader - seed ALL stock symbols not just first 10
     try:
-        stock_chains = live.get_live_chains_parallel(EXTRA_SYMBOLS[:10])
+        stock_chains = live.get_live_chains_parallel(EXTRA_SYMBOLS)
         for sym, ch in stock_chains.items():
             if ch and ch.get("spot"):
                 _LIVE_CACHE[sym] = {"ts": time.time(), "data": {

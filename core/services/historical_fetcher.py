@@ -231,15 +231,6 @@ def _fetch_google_finance(symbol: str, start_date: str, end_date: str) -> List[D
         pass
     return []
 
-def _fetch_yahoo(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """Fetch from Yahoo Finance (free, reliable for most NSE stocks)."""
-    try:
-        from core.services.free_data import fetch_yahoo_historical
-        return fetch_yahoo_historical(symbol, start_date, end_date)
-    except Exception:
-        pass
-    return []
-
 def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """Generate realistic synthetic OHLCV data as final fallback so backtest always works."""
     import math
@@ -288,9 +279,9 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
     return records
 
 def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """Try free sources in order: NiftyTrader -> StockMojo -> TradingTick -> Google Finance -> Yahoo Finance -> Synthetic. Backtest always works."""
+    """Try free sources in order: NiftyTrader -> StockMojo -> TradingTick -> Google Finance -> Synthetic. No Yahoo Finance (no option chain data)."""
     symbol = symbol.upper()
-    for fetcher in [_fetch_niftytrader_historical, _fetch_stockmojo_historical, _fetch_tradingtick_historical, _fetch_google_finance, _fetch_yahoo]:
+    for fetcher in [_fetch_niftytrader_historical, _fetch_stockmojo_historical, _fetch_tradingtick_historical, _fetch_google_finance]:
         try:
             data = fetcher(symbol, start_date, end_date)
             if data and len(data) >= 5:
