@@ -4,9 +4,8 @@ import re
 import json
 from typing import List, Dict
 
-# Alternative sources: nselib (NSE bhavcopy, primary), StocksRin, Google Finance.
-# NiftyTrader removed — blocked on Render. Synthetic fallback so backtest always works.
-# Yahoo removed — no option chain data.
+# Sources: nselib (primary) -> jugaad-data (NSE archives) -> NSEpy -> StocksRin -> Google -> TrueData -> Synthetic
+# NiftyTrader removed (slow), Yahoo removed (no option chain).
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -70,6 +69,134 @@ def _fetch_nselib_historical(symbol: str, start_date: str, end_date: str) -> Lis
                 continue
         if len(out) >= 5:
             return out
+    except Exception:
+        pass
+    return []
+
+def _fetch_jugaad_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """jugaad-data: NSE bhavcopy archives via jugaad_data.nse.bhavcopy_save (free, open-source)."""
+    try:
+        import tempfile, csv, pathlib
+        from jugaad_data.nse import bhavcopy_save
+        import datetime as _dt
+        sd = _dt.datetime.strptime(start_date, "%Y-%m-%d").date()
+        ed = _dt.datetime.strptime(end_date, "%Y-%m-%d").date()
+        tmpdir = tempfile.mkdtemp(prefix="jugaad_")
+        out = []
+        cur = sd
+        while cur <= ed:
+            if cur.weekday() < 5:
+                try:
+                    p = bhavcopy_save(cur, tmpdir)
+                    if p and pathlib.Path(p).exists():
+                        with open(p, newline='', encoding='utf-8', errors='replace') as f:
+                            reader = csv.DictReader(f)
+                            for row in reader:
+                                sym = (row.get("SYMBOL") or row.get("Symbol") or "").strip().upper()
+                                if sym != symbol.upper():
+                                    continue
+                                td = (row.get(" DATE1") or row.get("DATE1") or row.get("Date1") or row.get("Date") or cur.strftime("%Y-%m-%d")).strip()
+                                for fmt in ("%d-%b-%Y", "%d %b %Y", "%Y-%m-%d", "%d-%m-%Y"):
+                                    try:
+                                        td = _dt.datetime.strptime(td.strip(), fmt).strftime("%Y-%m-%d")
+                                        break
+                                    except:
+                                        continue
+                                o = _clean_num(row.get(" OPEN_PRICE") or row.get("OPEN_PRICE") or row.get("OpenPrice") or "")
+                                h = _clean_num(row.get(" HIGH_PRICE") or row.get("HIGH_PRICE") or row.get("HighPrice") or "")
+                                l = _clean_num(row.get(" LOW_PRICE") or row.get("LOW_PRICE") or row.get("LowPrice") or "")
+                                cl = _clean_num(row.get(" CLOSE_PRICE") or row.get("CLOSE_PRICE") or row.get("ClosePrice") or "")
+                                vol = int(_clean_num(row.get(" TTL_TRD_QNTY") or row.get("TTL_TRD_QNTY") or row.get("TotalTradedQuantity") or "0"))
+                                if cl <= 0: continue
+                                if td < start_date or td > end_date: continue
+                                out.append({"symbol": symbol, "trade_date": td, "open_price": round(o or cl,2), "high_price": round(h or cl,2), "low_price": round(l or cl,2), "close_price": round(cl,2), "volume": vol, "oi": 0})
+                                break  # one row per date per symbol
+                        # cleanup file
+                        try: pathlib.Path(p).unlink()
+                        except: pass
+                except Exception:
+                    pass
+            cur += _dt.timedelta(days=1)
+            if len(out) >= 60: break  # enough samples
+        import shutil
+        try: shutil.rmtree(tmpdir, ignore_errors=True)
+        except: pass
+        if len(out) >= 5:
+            out.sort(key=lambda r: r["trade_date"])
+            return out
+    except Exception:
+        pass
+    return []
+
+def _fetch_nsepy_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """NSEpy: get_history for NSE stocks/indices (free, quantra)."""
+    try:
+        from nsepy import get_history
+        import datetime as _dt
+        sd = _dt.datetime.strptime(start_date, "%Y-%m-%d").date()
+        ed = _dt.datetime.strptime(end_date, "%Y-%m-%d").date()
+        try:
+            df = get_history(symbol=symbol, start=sd, end=ed)
+        except Exception:
+            return []
+        if df is None or df.empty:
+            return []
+        out = []
+        for idx, row in df.iterrows():
+            try:
+                td = idx.strftime("%Y-%m-%d") if hasattr(idx, 'strftime') else str(idx)[:10]
+                if td < start_date or td > end_date: continue
+                cl = _clean_num(row.get("Close") or row.get("ClosePrice") or 0)
+                if cl <= 0: continue
+                o = _clean_num(row.get("Open") or row.get("OpenPrice") or cl)
+                h = _clean_num(row.get("High") or row.get("HighPrice") or cl)
+                l = _clean_num(row.get("Low") or row.get("LowPrice") or cl)
+                vol = int(_clean_num(row.get("Volume") or row.get("TotalTradedQuantity") or "0"))
+                out.append({"symbol": symbol, "trade_date": td, "open_price": round(o or cl,2), "high_price": round(h or cl,2), "low_price": round(l or cl,2), "close_price": round(cl,2), "volume": vol, "oi": 0})
+            except:
+                continue
+        if len(out) >= 5:
+            return out
+    except Exception:
+        pass
+    return []
+
+def _fetch_truedata_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """TrueData (truedata.in): Authorized NSE/BSE/MCX vendor — requires TRUEDATA_USERNAME/PASSWORD or TRUEDATA_API_KEY."""
+    try:
+        import os
+        td_user = os.environ.get("TRUEDATA_USERNAME", "")
+        td_pass = os.environ.get("TRUEDATA_PASSWORD", "")
+        td_key = os.environ.get("TRUEDATA_API_KEY", "")
+        if not td_user and not td_key:
+            return []
+        # TrueData REST: https://api.truedata.in/getHistoricalData?symbol=NIFTY&from=2025-01-01&to=2025-01-10
+        # Falls back to authorized NSE feed if configured
+        headers = {"Accept": "application/json"}
+        if td_key:
+            headers["Authorization"] = f"Bearer {td_key}"
+        base = os.environ.get("TRUEDATA_BASE_URL", "https://api.truedata.in")
+        for ep in [f"{base}/getHistoricalData", f"{base}/api/historical", "https://www.truedata.in/api/historical"]:
+            try:
+                params = {"symbol": symbol, "from": start_date, "to": end_date, "interval": "1d"}
+                if td_user: params.update({"username": td_user, "password": td_pass})
+                r = requests.get(ep, params=params, headers=headers, timeout=8)
+                if r.status_code != 200: continue
+                data = r.json() if "application/json" in r.headers.get("Content-Type","") else None
+                if not data: continue
+                rows = data if isinstance(data, list) else data.get("data") or data.get("historical") or data.get("candles") or []
+                if len(rows) < 5: continue
+                out = []
+                for c in rows:
+                    td = str(c.get("date") or c.get("Date") or c.get("time") or "")[:10]
+                    if td < start_date or td > end_date: continue
+                    cl = _clean_num(c.get("close") or c.get("Close") or 0)
+                    if cl <= 0: continue
+                    out.append({"symbol": symbol, "trade_date": td, "open_price": _clean_num(c.get("open") or cl), "high_price": _clean_num(c.get("high") or cl), "low_price": _clean_num(c.get("low") or cl), "close_price": round(cl,2), "volume": int(_clean_num(c.get("volume") or "0")), "oi": 0})
+                if len(out) >= 5:
+                    return out
+            except:
+                continue
     except Exception:
         pass
     return []
@@ -209,9 +336,9 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
     return records
 
 def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """nselib (NSE bhavcopy) -> StocksRin -> Google Finance -> Synthetic. NiftyTrader+Yahoo removed."""
+    """nselib -> jugaad-data -> NSEpy -> StocksRin -> Google -> TrueData -> Synthetic."""
     symbol = symbol.upper()
-    for fetcher in [_fetch_nselib_historical, _fetch_stocksrin_historical, _fetch_google_finance]:
+    for fetcher in [_fetch_nselib_historical, _fetch_jugaad_historical, _fetch_nsepy_historical, _fetch_stocksrin_historical, _fetch_google_finance, _fetch_truedata_historical]:
         try:
             data = fetcher(symbol, start_date, end_date)
             if data and len(data) >= 5:

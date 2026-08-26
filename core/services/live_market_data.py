@@ -58,10 +58,34 @@ def _fetch_nselib_spot(symbol: str):
         pass
     return None
 
-def _fetch_stocksrin_spot(symbol: str):
-    """StocksRin spot — if available, else None (fast fallback)."""
+def _fetch_truedata_spot(symbol: str):
+    """TrueData (truedata.in) — authorized NSE vendor, <50ms if configured."""
     try:
-        # Try StocksRin chain page for spot (may be behind auth, so quick fail)
+        import os
+        td_user = os.environ.get("TRUEDATA_USERNAME", "")
+        td_key = os.environ.get("TRUEDATA_API_KEY", "")
+        if not td_user and not td_key:
+            return None
+        base = os.environ.get("TRUEDATA_BASE_URL", "https://api.truedata.in")
+        headers = {"Accept": "application/json"}
+        if td_key:
+            headers["Authorization"] = f"Bearer {td_key}"
+        params = {"symbol": symbol, "interval": "1m"}
+        if td_user:
+            params.update({"username": td_user, "password": os.environ.get("TRUEDATA_PASSWORD", "")})
+        r = requests.get(f"{base}/getMarketData", params=params, headers=headers, timeout=2)
+        if r.status_code == 200:
+            j = r.json()
+            spot = float(j.get("last") or j.get("ltp") or j.get("spot") or (j.get("data", {}) or {}).get("last", 0) or 0)
+            if spot > 0:
+                return {"spot": spot, "change": float(j.get("change_percent", 0) or 0), "high": float(j.get("high", 0) or spot), "low": float(j.get("low", 0) or spot), "source": "truedata"}
+    except Exception:
+        pass
+    return None
+
+def _fetch_stocksrin_spot(symbol: str):
+    """StocksRin spot — quick fail if not available."""
+    try:
         r = requests.get(f"https://stocksrin.com/api/spot/{symbol}", headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=2)
         if r.status_code == 200:
             j = r.json()
@@ -97,7 +121,7 @@ class LiveMarketData:
         )
         if row and row["close_price"] and float(row["close_price"]) > 0:
             return float(row["close_price"])
-        for fn in [_fetch_nse_indices_spot, _fetch_nselib_spot]:
+        for fn in [_fetch_truedata_spot, _fetch_nse_indices_spot, _fetch_stocksrin_spot, _fetch_nselib_spot]:
             try:
                 d = fn(symbol)
                 if d and d.get("spot", 0) > 0:
@@ -120,8 +144,8 @@ class LiveMarketData:
         return float(row["close_price"]) if row else None
 
     def fetch_live_from_nse(self, symbol: str):
-        """Spot via 3 fast alternatives: NSE indices -> nselib -> Google."""
-        for fn in [_fetch_nse_indices_spot, _fetch_nselib_spot]:
+        """Spot via 4 alternatives: TrueData -> NSE indices -> StocksRin -> nselib -> Google."""
+        for fn in [_fetch_truedata_spot, _fetch_nse_indices_spot, _fetch_stocksrin_spot, _fetch_nselib_spot]:
             try:
                 d = fn(symbol)
                 if d:
