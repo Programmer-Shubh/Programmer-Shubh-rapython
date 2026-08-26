@@ -4,8 +4,8 @@ import re
 import json
 from typing import List, Dict
 
-# Free sources: NiftyTrader (primary, option chain), nselib/NSE bhavcopy,
-# StocksRin, Google Finance. Synthetic fallback so backtest always works.
+# Alternative sources: nselib (NSE bhavcopy, primary), StocksRin, Google Finance.
+# NiftyTrader removed — blocked on Render. Synthetic fallback so backtest always works.
 # Yahoo removed — no option chain data.
 
 _HEADERS = {
@@ -26,70 +26,6 @@ def _parse_dates(start_date: str, end_date: str):
         e = datetime.datetime.now()
         s = e - datetime.timedelta(days=90)
         return s, e
-
-def _fetch_niftytrader_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """NiftyTrader — primary source, best for live option chain data."""
-    try:
-        mmap = {"NIFTY": "nifty", "BANKNIFTY": "banknifty", "FINNIFTY": "finnifty", "MIDCPNIFTY": "midcpnifty"}
-        ephem = mmap.get(symbol.upper(), symbol.lower())
-        urls = [
-            f"https://www.niftytrader.in/api/historical/{ephem}?from={start_date}&to={end_date}",
-            f"https://www.niftytrader.in/api/historical-data?symbol={ephem}&from={start_date}&to={end_date}",
-            f"https://www.niftytrader.in/history/{ephem}?from={start_date}&to={end_date}",
-        ]
-        for url in urls:
-            try:
-                r = requests.get(url, headers=_HEADERS, timeout=5)
-                if r.status_code == 200:
-                    data = r.json() if "application/json" in r.headers.get("Content-Type","") else None
-                    if data and isinstance(data, (list, dict)):
-                        rows = data if isinstance(data, list) else data.get("data") or data.get("candles") or data.get("result") or []
-                        if rows and len(rows) >= 5:
-                            out = []
-                            for c in rows:
-                                try:
-                                    td = c.get("date") or c.get("time") or c.get("x") or ""
-                                    if isinstance(td, (int,float)):
-                                        td = datetime.datetime.utcfromtimestamp(td).strftime("%Y-%m-%d")
-                                    else:
-                                        td = str(td)[:10]
-                                    o = float(c.get("open") or c.get("o") or 0)
-                                    h = float(c.get("high") or c.get("h") or 0)
-                                    l = float(c.get("low") or c.get("l") or 0)
-                                    cl = float(c.get("close") or c.get("c") or c.get("price") or 0)
-                                    if cl <= 0: continue
-                                    if td < start_date or td > end_date: continue
-                                    out.append({"symbol": symbol, "trade_date": td, "open_price": o, "high_price": h, "low_price": l, "close_price": cl, "volume": int(c.get("volume",0) or 0), "oi": 0})
-                                except Exception:
-                                    continue
-                            if len(out) >= 10:
-                                return out
-            except Exception:
-                continue
-        home_url = f"https://www.niftytrader.in/nse-option-chain/{ephem}"
-        r = requests.get(home_url, headers=_HEADERS, timeout=6)
-        if r.status_code == 200:
-            m = re.search(r'"historicalData"\s*:\s*(\[.*?\])', r.text)
-            if m:
-                try:
-                    hist = json.loads(m.group(1))
-                    out = []
-                    for h in hist:
-                        try:
-                            td = str(h.get("date","") )[:10]
-                            if td < start_date or td > end_date: continue
-                            o = float(h.get("open",0)); cl = float(h.get("close",0)); high = float(h.get("high",0)); low = float(h.get("low",0))
-                            if cl <=0: continue
-                            out.append({"symbol": symbol, "trade_date": td, "open_price": o, "high_price": high, "low_price": low, "close_price": cl, "volume": int(h.get("volume",0) or 0), "oi":0})
-                        except Exception:
-                            continue
-                    if len(out) >= 10:
-                        return out
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    return []
 
 def _clean_num(v) -> float:
     """Parse NSE number like '2,613.10' or 2613.10."""
@@ -273,9 +209,9 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
     return records
 
 def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """Try free sources: NiftyTrader -> nselib -> StocksRin -> Google Finance -> Synthetic."""
+    """nselib (NSE bhavcopy) -> StocksRin -> Google Finance -> Synthetic. NiftyTrader+Yahoo removed."""
     symbol = symbol.upper()
-    for fetcher in [_fetch_niftytrader_historical, _fetch_nselib_historical, _fetch_stocksrin_historical, _fetch_google_finance]:
+    for fetcher in [_fetch_nselib_historical, _fetch_stocksrin_historical, _fetch_google_finance]:
         try:
             data = fetcher(symbol, start_date, end_date)
             if data and len(data) >= 5:

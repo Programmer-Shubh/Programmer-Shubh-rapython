@@ -86,71 +86,13 @@ def get_chain(symbol: str, date: str, expiry: str):
 def get_live_chain(symbol: str):
     live = LiveMarketData()
     symbol = symbol.upper()
-    # 1) Try NiftyTrader live chain
+    # 1) Live chain: DB/bhavcopy -> synthetic (NSE spot + Black-Scholes, no NiftyTrader)
     data = live.get_live_chain_cached(symbol)
     if not data:
         data = live.fetch_live_option_chain(symbol)
     if data and data.get("rows"):
         return data
-    # 2) DB fallback for latest chain
-    bhav = BhavcopyModel()
-    dates = bhav.get_dates(symbol)
-    if dates:
-        expiries = bhav.get_expiries(symbol, dates[0])
-        if expiries:
-            chain = bhav.get_option_chain(symbol, dates[0], expiries[0])
-            if chain:
-                spot = 0
-                try:
-                    ls = live.get_live_spot(symbol)
-                    spot = float(ls["spot"]) if ls and ls.get("spot") else 0
-                except Exception:
-                    pass
-                if spot <= 0:
-                    spot = live.get_spot_price(symbol)
-                step = get_strike_step(symbol)
-                atm = round(spot / step) * step if spot > 0 else 0
-                ce = {r["strike_price"]: r for r in chain if r["option_type"] == "CE"}
-                pe = {r["strike_price"]: r for r in chain if r["option_type"] == "PE"}
-                all_strikes = sorted(set(list(ce.keys()) + list(pe.keys())))
-                rows = []
-                for s in all_strikes:
-                    rows.append({"strike": s, "distance": int(s - atm),
-                                 "ce_ltp": ce.get(s, {}).get("close_price", 0), "ce_oi": ce.get(s, {}).get("oi", 0), "ce_vol": ce.get(s, {}).get("volume", 0), "ce_iv": 0,
-                                 "pe_ltp": pe.get(s, {}).get("close_price", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
-                if rows:
-                    return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "db"}
-    # 3) Final fallback: generate synthetic chain from Black-Scholes if spot is available
-    try:
-        spot_price = 0
-        try:
-            ls = live.get_live_spot(symbol)
-            spot_price = float(ls["spot"]) if ls and ls.get("spot") else 0
-        except Exception:
-            pass
-        if spot_price <= 0:
-            spot_price = live.get_spot_price(symbol)
-        if spot_price > 0:
-            step = get_strike_step(symbol)
-            atm = round(spot_price / step) * step
-            from utils.helpers import black_scholes
-            import datetime
-            dte = 7 / 365.0
-            rows = []
-            for offset in range(-5, 6):
-                strike = atm + offset * step
-                ce_prem = black_scholes(spot_price, strike, dte, 0.20, "CE")
-                pe_prem = black_scholes(spot_price, strike, dte, 0.20, "PE")
-                rows.append({
-                    "strike": strike, "distance": int(strike - atm),
-                    "ce_ltp": round(ce_prem, 2), "ce_oi": 0, "ce_vol": 0, "ce_iv": 20,
-                    "pe_ltp": round(pe_prem, 2), "pe_oi": 0, "pe_vol": 0, "pe_iv": 20,
-                })
-            if rows:
-                return {"symbol": symbol, "spot": spot_price, "atm": atm, "rows": rows, "source": "estimated"}
-    except Exception:
-        pass
-    return {"error": "Could not fetch live data. NiftyTrader may be blocked. Try again later."}
+    return {"error": "Could not fetch live data. Try again later."}
 
 
 @router.post("/place-trade")
@@ -208,11 +150,9 @@ def place_trade(req: TradeRequest):
     pe_data = {r["strike_price"]: r for r in chain if r["option_type"] == "PE"}
     chain_row = ce_data.get(req.strike) if req.option_type == "CE" else pe_data.get(req.strike)
     premium = float(chain_row.get("close_price", 0)) if chain_row else 0
-    # If no DB premium, try live NiftyTrader option LTP
     if premium <= 0:
         live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type)
         premium = live_premium if live_premium and live_premium > 0 else 0
-    # If still no premium, try NiftyTrader live chain for this strike
     if premium <= 0:
         try:
             lc = live.fetch_live_option_chain(req.symbol)
@@ -224,16 +164,14 @@ def place_trade(req: TradeRequest):
         except Exception:
             pass
     if premium <= 0:
-        # Black-Scholes fallback: estimate premium from spot + strike
         try:
             spot_price = live.get_spot_price(req.symbol)
             if spot_price <= 0:
-                ls = live.get_live_spot(req.symbol)
-                spot_price = float(ls["spot"]) if ls and ls.get("spot") else 0
+                ld = live.get_live_spot(req.symbol)
+                spot_price = float(ld["spot"]) if ld and ld.get("spot") else 0
             if spot_price > 0 and req.strike > 0:
                 from utils.helpers import black_scholes
                 import datetime
-                # Estimate DTE based on expiry or default 7 days
                 try:
                     exp_dt = datetime.datetime.strptime(req.expiry, "%Y-%m-%d") if req.expiry else datetime.datetime.now() + datetime.timedelta(days=7)
                     dte = max(1, (exp_dt - datetime.datetime.now()).days)
@@ -243,7 +181,7 @@ def place_trade(req: TradeRequest):
         except Exception:
             pass
     if premium <= 0:
-        return {"error": f"No premium data for {req.symbol} {req.strike} {req.option_type}. NiftyTrader may be blocked. Try again later."}
+        return {"error": f"No premium data for {req.symbol} {req.strike} {req.option_type}. Try refreshing option chain."}
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
     lot_size = get_lot_size(req.symbol)
     costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
