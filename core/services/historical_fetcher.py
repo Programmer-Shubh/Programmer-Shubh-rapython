@@ -129,36 +129,9 @@ def _fetch_jugaad_historical(symbol: str, start_date: str, end_date: str) -> Lis
     return []
 
 def _fetch_nsepy_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """NSEpy: get_history for NSE stocks/indices (free, quantra)."""
-    try:
-        from nsepy import get_history
-        import datetime as _dt
-        sd = _dt.datetime.strptime(start_date, "%Y-%m-%d").date()
-        ed = _dt.datetime.strptime(end_date, "%Y-%m-%d").date()
-        try:
-            df = get_history(symbol=symbol, start=sd, end=ed)
-        except Exception:
-            return []
-        if df is None or df.empty:
-            return []
-        out = []
-        for idx, row in df.iterrows():
-            try:
-                td = idx.strftime("%Y-%m-%d") if hasattr(idx, 'strftime') else str(idx)[:10]
-                if td < start_date or td > end_date: continue
-                cl = _clean_num(row.get("Close") or row.get("ClosePrice") or 0)
-                if cl <= 0: continue
-                o = _clean_num(row.get("Open") or row.get("OpenPrice") or cl)
-                h = _clean_num(row.get("High") or row.get("HighPrice") or cl)
-                l = _clean_num(row.get("Low") or row.get("LowPrice") or cl)
-                vol = int(_clean_num(row.get("Volume") or row.get("TotalTradedQuantity") or "0"))
-                out.append({"symbol": symbol, "trade_date": td, "open_price": round(o or cl,2), "high_price": round(h or cl,2), "low_price": round(l or cl,2), "close_price": round(cl,2), "volume": vol, "oi": 0})
-            except:
-                continue
-        if len(out) >= 5:
-            return out
-    except Exception:
-        pass
+    """NSEpy: DISABLED — SSL TLSV1_ALERT_INTERNAL_ERROR on www1.nseindia.com
+    on both Windows and Render OpenSSL. Use nselib (price_volume_data)
+    which hits same NSE archives via different endpoint without SSL issue."""
     return []
 
 def _fetch_truedata_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:

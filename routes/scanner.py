@@ -77,19 +77,30 @@ def breakout_scanner(symbol: str):
 
 @router.get("/scan-all")
 def scan_all():
-    scanner = OptionScanner()
-    st_result = scanner.scan()
-    vwap_result = scanner.scan_vwap()
-    return {"st_macd": st_result, "vwap": vwap_result}
+    try:
+        scanner = OptionScanner()
+        st_result = scanner.scan()
+        vwap_result = scanner.scan_vwap()
+        return {"st_macd": st_result, "vwap": vwap_result}
+    except Exception as e:
+        return {"st_macd": {"bullish": [], "bearish": [], "total_scanned": 0, "error": str(e)[:200]}, "vwap": {"long": [], "short": [], "total_scanned": 0}}
 
 
 @router.get("/fno-top5")
 def fno_top5():
-    scanner = OptionScanner()
-    return scanner.get_fno_top5_today()
+    try:
+        scanner = OptionScanner()
+        return scanner.get_fno_top5_today()
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {"date": __import__("datetime").datetime.now().strftime("%Y-%m-%d"), "bullish": [], "bearish": [], "total_scanned": 0, "error": str(e)[:300]}
 
 
 @router.get("/opportunities")
 def top_opportunities():
-    scanner = OptionScanner()
-    return {"opportunities": scanner.get_top_opportunities()}
+    try:
+        scanner = OptionScanner()
+        return {"opportunities": scanner.get_top_opportunities()}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {"opportunities": [], "error": str(e)[:300]}

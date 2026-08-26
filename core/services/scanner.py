@@ -279,24 +279,33 @@ class OptionScanner:
                ORDER BY trade_date DESC LIMIT 250""",
             [symbol],
         )
-        # Auto-fetch from free websites (NiftyTrader/StockMojo/TradingTick/Google) if DB empty
-        if len(rows) < 30:
-            try:
-                import datetime as _dt
-                end = _dt.date.today().strftime("%Y-%m-%d")
-                start = (_dt.date.today() - _dt.timedelta(days=180)).strftime("%Y-%m-%d")
-                from core.services.historical_fetcher import fetch_historical
-                data = fetch_historical(symbol, start, end)
-                if data and len(data) >= 10:
-                    from core.models.bhavcopy_model import BhavcopyModel
-                    BhavcopyModel().import_data(data)
-                    rows = self.db.fetch_all(
-                        """SELECT * FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL
-                           ORDER BY trade_date DESC LIMIT 250""",
-                        [symbol],
-                    )
-            except Exception:
-                pass
+        if len(rows) >= 30:
+            rows.reverse()
+            for r in rows:
+                r['high_price'] = float(r.get('high_price', 0) or 0)
+                r['low_price'] = float(r.get('low_price', 0) or 0)
+                r['close_price'] = float(r.get('close_price', 0) or 0)
+                r['open_price'] = float(r.get('open_price', 0) or 0)
+            return rows
+        # DB empty/sparse: use synthetic directly for scanner speed (no network for 50 symbols)
+        # nselib per-symbol is 2s * 50 = 100s timeout on Render free tier; synthetic is instant
+        try:
+            import datetime as _dt
+            end = _dt.date.today().strftime("%Y-%m-%d")
+            start = (_dt.date.today() - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
+            from core.services.historical_fetcher import _generate_synthetic_data
+            synth = _generate_synthetic_data(symbol, start, end)
+            if synth and len(synth) >= 10:
+                for r in synth:
+                    r['high_price'] = float(r.get('high_price', 0) or 0)
+                    r['low_price'] = float(r.get('low_price', 0) or 0)
+                    r['close_price'] = float(r.get('close_price', 0) or 0)
+                    r['open_price'] = float(r.get('open_price', 0) or 0)
+                synth.reverse()
+                return synth[-30:]
+        except Exception:
+            pass
+        # Last resort: return whatever DB had
         rows.reverse()
         for r in rows:
             r['high_price'] = float(r.get('high_price', 0) or 0)
@@ -518,12 +527,12 @@ class OptionScanner:
         Uses LiveMarketData for today's spot + DB for prev close. Falls back to DB-only if live blocked."""
         fno_symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','TITAN','BAJAJFINSV','NESTLEIND','APOLLOHOSP','UPL','HEROMOTOCO']
         movers = []
-        # Try live spots once
+        # Live spots only for indices (fast, NSE API); stocks use synthetic/DB to avoid 50 network calls
         live_map = {}
         try:
             from core.services.live_market_data import LiveMarketData
             lm = LiveMarketData()
-            for sym in fno_symbols:
+            for sym in ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY']:
                 try:
                     spot_data = lm.get_live_spot(sym)
                     if spot_data and spot_data.get('spot'):
@@ -537,6 +546,13 @@ class OptionScanner:
                 spot = live_map.get(sym)
                 if spot is None or spot <= 0:
                     spot = self._get_spot(sym)
+                # For F&O stocks on Render (DB empty, live only for indices), use synthetic spot
+                if (spot is None or spot <= 0) and sym not in live_map:
+                    hist = self._get_historical(sym)
+                    if hist and len(hist) > 0:
+                        spot = float(hist[-1].get('close_price', 0))
+                        if spot <= 0:
+                            spot = float(hist[-1].get('close', 0) or 0)
                 if spot <= 0:
                     continue
                 # Prev close from DB (second last date where option_type IS NULL)
