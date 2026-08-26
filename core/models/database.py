@@ -100,6 +100,7 @@ class Database:
                     legs TEXT DEFAULT '[]',
                     advanced_options TEXT DEFAULT '{}',
                     risk_management TEXT DEFAULT '{}',
+                    status TEXT DEFAULT 'active',
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
@@ -121,6 +122,20 @@ class Database:
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
             """)
+        # Migrate: add missing columns to existing DB
+        try:
+            self._migrate()
+        except Exception:
+            pass
+
+    def _migrate(self):
+        # Add status column if missing (migrate existing DB)
+        try:
+            cols = {r[1] for r in self.fetch_all("PRAGMA table_info(strategies)")}
+            if "status" not in cols:
+                self.execute("ALTER TABLE strategies ADD COLUMN status TEXT DEFAULT 'active'")
+        except Exception:
+            pass
 
     def fetch_one(self, query, params=None):
         with self._conn() as conn:

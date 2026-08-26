@@ -73,6 +73,10 @@
         @keyframes spin{to{transform:rotate(360deg)}}
         .live-dot{width:8px;height:8px;background:#198754;border-radius:50%;display:inline-block;animation:pulse 1.5s infinite}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+        .price-flash-up{animation:flashUp 0.6s ease}
+        .price-flash-down{animation:flashDown 0.6s ease}
+        @keyframes flashUp{0%{background:#d1e7dd}100%{background:transparent}}
+        @keyframes flashDown{0%{background:#f8d7da}100%{background:transparent}}
         .step-indicator{display:flex;gap:0;margin-bottom:16px}
         .step{flex:1;text-align:center;padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-size:12px;font-weight:500;color:#6c757d}
         .step:first-child{border-radius:6px 0 0 6px}
@@ -448,8 +452,12 @@
                 <div class="card mt-2" id="robot-trades"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="robot-tl"></div></div>
             </div>
             <div class="card mt-3">
-                <div class="card-header"><i class="bi bi-info-circle"></i> Live Robot Status</div>
-                <div class="card-body" id="robot-status"><p class="text-muted small">Robot stopped. Select symbol + order + SL/Target then Start Robot for paper trading.</p></div>
+                <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-info-circle"></i> Live Robot Status</span><button class="btn btn-sm btn-outline-secondary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect Brokers</button></div>
+                <div class="card-body" id="robot-status"><p class="text-muted small">Robot stopped. Select symbol + order + SL/Target then Start Robot for paper trading. Market hours: Mon-Fri 9:15-15:30 IST — Paper trades can queue outside hours.</p></div>
+            </div>
+            <div class="card mt-3" id="robot-saved-card">
+                <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Robots</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
+                <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved robots yet — click Save Robot.</p></div>
             </div>
         </div>
     </div>
@@ -923,8 +931,11 @@
     async function robotStart(){
         const mkt=isMarketOpenIST();
         if(!mkt.open){
-            document.getElementById('robot-status').innerHTML=`<p class="text-danger"><i class="bi bi-clock-history"></i> ${mkt.reason} — Trade sirf market hour me lagega (Mon-Fri 9:15-3:30 IST).</p>`;
-            return;
+            // Market closed: show warning but still allow PAPER queue
+            if(!confirm(`${mkt.reason}\n\nMarket band hai — Paper trade queue kar de? (Live trade market open par execute hoga)`)){
+                document.getElementById('robot-status').innerHTML=`<p class="text-danger"><i class="bi bi-clock-history"></i> ${mkt.reason} — Trade sirf market hour me lagega (Mon-Fri 9:15-3:30 IST).</p>`;
+                return;
+            }
         }
         const sym=document.getElementById('r-sym').value;
         let order=document.getElementById('r-order').value;
@@ -970,8 +981,40 @@
         if(order==='AUTO'){ legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType.toLowerCase()}]; }
         else { const p=order.split('-'); legs=[{option_type:p[0], transaction:p[1].toLowerCase(), lots:lots, strike_selection:strikeType.toLowerCase()}]; }
         const body={name:sym+'_Robot_'+order, symbol:sym, strategy_type:'intraday', entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, lots:lots, stop_loss:sl, take_profit:tp, start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, legs:legs, auto_signal:order==='AUTO'};
-        try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id) alert('Robot saved! ID: '+r.id); else alert('Saved'); }catch(e){alert('Error: '+e.message);}
+        try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ alert('Robot saved! ID: '+r.id); loadRobotSaved(); } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
     }
+     function _parseJsonField(v, fallback){ if(!v) return fallback; if(typeof v==='string'){ try{return JSON.parse(v);}catch(e){return fallback;} } return v; }
+     async function loadRobotSaved(){
+        try{
+            const r=await A('/api/strategies/list');
+            const robots=(r.strategies||[]).filter(s=>(s.name||'').includes('_Robot_'));
+            if(!robots.length){ document.getElementById('robot-saved').innerHTML='<p class="text-muted p-3 small">No saved robots yet — click Save Robot.</p>'; return; }
+            let h='<table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Symbol</th><th>Order</th><th>SL/TP</th><th>Status</th><th>Action</th></tr></thead><tbody>';
+            robots.forEach(s=>{
+                const legs=_parseJsonField(s.legs,[]); const leg=legs[0]||{}; const ord=(leg.option_type||'')+'-'+(leg.transaction||'');
+                const rm=_parseJsonField(s.risk_management,{});
+                h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td><td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td><span class="badge ${s.status==='active'?'badge-active':'badge-draft'}">${s.status||'active'}</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="loadRobotToForm(${s.id})">Load</button> <button class="btn btn-sm btn-outline-danger" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
+            });
+            h+='</tbody></table>'; document.getElementById('robot-saved').innerHTML=h;
+        }catch(e){ document.getElementById('robot-saved').innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>'; console.error(e); }
+    }
+    async function loadRobotToForm(id){
+        try{
+            const s=await A('/api/strategies/'+id);
+            if(s.error){ alert(s.error); return; }
+            document.getElementById('r-sym').value=s.symbol||'BANKNIFTY';
+            const legs=_parseJsonField(s.legs,[]); const leg=legs[0]||{};
+            if(leg.option_type==='AUTO') document.getElementById('r-order').value='AUTO';
+            else document.getElementById('r-order').value=(leg.option_type||'CE')+'-'+(leg.transaction||'buy').toUpperCase();
+            document.getElementById('r-strike').value=(leg.strike_selection||'atm').toUpperCase();
+            document.getElementById('r-lots').value=leg.lots||1;
+            const rm=_parseJsonField(s.risk_management,{}); document.getElementById('r-sl').value=rm.daily_stop_loss||500; document.getElementById('r-tp').value=rm.daily_take_profit||1000;
+            const ao=_parseJsonField(s.advanced_options,{}); if(ao.entry_time) document.getElementById('r-entry').value=ao.entry_time; if(ao.exit_time) document.getElementById('r-exit').value=ao.exit_time;
+            if(s.start_date) document.getElementById('r-start').value=s.start_date; if(s.end_date) document.getElementById('r-end').value=s.end_date;
+            alert('Robot ID '+id+' loaded to form');
+        }catch(e){ alert('Error: '+e.message); }
+    }
+    async function delRobotSaved(id){ if(!confirm('Delete this saved robot?')) return; await A('/api/strategies/'+id,{method:'DELETE'}); loadRobotSaved(); }
     async function robotPaperTrade(){ await robotStart(); document.getElementById('robot-status').innerHTML+='<br><small class="text-muted">Mode: Paper Trade (default)</small>'; }
     async function robotLiveTrade(){
         if(!confirm('Live Trade will place real broker order. Continue?')) return;
@@ -996,10 +1039,43 @@
     addCondition();
     loadDash();
     loadStrategySymbols();
-    setInterval(loadDash,120000);
-    // NSE-like rate streaming: live positions & dashboard auto-refresh every 3s, option chain live every 2s
+    setInterval(loadDash,30000);
+    // WebSocket live streaming: NSE-like sub-50ms via /api/ws/live, fallback to HTTP polling
+    let _dashWS=null, _dashWSRetry=0;
+    function connectDashWS(){
+        try{
+            const proto=location.protocol==='https:'?'wss:':'ws:';
+            _dashWS=new WebSocket(proto+'//'+location.host+'/api/ws/live');
+            let _prevSpots={};
+            _dashWS.onmessage=e=>{
+                try{
+                    const msg=JSON.parse(e.data);
+                    if(msg.type==='tick' && msg.ticks){
+                        let h='';
+                        for(const [sym,d] of Object.entries(msg.ticks)){
+                            const prev=_prevSpots[sym]||0; const cur=d.spot||0;
+                            const flash=cur>prev?'price-flash-up':cur<prev?'price-flash-down':'';
+                            _prevSpots[sym]=cur;
+                            const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:''; 
+                            const fmt=d.spot?`INR ${d.spot.toLocaleString('en-IN',{minimumFractionDigits:2})}`:'No Data';
+                            h+=`<div class="col"><div class="card stat-card ${flash}"><div class="label">${sym}</div><div class="value">${fmt}</div>${chg}<div class="label">${d.source||'live'}</div></div></div>`;
+                        }
+                        if(h) document.getElementById('mkt-cards').innerHTML=h;
+                        document.getElementById('status').innerHTML='<span class="live-dot"></span> Live Streaming';
+                    }
+                }catch(err){}
+            };
+            _dashWS.onclose=()=>{ _dashWS=null; _dashWSRetry++; setTimeout(connectDashWS, Math.min(5000, 1000*_dashWSRetry)); };
+            _dashWS.onerror=()=>{ try{_dashWS.close();}catch(e){} };
+        }catch(e){}
+    }
+    connectDashWS();
+    // Fallback HTTP refresh if WS not connected
+    setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },30000);
     setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 3000);
     setInterval(()=>{ try{ if(!document.getElementById('pg-chain').classList.contains('hidden') && document.getElementById('c-live') && document.getElementById('c-live').checked) cLoadChain(); }catch(e){} }, 2500);
+    // Auto-load saved robots on robot page visit
+    document.querySelector('.nav button[onclick*=\"robot\"]')?.addEventListener('click', ()=> setTimeout(loadRobotSaved, 300));
 
     let currentBroker='';
     let brokerData=[];
