@@ -3,8 +3,8 @@ services:
     name: ratrade
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
@@ -13,6 +13,8 @@ services:
         value: auto
       - key: DB_PATH
         value: /opt/render/project/src/data/ratrade.db
+      - key: PYTHONUNBUFFERED
+        value: 1
     autoDeploy: true
     # Render free tier has ephemeral filesystem - trades/data disappear on deploy/restart.
     # To persist trades, upgrade to Starter+ plan and uncomment disk config.
