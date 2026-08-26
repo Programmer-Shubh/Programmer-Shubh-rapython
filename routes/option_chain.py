@@ -126,6 +126,40 @@ def get_live_chain(symbol: str):
                                  "pe_ltp": pe.get(s, {}).get("close_price", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
                 if rows:
                     return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "db"}
+    # 3) Final fallback: generate synthetic chain from Black-Scholes if spot is available
+    try:
+        spot_price = 0
+        try:
+            from core.services.free_data import fetch_yahoo_spot
+            spot_price = fetch_yahoo_spot(symbol)
+        except Exception:
+            pass
+        if spot_price <= 0:
+            try:
+                ls = live.get_live_spot(symbol)
+                spot_price = float(ls["spot"]) if ls and ls.get("spot") else 0
+            except Exception:
+                pass
+        if spot_price > 0:
+            step = get_strike_step(symbol)
+            atm = round(spot_price / step) * step
+            from utils.helpers import black_scholes
+            import datetime
+            dte = 7 / 365.0
+            rows = []
+            for offset in range(-5, 6):
+                strike = atm + offset * step
+                ce_prem = black_scholes(spot_price, strike, dte, 0.20, "CE")
+                pe_prem = black_scholes(spot_price, strike, dte, 0.20, "PE")
+                rows.append({
+                    "strike": strike, "distance": int(strike - atm),
+                    "ce_ltp": round(ce_prem, 2), "ce_oi": 0, "ce_vol": 0, "ce_iv": 20,
+                    "pe_ltp": round(pe_prem, 2), "pe_oi": 0, "pe_vol": 0, "pe_iv": 20,
+                })
+            if rows:
+                return {"symbol": symbol, "spot": spot_price, "atm": atm, "rows": rows, "source": "estimated"}
+    except Exception:
+        pass
     return {"error": "Could not fetch live data. NiftyTrader may be blocked. Try again later."}
 
 
@@ -200,7 +234,26 @@ def place_trade(req: TradeRequest):
         except Exception:
             pass
     if premium <= 0:
-        return {"error": f"No real premium data for {req.symbol} {req.strike} {req.option_type}. Load option chain first to get live prices."}
+        # Black-Scholes fallback: estimate premium from spot + strike
+        try:
+            spot_price = live.get_spot_price(req.symbol)
+            if spot_price <= 0:
+                ls = live.get_live_spot(req.symbol)
+                spot_price = float(ls["spot"]) if ls and ls.get("spot") else 0
+            if spot_price > 0 and req.strike > 0:
+                from utils.helpers import black_scholes
+                import datetime
+                # Estimate DTE based on expiry or default 7 days
+                try:
+                    exp_dt = datetime.datetime.strptime(req.expiry, "%Y-%m-%d") if req.expiry else datetime.datetime.now() + datetime.timedelta(days=7)
+                    dte = max(1, (exp_dt - datetime.datetime.now()).days)
+                except Exception:
+                    dte = 7
+                premium = black_scholes(spot_price, req.strike, dte / 365.0, 0.20, req.option_type)
+        except Exception:
+            pass
+    if premium <= 0:
+        return {"error": f"No premium data for {req.symbol} {req.strike} {req.option_type}. NiftyTrader may be blocked. Try again later."}
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
     lot_size = get_lot_size(req.symbol)
     costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
