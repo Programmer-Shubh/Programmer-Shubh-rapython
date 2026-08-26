@@ -122,6 +122,13 @@ class Database:
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
             """)
+        # Market data is API-only — clear stale bhavcopy (db ko hatao)
+        try:
+            with self._conn() as c2:
+                c2.execute("DELETE FROM bhavcopy_data")
+                c2.commit()
+        except Exception:
+            pass
         # Migrate: add missing columns to existing DB
         try:
             self._migrate()
