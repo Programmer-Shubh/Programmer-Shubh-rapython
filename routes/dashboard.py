@@ -6,10 +6,7 @@ from utils.helpers import get_lot_size, format_currency
 
 router = APIRouter()
 
-_YAHOO_INDEX_MAP = {
-    "NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK",
-    "FINNIFTY": "^CNXFINANCE", "MIDCPNIFTY": "^NSEMDCP50",
-}
+
 
 _NSE_INDEX_MAP = {
     "NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
@@ -53,23 +50,6 @@ def _fetch_nse_spot_all():
     return _NSE_SPOT_CACHE
 
 
-def _fetch_yahoo_spot(symbol: str) -> float:
-    """Fetch live spot from Yahoo Finance (fast, free)."""
-    try:
-        import requests
-        ysym = _YAHOO_INDEX_MAP.get(symbol.upper(), f"{symbol.upper()}.NS")
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?range=1d&interval=1d"
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
-        if r.status_code == 200:
-            meta = r.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
-            price = meta.get("regularMarketPrice") or meta.get("previousClose") or 0
-            if price and float(price) > 0:
-                return float(price)
-    except Exception:
-        pass
-    return 0
-
-
 def _fetch_google_spot(symbol: str) -> float:
     """Scrape Google Finance for live spot price."""
     try:
@@ -82,6 +62,24 @@ def _fetch_google_spot(symbol: str) -> float:
             m = re.search(r'data-last-price="([^"]+)"', r.text)
             if m:
                 return float(m.group(1).replace(",", ""))
+    except Exception:
+        pass
+    return 0
+
+
+def _fetch_nselib_spot(symbol: str) -> float:
+    """Fetch spot via nselib (NSE bhavcopy, reliable for all stocks)."""
+    try:
+        from nselib.capital_market import price_volume_data
+        import datetime
+        sd = (datetime.datetime.now() - datetime.timedelta(days=5)).strftime("%d-%m-%Y")
+        ed = datetime.datetime.now().strftime("%d-%m-%Y")
+        df = price_volume_data(symbol, from_date=sd, to_date=ed)
+        if df is not None and not df.empty:
+            last = df.iloc[-1]
+            cl = float(last.get("ClosePrice", last.get("LastPrice", 0)) or 0)
+            if cl > 0:
+                return float(cl)
     except Exception:
         pass
     return 0
@@ -118,7 +116,7 @@ def get_spots():
                 "source": "nse",
             }
             continue
-        # 3) Try Yahoo Finance
+        # 3) Try nselib / Google
         spot, source = _free_latest_spot(sym)
         if spot > 0:
             change_pct = _free_change_pct(sym, spot)
@@ -138,16 +136,8 @@ def get_spots():
 
 
 def _free_latest_spot(symbol: str):
-    """Try live free sources first (Yahoo/Google), then DB fallback. Returns (spot, source)."""
-    # 1) Yahoo Finance (fastest, most reliable for indices)
-    spot = _fetch_yahoo_spot(symbol)
-    if spot > 0:
-        return spot, "yahoo"
-    # 2) Google Finance
-    spot = _fetch_google_spot(symbol)
-    if spot > 0:
-        return spot, "google"
-    # 3) NiftyTrader live via LiveMarketData
+    """NiftyTrader -> NSE nselib -> Google -> DB. No Yahoo."""
+    # 1) NiftyTrader live (primary, has option chain)
     try:
         live = LiveMarketData()
         data = live.get_live_spot(symbol)
@@ -155,6 +145,14 @@ def _free_latest_spot(symbol: str):
             return float(data["spot"]), "niftytrader"
     except Exception:
         pass
+    # 2) NSE via nselib
+    spot = _fetch_nselib_spot(symbol)
+    if spot > 0:
+        return spot, "nselib"
+    # 3) Google Finance
+    spot = _fetch_google_spot(symbol)
+    if spot > 0:
+        return spot, "google"
     # 4) DB fallback (last resort)
     db = Database.get_instance()
     try:

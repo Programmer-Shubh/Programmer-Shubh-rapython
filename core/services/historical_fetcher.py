@@ -4,8 +4,9 @@ import re
 import json
 from typing import List, Dict
 
-# Free sources like NiftyTrader, StockMojo, TradingTick offer user-friendly visual interfaces and historical data.
-# This fetcher tries them in order, falls back to Google Finance, then synthetic generation so backtest always works.
+# Free sources: NiftyTrader (primary, option chain), nselib/NSE bhavcopy,
+# StocksRin, Google Finance. Synthetic fallback so backtest always works.
+# Yahoo removed — no option chain data.
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -27,12 +28,10 @@ def _parse_dates(start_date: str, end_date: str):
         return s, e
 
 def _fetch_niftytrader_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """Try NiftyTrader historical chart via its Next.js data endpoint."""
+    """NiftyTrader — primary source, best for live option chain data."""
     try:
-        # NiftyTrader maps
         mmap = {"NIFTY": "nifty", "BANKNIFTY": "banknifty", "FINNIFTY": "finnifty", "MIDCPNIFTY": "midcpnifty"}
         ephem = mmap.get(symbol.upper(), symbol.lower())
-        # Try to fetch via niftytrader historical API if exists
         urls = [
             f"https://www.niftytrader.in/api/historical/{ephem}?from={start_date}&to={end_date}",
             f"https://www.niftytrader.in/api/historical-data?symbol={ephem}&from={start_date}&to={end_date}",
@@ -44,7 +43,6 @@ def _fetch_niftytrader_historical(symbol: str, start_date: str, end_date: str) -
                 if r.status_code == 200:
                     data = r.json() if "application/json" in r.headers.get("Content-Type","") else None
                     if data and isinstance(data, (list, dict)):
-                        # Try to parse list of OHLC
                         rows = data if isinstance(data, list) else data.get("data") or data.get("candles") or data.get("result") or []
                         if rows and len(rows) >= 5:
                             out = []
@@ -68,7 +66,6 @@ def _fetch_niftytrader_historical(symbol: str, start_date: str, end_date: str) -
                                 return out
             except Exception:
                 continue
-        # Fallback: scrape NiftyTrader page for embedded historical JSON
         home_url = f"https://www.niftytrader.in/nse-option-chain/{ephem}"
         r = requests.get(home_url, headers=_HEADERS, timeout=6)
         if r.status_code == 200:
@@ -94,33 +91,77 @@ def _fetch_niftytrader_historical(symbol: str, start_date: str, end_date: str) -
         pass
     return []
 
-def _fetch_stockmojo_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+def _clean_num(v) -> float:
+    """Parse NSE number like '2,613.10' or 2613.10."""
+    if v is None: return 0
+    s = str(v).replace(",", "").replace("\u20b9", "").strip()
+    try: return float(s)
+    except: return 0
+
+def _fetch_nselib_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """nselib — reliable for all NSE stocks + indices (free, no API key)."""
     try:
-        # StockMojo has visual historical charts, try its API
+        from nselib.capital_market import price_volume_data
+        sd = datetime.datetime.strptime(start_date, "%Y-%m-%d").strftime("%d-%m-%Y")
+        ed = datetime.datetime.strptime(end_date, "%Y-%m-%d").strftime("%d-%m-%Y")
+        df = price_volume_data(symbol, from_date=sd, to_date=ed)
+        if df is None or df.empty:
+            return []
+        out = []
+        for _, row in df.iterrows():
+            td = str(row.get("Date", row.get("Historical Date", "")))
+            for fmt in ("%d-%b-%Y", "%d %b %Y", "%Y-%m-%d", "%d-%m-%Y"):
+                try:
+                    td = datetime.datetime.strptime(td.strip(), fmt).strftime("%Y-%m-%d")
+                    break
+                except Exception:
+                    continue
+            try:
+                o = _clean_num(row.get("OpenPrice", row.get("Open Price", "")))
+                h = _clean_num(row.get("HighPrice", row.get("High Price", "")))
+                l = _clean_num(row.get("LowPrice", row.get("Low Price", "")))
+                cl = _clean_num(row.get("ClosePrice", row.get("LastPrice", row.get("Close", ""))))
+                vol_raw = str(row.get("TotalTradedQuantity", row.get("Total Traded Quantity", "0"))).replace(",", "").strip()
+                try: vol = int(float(vol_raw))
+                except: vol = 0
+                if cl <= 0: continue
+                if td < start_date or td > end_date: continue
+                if o <= 0: o = cl
+                if h <= 0: h = cl
+                if l <= 0: l = cl
+                out.append({"symbol": symbol, "trade_date": td, "open_price": round(o,2), "high_price": round(h,2), "low_price": round(l,2), "close_price": round(cl,2), "volume": vol, "oi": 0})
+            except Exception:
+                continue
+        if len(out) >= 5:
+            return out
+    except Exception:
+        pass
+    return []
+
+def _fetch_stocksrin_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """StocksRin — option chain + historical data platform."""
+    try:
+        # StocksRin has historical API for F&O data
         urls = [
-            f"https://www.stockmojo.com/api/stock/historical/{symbol}?from={start_date}&to={end_date}",
-            f"https://www.stockmojo.com/stock/{symbol.lower()}",
+            f"https://stocksrin.com/api/historical/{symbol}?from={start_date}&to={end_date}",
+            f"https://stocksrin.com/api/history/{symbol}?from={start_date}&to={end_date}",
         ]
         for url in urls:
             try:
-                r = requests.get(url, headers=_HEADERS, timeout=5)
+                r = requests.get(url, headers=_HEADERS, timeout=6)
                 if r.status_code != 200: continue
-                # Try JSON
                 try:
                     data = r.json()
-                    rows = data if isinstance(data, list) else data.get("data") or data.get("historical") or []
+                    rows = data if isinstance(data, list) else data.get("data") or data.get("historical") or data.get("candles") or []
                     if rows and len(rows) >= 5:
-                        out=[]
+                        out = []
                         for c in rows:
-                            try:
-                                td = str(c.get("date") or c.get("Date") or "")[:10]
-                                if td < start_date or td > end_date: continue
-                                cl = float(c.get("close") or c.get("Close") or 0)
-                                if cl<=0: continue
-                                out.append({"symbol": symbol, "trade_date": td, "open_price": float(c.get("open") or c.get("Open") or cl), "high_price": float(c.get("high") or c.get("High") or cl), "low_price": float(c.get("low") or c.get("Low") or cl), "close_price": cl, "volume": int(c.get("volume") or 0), "oi":0})
-                            except Exception:
-                                continue
-                        if len(out)>=10:
+                            td = str(c.get("date") or c.get("Date") or c.get("trade_date") or "")[:10]
+                            if td < start_date or td > end_date: continue
+                            cl = float(c.get("close") or c.get("Close") or c.get("close_price") or 0)
+                            if cl <= 0: continue
+                            out.append({"symbol": symbol, "trade_date": td, "open_price": float(c.get("open") or c.get("Open") or cl), "high_price": float(c.get("high") or c.get("High") or cl), "low_price": float(c.get("low") or c.get("Low") or cl), "close_price": cl, "volume": int(c.get("volume") or 0), "oi": 0})
+                        if len(out) >= 5:
                             return out
                 except Exception:
                     pass
@@ -129,60 +170,14 @@ def _fetch_stockmojo_historical(symbol: str, start_date: str, end_date: str) -> 
                 if m:
                     try:
                         hist = json.loads(m.group(1))
-                        out=[]
+                        out = []
                         for h in hist:
-                            td=str(h.get("date",""))[:10]
-                            if td<start_date or td>end_date: continue
-                            cl=float(h.get("close",0))
-                            if cl<=0: continue
-                            out.append({"symbol":symbol,"trade_date":td,"open_price":float(h.get("open",cl)),"high_price":float(h.get("high",cl)),"low_price":float(h.get("low",cl)),"close_price":cl,"volume":0,"oi":0})
-                        if len(out)>=10:
-                            return out
-                    except Exception:
-                        pass
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return []
-
-def _fetch_tradingtick_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    try:
-        urls = [
-            f"https://www.tradingtick.com/api/historical/{symbol}?from={start_date}&to={end_date}",
-            f"https://www.tradingtick.com/stock/{symbol}",
-        ]
-        for url in urls:
-            try:
-                r = requests.get(url, headers=_HEADERS, timeout=5)
-                if r.status_code != 200: continue
-                try:
-                    data = r.json()
-                    rows = data if isinstance(data, list) else data.get("data") or data.get("candles") or []
-                    if rows and len(rows)>=5:
-                        out=[]
-                        for c in rows:
-                            td=str(c.get("date") or c.get("time") or "")[:10]
-                            if td<start_date or td>end_date: continue
-                            cl=float(c.get("close") or c.get("c") or 0)
-                            if cl<=0: continue
-                            out.append({"symbol":symbol,"trade_date":td,"open_price":float(c.get("open") or cl),"high_price":float(c.get("high") or cl),"low_price":float(c.get("low") or cl),"close_price":cl,"volume":0,"oi":0})
-                        if len(out)>=10:
-                            return out
-                except Exception:
-                    pass
-                m=re.search(r'"candles"\s*:\s*(\[.*?\])', r.text)
-                if m:
-                    try:
-                        hist=json.loads(m.group(1))
-                        out=[]
-                        for h in hist:
-                            td=str(h.get("date",""))[:10]
-                            if td<start_date or td>end_date: continue
-                            cl=float(h.get("close",0))
-                            if cl<=0: continue
-                            out.append({"symbol":symbol,"trade_date":td,"open_price":float(h.get("open",cl)),"high_price":float(h.get("high",cl)),"low_price":float(h.get("low",cl)),"close_price":cl,"volume":0,"oi":0})
-                        if len(out)>=10:
+                            td = str(h.get("date",""))[:10]
+                            if td < start_date or td > end_date: continue
+                            cl = float(h.get("close",0))
+                            if cl <= 0: continue
+                            out.append({"symbol": symbol, "trade_date": td, "open_price": float(h.get("open",cl)), "high_price": float(h.get("high",cl)), "low_price": float(h.get("low",cl)), "close_price": cl, "volume": 0, "oi": 0})
+                        if len(out) >= 5:
                             return out
                     except Exception:
                         pass
@@ -232,8 +227,7 @@ def _fetch_google_finance(symbol: str, start_date: str, end_date: str) -> List[D
     return []
 
 def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """Generate realistic synthetic OHLCV data as final fallback so backtest always works."""
-    import math
+    """Realistic synthetic OHLCV - final fallback so backtest always works."""
     _SPOTS = {
         "NIFTY": 24500, "BANKNIFTY": 51200, "FINNIFTY": 22800, "MIDCPNIFTY": 14800,
         "RELIANCE": 2850, "HDFCBANK": 1780, "ICICIBANK": 1250, "TCS": 3950,
@@ -279,16 +273,15 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
     return records
 
 def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """Try free sources in order: NiftyTrader -> StockMojo -> TradingTick -> Google Finance -> Synthetic. No Yahoo Finance (no option chain data)."""
+    """Try free sources: NiftyTrader -> nselib -> StocksRin -> Google Finance -> Synthetic."""
     symbol = symbol.upper()
-    for fetcher in [_fetch_niftytrader_historical, _fetch_stockmojo_historical, _fetch_tradingtick_historical, _fetch_google_finance]:
+    for fetcher in [_fetch_niftytrader_historical, _fetch_nselib_historical, _fetch_stocksrin_historical, _fetch_google_finance]:
         try:
             data = fetcher(symbol, start_date, end_date)
             if data and len(data) >= 5:
                 return data
         except Exception:
             continue
-    # Final fallback: synthetic data so backtest always works
     try:
         synth = _generate_synthetic_data(symbol, start_date, end_date)
         if synth and len(synth) >= 5:

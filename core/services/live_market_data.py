@@ -4,9 +4,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from core.models.database import Database
 try:
-    from core.services.free_data import fetch_yahoo_spot, fetch_google_spot
+    from core.services.free_data import fetch_google_spot
 except Exception:
-    fetch_yahoo_spot = lambda s: 0
     fetch_google_spot = lambda s: 0
 
 _LIVE_CACHE = {}
@@ -64,11 +63,18 @@ class LiveMarketData:
         )
         if row and row["close_price"] and float(row["close_price"]) > 0:
             return float(row["close_price"])
-        # Free website fallback: Yahoo/Google (no bhavcopy needed)
+        # Free website fallback: nselib / Google (no bhavcopy needed)
         try:
-            y = fetch_yahoo_spot(symbol)
-            if y and y > 0:
-                return float(y)
+            from nselib.capital_market import price_volume_data as _pvd
+            import datetime as _dt
+            sd = (_dt.datetime.now() - _dt.timedelta(days=5)).strftime("%d-%m-%Y")
+            ed = _dt.datetime.now().strftime("%d-%m-%Y")
+            df = _pvd(symbol, from_date=sd, to_date=ed)
+            if df is not None and not df.empty:
+                last = df.iloc[-1]
+                cl = float(last.get("ClosePrice", last.get("LastPrice", last.get("CLOSE", 0))) or 0)
+                if cl > 0:
+                    return float(cl)
         except Exception:
             pass
         try:

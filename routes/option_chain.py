@@ -102,16 +102,10 @@ def get_live_chain(symbol: str):
             if chain:
                 spot = 0
                 try:
-                    from core.services.free_data import fetch_yahoo_spot
-                    spot = fetch_yahoo_spot(symbol)
+                    ls = live.get_live_spot(symbol)
+                    spot = float(ls["spot"]) if ls and ls.get("spot") else 0
                 except Exception:
                     pass
-                if spot <= 0:
-                    try:
-                        ls = live.get_live_spot(symbol)
-                        spot = float(ls["spot"]) if ls and ls.get("spot") else 0
-                    except Exception:
-                        pass
                 if spot <= 0:
                     spot = live.get_spot_price(symbol)
                 step = get_strike_step(symbol)
@@ -130,16 +124,12 @@ def get_live_chain(symbol: str):
     try:
         spot_price = 0
         try:
-            from core.services.free_data import fetch_yahoo_spot
-            spot_price = fetch_yahoo_spot(symbol)
+            ls = live.get_live_spot(symbol)
+            spot_price = float(ls["spot"]) if ls and ls.get("spot") else 0
         except Exception:
             pass
         if spot_price <= 0:
-            try:
-                ls = live.get_live_spot(symbol)
-                spot_price = float(ls["spot"]) if ls and ls.get("spot") else 0
-            except Exception:
-                pass
+            spot_price = live.get_spot_price(symbol)
         if spot_price > 0:
             step = get_strike_step(symbol)
             atm = round(spot_price / step) * step
