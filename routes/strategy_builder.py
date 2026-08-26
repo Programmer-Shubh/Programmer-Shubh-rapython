@@ -12,7 +12,7 @@ router = APIRouter()
 
 class BacktestRequest(BaseModel):
     symbol: str = "NIFTY"
-    start_date: str = "2025-08-01"
+    start_date: str = "2026-08-01"
     end_date: str = "2026-08-20"
     indicators: list = []
     entry_conditions: list = []
@@ -247,7 +247,7 @@ def _fetch_and_store_nselib(symbol, start_date, end_date):
 def run_backtest(req: BacktestRequest):
     try:
         symbol = (req.symbol or "NIFTY").upper()
-        start_date = req.start_date or "2025-08-01"
+        start_date = req.start_date or "2026-08-01"
         end_date = req.end_date or "2026-08-20"
         # Merge frontend flat fields
         advanced_in = dict(req.advanced or {})
@@ -376,7 +376,7 @@ def run_backtest(req: BacktestRequest):
 
 class MasterConfluenceRequest(BaseModel):
     symbol: str = "NIFTY"
-    start_date: str = "2025-08-01"
+    start_date: str = "2026-08-01"
     end_date: str = "2026-08-20"
     sl_pct: float = 2.0
     tp_rr: float = 2.0

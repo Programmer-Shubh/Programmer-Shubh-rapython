@@ -999,7 +999,7 @@ class BacktestEngine:
                 "equity_curve": equity,
                 "trade_list": trade_list,
                 "monthly_pnl": monthly_pnl,
-                "source": "shoonya.algotest.in",
+                "source": "ratrade.quantitative.engine",
             },
         }
 
