@@ -323,11 +323,20 @@ class OptionScanner:
                 return float(live['spot'])
         except Exception:
             pass
+        # Fallback: use multi-source historical fetcher (nselib -> jugaad-data -> synthetic)
+        try:
+            from core.services.historical_fetcher import fetch_historical
+            hist = fetch_historical(symbol, "2026-07-01", "2026-08-20")
+            if hist and len(hist) >= 5:
+                return float(hist[-1].get("close_price", hist[-1].get("close", 0)))
+        except Exception:
+            pass
+        # Last resort: DB
         row = self.db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL)",
             [symbol, symbol],
         )
-        return float(row['close_price']) if row else 0
+        return float(row["close_price"]) if row else 0
 
     def _get_step(self, symbol: str) -> int:
         steps = {'NIFTY': 50, 'BANKNIFTY': 100, 'FINNIFTY': 50, 'MIDCPNIFTY': 50,
@@ -561,10 +570,10 @@ class OptionScanner:
                 if len(rows) >= 2:
                     prev = float(rows[1]['close_price'] or 0)
                 elif len(rows) == 1:
-                    # No prev, use spot as prev (0% change) - skip
-                    continue
+                    # Only 1 row - use spot as prev (0% change)
+                    prev = spot if spot > 0 else prev
                 if prev <= 0:
-                    continue
+                    prev = spot if spot > 0 else 0
                 change_pct = (spot - prev) / prev * 100
                 # Option suggestion for trading
                 opt_type = 'CE' if change_pct >= 0 else 'PE'
