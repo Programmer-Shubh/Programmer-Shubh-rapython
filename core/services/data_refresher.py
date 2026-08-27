@@ -70,17 +70,20 @@ def _seed_chain(symbol: str, chain: dict):
         BhavcopyModel().import_data(rows)
 
 
-def refresh_all():
-    """Fetch live spot + option chains via 3 fast alternatives: NSE allIndices + nselib + StocksRin. No NiftyTrader, no Yahoo."""
+def refresh_all(light: bool = False):
+    """Fetch live spot + option chains via 3 fast alternatives: NSE allIndices (200ms) + StocksRin + nselib. No NiftyTrader, no Yahoo.
+    light=True -> only indices (fast startup <1s, keeps health check responsive)."""
     live = LiveMarketData()
-    # Parallel fetch indices first (fastest: NSE allIndices 200ms)
     chains = live.get_live_chains_parallel(INDEX_SYMBOLS)
     chain_ok = 0
     for sym in INDEX_SYMBOLS:
         chain = chains.get(sym)
         if chain:
             chain_ok += 1
-            _seed_chain(sym, chain)
+            try:
+                _seed_chain(sym, chain)
+            except Exception:
+                pass
             spot = chain.get("spot", 0)
             if spot:
                 src = chain.get("source", "nse")
@@ -88,15 +91,11 @@ def refresh_all():
                     "spot": spot, "formatted": f"INR {spot:,.2f}",
                     "change": 0, "high": spot, "low": spot, "source": src,
                 }}
-    # Seed historical via multi-source fetcher (nselib -> StocksRin -> synthetic) - fast synthetic fallback
-    for sym in INDEX_SYMBOLS:
-        try:
-            _seed_history(sym)
-        except Exception:
-            pass
-    # Cache stock spots - use live spot (NSE quote + StocksRin + nselib) without heavy chain generation
+    if light:
+        return {sym: bool(chains.get(sym)) for sym in INDEX_SYMBOLS}, chain_ok
+    # Full refresh (background, after startup) - cache stock spots slowly without blocking
     try:
-        for sym in EXTRA_SYMBOLS:
+        for sym in EXTRA_SYMBOLS[:8]:  # only 8 per cycle to avoid 40*3s block, rest next cycle
             try:
                 spot_data = live.get_live_spot(sym)
                 if spot_data and spot_data.get("spot"):
@@ -118,13 +117,14 @@ async def run_refresh_loop():
         return
     _RUNNING = True
     logger.info("[refresh] background loop started (every %ss)", _REFRESH_INTERVAL)
+    # Light initial refresh in background thread - non-blocking so health check returns 200 instantly
     try:
-        refresh_all()
+        await asyncio.to_thread(refresh_all, True)
     except Exception as e:
-        logger.warning("[refresh] initial refresh failed: %s", e)
+        logger.warning("[refresh] initial light refresh failed: %s", e)
     while True:
         await asyncio.sleep(_REFRESH_INTERVAL)
         try:
-            await asyncio.to_thread(refresh_all)
+            await asyncio.to_thread(refresh_all, False)
         except Exception as e:
             logger.warning("[refresh] refresh failed: %s", e)

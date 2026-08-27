@@ -16,35 +16,22 @@ _CHAIN_CACHE_TTL = 2
 # --- 3 fast alternatives (NSE allIndices + NSE quote + StocksRin) - No NiftyTrader, No Yahoo ---
 
 def _fetch_nse_quote_spot(symbol: str):
-    """NSE quote-equity API - fastest for stocks (300ms), real-time."""
+    """NSE quote-equity API - single request, 1.5s timeout."""
     try:
-        # NSE blocks without proper session cookies, mimic browser
-        s = requests.Session()
-        s.headers.update({
+        headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
-        })
-        # Prime cookies
-        try:
-            s.get("https://www.nseindia.com", timeout=2)
-        except Exception:
-            pass
-        # Try quote-equity first, then quote-derivative for indices
+        }
         for url in [
             f"https://www.nseindia.com/api/quote-equity?symbol={symbol.upper()}",
-            f"https://www.nseindia.com/api/quote-derivative?symbol={symbol.upper()}",
         ]:
             try:
-                r = s.get(url, timeout=3)
+                r = requests.get(url, headers=headers, timeout=1.5)
                 if r.status_code == 200:
                     j = r.json()
-                    # Equity: priceInfo.lastPrice, Derivative: stocks[0].metadata.lastPrice, Index: fallback
                     spot = 0
                     if "priceInfo" in j and j["priceInfo"]:
                         spot = float(j["priceInfo"].get("lastPrice", 0) or j["priceInfo"].get("close", 0) or 0)
-                    elif "stocks" in j and j["stocks"]:
-                        spot = float(j["stocks"][0].get("metadata", {}).get("lastPrice", 0) or 0)
                     if spot > 0:
                         return {"spot": spot, "change": float(j.get("priceInfo", {}).get("pChange", 0) or 0),
                                 "high": float(j.get("priceInfo", {}).get("intraDayHighLow", {}).get("max", spot) or spot),
