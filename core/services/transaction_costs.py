@@ -1,37 +1,73 @@
 class TransactionCosts:
     # Realistic charges based on Indian brokers (Zerodha, Upstox, Angel One, etc.)
-    SLIPPAGE_PCT = 0.05  # 0.05% slippage (5 bps) - more realistic than 0.50%
+    # Slippage: 0.5% per order (realistic market impact + spread)
+    SLIPPAGE_PCT = 0.50  # 0.50% slippage (50 bps) - realistic for options
+    # Brokerage: Rs 20 per order (discount broker) or 0.05% of turnover (full service)
     BROKERAGE_PER_TRADE = 20.0  # Flat Rs 20 per trade (discount broker)
-    EXCHANGE_TXN_PCT = 0.00345  # 0.00345% exchange transaction charge
-    SEBI_FEE_PCT = 0.0001  # 0.0001% SEBI fee
-    STAMP_DUTY_PCT = 0.003  # 0.003% stamp duty
-    GST_PCT = 18.0  # 18% GST on brokerage + exchange + sebi + stamp
-    STT_PCT = 0.0625  # 0.0625% STT on sell side (options)
+    # Exchange turnover charge: 0.00325% (NSE/F&O)
+    EXCHANGE_TXN_PCT = 0.00325  # 0.00325% per order
+    # SEBI fee: 0.0001%
+    SEBI_FEE_PCT = 0.0001
+    # Stamp duty: 0.015% on buy side (options), 0.003% on sell side
+    # Updated: 0.015% on buy, 0.003% on sell for options (SEBI circular)
+    STAMP_DUTY_BUY_PCT = 0.015  # 0.015% on buy
+    STAMP_DUTY_SELL_PCT = 0.003  # 0.003% on sell
+    # GST: 18% on (brokerage + exchange + SEBI + stamp)
+    GST_PCT = 18.0
+    # STT: 0.1% on sell side for delivery, 0.025% for options intraday
+    # For options: 0.05% on sell side (intraday), 0.1% for delivery
+    STT_PCT_SELL = 0.05  # 0.05% on sell (options intraday)
+    STT_PCT_BUY = 0.025  # 0.025% on buy (options, if squared off same day)
 
     # Latency simulation (milliseconds) - only used in backtest
     LATENCY_MS = 50  # 50ms typical broker API latency
 
     @classmethod
     def apply_fill_slippage(cls, price: float, side: str, is_live: bool = False) -> float:
-        """Apply slippage. In live mode, use minimal slippage."""
+        """Apply slippage. In live mode, use minimal slippage.
+        side: "BUY" or "SELL" - indicates order side
+        """
         if price <= 0:
             return price
-        # Live mode: minimal slippage (0.01%)
-        # Backtest mode: realistic slippage (0.05%)
-        slippage = 0.0001 if is_live else cls.SLIPPAGE_PCT / 100
-        return price * (1 - slippage) if side == "SELL" else price * (1 + slippage)
+        # Live mode: minimal slippage (0.05%)
+        # Backtest mode: realistic 0.5% slippage per order
+        slippage = 0.0005 if is_live else cls.SLIPPAGE_PCT / 100
+        # Apply slippage: price moves against the order
+        # For BUY: price increases (we pay more); for SELL: price decreases (we receive less)
+        if side == "BUY":
+            return price * (1 + slippage)
+        else:  # SELL
+            return price * (1 - slippage)
 
     @classmethod
     def calculate(cls, turnover: float, is_sell: bool, is_live: bool = False) -> dict:
         """Calculate all transaction costs.
         In live mode, use actual broker charges.
-        In backtest mode, use realistic estimates.
+        In backtest mode, use realistic estimates with all charges deducted.
         """
+        # Brokerage: Rs 20 per trade for discount broker; otherwise % of turnover
         brokerage = cls.BROKERAGE_PER_TRADE
-        exchange_txn = max(0.01, turnover * cls.EXCHANGE_TXN_PCT / 100)
-        sebi_fee = max(0.01, turnover * cls.SEBI_FEE_PCT / 100)
-        stamp_duty = max(0.01, turnover * cls.STAMP_DUTY_PCT / 100)
-        stt = turnover * cls.STT_PCT / 100 if is_sell else 0
+
+        # Exchange transaction charge: 0.00325% of turnover
+        exchange_txn = turnover * cls.EXCHANGE_TXN_PCT
+
+        # SEBI fee: 0.0001% of turnover
+        sebi_fee = turnover * cls.SEBI_FEE_PCT
+
+        # Stamp duty: different rates for buy vs sell
+        # Buy: 0.015%, Sell: 0.003% (options, as per latest SEBI circular)
+        if is_sell:
+            stamp_duty = turnover * cls.STAMP_DUTY_SELL_PCT
+        else:
+            stamp_duty = turnover * cls.STAMP_DUTY_BUY_PCT
+
+        # STT: 0.05% on sell side for options intraday; 0.025% on buy if squared off same day
+        if is_sell:
+            stt = turnover * cls.STT_PCT_SELL
+        else:
+            stt = turnover * cls.STT_PCT_BUY
+
+        # GST: 18% on (brokerage + exchange + SEBI + stamp)
         subtotal = brokerage + exchange_txn + sebi_fee + stamp_duty + stt
         gst = subtotal * cls.GST_PCT / 100
         total = subtotal + gst

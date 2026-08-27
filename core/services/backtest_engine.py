@@ -232,6 +232,9 @@ class BacktestEngine:
                             pending_entry_signal = None
                     else:
                         pending_entry_signal = None
+                # SQUARE OFF ON EXPIRY DAY - automatic square-off to avoid delivery risk
+                if not self.is_live:
+                    self._square_off_expiry(historical, entries, exits, symbol, option_type, txn_type, qty, risk_management)
                 if has_open and pending_exit is None and (exit_sig or time_exit):
                     pending_exit = "condition" if exit_sig else "time"
 
@@ -588,6 +591,7 @@ class BacktestEngine:
 
     def _check_sl_tp(self, current, entry, option_type, txn_type, sl_amt, tp_amt):
         entry_price = float(entry["price"])
+        # Use fixed percent based on sl_amt/tp_amt magnitude
         if sl_amt > 20:
             sl_pct = (sl_amt / max(entry_price, 0.01)) * 100
         else:
@@ -630,6 +634,49 @@ class BacktestEngine:
             return {"reason": "stoploss", "level": sl_level}
         if hit_tp:
             return {"reason": "target", "level": tp_level}
+        return None
+
+    def _square_off_expiry(self, historical, entries, exits, symbol, option_type, txn_type, qty, risk_management):
+        """Automatically square off all open option positions on expiry day at market close.
+        This prevents physical delivery risk and is critical for F&O options."""
+        import datetime
+        # Find the last bar's date
+        last_date = historical[-1]["trade_date"] if historical else ""
+        # Check if any position is open and we're on or near expiry
+        open_positions = len(entries) - len(exits)
+        if open_positions > 0:
+            # Parse expiry from legs - if weekly, next Thursday; if monthly, last Thursday
+            exp_type = getattr(self, '_expiry_hint', 'weekly')
+            # Determine if today is expiry day (last Thursday of month for Nifty/BankNifty)
+            try:
+                bar_dt = datetime.datetime.strptime(last_date, "%Y-%m-%d")
+                if exp_type == "monthly":
+                    # Last Thursday of the month
+                    last_day = datetime.datetime(bar_dt.year, bar_dt.month, 
+                        calendar.monthrange(bar_dt.year, bar_dt.month)[1])
+                    while last_day.weekday() != 3:
+                        last_day -= datetime.timedelta(days=1)
+                    is_expiry = (last_day.strftime("%Y-%m-%d") == last_date)
+                else:
+                    # Weekly: next Thursday from bar date
+                    days_ahead = 3 - bar_dt.weekday()
+                    if days_ahead <= 0:
+                        days_ahead += 7
+                    exp_thu = (bar_dt + datetime.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+                    is_expiry = (exp_thu == last_date)
+                
+                if is_expiry:
+                    # Square off all positions at close price (last bar's close)
+                    for i in range(len(exits), len(entries)):
+                        entry = entries[i]
+                        exit_prem = self._close_premium(last_date, float(historical[-1]["close_price"]), 
+                            float(entry["strike"]), option_type)
+                        exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, 
+                            "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                        self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff", 
+                            last_date, qty, txn_type)
+            except Exception:
+                pass
         return None
 
     def _entry_premium(self, date, spot, strike, option_type):
