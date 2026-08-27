@@ -95,28 +95,38 @@ def refresh_all(light: bool = False):
                 }}
     if light:
         return {sym: bool(chains.get(sym)) for sym in INDEX_SYMBOLS}, chain_ok
-    # Full refresh (background, after startup) - cache stock spots + history slowly without blocking
+    # Full refresh (background, after startup) - Yahoo live batch (subprocess 12s) + history seed
     try:
-        for sym in EXTRA_SYMBOLS[:8]:  # only 8 per cycle to avoid 40*3s block, rest next cycle
-            try:
-                spot_data = live.get_live_spot(sym)
+        # Use batch Yahoo live (reliable, 400ms) for 8 stocks per cycle
+        batch_syms = EXTRA_SYMBOLS[:8]
+        try:
+            batch = live.get_live_spots_parallel(batch_syms, max_workers=8)
+            for sym, spot_data in batch.items():
                 if spot_data and spot_data.get("spot"):
-                    src = spot_data.get("source", "nselib")
+                    src = spot_data.get("source", "yahoo")
                     _LIVE_CACHE[sym] = {"ts": time.time(), "data": {
                         "spot": spot_data["spot"], "formatted": f"INR {spot_data['spot']:,.2f}",
                         "change": spot_data.get("change", 0), "high": spot_data.get("high", spot_data["spot"]), "low": spot_data.get("low", spot_data["spot"]), "source": src,
                     }}
-            except Exception:
-                continue
+        except Exception:
+            pass
+        # indices also via Yahoo
+        try:
+            ibatch = live.get_live_spots_parallel(INDEX_SYMBOLS, max_workers=4)
+            for sym, spot_data in ibatch.items():
+                if spot_data and spot_data.get("spot"):
+                    _LIVE_CACHE[sym] = {"ts": time.time(), "data": spot_data}
+        except Exception:
+            pass
         # Seed historical spot cache so backtest/option-chain use DB (instant, no 'Network error')
-        for sym in ALL_SYMBOLS[:4]:  # a few per cycle, rotates over cycles
+        for sym in ALL_SYMBOLS[:4]:
             try:
                 _seed_history(sym)
             except Exception:
                 continue
     except Exception:
         pass
-    return {sym: bool(chains.get(sym)) for sym in INDEX_SYMBOLS}, chain_ok
+    return {sym: bool(_LIVE_CACHE.get(sym)) for sym in INDEX_SYMBOLS}, len([s for s in INDEX_SYMBOLS if s in _LIVE_CACHE])
 
 
 async def run_refresh_loop():

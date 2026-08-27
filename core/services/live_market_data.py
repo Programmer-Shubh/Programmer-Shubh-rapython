@@ -156,7 +156,141 @@ def _fetch_stocksrin_spot(symbol: str):
                         pass
         except Exception:
             continue
+def _fetch_nse_option_chain_live(symbol: str):
+    """NSE option-chain live: /api/option-chain-indices or /api/option-chain-equities.
+    Returns {spot, rows: [{strike, ce_ltp, ce_oi, ...} ...]} or None. Session + 4s timeout."""
+    try:
+        is_index = symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")
+        s = requests.Session()
+        s.headers.update({"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9"})
+        s.get("https://www.nseindia.com", timeout=3)
+        url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol.upper()}" if is_index else f"https://www.nseindia.com/api/option-chain-equities?symbol={symbol.upper()}"
+        r = s.get(url, timeout=4)
+        if r.status_code != 200:
+            return None
+        j = r.json()
+        rec = j.get("records", {})
+        spot = float(rec.get("underlyingValue") or j.get("underlyingValue") or rec.get("underlying_value") or 0)
+        if spot <= 0:
+            spot = float(j.get("underlyingValue") or 0)
+        datas = rec.get("data") or j.get("data") or []
+        if not datas:
+            filtered = j.get("filtered", {})
+            datas = filtered.get("data") or []
+        rows = []
+        expiries = rec.get("expiryDates") or []
+        # pick nearest expiry
+        nearest = expiries[0] if expiries else ""
+        for d in datas:
+            if nearest and d.get("expiryDate") != nearest:
+                continue
+            strike = float(d.get("strikePrice") or d.get("strike") or 0)
+            if strike <= 0:
+                continue
+            ce = d.get("CE") or {}
+            pe = d.get("PE") or {}
+            rows.append({
+                "strike": strike,
+                "distance": 0,
+                "ce_ltp": float(ce.get("lastPrice") or ce.get("ltp") or 0),
+                "ce_oi": int(ce.get("openInterest") or ce.get("oi") or 0),
+                "ce_vol": int(ce.get("totalTradedVolume") or ce.get("volume") or 0),
+                "ce_iv": float(ce.get("impliedVolatility") or ce.get("iv") or 0),
+                "pe_ltp": float(pe.get("lastPrice") or pe.get("ltp") or 0),
+                "pe_oi": int(pe.get("openInterest") or pe.get("oi") or 0),
+                "pe_vol": int(pe.get("totalTradedVolume") or pe.get("volume") or 0),
+                "pe_iv": float(pe.get("impliedVolatility") or pe.get("iv") or 0),
+            })
+        if not rows:
+            return None
+        # fill distance after spot known
+        from utils.helpers import get_strike_step
+        try:
+            step = get_strike_step(symbol.upper())
+            atm = round(spot / step) * step if spot > 0 and step else 0
+            for rr in rows:
+                rr["distance"] = int(rr["strike"] - atm) if atm else 0
+        except Exception:
+            pass
+        rows = sorted(rows, key=lambda x: x["strike"])
+        return {"symbol": symbol.upper(), "spot": spot, "atm": 0, "rows": rows, "source": "nse_option", "timestamp": nearest, "max_pain": 0, "pcr": None}
+    except Exception:
+        return None
     return None
+
+def _fetch_yahoo_spot(symbol: str):
+    """Yahoo Finance chart API - reliable free realtime (works from Render, ~400ms).
+    Returns live NSE spot for stocks (.NS) + indices (^NSEI/^NSEBANK)."""
+    try:
+        m = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "FINNIFTY": "NIFTY_FIN_SERVICE.NS", "MIDCPNIFTY": "NIFTY_MID_SELECT.NS"}
+        y = m.get(symbol.upper(), symbol.upper() + ".NS")
+        r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{y}", headers={"User-Agent": "Mozilla/5.0"}, timeout=2)
+        if r.status_code == 200:
+            j = r.json()
+            res = j.get("chart", {}).get("result", [])
+            if res:
+                meta = res[0].get("meta", {})
+                spot = float(meta.get("regularMarketPrice") or meta.get("previousClose") or 0)
+                if spot > 0:
+                    prev = float(meta.get("previousClose") or spot)
+                    ch = ((spot - prev) / prev * 100) if prev else 0
+                    return {"spot": spot, "change": ch, "high": float(meta.get("regularMarketDayHigh") or spot), "low": float(meta.get("regularMarketDayLow") or spot), "source": "yahoo"}
+    except Exception:
+        pass
+    return None
+
+
+def _spots_worker(syms, max_workers, q):
+    try:
+        from core.services.live_market_data import LiveMarketData as _LM
+        lm = _LM()
+        res = {}
+
+        def _one(s):
+            try:
+                return s, lm.fetch_live_from_nse(s)
+            except Exception:
+                return s, None
+        from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed as _ac
+        with _TPE(max_workers=max_workers) as ex:
+            futs = {ex.submit(_one, s): s for s in syms}
+            for fut in _ac(futs, timeout=12):
+                try:
+                    sym, data = fut.result()
+                    if data and data.get("spot"):
+                        res[sym] = data
+                except Exception:
+                    continue
+        q.put(res)
+    except Exception:
+        try:
+            q.put({})
+        except Exception:
+            pass
+
+
+def _chains_worker(syms, q):
+    try:
+        from core.services.live_market_data import LiveMarketData as _LM
+        lm = _LM()
+        res = {}
+        from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed as _ac
+        with _TPE(max_workers=len(syms)) as ex:
+            futs = {ex.submit(lm.fetch_live_option_chain, s): s for s in syms}
+            for fut in _ac(futs, timeout=10):
+                try:
+                    sym = futs[fut]
+                    data = fut.result() if not fut.exception() else None
+                    if data and data.get("rows"):
+                        res[sym] = data
+                except Exception:
+                    continue
+        q.put(res)
+    except Exception:
+        try:
+            q.put({})
+        except Exception:
+            pass
 
 
 class LiveMarketData:
@@ -196,11 +330,10 @@ class LiveMarketData:
         return float(row["close_price"]) if row else None
 
     def fetch_live_from_nse(self, symbol: str):
-        """Spot via fast alternatives (no nselib - slow/stale). Each source bounded by _with_timeout.
-        Returns None fast if no source answers -> caller uses DB/synthetic (never hangs the request)."""
-        for fn in [_fetch_truedata_spot, _fetch_nse_quote_spot, _fetch_nse_indices_spot, _fetch_stocksrin_spot]:
+        """Spot via Yahoo first (reliable, 3s, works from Render)."""
+        for fn, tout in [(_fetch_yahoo_spot, 3.0), (_fetch_truedata_spot, 1.8), (_fetch_nse_quote_spot, 1.8), (_fetch_nse_indices_spot, 1.8), (_fetch_stocksrin_spot, 1.5)]:
             try:
-                d = _with_timeout(fn, 1.5, symbol)
+                d = _with_timeout(fn, tout, symbol)
                 if d:
                     return {"spot": d["spot"], "formatted": f"INR {d['spot']:,.2f}", "change": d.get("change", 0), "high": d.get("high", 0) or d["spot"], "low": d.get("low", 0) or d["spot"], "source": d["source"]}
             except Exception:
@@ -231,8 +364,7 @@ class LiveMarketData:
         return result
 
     def get_live_spots_parallel(self, symbols, max_workers: int = 10):
-        """Parallel live spots for 50 F&O symbols. Runs in a subprocess hard-killed at 12s
-        so NSE/StocksRin hangs can never freeze the HTTP request (fixes 503/fno-top5 timeout)."""
+        """Parallel live spots for 50 F&O symbols. Subprocess hard-killed at 12s + Yahoo realtime."""
         now = time.time()
         result = {}
         fresh = []
@@ -244,32 +376,8 @@ class LiveMarketData:
         if not fresh:
             return result
         import multiprocessing as _mp
-        def _worker(syms, q):
-            try:
-                from core.services.live_market_data import LiveMarketData as _LM
-                lm = _LM()
-                res = {}
-                def _one(s):
-                    try:
-                        return s, lm.fetch_live_from_nse(s)
-                    except Exception:
-                        return s, None
-                from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed as _ac
-                with _TPE(max_workers=max_workers) as ex:
-                    futs = {ex.submit(_one, s): s for s in syms}
-                    for fut in _ac(futs, timeout=12):
-                        try:
-                            sym, data = fut.result()
-                            if data and data.get("spot"):
-                                res[sym] = data
-                        except Exception:
-                            continue
-                q.put(res)
-            except Exception:
-                try: q.put({})
-                except: pass
         q = _mp.Queue()
-        p = _mp.Process(target=_worker, args=(fresh, q))
+        p = _mp.Process(target=_spots_worker, args=(fresh, max_workers, q))
         p.start()
         p.join(12)
         if p.is_alive():
@@ -304,30 +412,9 @@ class LiveMarketData:
                 fresh.append(sym)
         if not fresh:
             return result
-        # subprocess hard-killed at 10s so startup never hangs (previous 4/4 futures unfinished)
         import multiprocessing as _mp
-        def _cworker(syms, q):
-            try:
-                from core.services.live_market_data import LiveMarketData as _LM
-                lm = _LM()
-                res = {}
-                from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed as _ac
-                with _TPE(max_workers=len(syms)) as ex:
-                    futs = {ex.submit(lm.fetch_live_option_chain, s): s for s in syms}
-                    for fut in _ac(futs, timeout=10):
-                        try:
-                            sym = futs[fut]
-                            data = fut.result() if not fut.exception() else None
-                            if data and data.get("rows"):
-                                res[sym] = data
-                        except Exception:
-                            continue
-                q.put(res)
-            except Exception:
-                try: q.put({})
-                except: pass
         q = _mp.Queue()
-        p = _mp.Process(target=_cworker, args=(fresh, q))
+        p = _mp.Process(target=_chains_worker, args=(fresh, q))
         p.start()
         p.join(10)
         if p.is_alive():
@@ -348,8 +435,15 @@ class LiveMarketData:
         return self.fetch_live_option_chain(symbol)
 
     def fetch_live_option_chain(self, symbol: str):
-        """3 alternatives: nselib spot + DB -> nselib spot + synthetic -> nselib only. No NiftyTrader."""
-        # Try DB chain first (fastest if bhavcopy exists)
+        """Live option chain: NSE live (option-chain-indices/equities) -> Yahoo spot + DB -> synthetic. No NiftyTrader."""
+        # 0) Try NSE live option chain first (real LTP, OI, IV) - bounded 6s
+        try:
+            live = _with_timeout(_fetch_nse_option_chain_live, 6.0, symbol)
+            if live and live.get("rows"):
+                return live
+        except Exception:
+            pass
+        # 1) Try DB chain next (fastest if bhavcopy exists)
         try:
             from core.models.bhavcopy_model import BhavcopyModel
             bhav = BhavcopyModel()
