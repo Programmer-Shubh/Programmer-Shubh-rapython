@@ -13,7 +13,48 @@ _LIVE_CACHE_TTL = 2  # fast streaming: 2 sec
 _CHAIN_CACHE = {}
 _CHAIN_CACHE_TTL = 2
 
-# --- 3 fast alternatives (no NiftyTrader, no Yahoo) ---
+# --- 3 fast alternatives (NSE allIndices + NSE quote + StocksRin) - No NiftyTrader, No Yahoo ---
+
+def _fetch_nse_quote_spot(symbol: str):
+    """NSE quote-equity API - fastest for stocks (300ms), real-time."""
+    try:
+        # NSE blocks without proper session cookies, mimic browser
+        s = requests.Session()
+        s.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        # Prime cookies
+        try:
+            s.get("https://www.nseindia.com", timeout=2)
+        except Exception:
+            pass
+        # Try quote-equity first, then quote-derivative for indices
+        for url in [
+            f"https://www.nseindia.com/api/quote-equity?symbol={symbol.upper()}",
+            f"https://www.nseindia.com/api/quote-derivative?symbol={symbol.upper()}",
+        ]:
+            try:
+                r = s.get(url, timeout=3)
+                if r.status_code == 200:
+                    j = r.json()
+                    # Equity: priceInfo.lastPrice, Derivative: stocks[0].metadata.lastPrice, Index: fallback
+                    spot = 0
+                    if "priceInfo" in j and j["priceInfo"]:
+                        spot = float(j["priceInfo"].get("lastPrice", 0) or j["priceInfo"].get("close", 0) or 0)
+                    elif "stocks" in j and j["stocks"]:
+                        spot = float(j["stocks"][0].get("metadata", {}).get("lastPrice", 0) or 0)
+                    if spot > 0:
+                        return {"spot": spot, "change": float(j.get("priceInfo", {}).get("pChange", 0) or 0),
+                                "high": float(j.get("priceInfo", {}).get("intraDayHighLow", {}).get("max", spot) or spot),
+                                "low": float(j.get("priceInfo", {}).get("intraDayHighLow", {}).get("min", spot) or spot),
+                                "source": "nse_quote"}
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
 
 def _fetch_nse_indices_spot(symbol: str):
     """NSE /api/allIndices — fastest for indices (200ms)."""
@@ -84,16 +125,34 @@ def _fetch_truedata_spot(symbol: str):
     return None
 
 def _fetch_stocksrin_spot(symbol: str):
-    """StocksRin spot — quick fail if not available."""
-    try:
-        r = requests.get(f"https://stocksrin.com/api/spot/{symbol}", headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=2)
-        if r.status_code == 200:
-            j = r.json()
-            spot = float(j.get("spot") or j.get("last") or j.get("price") or 0)
-            if spot > 0:
-                return {"spot": spot, "change": 0, "high": spot, "low": spot, "source": "stocksrin"}
-    except Exception:
-        pass
+    """StocksRin spot - https://stocksrin.com (F&O analytics). Real-time if public endpoint available, else scrape quote page."""
+    # Try multiple possible StocksRin endpoints with very short timeout (fast fail 1.2s)
+    for url in [
+        f"https://stocksrin.com/api/spot/{symbol.upper()}",
+        f"https://stocksrin.com/api/quote/{symbol.upper()}",
+        f"https://stocksrin.com/api/v1/spot?symbol={symbol.upper()}",
+    ]:
+        try:
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=1.2)
+            if r.status_code == 200:
+                try:
+                    j = r.json()
+                    spot = float(j.get("spot") or j.get("last") or j.get("price") or j.get("ltp") or (j.get("data", {}) or {}).get("spot", 0) or 0)
+                    if spot > 0:
+                        return {"spot": spot, "change": 0, "high": spot, "low": spot, "source": "stocksrin"}
+                except Exception:
+                    pass
+                # Scrape embedded JSON if not pure JSON
+                m = re.search(r'"spot"\s*:\s*([0-9]+\.?[0-9]*)', r.text)
+                if m:
+                    try:
+                        v = float(m.group(1))
+                        if v > 0:
+                            return {"spot": v, "change": 0, "high": v, "low": v, "source": "stocksrin"}
+                    except Exception:
+                        pass
+        except Exception:
+            continue
     return None
 
 
@@ -102,13 +161,14 @@ class LiveMarketData:
         self.db = Database.get_instance()
 
     def get_spot_price(self, symbol: str) -> float:
-        # 1) Live cache
+        # 1) Live cache (2 sec TTL - instant)
         try:
             live = self.get_live_spot(symbol)
             if live and live.get("spot"):
                 return float(live["spot"])
         except Exception:
             pass
+        # 2) DB fallback (instant) before network calls for speed
         row = self.db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
             [symbol, symbol],
@@ -121,7 +181,8 @@ class LiveMarketData:
         )
         if row and row["close_price"] and float(row["close_price"]) > 0:
             return float(row["close_price"])
-        for fn in [_fetch_truedata_spot, _fetch_nse_indices_spot, _fetch_stocksrin_spot, _fetch_nselib_spot]:
+        # 3) Fast live sources: TrueData (<50ms if configured) -> NSE quote (300ms) -> NSE indices (200ms) -> StocksRin (1.2s) -> nselib (1-2s)
+        for fn in [_fetch_truedata_spot, _fetch_nse_quote_spot, _fetch_nse_indices_spot, _fetch_stocksrin_spot, _fetch_nselib_spot]:
             try:
                 d = fn(symbol)
                 if d and d.get("spot", 0) > 0:
@@ -144,8 +205,8 @@ class LiveMarketData:
         return float(row["close_price"]) if row else None
 
     def fetch_live_from_nse(self, symbol: str):
-        """Spot via 4 alternatives: TrueData -> NSE indices -> StocksRin -> nselib -> Google."""
-        for fn in [_fetch_truedata_spot, _fetch_nse_indices_spot, _fetch_stocksrin_spot, _fetch_nselib_spot]:
+        """Spot via 5 fast alternatives: TrueData -> NSE quote -> NSE indices -> StocksRin -> nselib -> Google (stocksrin.com integrated)."""
+        for fn in [_fetch_truedata_spot, _fetch_nse_quote_spot, _fetch_nse_indices_spot, _fetch_stocksrin_spot, _fetch_nselib_spot]:
             try:
                 d = fn(symbol)
                 if d:

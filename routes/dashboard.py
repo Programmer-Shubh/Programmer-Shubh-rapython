@@ -136,24 +136,32 @@ def get_spots():
 
 
 def _free_latest_spot(symbol: str):
-    """NiftyTrader -> NSE nselib -> Google -> DB. No Yahoo."""
-    # 1) NiftyTrader live (primary, has option chain)
+    """3 fast alternatives: NSE quote/indices -> StocksRin (stocksrin.com) -> nselib -> Google -> DB. No Yahoo, No NiftyTrader."""
+    # 1) Live via 3 alternatives (NSE quote + NSE indices + StocksRin + TrueData) - fastest path
     try:
         live = LiveMarketData()
         data = live.get_live_spot(symbol)
         if data and data.get("spot") and float(data["spot"]) > 0:
-            return float(data["spot"]), "niftytrader"
+            return float(data["spot"]), data.get("source", "live")
     except Exception:
         pass
-    # 2) NSE via nselib
+    # 2) NSE via nselib (reliable for all stocks, 1-2s)
     spot = _fetch_nselib_spot(symbol)
     if spot > 0:
         return spot, "nselib"
-    # 3) Google Finance
+    # 3) StocksRin (stocksrin.com) already tried inside LiveMarketData, retry direct
+    try:
+        live2 = LiveMarketData()
+        d = live2.fetch_live_from_nse(symbol)
+        if d and d.get("spot"):
+            return float(d["spot"]), d.get("source", "stocksrin")
+    except Exception:
+        pass
+    # 4) Google Finance fallback
     spot = _fetch_google_spot(symbol)
     if spot > 0:
         return spot, "google"
-    # 4) DB fallback (last resort)
+    # 5) DB fallback (last resort)
     db = Database.get_instance()
     try:
         row = db.fetch_one(

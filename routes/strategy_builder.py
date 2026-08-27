@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 from core.services.backtest_engine import BacktestEngine
 from core.services.historical_fetcher import fetch_historical
+from core.models.bhavcopy_model import BhavcopyModel
 from utils.helpers import format_currency
 import datetime
 import re
@@ -155,11 +156,14 @@ def _fetch_google_finance(symbol, start_date, end_date):
     return 0
 
 
-def _fetch_niftytrader_live(symbol):
-    """Fallback: fetch current live spot from niftytrader.in and expand to recent 90 days via spot drift."""
+def _fetch_stocksrin_live(symbol):
+    """Fallback: fetch live spot via 3 fast alternatives (NSE quote + StocksRin + nselib) and expand to 90 days via drift for instant backtest."""
     try:
         from core.services.live_market_data import LiveMarketData
         live = LiveMarketData().get_live_spot(symbol)
+        # If not in cache, try direct fetch from 3 alternatives
+        if not live or not live.get("spot"):
+            live = LiveMarketData().fetch_live_from_nse(symbol)
         spot = float(live["spot"]) if live and live.get("spot") else 0
         if spot <= 0:
             return 0

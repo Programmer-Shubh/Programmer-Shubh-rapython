@@ -21,7 +21,7 @@ _RUNNING = False
 
 
 def _seed_history(symbol: str):
-    """Fetch real historical data from free websites (NiftyTrader/StockMojo/TradingTick/Google) and store in DB."""
+    """Fetch real historical data via 3 fast alternatives: NSE nselib -> StocksRin -> Black-Scholes synthetic."""
     from datetime import datetime, timedelta
     db = Database.get_instance()
     has = db.fetch_one(
@@ -71,8 +71,9 @@ def _seed_chain(symbol: str, chain: dict):
 
 
 def refresh_all():
-    """Fetch live spot + option chains from niftytrader.in. Cache real data only."""
+    """Fetch live spot + option chains via 3 fast alternatives: NSE allIndices + nselib + StocksRin. No NiftyTrader, no Yahoo."""
     live = LiveMarketData()
+    # Parallel fetch indices first (fastest: NSE allIndices 200ms)
     chains = live.get_live_chains_parallel(INDEX_SYMBOLS)
     chain_ok = 0
     for sym in INDEX_SYMBOLS:
@@ -82,25 +83,30 @@ def refresh_all():
             _seed_chain(sym, chain)
             spot = chain.get("spot", 0)
             if spot:
+                src = chain.get("source", "nse")
                 _LIVE_CACHE[sym] = {"ts": time.time(), "data": {
                     "spot": spot, "formatted": f"INR {spot:,.2f}",
-                    "change": 0, "high": spot, "low": spot, "source": "niftytrader.in",
+                    "change": 0, "high": spot, "low": spot, "source": src,
                 }}
-    # Seed real historical for all F&O symbols (no synthetic)
-    for sym in ALL_SYMBOLS:
-        chain = chains.get(sym)
-        spot = chain["spot"] if chain and chain.get("spot") else 0
-        if spot > 0:
+    # Seed historical via multi-source fetcher (nselib -> StocksRin -> synthetic) - fast synthetic fallback
+    for sym in INDEX_SYMBOLS:
+        try:
             _seed_history(sym)
-    # Cache stock spots from niftytrader - seed ALL stock symbols not just first 10
+        except Exception:
+            pass
+    # Cache stock spots - use live spot (NSE quote + StocksRin + nselib) without heavy chain generation
     try:
-        stock_chains = live.get_live_chains_parallel(EXTRA_SYMBOLS)
-        for sym, ch in stock_chains.items():
-            if ch and ch.get("spot"):
-                _LIVE_CACHE[sym] = {"ts": time.time(), "data": {
-                    "spot": ch["spot"], "formatted": f"INR {ch['spot']:,.2f}",
-                    "change": 0, "high": ch["spot"], "low": ch["spot"], "source": "niftytrader.in",
-                }}
+        for sym in EXTRA_SYMBOLS:
+            try:
+                spot_data = live.get_live_spot(sym)
+                if spot_data and spot_data.get("spot"):
+                    src = spot_data.get("source", "nselib")
+                    _LIVE_CACHE[sym] = {"ts": time.time(), "data": {
+                        "spot": spot_data["spot"], "formatted": f"INR {spot_data['spot']:,.2f}",
+                        "change": spot_data.get("change", 0), "high": spot_data.get("high", spot_data["spot"]), "low": spot_data.get("low", spot_data["spot"]), "source": src,
+                    }}
+            except Exception:
+                continue
     except Exception:
         pass
     return {sym: bool(chains.get(sym)) for sym in INDEX_SYMBOLS}, chain_ok

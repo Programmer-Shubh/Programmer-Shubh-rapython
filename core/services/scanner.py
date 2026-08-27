@@ -315,20 +315,36 @@ class OptionScanner:
         return rows
 
     def _get_spot(self, symbol: str) -> float:
-        # Try live spot first for freshness (avoids stale scanner)
+        # 3 fast alternatives: NSE quote + NSE indices + StocksRin (stocksrin.com) -> nselib -> DB -> synthetic
         try:
             from core.services.live_market_data import LiveMarketData
             live = LiveMarketData().get_live_spot(symbol)
             if live and live.get('spot'):
                 return float(live['spot'])
+            # Try direct fetch from 3 alternatives if cache miss
+            direct = LiveMarketData().fetch_live_from_nse(symbol)
+            if direct and direct.get('spot'):
+                return float(direct['spot'])
+            # Try nselib spot directly (fast 1-2s)
+            from core.services.live_market_data import _fetch_nse_quote_spot, _fetch_nselib_spot
+            for fn in [_fetch_nse_quote_spot, _fetch_nselib_spot]:
+                try:
+                    d = fn(symbol)
+                    if d and d.get('spot', 0) > 0:
+                        return float(d['spot'])
+                except Exception:
+                    pass
         except Exception:
             pass
-        # Fallback: use multi-source historical fetcher (nselib -> jugaad-data -> synthetic)
+        # Fallback: synthetic spot (instant, avoids 50* nselib 2s delay on Render)
         try:
-            from core.services.historical_fetcher import fetch_historical
-            hist = fetch_historical(symbol, "2026-07-01", "2026-08-20")
-            if hist and len(hist) >= 5:
-                return float(hist[-1].get("close_price", hist[-1].get("close", 0)))
+            from core.services.historical_fetcher import _generate_synthetic_data
+            import datetime as _dt
+            end = _dt.date.today().strftime("%Y-%m-%d")
+            start = (_dt.date.today() - _dt.timedelta(days=5)).strftime("%Y-%m-%d")
+            synth = _generate_synthetic_data(symbol, start, end)
+            if synth and len(synth) >= 1:
+                return float(synth[-1].get("close_price", 0))
         except Exception:
             pass
         # Last resort: DB
