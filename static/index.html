@@ -105,6 +105,13 @@
         .bt-table tbody tr:nth-child(even){background:#fafafa}
         .bt-table tbody tr:hover{background:#f0f7ff}
         .section-title{font-size:12px;font-weight:700;color:#0d6efd;margin:8px 0 4px;text-transform:uppercase}
+        .quant-card{border:1px solid #dee2e6;border-radius:8px;padding:12px;text-align:center;cursor:pointer;transition:all 0.2s;background:#fff;height:100%}
+        .quant-card:hover{border-color:#0d6efd;box-shadow:0 2px 8px rgba(13,110,253,0.15);transform:translateY(-2px)}
+        .quant-card.active{border-color:#0d6efd;background:#e7f1ff}
+        .quant-card .icon{font-size:22px;margin-bottom:6px}
+        .quant-card .title{font-size:11px;font-weight:700}
+        .quant-card .desc{font-size:10px;color:#6c757d;line-height:1.2}
+        .payoff-card{border:1px solid #0d6efd22}
         @media(max-width:768px){.sig-grid{grid-template-columns:1fr}.row{flex-direction:column}.col{min-width:100%}}
     </style>
 </head>
@@ -246,6 +253,35 @@
                 </div>
                 <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
+                <!-- Quantman Strategy Gallery -->
+                <div class="card mt-3">
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Quantman Strategies — Click to Build</strong><small class="text-muted">Live Payoff + Greeks</small></div>
+                    <div class="card-body p-2">
+                        <div class="row g-2">
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longcall')"><div class="icon">📈</div><div class="title">Long Call</div><div class="desc">Buy CE ATM<br>Unlimited gain</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longput')"><div class="icon">📉</div><div class="title">Long Put</div><div class="desc">Buy PE ATM<br>Bearish</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortcall')"><div class="icon">🔻</div><div class="title">Short Call</div><div class="desc">Sell CE OTM<br>Theta decay</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortput')"><div class="icon">🔺</div><div class="title">Short Put</div><div class="desc">Sell PE OTM<br>Premium</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bullspread')"><div class="icon">⚡</div><div class="title">Bull Call Spread</div><div class="desc">Buy ATM + Sell OTM CE</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bearputspread')"><div class="icon">🛡️</div><div class="title">Bear Put Spread</div><div class="desc">Buy ATM PE + Sell OTM</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('straddle')"><div class="icon">🔄</div><div class="title">Long Straddle</div><div class="desc">Buy CE+PE ATM<br>Volatility</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('strangle')"><div class="icon">↔️</div><div class="title">Short Strangle</div><div class="desc">Sell OTM CE+PE<br>Range</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironcondor')"><div class="icon">🏛️</div><div class="title">Iron Condor</div><div class="desc">Sell OTM 1 + Buy OTM 3 (CE/PE)</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironbutterfly')"><div class="icon">🦋</div><div class="title">Iron Butterfly</div><div class="desc">ATM Straddle + OTM Wings</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('butterfly')"><div class="icon">✈️</div><div class="title">Long Butterfly</div><div class="desc">1-2-1 CE<br>Limited risk</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('calendar')"><div class="icon">📅</div><div class="title">Calendar Spread</div><div class="desc">Sell Weekly + Buy Monthly</div></div></div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Quantman Payoff Diagram -->
+                <div class="card mt-3 payoff-card" id="payoffCard" style="display:none">
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-graph-up"></i> Payoff Diagram (Expiry) — Quantman View</strong><span class="badge bg-primary" id="payoff-spot">Spot: -</span></div>
+                    <div class="card-body p-2">
+                        <div id="payoff-chart" style="height:280px"></div>
+                        <div class="row g-2 mt-2" id="payoff-metrics"></div>
+                        <div class="small text-muted mt-1">Greeks &amp; margin estimated via Black-Scholes (IV 20%, DTE from expiry). Live premiums from Yahoo/NSE when available.</div>
+                    </div>
+                </div>
             </div>
             <div class="mt-2">
                 <button class="btn btn-sm btn-warning" type="button" data-bs-toggle="collapse" data-bs-target="#overallSettings"><i class="bi bi-caret-down"></i> Overall strategy settings</button>
@@ -773,11 +809,14 @@
         if(r.id){alert('Strategy saved! ID: '+r.id);loadStrats();}else{alert('Error saving strategy');}
     }
     let stratLegs=[];
+    let _payoffSpot=24500;
+    async function fetchPayoffSpot(){ try{ const s=document.getElementById('s-index').value||'NIFTY'; const d=await A('/api/chain/live/'+s); if(d.spot) _payoffSpot=d.spot; else if(d.rows) _payoffSpot=d.spot; }catch(e){} }
     function renderLegs(){
         const card=document.getElementById('legsTableCard'); const tbody=document.querySelector('#legsTable tbody');
-        if(!stratLegs.length){card.style.display='none'; tbody.innerHTML=''; return;}
+        if(!stratLegs.length){card.style.display='none'; tbody.innerHTML=''; document.getElementById('payoffCard').style.display='none'; return;}
         card.style.display='block';
         tbody.innerHTML=stratLegs.map((l,i)=>`<tr><td>${i+1}</td><td><span class="badge ${l.transaction==='buy'?'badge-buy':'badge-sell'}">${l.transaction.toUpperCase()}</span></td><td>${l.option_type}</td><td>${l.strike_selection}${l.strike_selection==='delta'?'('+l.delta_target+')':''}${l.otm_distance?'+'+l.otm_distance:''}</td><td>${l.lots}</td><td>${l.expiry}</td><td><button class="btn btn-sm btn-danger" onclick="removeLeg(${i})"><i class="bi bi-x"></i></button></td></tr>`).join('');
+        updatePayoff();
     }
     function addLeg(){
         const lots=parseInt(document.getElementById('s-lots').value)||1;
@@ -798,6 +837,10 @@
         clearLegs();
         const lots=parseInt(document.getElementById('s-lots').value)||1;
         if(t==='single'){ addLeg(); }
+        else if(t==='longcall'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='longput'){ stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='shortcall'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='shortput'){ stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='straddle'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='strangle'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='bullspread'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:2}); renderLegs(); }
@@ -805,8 +848,53 @@
         else if(t==='bearputspread'){ stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:2}); renderLegs(); }
         else if(t==='bullputspread'){ stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:3,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='ironcondor'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:3,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:3,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='ironbutterfly'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='butterfly'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='calendar'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'monthly',offset:0}); renderLegs(); }
+        updatePayoff();
+    }
+    async function updatePayoff(){
+        if(!stratLegs.length){ document.getElementById('payoffCard').style.display='none'; return; }
+        document.getElementById('payoffCard').style.display='block';
+        await fetchPayoffSpot();
+        const spot=_payoffSpot;
+        const lotMap={NIFTY:50,BANKNIFTY:15,FINNIFTY:40,MIDCPNIFTY:75,RELIANCE:250,TCS:150,INFY:300,SBIN:750};
+        const sym=document.getElementById('s-index').value||'NIFTY';
+        const lot=lotMap[sym]||50;
+        const stepMap={NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:25};
+        const step=stepMap[sym]||100;
+        const atm=Math.round(spot/step)*step;
+        // Black-Scholes proxy (IV 20%, DTE 7) with erf polyfill (JS Math.erf not exists)
+        function erf(x){ const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911; const s=x<0?-1:1; x=Math.abs(x); const t=1/(1+p*x); const y=1-((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t*Math.exp(-x*x); return s*y; }
+        function bsPremium(s,k,ot){const dte=7/365, vol=0.2, r=0.06; const d1=(Math.log(s/k)+(r+0.5*vol*vol)*dte)/(vol*Math.sqrt(dte)); const d2=d1-vol*Math.sqrt(dte); const Nd1=0.5*(1+erf(d1/Math.sqrt(2))); const Nd2=0.5*(1+erf(d2/Math.sqrt(2))); if(ot==='CE') return s*Nd1 - k*Math.exp(-r*dte)*Nd2; else return k*Math.exp(-r*dte)*(1-Nd2)-s*(1-Nd1); }
+        // build strike mapping
+        stratLegs.forEach(l=>{ let dist=l.otm_distance||0; if(l.strike_selection==='atm') l._strike=atm; else if(l.strike_selection==='otm') l._strike= atm + (l.option_type==='CE'? dist*step : -dist*step); else if(l.strike_selection==='itm') l._strike= atm + (l.option_type==='CE'? -dist*step : dist*step); else l._strike=atm; l._prem=Math.max(5, bsPremium(spot,l._strike,l.option_type)); });
+        const xs=[], ys=[];
+        let maxP=-Infinity, minP=Infinity, breakevens=[];
+        for(let pct=-8; pct<=8; pct+=0.5){
+            const spt = Math.round(spot*(1+pct/100));
+            let pnl=0;
+            stratLegs.forEach(l=>{
+                const intr = l.option_type==='CE'? Math.max(0,spt - l._strike): Math.max(0,l._strike - spt);
+                const legPnl = (l.transaction==='buy'? (intr - l._prem) : (l._prem - intr)) * lot * l.lots;
+                pnl+=legPnl;
+            });
+            xs.push(spt); ys.push(Math.round(pnl));
+            maxP=Math.max(maxP,pnl); minP=Math.min(minP,pnl);
+            if(ys.length>1 && ((ys[ys.length-2] <0 && pnl>=0)||(ys[ys.length-2]>=0 && pnl<0))) breakevens.push(spt);
+        }
+        // payoff metrics
+        const beText = breakevens.length? breakevens.map(b=>'\u20B9'+b).join(', ') : '—';
+        const maxProfit = Math.round(maxP), maxLoss=Math.round(minP);
+        const rr = maxLoss<0? (maxProfit/Math.abs(maxLoss)).toFixed(2): '∞';
+        document.getElementById('payoff-spot').textContent='Spot: \u20B9'+spot.toFixed(2)+' | ATM: '+atm;
+        document.getElementById('payoff-metrics').innerHTML=`<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">\u20B9${maxProfit.toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">\u20B9${Math.abs(maxLoss).toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">${beText}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">${rr}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Lots×LotSize</div><div class="value">${stratLegs.reduce((a,l)=>a+l.lots,0)}×${lot}</div></div></div>`;
+        try{ Plotly.newPlot('payoff-chart', [{x:xs, y:ys, type:'scatter', mode:'lines', fill:'tozeroy', line:{color: maxProfit>Math.abs(maxLoss)?'#198754':'#0d6efd', width:2}, fillcolor:'rgba(13,110,253,0.08)'}, {x:[spot], y:[0], mode:'markers', marker:{color:'#dc3545', size:10}, name:'Spot'}], {title:'', xaxis:{title:'Spot at Expiry'}, yaxis:{title:'P&L (₹)'}, shapes:[{type:'line', x0:xs[0], x1:xs[xs.length-1], y0:0, y1:0, line:{color:'#6c757d', dash:'dash'}}], margin:{t:10,b:40,l:60,r:20}, paper_bgcolor:'#fff', plot_bgcolor:'#fff'}, {displayModeBar:false}); }catch(e){}
+        // highlight quant cards
+        document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
     }
     document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta');});
+    document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); });
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
         document.getElementById('s-lots').value=1;
