@@ -724,7 +724,7 @@
         const entryTime=document.getElementById('s-entry-time').value;
         const exitTime=document.getElementById('s-exit-time').value;
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
-        const body={symbol:idx,start_date:startDate,end_date:endDate,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+        const body={symbol:idx,start_date:startDate,end_date:endDate,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:0.50,slippage:0.50},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
         try{
             const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             btn.innerHTML=orig;
@@ -747,6 +747,7 @@
 <div class="col"><div class="card stat-card-sm"><div class="label">Max Profit/Trade</div><div class="value price-up">${F(m.max_win)}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Max Loss/Trade</div><div class="value price-down">${F(m.max_loss)}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Max Drawdown</div><div class="value price-down">${m.max_drawdown}%</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Drawdown Days</div><div class="value">${m.max_dd_duration||0} days</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Return/MaxDD</div><div class="value price-up">${m.return_maxdd}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Reward to Risk</div><div class="value price-up">${m.reward_risk}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Expectancy</div><div class="value ${m.expectancy>=0?'price-up':'price-down'}">${m.expectancy}</div></div></div>

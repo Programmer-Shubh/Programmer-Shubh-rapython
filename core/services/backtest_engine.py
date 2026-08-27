@@ -27,6 +27,18 @@ class BacktestEngine:
         self.bt_symbol = symbol
         self.bt_expiry = legs[0].get("expiry_date", "") if legs else ""
         self.implied_volatility = advanced_options.get("implied_volatility", 0.14)
+        # Quantman: slippage override (user enters estimated slippage % like 0.05, 0.1)
+        _orig_slip = TransactionCosts.SLIPPAGE_PCT
+        if advanced_options.get("slippage_pct") is not None:
+            try:
+                TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage_pct"))
+            except Exception:
+                pass
+        elif advanced_options.get("slippage") is not None:
+            try:
+                TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage"))
+            except Exception:
+                pass
         # Quant wiring: expiry type, trailing, momentum, entry/exit times
         self._expiry_hint = advanced_options.get("expiry", "weekly")
         # Check legs for expiry override
@@ -248,6 +260,11 @@ class BacktestEngine:
                 exit_prem = self._close_premium(last["trade_date"], float(last["close_price"]), float(entry["strike"]), option_type)
                 self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type)
 
+        # Quantman: restore slippage
+        try:
+            TransactionCosts.SLIPPAGE_PCT = _orig_slip
+        except Exception:
+            pass
         return self._build_result(symbol, start_date, end_date, entries, exits)
 
     def _pre_calc(self, historical, closes, highs, lows, ind_list):
@@ -1002,9 +1019,28 @@ class BacktestEngine:
                 cur_ls += 1
                 cur_ws = 0
                 max_loss_streak = max(max_loss_streak, cur_ls)
-        # Max DD duration & max trades in DD (simplified)
+        # Quantman Drawdown Days: days strategy stays in drawdown before new peak (blog 2025)
         max_dd_duration = 0
         max_trades_in_dd = 0
+        if len(equity) > 1:
+            peak = equity[0]
+            dd_start = None
+            for idx, val in enumerate(equity):
+                if val > peak:
+                    if dd_start is not None:
+                        dur = idx - dd_start
+                        max_dd_duration = max(max_dd_duration, dur)
+                        max_trades_in_dd = max(max_trades_in_dd, dur)
+                        dd_start = None
+                    peak = val
+                elif val < peak and dd_start is None:
+                    dd_start = idx
+            if dd_start is not None:
+                dur = len(equity) - dd_start
+                max_dd_duration = max(max_dd_duration, dur)
+                max_trades_in_dd = max(max_trades_in_dd, dur)
+            # also show in days (approx 1 trade ~1 day, Quantman counts calendar days)
+            # max_dd_duration already in trades; for display same as days
         # Reward/risk, expectancy, return/maxDD
         reward_risk = (avg_win / max(avg_loss, 0.01)) if avg_loss > 0 else 0
         expectancy = (win_rate/100 * avg_win - (1-win_rate/100)*avg_loss) if total_trades>0 else 0
