@@ -182,16 +182,26 @@
                 <div><button class="btn btn-sm btn-outline-primary" onclick="runSim()"><i class="bi bi-play-circle"></i> Run Simulation</button></div>
             </div>
             <div class="row" id="trd-stats"></div>
+            <div class="card mb-2">
+                <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center">
+                    <span class="small fw-bold"><i class="bi bi-layers"></i> Quantman Portfolio</span>
+                    <div class="input-group input-group-sm" style="width:180px"><span class="input-group-text">Slippage %</span><input type="number" class="form-control" id="q-slip" value="0.05" step="0.01" min="0" max="2"><button class="btn btn-outline-primary" onclick="applySlippage()">Apply</button></div>
+                    <button class="btn btn-sm btn-primary" onclick="combineResults()"><i class="bi bi-collection"></i> Combine Results</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadTrades()">Refresh</button>
+                    <span class="small text-muted">Live <span class="badge bg-danger">LIVE</span> Paper <span class="badge bg-secondary">PAPER</span> Backtest <span class="badge bg-info">BT</span></span>
+                    <span class="small text-muted" id="q-drawdown"></span>
+                </div>
+            </div>
             <div class="card">
                 <div class="card-header">Saved Strategies <span class="text-muted small" id="strat-count"></span></div>
                 <div class="card-body p-0"><div id="strat-cards" class="row" style="padding:12px"></div></div>
             </div>
             <div class="card">
-                <div class="card-header">Open Trades</div>
+                <div class="card-header d-flex justify-content-between align-items-center">Open Trades <span class="badge bg-danger">LIVE</span><span class="badge bg-secondary">PAPER</span></div>
                 <div class="card-body p-0"><div id="open-trd"></div></div>
             </div>
             <div class="card">
-                <div class="card-header">Trade History</div>
+                <div class="card-header">Trade History <small class="text-muted">(Order-Type Badge: Live/Paper/BT)</small></div>
                 <div class="card-body p-0"><div id="closed-trd"></div></div>
             </div>
         </div>
@@ -298,6 +308,12 @@
                     <div class="col-md-3"><label class="form-label small">Lock if profit reaches</label><input type="number" class="form-control form-control-sm" id="s-lock-profit" value="0" min="0" step="50"></div>
                     <div class="col-md-3"><label class="form-label small">Lock profit</label><input type="number" class="form-control form-control-sm" id="s-lock-amount" value="1" min="0" step="1"></div>
                     <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="s-mtd" value="5" min="1"></div>
+                </div>
+                <div class="row g-2 mt-1">
+                    <div class="col-md-3"><label class="form-label small">Slippage (%) <span class="badge bg-warning text-dark">Quantman</span></label><input type="number" class="form-control form-control-sm" id="s-slippage" value="0.50" step="0.05" min="0" max="2" title="Quantman: Add Slippage to make results realistic (market impact + spread)"></div>
+                    <div class="col-md-3"><label class="form-label small">Combined Portfolio</label><select class="form-select form-select-sm" id="s-combine"><option selected>No</option><option>Yes - Merge with previous</option></select></div>
+                    <div class="col-md-3"><label class="form-label small">Order-Type Badge</label><select class="form-select form-select-sm" id="s-order-badge"><option selected>Live/Paper/Backtest</option><option>Live Only</option></select></div>
+                    <div class="col-md-3 d-flex align-items-end"><small class="text-muted" style="font-size:10px">Slippage 0.5% realistic | Drawdown Days + Badge as per Quantman Mar 2025 update</small></div>
                 </div>
             </div>
             <div class="card mt-3">
@@ -673,9 +689,13 @@
                 }
             }
         }catch(e){ console.error('loadTrades failed',e); }
-        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=t.pnl>=0?'Target Hit':'Stoploss Hit';const sbg=t.pnl>=0?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<p class="text-muted p-3">No trades yet</p>';}
+        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Badge</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=t.pnl>=0?'Target Hit':'Stoploss Hit';const sbg=t.pnl>=0?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const badge=B(t.trade_mode==='live'?'LIVE':t.trade_mode==='paper'?'PAPER':'BT', t.trade_mode==='live'?'sell':'buy');const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td>${badge}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<p class="text-muted p-3">No trades yet</p>';}
         }catch(e){}
+        // Quantman Drawdown Days in stats
+        try{ if(window._lastBacktestMetrics && window._lastBacktestMetrics.max_dd_duration!==undefined) document.getElementById('q-drawdown').textContent='Drawdown Days: '+(window._lastBacktestMetrics.max_dd_duration||0)+' | Trades in DD: '+(window._lastBacktestMetrics.max_trades_in_dd||0); }catch(e){}
     }
+    function applySlippage(){ const v=parseFloat(document.getElementById('q-slip').value)||0; localStorage.setItem('qSlip',v); alert('Quantman: Slippage '+v+'% will apply to next backtest & paper trades (Add Slippage to Results).'); }
+    async function combineResults(){ try{ const o=await A('/api/trades/open'); const c=await A('/api/trades/history'); const all=[...(o.positions||[]), ...(c.trades||[])]; let total=all.reduce((a,t)=>a+(t.pnl||0),0); let wins=all.filter(t=>t.pnl>0).length; const slip=localStorage.getItem('qSlip')||document.getElementById('q-slip').value||0.05; let adjTotal = total * (1 - parseFloat(slip)/100); alert('Quantman Combined Portfolio\nTotal Trades: '+all.length+'\nWins: '+wins+' ('+(all.length? (wins/all.length*100).toFixed(1):0)+'%)\nTotal P&L (raw): ₹'+total.toFixed(2)+'\nWith Slippage '+slip+'%: ₹'+adjTotal.toFixed(2)+'\n\nDrawdown Days & Order-Type Badge as per Quantman March 2025.'); }catch(e){alert(e.message)} }
     async function updateTP(id,v){await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:0,target:parseFloat(v)})});}
     async function updateSL(id,v){await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:parseFloat(v),target:0})});}
     async function runSim(){alert('Simulation: Checking all open trades for SL/TP...');await loadTrades();}
@@ -729,7 +749,7 @@
             const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             btn.innerHTML=orig;
             if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');return;}
-            const m=r.metrics||r;
+            const m=r.metrics||r; window._lastBacktestMetrics=m;
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
             const pnl = m.final_capital - m.initial_capital;
