@@ -71,8 +71,10 @@ def _seed_chain(symbol: str, chain: dict):
 
 
 def refresh_all(light: bool = False):
-    """Fetch live spot + option chains via 3 fast alternatives: NSE allIndices (200ms) + StocksRin + nselib. No NiftyTrader, no Yahoo.
-    light=True -> only indices (fast startup <1s, keeps health check responsive)."""
+    """Startup light=True -> return instantly (no network) so health/503 never hangs.
+    Full refresh does background seeding (DB-only spot, no live hang)."""
+    if light:
+        return {}, 0
     live = LiveMarketData()
     chains = live.get_live_chains_parallel(INDEX_SYMBOLS)
     chain_ok = 0

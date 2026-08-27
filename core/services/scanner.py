@@ -315,25 +315,19 @@ class OptionScanner:
         return rows
 
     def _get_spot(self, symbol: str) -> float:
-        # Live NSE first: LIVE_CACHE -> live fetch (NSE quote 1.5s + StocksRin + nselib) -> DB -> synthetic last fallback
+        # Fast path only: LIVE_CACHE -> DB (instant). NO per-symbol network call.
+        # Per-symbol live fetch is done in batch by get_fno_top5_today/get_live_spots_parallel;
+        # doing it serially here for 50 symbols caused the request to hang (503/data-not-fetch).
         try:
-            from core.services.live_market_data import _LIVE_CACHE, LiveMarketData
+            from core.services.live_market_data import _LIVE_CACHE
             import time as _tm
-            if symbol in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[symbol]["ts"] < 5:
+            if symbol in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[symbol]["ts"] < 60:
                 v = _LIVE_CACHE[symbol]["data"].get("spot", 0)
                 if v and float(v) > 0:
                     return float(v)
-            # Try live NSE price (real, not synthetic) - for single symbol this is 1-1.5s
-            try:
-                live = LiveMarketData().fetch_live_from_nse(symbol)
-                if live and live.get("spot") and float(live["spot"]) > 0:
-                    _LIVE_CACHE[symbol] = {"ts": _tm.time(), "data": live}
-                    return float(live["spot"])
-            except Exception:
-                pass
         except Exception:
             pass
-        # DB fallback
+        # DB fallback (latest real close from bhavcopy cache)
         try:
             row = self.db.fetch_one(
                 "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL)",
@@ -343,7 +337,7 @@ class OptionScanner:
                 return float(row["close_price"])
         except Exception:
             pass
-        # Last fallback synthetic only if live failed
+        # Last fallback synthetic only (never network -> never hangs)
         try:
             from core.services.historical_fetcher import _generate_synthetic_data
             import datetime as _dt
@@ -574,50 +568,17 @@ class OptionScanner:
         Uses LiveMarketData for today's spot + DB for prev close. Falls back to DB-only if live blocked."""
         fno_symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','TITAN','BAJAJFINSV','NESTLEIND','APOLLOHOSP','UPL','HEROMOTOCO']
         movers = []
-        # Live NSE prices: parallel fetch for all F&O (NSE quote 1.5s + allIndices 200ms + StocksRin 1.2s) -> live dikhe, synthetic nahi
+        # Instant: use LIVE_CACHE (seeded by background refresh subprocess) else DB/synthetic via _get_spot.
+        # No per-request network here — parallel live fetch hangs on Render free tier (NSE/StocksRin blocked) and caused 60s timeout / 503.
         live_map = {}
         try:
-            from core.services.live_market_data import LiveMarketData
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-            lm = LiveMarketData()
-            # 1) Try LIVE_CACHE first (instant)
-            try:
-                from core.services.live_market_data import _LIVE_CACHE
-                import time as _tm
-                for sym in fno_symbols:
-                    if sym in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[sym]["ts"] < 45:
-                        v = _LIVE_CACHE[sym]["data"].get("spot", 0)
-                        if v and float(v) > 0:
-                            live_map[sym] = float(v)
-            except Exception:
-                pass
-            # 2) Parallel live NSE fetch for missing symbols (12 workers, 10s total -> real live price, not synthetic)
-            missing = [s for s in fno_symbols if s not in live_map]
-            if missing:
-                def _fetch_one(sym):
-                    try:
-                        d = lm.fetch_live_from_nse(sym)
-                        if d and d.get("spot"):
-                            return sym, float(d["spot"])
-                    except Exception:
-                        pass
-                    return sym, 0
-                with ThreadPoolExecutor(max_workers=12) as ex:
-                    futs = {ex.submit(_fetch_one, sym): sym for sym in missing}
-                    for fut in as_completed(futs, timeout=10):
-                        try:
-                            sym, spot = fut.result()
-                            if spot and spot > 0:
-                                live_map[sym] = spot
-                                # update cache for next scanner call instant
-                                try:
-                                    import time as _tm2
-                                    from core.services.live_market_data import _LIVE_CACHE
-                                    _LIVE_CACHE[sym] = {"ts": _tm2.time(), "data": {"spot": spot, "formatted": f"INR {spot:,.2f}", "change": 0, "high": spot, "low": spot, "source": "nse_live"}}
-                                except Exception:
-                                    pass
-                        except Exception:
-                            continue
+            from core.services.live_market_data import _LIVE_CACHE
+            import time as _tm
+            for sym in fno_symbols:
+                if sym in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[sym]["ts"] < 60:
+                    v = _LIVE_CACHE[sym]["data"].get("spot", 0)
+                    if v and float(v) > 0:
+                        live_map[sym] = float(v)
         except Exception:
             pass
         for sym in fno_symbols:
