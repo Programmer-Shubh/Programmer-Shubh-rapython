@@ -315,18 +315,25 @@ class OptionScanner:
         return rows
 
     def _get_spot(self, symbol: str) -> float:
-        # Instant path for scanner: LIVE_CACHE -> DB -> synthetic (NO network per-symbol to avoid 50*2s timeout)
-        # Only indices use live cache if available
+        # Live NSE first: LIVE_CACHE -> live fetch (NSE quote 1.5s + StocksRin + nselib) -> DB -> synthetic last fallback
         try:
-            from core.services.live_market_data import _LIVE_CACHE
+            from core.services.live_market_data import _LIVE_CACHE, LiveMarketData
             import time as _tm
             if symbol in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[symbol]["ts"] < 5:
                 v = _LIVE_CACHE[symbol]["data"].get("spot", 0)
                 if v and float(v) > 0:
                     return float(v)
+            # Try live NSE price (real, not synthetic) - for single symbol this is 1-1.5s
+            try:
+                live = LiveMarketData().fetch_live_from_nse(symbol)
+                if live and live.get("spot") and float(live["spot"]) > 0:
+                    _LIVE_CACHE[symbol] = {"ts": _tm.time(), "data": live}
+                    return float(live["spot"])
+            except Exception:
+                pass
         except Exception:
             pass
-        # DB instant
+        # DB fallback
         try:
             row = self.db.fetch_one(
                 "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL)",
@@ -336,7 +343,7 @@ class OptionScanner:
                 return float(row["close_price"])
         except Exception:
             pass
-        # Synthetic instant - ensures scanner always has data (no network, no 50* nselib delay)
+        # Last fallback synthetic only if live failed
         try:
             from core.services.historical_fetcher import _generate_synthetic_data
             import datetime as _dt
@@ -393,6 +400,16 @@ class OptionScanner:
         closes = [d['close_price'] for d in data]
         volumes = [d.get('volume', 0) or 0 for d in data]
         spot = closes[-1]
+        # Live NSE price if available in cache (real-time, not synthetic)
+        try:
+            from core.services.live_market_data import _LIVE_CACHE
+            import time as _tm
+            if symbol in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[symbol]["ts"] < 60:
+                lv = float(_LIVE_CACHE[symbol]["data"].get("spot", 0) or 0)
+                if lv > 0:
+                    spot = lv
+        except Exception:
+            pass
         supertrend = self.indicators.calculate_supertrend(data, 10, 3.0)
         macd_data = self.indicators.calculate_macd(closes, 12, 26, 9)
         ema200 = self.indicators.calculate_ema(closes, 200)
@@ -470,6 +487,16 @@ class OptionScanner:
         highs = [d['high_price'] for d in data]
         lows = [d['low_price'] for d in data]
         spot = closes[-1]
+        # Live NSE price override if cached (real-time stocksrin.com/NSE quote)
+        try:
+            from core.services.live_market_data import _LIVE_CACHE
+            import time as _tm
+            if symbol in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[symbol]["ts"] < 60:
+                lv = float(_LIVE_CACHE[symbol]["data"].get("spot", 0) or 0)
+                if lv > 0:
+                    spot = lv
+        except Exception:
+            pass
         vwap_data = self.indicators.calculate_vwap(data, 20, 2.0)
         rsi = self.indicators.calculate_rsi(closes, 14)
         ema9 = self.indicators.calculate_ema(closes, 9)
@@ -547,27 +574,65 @@ class OptionScanner:
         Uses LiveMarketData for today's spot + DB for prev close. Falls back to DB-only if live blocked."""
         fno_symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','TITAN','BAJAJFINSV','NESTLEIND','APOLLOHOSP','UPL','HEROMOTOCO']
         movers = []
-        # Live spots only for indices (fast, NSE API); stocks use synthetic/DB to avoid 50 network calls
+        # Live NSE prices: parallel fetch for all F&O (NSE quote 1.5s + allIndices 200ms + StocksRin 1.2s) -> live dikhe, synthetic nahi
         live_map = {}
         try:
             from core.services.live_market_data import LiveMarketData
+            from concurrent.futures import ThreadPoolExecutor, as_completed
             lm = LiveMarketData()
-            for sym in ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY']:
-                try:
-                    spot_data = lm.get_live_spot(sym)
-                    if spot_data and spot_data.get('spot'):
-                        live_map[sym] = float(spot_data['spot'])
-                except Exception:
-                    continue
+            # 1) Try LIVE_CACHE first (instant)
+            try:
+                from core.services.live_market_data import _LIVE_CACHE
+                import time as _tm
+                for sym in fno_symbols:
+                    if sym in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[sym]["ts"] < 45:
+                        v = _LIVE_CACHE[sym]["data"].get("spot", 0)
+                        if v and float(v) > 0:
+                            live_map[sym] = float(v)
+            except Exception:
+                pass
+            # 2) Parallel live NSE fetch for missing symbols (12 workers, 10s total -> real live price, not synthetic)
+            missing = [s for s in fno_symbols if s not in live_map]
+            if missing:
+                def _fetch_one(sym):
+                    try:
+                        d = lm.fetch_live_from_nse(sym)
+                        if d and d.get("spot"):
+                            return sym, float(d["spot"])
+                    except Exception:
+                        pass
+                    return sym, 0
+                with ThreadPoolExecutor(max_workers=12) as ex:
+                    futs = {ex.submit(_fetch_one, sym): sym for sym in missing}
+                    for fut in as_completed(futs, timeout=10):
+                        try:
+                            sym, spot = fut.result()
+                            if spot and spot > 0:
+                                live_map[sym] = spot
+                                # update cache for next scanner call instant
+                                try:
+                                    import time as _tm2
+                                    from core.services.live_market_data import _LIVE_CACHE
+                                    _LIVE_CACHE[sym] = {"ts": _tm2.time(), "data": {"spot": spot, "formatted": f"INR {spot:,.2f}", "change": 0, "high": spot, "low": spot, "source": "nse_live"}}
+                                except Exception:
+                                    pass
+                        except Exception:
+                            continue
         except Exception:
             pass
         for sym in fno_symbols:
             try:
                 spot = live_map.get(sym)
                 if spot is None or spot <= 0:
-                    spot = self._get_spot(sym)
-                # For F&O stocks on Render (DB empty, live only for indices), use synthetic spot
-                if (spot is None or spot <= 0) and sym not in live_map:
+                    # Parallel already tried live NSE (4-10s); don't retry per-symbol live -> use DB/synthetic fast only
+                    spot = 0
+                    try:
+                        row2 = self.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [sym])
+                        if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
+                            spot = float(row2["close_price"])
+                    except Exception:
+                        pass
+                if spot is None or spot <= 0:
                     hist = self._get_historical(sym)
                     if hist and len(hist) > 0:
                         spot = float(hist[-1].get('close_price', 0))

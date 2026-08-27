@@ -225,6 +225,34 @@ class LiveMarketData:
                 result[sym] = _LIVE_CACHE[sym]["data"]
         return result
 
+    def get_live_spots_parallel(self, symbols, max_workers: int = 10):
+        """Parallel live spots for 50 F&O symbols - NSE quote + StocksRin + nselib in parallel (5-7 sec total, live NSE price)."""
+        now = time.time()
+        result = {}
+        fresh = []
+        for sym in symbols:
+            if sym in _LIVE_CACHE and now - _LIVE_CACHE[sym]["ts"] < _LIVE_CACHE_TTL:
+                result[sym] = _LIVE_CACHE[sym]["data"]
+            else:
+                fresh.append(sym)
+        if fresh:
+            def _fetch_one(sym):
+                try:
+                    return sym, self.fetch_live_from_nse(sym)
+                except Exception:
+                    return sym, None
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futures = {ex.submit(_fetch_one, sym): sym for sym in fresh}
+                for fut in as_completed(futures, timeout=12):
+                    try:
+                        sym, data = fut.result()
+                        if data and data.get("spot"):
+                            _LIVE_CACHE[sym] = {"ts": now, "data": data}
+                            result[sym] = data
+                    except Exception:
+                        continue
+        return result
+
     def get_live_chain_cached(self, symbol: str):
         now = time.time()
         sym = symbol.upper()
