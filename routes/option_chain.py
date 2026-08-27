@@ -47,14 +47,45 @@ def get_expiries(symbol: str, date: str):
     return {"expiries": bhav.get_expiries(symbol, date)}
 
 
+@router.get("/chain/{symbol}")
+def get_chain_auto(symbol: str):
+    """Auto option chain without date - live NSE (Yahoo spot + NSE option live) or synthetic - no date input needed."""
+    live = LiveMarketData()
+    # try cached live first (2s TTL)
+    data = live.get_live_chain_cached(symbol)
+    if not data:
+        data = live.fetch_live_option_chain(symbol)
+    if data and data.get("rows"):
+        return data
+    return {"error": "No data - try again"}
+
+
 @router.get("/chain/{symbol}/{date}/{expiry}")
 def get_chain(symbol: str, date: str, expiry: str):
     bhav = BhavcopyModel()
     live = LiveMarketData()
     chain = bhav.get_option_chain(symbol, date, expiry)
     if not chain:
-        return {"error": "No data"}
+        # No bhavcopy for this date/expiry - fallback to live auto chain (no date needed, no network error)
+        data = live.get_live_chain_cached(symbol)
+        if not data:
+            data = live.fetch_live_option_chain(symbol)
+        if data and data.get("rows"):
+            return {"symbol": symbol, "date": date, "expiry": data.get("timestamp") or expiry, "spot": data.get("spot"), "atm": data.get("atm"), "rows": data.get("rows"), "source": data.get("source")}
+        return {"error": "No data - no bhavcopy for this date and live fetch failed"}
     spot = live.get_spot_price(symbol)
+    # if DB spot missing, use live Yahoo spot (instant via cache or 2s)
+    if spot <= 0:
+        try:
+            ld = live.get_live_spot(symbol)
+            if ld and ld.get("spot"):
+                spot = float(ld["spot"])
+            else:
+                ld2 = live.fetch_live_from_nse(symbol)
+                if ld2 and ld2.get("spot"):
+                    spot = float(ld2["spot"])
+        except Exception:
+            pass
     step = get_strike_step(symbol)
     atm = round(spot / step) * step if spot > 0 else 0
     ce = {}

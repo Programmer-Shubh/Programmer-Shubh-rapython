@@ -436,9 +436,9 @@ class LiveMarketData:
 
     def fetch_live_option_chain(self, symbol: str):
         """Live option chain: NSE live (option-chain-indices/equities) -> Yahoo spot + DB -> synthetic. No NiftyTrader."""
-        # 0) Try NSE live option chain first (real LTP, OI, IV) - bounded 6s
+        # 0) Try NSE live option chain first (real LTP, OI) - bounded 3.5s, fallback to synthetic instant
         try:
-            live = _with_timeout(_fetch_nse_option_chain_live, 6.0, symbol)
+            live = _with_timeout(_fetch_nse_option_chain_live, 3.5, symbol)
             if live and live.get("rows"):
                 return live
         except Exception:
