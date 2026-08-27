@@ -93,7 +93,7 @@ def refresh_all(light: bool = False):
                 }}
     if light:
         return {sym: bool(chains.get(sym)) for sym in INDEX_SYMBOLS}, chain_ok
-    # Full refresh (background, after startup) - cache stock spots slowly without blocking
+    # Full refresh (background, after startup) - cache stock spots + history slowly without blocking
     try:
         for sym in EXTRA_SYMBOLS[:8]:  # only 8 per cycle to avoid 40*3s block, rest next cycle
             try:
@@ -104,6 +104,12 @@ def refresh_all(light: bool = False):
                         "spot": spot_data["spot"], "formatted": f"INR {spot_data['spot']:,.2f}",
                         "change": spot_data.get("change", 0), "high": spot_data.get("high", spot_data["spot"]), "low": spot_data.get("low", spot_data["spot"]), "source": src,
                     }}
+            except Exception:
+                continue
+        # Seed historical spot cache so backtest/option-chain use DB (instant, no 'Network error')
+        for sym in ALL_SYMBOLS[:4]:  # a few per cycle, rotates over cycles
+            try:
+                _seed_history(sym)
             except Exception:
                 continue
     except Exception:

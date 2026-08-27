@@ -308,13 +308,65 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
         d += datetime.timedelta(days=1)
     return records
 
+def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Instant local cache: bhavcopy_data spot rows (seeded by background refresh). No network."""
+    try:
+        from core.models.database import Database
+        db = Database.get_instance()
+        rows = db.fetch_all(
+            "SELECT trade_date, open_price, high_price, low_price, close_price, volume FROM bhavcopy_data "
+            "WHERE symbol=? AND option_type IS NULL AND trade_date>=? AND trade_date<=? ORDER BY trade_date ASC",
+            [symbol.upper(), start_date, end_date],
+        )
+        if rows and len(rows) >= 5:
+            out = []
+            for r in rows:
+                cl = float(r.get("close_price") or 0)
+                if cl <= 0:
+                    continue
+                out.append({
+                    "symbol": symbol.upper(),
+                    "trade_date": str(r.get("trade_date")),
+                    "open_price": float(r.get("open_price") or cl),
+                    "high_price": float(r.get("high_price") or cl),
+                    "low_price": float(r.get("low_price") or cl),
+                    "close_price": cl,
+                    "volume": int(r.get("volume") or 0),
+                    "oi": 0,
+                })
+            if len(out) >= 5:
+                return out
+    except Exception:
+        pass
+    return []
+
+
 def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """nselib -> jugaad-data -> NSEpy -> StocksRin -> Google -> TrueData -> Synthetic."""
+    """DB cache (instant) -> nselib -> StocksRin -> Google -> TrueData -> Synthetic.
+    DB-first + hard 15s budget avoids slow external calls so backtest never times out (no 'Network error')."""
     symbol = symbol.upper()
+    # 1) Instant local cache (seeded by background refresh) - serves backtest in <10ms
+    try:
+        db_data = _fetch_db_historical(symbol, start_date, end_date)
+        if db_data and len(db_data) >= 5:
+            return db_data
+    except Exception:
+        pass
+    # 2) External sources with a hard time budget so a slow/hanging API can't freeze the request
+    import time as _t
+    _deadline = _t.time() + 15
     for fetcher in [_fetch_nselib_historical, _fetch_jugaad_historical, _fetch_nsepy_historical, _fetch_stocksrin_historical, _fetch_google_finance, _fetch_truedata_historical]:
         try:
+            if _t.time() > _deadline:
+                break
             data = fetcher(symbol, start_date, end_date)
             if data and len(data) >= 5:
+                # Cache it for next time (instant backtest thereafter)
+                try:
+                    from core.models.bhavcopy_model import BhavcopyModel
+                    BhavcopyModel().import_data(data)
+                except Exception:
+                    pass
                 return data
         except Exception:
             continue
