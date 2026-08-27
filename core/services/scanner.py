@@ -568,23 +568,18 @@ class OptionScanner:
         Uses LiveMarketData for today's spot + DB for prev close. Falls back to DB-only if live blocked."""
         fno_symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','TITAN','BAJAJFINSV','NESTLEIND','APOLLOHOSP','UPL','HEROMOTOCO']
         movers = []
-        # Live realtime: Yahoo Finance (reliable, 400ms) + subprocess hard-kill at 12s + DB fallback
+        # Live realtime via LIVE_CACHE only (instant, no per-request network).
+        # Background refresh (data_refresher + Yahoo via subprocess) fills _LIVE_CACHE every 45s.
+        # Per-request parallel caused 13s hang -> frontend timeout "Failed to load F&O Top 5".
         live_map = {}
         try:
-            from core.services.live_market_data import _LIVE_CACHE, LiveMarketData
+            from core.services.live_market_data import _LIVE_CACHE
             import time as _tm
             for sym in fno_symbols:
                 if sym in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[sym]["ts"] < 60:
                     v = _LIVE_CACHE[sym]["data"].get("spot", 0)
                     if v and float(v) > 0:
                         live_map[sym] = float(v)
-            missing = [s for s in fno_symbols if s not in live_map]
-            if missing:
-                lm = LiveMarketData()
-                batch = lm.get_live_spots_parallel(missing, max_workers=12)
-                for sym, data in batch.items():
-                    if data and data.get("spot"):
-                        live_map[sym] = float(data["spot"])
         except Exception:
             pass
         for sym in fno_symbols:
