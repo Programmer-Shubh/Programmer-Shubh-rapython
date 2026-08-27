@@ -207,11 +207,16 @@
         </div>
         <!-- STRATEGY BUILDER -->
         <div id="pg-strategy" class="pg hidden">
-            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
-                <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Builder</h4>
-                <div style="display:flex;gap:6px;align-items:center">
-                    <button class="btn btn-sm btn-outline-secondary" onclick="resetStrat()">Reset</button>
-                    <button class="btn btn-sm btn-primary" onclick="saveStrat()"><i class="bi bi-check-circle"></i> Save</button>
+            <div class="card mb-2" style="border-left:4px solid #0d6efd">
+                <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                    <div class="d-flex gap-2 align-items-center">
+                        <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Builder</h4><span class="badge bg-primary">Quantman Style</span>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center">
+                        <div class="input-group input-group-sm" style="width:260px"><span class="input-group-text">Run Name</span><input type="text" class="form-control" id="s-name" placeholder="Nifty Breakout Strategy"></div>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="resetStrat()">Reset</button>
+                        <button class="btn btn-sm btn-primary" onclick="saveStrat()"><i class="bi bi-check-circle"></i> Save</button>
+                    </div>
                 </div>
             </div>
             <div id="custom-form">
@@ -744,7 +749,8 @@
         const entryTime=document.getElementById('s-entry-time').value;
         const exitTime=document.getElementById('s-exit-time').value;
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
-        const body={symbol:idx,start_date:startDate,end_date:endDate,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:0.50,slippage:0.50},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+        const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50;
+        const body={symbol:idx,start_date:startDate,end_date:endDate,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
         try{
             const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             btn.innerHTML=orig;
@@ -755,8 +761,10 @@
             const pnl = m.final_capital - m.initial_capital;
             const pnlClass = pnl >= 0 ? 'price-up' : 'price-down';
             document.getElementById('bt-metrics').innerHTML=`
+<div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> Quantman 4 Key Metrics:</strong><span>Win Prob: <strong>${m.win_rate}%</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${m.expectancy}</strong> ${m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>'}</span><span class="ms-auto badge bg-info">Slippage ${qSlip}%</span></div>
 <div class="row g-2 mb-2">
 <div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Run Name</div><div class="value fw-bold" style="font-size:13px">${document.getElementById('s-name').value||'-'}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlClass}">${F(m.net_pnl||pnl)}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">No. of Trades</div><div class="value">${m.total_trades}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit/Trade</div><div class="value ${pnlClass}">${F(m.avg_profit_per_trade)}</div></div></div>

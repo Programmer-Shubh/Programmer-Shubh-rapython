@@ -352,9 +352,9 @@ def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
             return db_data
     except Exception:
         pass
-    # 2) External sources with a hard time budget so a slow/hanging API can't freeze the request
+    # 2) External sources with tight 4s budget (Quantman instant) - then synthetic
     import time as _t
-    _deadline = _t.time() + 15
+    _deadline = _t.time() + 4
     for fetcher in [_fetch_nselib_historical, _fetch_jugaad_historical, _fetch_nsepy_historical, _fetch_stocksrin_historical, _fetch_google_finance, _fetch_truedata_historical]:
         try:
             if _t.time() > _deadline:
