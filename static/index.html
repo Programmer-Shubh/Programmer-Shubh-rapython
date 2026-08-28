@@ -303,7 +303,7 @@
             </div>
             <div class="collapse show mt-2" id="overallSettings">
                 <div class="row g-2">
-                    <div class="col-md-3"><label class="form-label small">Overall Stop Loss</label><input type="number" class="form-control form-control-sm" id="s-sl" value="500" min="0" step="50"></div>
+                    <div class="col-md-3"><label class="form-label small">Overall Stop Loss</label><input type="number" class="form-control form-control-sm" id="s-sl" value="1500" min="0" step="50"></div>
                     <div class="col-md-3"><label class="form-label small">Overall Target</label><input type="number" class="form-control form-control-sm" id="s-tp" value="1000" min="0" step="50"></div>
                     <div class="col-md-3"><label class="form-label small">Re-entry on SL</label><select class="form-select form-select-sm" id="s-reentry-sl"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
                     <div class="col-md-3"><label class="form-label small">Re-entry on Tgt</label><select class="form-select form-select-sm" id="s-reentry-tp"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
@@ -472,7 +472,7 @@
                         <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
                         <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="r-lots" class="form-control form-control-sm" value="1" min="1"></div>
                         <div class="col-md-1"><label class="form-label small">Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="500" min="0" step="100"></div>
+                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
                         <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="1000" min="0" step="100"></div>
                     </div>
                     <div class="row g-2 mt-2">
@@ -598,8 +598,8 @@
     async function loadDashScanner(){try{const r=await A('/api/scanner/scan-all');const st=r.st_macd||{};const vw=r.vwap||{};document.getElementById('scan-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Scanned</div><div class="value">${st.total_scanned||0}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Bullish</div><div class="value price-up">${(st.bullish||[]).length}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Bearish</div><div class="value price-down">${(st.bearish||[]).length}</div></div></div><div class="col"><div class="card stat-card"><div class="label">VWAP Signals</div><div class="value">${(vw.long||[]).length+(vw.short||[]).length}</div></div></div>`;renderSig('scan-st',st.bullish||[],st.bearish||[],'SuperTrend + MACD');renderSig('scan-vwap',vw.long||[],vw.short||[],'VWAP + RSI + EMA');}catch(e){}}
     function renderSig(cid,buy,sell,title){let h=`<div class="sig-box bull"><h5 class="price-up">${title} - Bullish (Buy CE)</h5>`;if(!buy.length)h+='<p class="text-muted small">No signals</p>';buy.forEach(s=>{h+=sigItem(s,'buy');});h+=`</div><div class="sig-box bear"><h5 class="price-down">${title} - Bearish (Buy PE)</h5>`;if(!sell.length)h+='<p class="text-muted small">No signals</p>';sell.forEach(s=>{h+=sigItem(s,'sell');});h+='</div>';document.getElementById(cid).innerHTML=h;}
     function sigItem(s,dir){const opt=s.option_suggestion||{};const prem=opt.premium?' | Premium: ₹'+opt.premium.toFixed(2):'';const ind=s.indicators||{};const indH=Object.entries(ind).map(([k,v])=>`<span class="reason-tag">${k}: ${v}</span>`).join('');const d={symbol:s.symbol,direction:dir==='buy'?'bullish':'bearish',signal_type:dir==='buy'?'BUY CE':'BUY PE',option_suggestion:opt};return`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span>${B(dir==='buy'?'BUY CE':'BUY PE',dir==='buy'?'buy':'sell')}</div><div class="meta">₹${(s.price||0).toLocaleString()} | ${s.date||''} | Strike: ${opt.strike||'-'}${prem}</div><div>${R(s.reasons||[])}</div><div style="margin-top:3px">${indH}</div><div style="margin-top:6px"><span class="score-badge">Score: ${s.score}/100</span></div><div style="margin-top:6px">${stratBtns(d)}</div></div>`;}
-    function quickTrade(sym,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:'BUY',quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert('Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
-    function quickStrat(sym,action,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
+    function quickTrade(sym,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:'BUY',quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert('Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
+    function quickStrat(sym,action,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
     function stratBtnsForTrade(t){const opt=t.option_type||'CE';const bull=(opt==='CE');return bull?`<button class="btn btn-sm btn-buy" onclick="quickStrat('${t.symbol}','BUY','CE',${t.strike},'')">Buy Call</button> <button class="btn btn-sm btn-sell" onclick="quickStrat('${t.symbol}','SELL','PE',${t.strike},'')">Sell Put</button>`:`<button class="btn btn-sm btn-sell" onclick="quickStrat('${t.symbol}','BUY','PE',${t.strike},'')">Buy Put</button> <button class="btn btn-sm btn-buy" onclick="quickStrat('${t.symbol}','SELL','CE',${t.strike},'')">Sell Call</button>`;}
     let _lastDashPosHTML = null;
     async function loadDashPositions(){
@@ -670,7 +670,7 @@
         htm+='</tbody></table>';
         document.getElementById('chain-body').innerHTML=htm;
     }
-    function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);});}
+    function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);});}
 
     let _lastOpenTrdHTML = null;
     async function loadTrades(){
@@ -730,7 +730,7 @@
         const endDate=document.getElementById('s-end').value;
         if(!startDate||!endDate){btn.innerHTML=orig;alert('Select start and end date');return;}
         const lots=parseInt(document.getElementById('s-lots').value)||1;
-        const sl=parseFloat(document.getElementById('s-sl').value)||500;
+        const sl=parseFloat(document.getElementById('s-sl').value)||1500;
         const tp=parseFloat(document.getElementById('s-tp').value)||1000;
         const mtd=parseInt(document.getElementById('s-mtd').value)||5;
         const indicators=collectIndicators();
@@ -941,7 +941,7 @@
 
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3">No strategies yet. Create your first strategy!</p>';return;}let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const statusCls=s.status==='active'?'active':s.status==='draft'?'draft':'paused';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span class="badge badge-${statusCls}">${s.status}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px"><button class="btn btn-sm btn-success" onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})">Edit</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
 
-    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];const leg=legs[0]||{};const opt=leg.option_type||'CE';const txn=leg.transaction||'buy';const lots=leg.lots||1;const sl=leg.stop_loss||500;const tp=leg.take_profit||1000;alert(`Paper Trade from "${s.name}"\nSymbol: ${s.symbol}\nOption: ${opt}\nTransaction: ${txn}\nLots: ${lots}\nSL: ₹${sl}\nTP: ₹${tp}\n\nGo to Option Chain to place trade.`);}catch(e){alert('Error: '+e.message);}}
+    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];const leg=legs[0]||{};const opt=leg.option_type||'CE';const txn=leg.transaction||'buy';const lots=leg.lots||1;const sl=leg.stop_loss||1500;const tp=leg.take_profit||1000;alert(`Paper Trade from "${s.name}"\nSymbol: ${s.symbol}\nOption: ${opt}\nTransaction: ${txn}\nLots: ${lots}\nSL: ₹${sl}\nTP: ₹${tp}\n\nGo to Option Chain to place trade.`);}catch(e){alert('Error: '+e.message);}}
     async function atFromStrat(id,status){const newStatus=status==='active'?'paused':'active';await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:newStatus})});loadStrats();loadTrades();}
     async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);document.getElementById('s-name').value=s.name||'';document.getElementById('s-sym').value=s.symbol||'BANKNIFTY';document.getElementById('s-start').value=s.start_date||'';document.getElementById('s-end').value=s.end_date||'';document.getElementById('s-tf').value=s.timeframe||'daily';}catch(e){alert('Error');}}
     async function delStrat(id){if(!confirm('Delete this strategy?'))return;await A('/api/strategies/'+id,{method:'DELETE'});loadStrats();}
@@ -1004,7 +1004,7 @@
             opt=parts[0]; txn=parts[1].toLowerCase();
             legs=[{option_type:opt, transaction:txn, lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
         }
-        const sl=parseFloat(document.getElementById('r-sl').value)||500;
+        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
         const mtd=parseInt(document.getElementById('r-mtd').value)||1;
         const s=document.getElementById('r-start').value; const e=document.getElementById('r-end').value;
@@ -1057,7 +1057,7 @@
         const sym=document.getElementById('r-sym').value;
         let order=document.getElementById('r-order').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sl=parseFloat(document.getElementById('r-sl').value)||500;
+        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
         const strikeType=document.getElementById('r-strike').value;
         const expiry=document.getElementById('r-expiry').value;
@@ -1092,7 +1092,7 @@
         const order=document.getElementById('r-order').value;
         const strikeType=document.getElementById('r-strike').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sl=parseFloat(document.getElementById('r-sl').value)||500;
+        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
         let legs=[];
         if(order==='AUTO'){ legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType.toLowerCase()}]; }
@@ -1125,7 +1125,7 @@
             else document.getElementById('r-order').value=(leg.option_type||'CE')+'-'+(leg.transaction||'buy').toUpperCase();
             document.getElementById('r-strike').value=(leg.strike_selection||'atm').toUpperCase();
             document.getElementById('r-lots').value=leg.lots||1;
-            const rm=_parseJsonField(s.risk_management,{}); document.getElementById('r-sl').value=rm.daily_stop_loss||500; document.getElementById('r-tp').value=rm.daily_take_profit||1000;
+            const rm=_parseJsonField(s.risk_management,{}); document.getElementById('r-sl').value=rm.daily_stop_loss||1500; document.getElementById('r-tp').value=rm.daily_take_profit||1000;
             const ao=_parseJsonField(s.advanced_options,{}); if(ao.entry_time) document.getElementById('r-entry').value=ao.entry_time; if(ao.exit_time) document.getElementById('r-exit').value=ao.exit_time;
             if(s.start_date) document.getElementById('r-start').value=s.start_date; if(s.end_date) document.getElementById('r-end').value=s.end_date;
             alert('Robot ID '+id+' loaded to form');
@@ -1139,7 +1139,7 @@
         const order=document.getElementById('r-order').value;
         let optR, txnR; if(order==='AUTO'){ optR='CE'; txnR='BUY'; } else { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sl=parseFloat(document.getElementById('r-sl').value)||500;
+        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
         const expiry=document.getElementById('r-expiry').value;
         try{

@@ -120,7 +120,7 @@ def _place_from_signal(data: dict, source: str = "webhook") -> dict:
     tid = tm.insert_trade({
         "symbol": symbol, "option_type": opt_type, "strike_price": strike,
         "expiry_date": expiry, "transaction_type": action, "quantity": qty,
-        "lot_size": lot, "entry_price": adj, "stop_loss": 500, "target": 1000,
+        "lot_size": lot, "entry_price": adj, "stop_loss": 1500, "target": 1000,
         "total_cost": costs["total"], "entry_date": __import__("datetime").datetime.now().strftime("%Y-%m-%d"),
     })
     return {"trade_id": tid, "symbol": symbol, "action": action, "strike": strike, "type": opt_type, "entry_price": round(adj,2), "source": source}

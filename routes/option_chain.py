@@ -18,7 +18,7 @@ class TradeRequest(BaseModel):
     date: str
     transaction_type: str
     quantity: int = 1
-    stop_loss: float = 500.0
+    stop_loss: float = 1500.0
     take_profit: float = 1000.0
 
 

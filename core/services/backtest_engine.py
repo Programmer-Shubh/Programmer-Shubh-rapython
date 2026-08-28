@@ -67,7 +67,7 @@ class BacktestEngine:
         option_type = leg.get("option_type", "CE")
         qty = int(leg.get("lots", 1)) * get_lot_size(symbol)
         txn_type = leg.get("transaction", "buy").lower()
-        leg_sl = float(leg.get("stop_loss", risk_management.get("daily_stop_loss", 500)))
+        leg_sl = float(leg.get("stop_loss", risk_management.get("daily_stop_loss", 1500)))
         leg_tp = float(leg.get("take_profit", risk_management.get("daily_take_profit", 1000)))
         strike_sel = advanced_options.get("strike_selection", "otm")
         delta_target = advanced_options.get("delta_target")

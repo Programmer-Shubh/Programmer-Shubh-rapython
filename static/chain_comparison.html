@@ -147,9 +147,9 @@
                     end_date:'2026-08-06',
                     indicators:[{'id':'rsi','params':{'period':14}}],
                     entry_conditions:[{'indicator':'close','operator':'greater_than','value':'0'}],
-                    legs:[{option_type:'CE',lots:1,transaction:'buy',stop_loss:500,take_profit:1000}],
+                    legs:[{option_type:'CE',lots:1,transaction:'buy',stop_loss:1500,take_profit:1000}],
                     advanced:{signal_delay_bars:0,max_holding_bars:20,trade_mode:'positional',implied_volatility:0.14,days_to_expiry:15},
-                    risk:{max_trades_per_day:5,daily_stop_loss:500,daily_take_profit:1000,daily_loss_limit:0}
+                    risk:{max_trades_per_day:5,daily_stop_loss:1500,daily_take_profit:1000,daily_loss_limit:0}
                 })
             });
             

@@ -19,7 +19,7 @@ class TradeModel:
                 data["option_type"], data["strike_price"], data.get("expiry_date", ""),
                 data["transaction_type"], data.get("quantity", 1),
                 data.get("lot_size", get_lot_size(data["symbol"])),
-                data["entry_price"], data.get("stop_loss", 500), data.get("target", 1000),
+                data["entry_price"], data.get("stop_loss", 1500), data.get("target", 1000),
                 data.get("auto_action", "OFF"), data.get("total_cost", 0),
                 data.get("entry_date", ""), data.get("trade_mode", "paper"),
             ],

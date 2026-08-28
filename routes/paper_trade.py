@@ -14,7 +14,7 @@ class PlaceTradeRequest(BaseModel):
     transaction_type: str
     quantity: int = 1
     entry_price: float
-    stop_loss: float = 500.0
+    stop_loss: float = 1500.0
     take_profit: float = 1000.0
     date: str = ""
 
