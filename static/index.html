@@ -105,9 +105,10 @@
         .bt-table tbody tr:nth-child(even){background:#fafafa}
         .bt-table tbody tr:hover{background:#f0f7ff}
         .section-title{font-size:12px;font-weight:700;color:#0d6efd;margin:8px 0 4px;text-transform:uppercase}
-        .quant-card{border:1px solid #dee2e6;border-radius:8px;padding:12px;text-align:center;cursor:pointer;transition:all 0.2s;background:#fff;height:100%}
+        .quant-card{border:1px solid #dee2e6;border-radius:8px;padding:12px;text-align:center;cursor:pointer;transition:all 0.2s;background:#fff;height:100%;position:relative}
         .quant-card:hover{border-color:#0d6efd;box-shadow:0 2px 8px rgba(13,110,253,0.15);transform:translateY(-2px)}
-        .quant-card.active{border-color:#0d6efd;background:#e7f1ff}
+        .quant-card.active{border-color:#0d6efd;background:#e7f1ff;box-shadow:0 0 0 2px #0d6efd33}
+        .quant-card.active::after{content:"✓";position:absolute;top:6px;right:6px;background:#0d6efd;color:#fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:18px;text-align:center}
         .quant-card .icon{font-size:22px;margin-bottom:6px}
         .quant-card .title{font-size:11px;font-weight:700}
         .quant-card .desc{font-size:10px;color:#6c757d;line-height:1.2}
@@ -250,20 +251,30 @@
                     <div class="col-md-2"><label class="form-label small">Total Lot</label><input type="number" class="form-control form-control-sm" id="s-lots" value="1" min="1"></div>
                     <div class="col-md-2"><label class="form-label small">Position</label><select class="form-select form-select-sm" id="s-position"><option>Buy</option><option selected>Sell</option></select></div>
                     <div class="col-md-2"><label class="form-label small">Option Type</label><select class="form-select form-select-sm" id="s-opt"><option>CE</option><option selected>PE</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">Strike Type</label><select class="form-select form-select-sm" id="s-strike-type"><option>ATM</option><option selected>OTM</option><option>ITM</option><option>Delta</option></select><input type="number" class="form-control form-control-sm mt-1 d-none" id="s-delta" value="0.3" step="0.05" min="0.1" max="0.9" placeholder="Delta 0.3"></div>
+                    <div class="col-md-2"><label class="form-label small">Strike Type</label><select class="form-select form-select-sm" id="s-strike-type"><option>ATM</option><option selected>OTM</option><option>ITM</option><option>Delta</option></select><input type="number" class="form-control form-control-sm mt-1 d-none" id="s-delta" value="0.3" step="0.05" min="0.1" max="0.9" placeholder="Delta 0.3"><select class="form-select form-select-sm mt-1" id="s-otm-distance"><option value="1">Distance 1</option><option value="2" selected>Distance 2</option><option value="3">Distance 3</option><option value="4">Distance 4</option><option value="5">Distance 5</option></select></div>
                     <div class="col-md-2"><label class="form-label small">Expiry</label><select class="form-select form-select-sm" id="s-expiry"><option>Weekly</option><option selected>Monthly</option></select><input type="number" class="form-control form-control-sm mt-1" id="s-dte" value="7" min="1" max="60" title="DTE"></div>
                     <div class="col-md-2 d-flex align-items-end"><button class="btn btn-sm btn-success w-100" onclick="addLeg()">Add Leg</button></div>
                 </div>
+                <div class="mt-2 d-flex gap-1 flex-wrap align-items-center">
+                    <span class="small text-muted me-1">Easy OTM/ITM:</span>
+                    <button class="btn btn-sm btn-outline-primary" onclick="setAndAdd('OTM','1')">OTM 1</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="setAndAdd('OTM','2')">OTM 2</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="setAndAdd('OTM','3')">OTM 3</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="setAndAdd('ITM','1')">ITM 1</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="setAndAdd('ITM','2')">ITM 2</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="setAndAdd('ITM','3')">ITM 3</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="setAndAdd('ATM','0')">ATM</button>
+                </div>
                 <div class="mt-2 d-flex gap-1 flex-wrap">
                     <span class="small text-muted me-1">Templates:</span>
-                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('single')">Single</button>
-                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('straddle')">Straddle (ATM CE+PE Sell)</button>
-                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('strangle')">Strangle (OTM CE+PE Sell)</button>
-                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bullspread')">Bull Call Spread</button>
-                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bearspread')">Bear Call Spread</button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('bearputspread')">Bear Put Spread</button>
-                    <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('bullputspread')">Bull Put Spread</button>
-                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironcondor')">Iron Condor</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('single',this)">Single</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('straddle',this)">Straddle (ATM CE+PE Sell)</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('strangle',this)">Strangle (OTM CE+PE Sell)</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bullspread',this)">Bull Call Spread</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bearspread',this)">Bear Call Spread</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('bearputspread',this)">Bear Put Spread</button>
+                    <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('bullputspread',this)">Bull Put Spread</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironcondor',this)">Iron Condor</button>
                     <button class="btn btn-sm btn-outline-secondary" onclick="clearLegs()">Clear</button>
                 </div>
                 <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
@@ -273,18 +284,18 @@
                     <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Quantman Strategies — Click to Build</strong><small class="text-muted">Live Payoff + Greeks</small></div>
                     <div class="card-body p-2">
                         <div class="row g-2">
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longcall')"><div class="icon">📈</div><div class="title">Long Call</div><div class="desc">Buy CE ATM<br>Unlimited gain</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longput')"><div class="icon">📉</div><div class="title">Long Put</div><div class="desc">Buy PE ATM<br>Bearish</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortcall')"><div class="icon">🔻</div><div class="title">Short Call</div><div class="desc">Sell CE OTM<br>Theta decay</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortput')"><div class="icon">🔺</div><div class="title">Short Put</div><div class="desc">Sell PE OTM<br>Premium</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bullspread')"><div class="icon">⚡</div><div class="title">Bull Call Spread</div><div class="desc">Buy ATM + Sell OTM CE</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bearputspread')"><div class="icon">🛡️</div><div class="title">Bear Put Spread</div><div class="desc">Buy ATM PE + Sell OTM</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('straddle')"><div class="icon">🔄</div><div class="title">Long Straddle</div><div class="desc">Buy CE+PE ATM<br>Volatility</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('strangle')"><div class="icon">↔️</div><div class="title">Short Strangle</div><div class="desc">Sell OTM CE+PE<br>Range</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironcondor')"><div class="icon">🏛️</div><div class="title">Iron Condor</div><div class="desc">Sell OTM 1 + Buy OTM 3 (CE/PE)</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironbutterfly')"><div class="icon">🦋</div><div class="title">Iron Butterfly</div><div class="desc">ATM Straddle + OTM Wings</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('butterfly')"><div class="icon">✈️</div><div class="title">Long Butterfly</div><div class="desc">1-2-1 CE<br>Limited risk</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('calendar')"><div class="icon">📅</div><div class="title">Calendar Spread</div><div class="desc">Sell Weekly + Buy Monthly</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longcall',this)"><div class="icon">📈</div><div class="title">Long Call</div><div class="desc">Buy CE ATM<br>Unlimited gain</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longput',this)"><div class="icon">📉</div><div class="title">Long Put</div><div class="desc">Buy PE ATM<br>Bearish</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortcall',this)"><div class="icon">🔻</div><div class="title">Short Call</div><div class="desc">Sell CE OTM<br>Theta decay</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortput',this)"><div class="icon">🔺</div><div class="title">Short Put</div><div class="desc">Sell PE OTM<br>Premium</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bullspread',this)"><div class="icon">⚡</div><div class="title">Bull Call Spread</div><div class="desc">Buy ATM + Sell OTM CE</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bearputspread',this)"><div class="icon">🛡️</div><div class="title">Bear Put Spread</div><div class="desc">Buy ATM PE + Sell OTM</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('straddle',this)"><div class="icon">🔄</div><div class="title">Long Straddle</div><div class="desc">Buy CE+PE ATM<br>Volatility</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('strangle',this)"><div class="icon">↔️</div><div class="title">Short Strangle</div><div class="desc">Sell OTM CE+PE<br>Range</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironcondor',this)"><div class="icon">🏛️</div><div class="title">Iron Condor</div><div class="desc">Sell OTM 1 + Buy OTM 3 (CE/PE)</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironbutterfly',this)"><div class="icon">🦋</div><div class="title">Iron Butterfly</div><div class="desc">ATM Straddle + OTM Wings</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('butterfly',this)"><div class="icon">✈️</div><div class="title">Long Butterfly</div><div class="desc">1-2-1 CE<br>Limited risk</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('calendar',this)"><div class="icon">📅</div><div class="title">Calendar Spread</div><div class="desc">Sell Weekly + Buy Monthly</div></div></div>
                         </div>
                     </div>
                 </div>
@@ -845,14 +856,30 @@
         const expiry=document.getElementById('s-expiry').value.toLowerCase();
         const dte=parseInt(document.getElementById('s-dte').value)||7;
         const delta=parseFloat(document.getElementById('s-delta').value)||0.3;
+        const otmDist=parseInt(document.getElementById('s-otm-distance').value)||2;
         // expiry offset: weekly=0, monthly=2 weeks extra
         const offset = expiry==='weekly'?0:0;
-        stratLegs.push({option_type:opt, transaction:pos, strike_selection:strikeSel, otm_distance:2, lots:lots, expiry:expiry, offset:offset, delta_target: strikeSel==='delta'?delta:null, dte:dte});
+        stratLegs.push({option_type:opt, transaction:pos, strike_selection:strikeSel, otm_distance:otmDist, lots:lots, expiry:expiry, offset:offset, delta_target: strikeSel==='delta'?delta:null, dte:dte});
         renderLegs();
+    }
+    function setAndAdd(type, dist){
+        document.getElementById('s-strike-type').value=type;
+        document.getElementById('s-otm-distance').value=dist;
+        document.getElementById('s-delta').classList.toggle('d-none', type!=='Delta');
+        addLeg();
     }
     function removeLeg(i){stratLegs.splice(i,1);renderLegs();}
     function clearLegs(){stratLegs=[];renderLegs();}
-    function applyTemplate(t){
+    function applyTemplate(t, el){
+        // Quantman tick
+        if(el){
+            document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
+            const card = el.closest ? el.closest('.quant-card') : el;
+            if(card) card.classList.add('active'); else el.classList.add('active');
+        } else {
+            // fallback when called programmatically without element, highlight matching card
+            document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
+        }
         clearLegs();
         const lots=parseInt(document.getElementById('s-lots').value)||1;
         if(t==='single'){ addLeg(); }
@@ -909,8 +936,6 @@
         document.getElementById('payoff-spot').textContent='Spot: \u20B9'+spot.toFixed(2)+' | ATM: '+atm;
         document.getElementById('payoff-metrics').innerHTML=`<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">\u20B9${maxProfit.toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">\u20B9${Math.abs(maxLoss).toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">${beText}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">${rr}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Lots×LotSize</div><div class="value">${stratLegs.reduce((a,l)=>a+l.lots,0)}×${lot}</div></div></div>`;
         try{ Plotly.newPlot('payoff-chart', [{x:xs, y:ys, type:'scatter', mode:'lines', fill:'tozeroy', line:{color: maxProfit>Math.abs(maxLoss)?'#198754':'#0d6efd', width:2}, fillcolor:'rgba(13,110,253,0.08)'}, {x:[spot], y:[0], mode:'markers', marker:{color:'#dc3545', size:10}, name:'Spot'}], {title:'', xaxis:{title:'Spot at Expiry'}, yaxis:{title:'P&L (₹)'}, shapes:[{type:'line', x0:xs[0], x1:xs[xs.length-1], y0:0, y1:0, line:{color:'#6c757d', dash:'dash'}}], margin:{t:10,b:40,l:60,r:20}, paper_bgcolor:'#fff', plot_bgcolor:'#fff'}, {displayModeBar:false}); }catch(e){}
-        // highlight quant cards
-        document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
     }
     document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta');});
     document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); });
