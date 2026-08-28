@@ -248,7 +248,7 @@
                 <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Leg Builder</button>
             </div>
             <div class="collapse show mt-2" id="legBuilder">
-                <div class="row g-2 align-items-end">
+                <div class="row g-2 align-items-end" style="display:none">
                     <div class="col-md-2"><label class="form-label small">Total Lot</label><input type="number" class="form-control form-control-sm" id="s-lots" value="1" min="1"></div>
                     <div class="col-md-2"><label class="form-label small">Position</label><select class="form-select form-select-sm" id="s-position"><option>Buy</option><option selected>Sell</option></select></div>
                     <div class="col-md-2"><label class="form-label small">Option Type</label><select class="form-select form-select-sm" id="s-opt"><option>CE</option><option selected>PE</option></select></div>
@@ -256,7 +256,7 @@
                     <div class="col-md-2"><label class="form-label small">Expiry</label><select class="form-select form-select-sm" id="s-expiry"><option>Weekly</option><option selected>Monthly</option></select><input type="number" class="form-control form-control-sm mt-1" id="s-dte" value="7" min="1" max="60" title="DTE"></div>
                     <div class="col-md-2 d-flex align-items-end"><button class="btn btn-sm btn-success w-100" onclick="addLeg()">Add Leg</button></div>
                 </div>
-                <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
+                <div class="card mt-2" id="legsTableCard"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
                 <!-- Quantman Strategy Gallery -->
                 <div class="card mt-3">
@@ -819,7 +819,8 @@
         const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         if(r.id){alert('Strategy saved! ID: '+r.id);loadStrats();}else{alert('Error saving strategy');}
     }
-    let stratLegs=[];
+    let stratLegs=[{option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:1,expiry:'weekly',offset:0}];
+    setTimeout(()=>{ try{ renderLegs(); updatePayoff(); }catch(e){} },400);
     let _payoffSpot=24500;
     async function fetchPayoffSpot(){ try{ const s=document.getElementById('s-index').value||'NIFTY'; const d=await A('/api/chain/live/'+s); if(d.spot) _payoffSpot=d.spot; else if(d.rows) _payoffSpot=d.spot; }catch(e){} }
     function renderLegs(){
