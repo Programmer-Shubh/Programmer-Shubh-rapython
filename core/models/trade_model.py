@@ -95,8 +95,7 @@ class TradeModel:
                 if should_exit:
                     # Auto-close with accurate P&L via close_trade
                     try:
-                        import datetime as _dt
-                        today = _dt.datetime.now().strftime("%Y-%m-%d")
+                        today = self._ist_today()
                         self.close_trade(t["id"], current_price, today, exit_status=f"auto_{exit_reason}")
                         continue  # Don't include in open positions, it's closed
                     except Exception:
@@ -273,10 +272,25 @@ class TradeModel:
             pass
         return None
 
+    def _ist_today(self) -> str:
+        import datetime as _dt
+        return (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
+
     def close_trade(self, trade_id: int, exit_price: float, exit_date: str, exit_status="manual") -> int:
         trade = self.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [trade_id])
         if not trade:
             return 0
+        # Fix date reversal: ensure exit_date >= entry_date (IST)
+        try:
+            import datetime as _dt
+            entry_d = str(trade.get("entry_date") or "")
+            # Use IST today if exit_date is empty or before entry
+            if not exit_date or (entry_d and exit_date < entry_d):
+                exit_date = self._ist_today()
+                if entry_d and exit_date < entry_d:
+                    exit_date = entry_d
+        except Exception:
+            pass
         lot = trade.get("lot_size", 50)
         qty = trade["quantity"]
         is_sell = trade["transaction_type"] == "BUY"
@@ -346,6 +360,15 @@ class TradeModel:
                 if synth:
                     BhavcopyModel().import_data(synth)
                     issues.append(f"NIFTY incomplete data fixed: seeded {len(synth)} synthetic bars")
+        except Exception:
+            pass
+        # Fix date reversal: exit before entry (IST vs UTC bug 2026-08-28 vs 2026-08-27)
+        try:
+            rev = self.db.fetch_all("SELECT id, entry_date, exit_date FROM paper_trades WHERE user_id=? AND status='closed' AND exit_date < entry_date", [user_id])
+            for r in rev:
+                self.db.execute("UPDATE paper_trades SET exit_date=entry_date WHERE id=?", [r["id"]])
+                issues.append(f"Date fix {r['id']}: {r['exit_date']} -> {r['entry_date']}")
+                fixed += 1
         except Exception:
             pass
         # Fix M&M 523->67 unrealistic SELL profit due to bad tick
