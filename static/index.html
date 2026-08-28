@@ -616,19 +616,12 @@
                 });
                 h+='</table>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
             }else{
-                // Keep last HTML if we had trades before, avoid flicker to "No positions" on transient error
-                if(_lastDashPosHTML && document.getElementById('dash-pos').innerHTML.includes('<table>')){
-                    // keep previous, do not overwrite
-                } else {
-                    document.getElementById('dash-pos').innerHTML='<p class="text-muted p-3">No open positions</p>';
-                }
+                document.getElementById('dash-pos').innerHTML='<p class="text-muted p-3">No open positions</p>';
+                _lastDashPosHTML=null;
             }
         }catch(e){
             console.error('loadDashPositions failed',e);
-            // Do not clear table on error - keep last known trades visible
-            if(!document.getElementById('dash-pos').innerHTML.trim() || document.getElementById('dash-pos').innerHTML.includes('No open')){
-                // keep as is
-            }
+            document.getElementById('dash-pos').innerHTML='<p class="text-muted p-3">No open positions</p>';
         }
     }
     async function loadDashHistory(){try{const c=await A('/api/dashboard/trade-history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';c.trades.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;});h+='</table>';document.getElementById('dash-hist').innerHTML=h;}else{document.getElementById('dash-hist').innerHTML='<p class="text-muted p-3">No trades yet</p>';};}catch(e){}}
@@ -687,13 +680,10 @@
                 });
                 h+='</table>';document.getElementById('open-trd').innerHTML=h;_lastOpenTrdHTML=h;
             }else{
-                if(_lastOpenTrdHTML && document.getElementById('open-trd').innerHTML.includes('<table>')){
-                    // keep previous trades visible - avoid flicker when other tab clicked
-                } else {
-                    document.getElementById('open-trd').innerHTML='<p class="text-muted p-3">No open positions</p>';
-                }
+                document.getElementById('open-trd').innerHTML='<p class="text-muted p-3">No open positions</p>';
+                _lastOpenTrdHTML=null;
             }
-        }catch(e){ console.error('loadTrades failed',e); }
+        }catch(e){ console.error('loadTrades failed',e); document.getElementById('open-trd').innerHTML='<p class="text-muted p-3">No open positions</p>'; }
         try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Badge</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=t.pnl>=0?'Target Hit':'Stoploss Hit';const sbg=t.pnl>=0?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const badge=B(t.trade_mode==='live'?'LIVE':t.trade_mode==='paper'?'PAPER':'BT', t.trade_mode==='live'?'sell':'buy');const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td>${badge}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<p class="text-muted p-3">No trades yet</p>';}
         }catch(e){}
         // Quantman Drawdown Days in stats
@@ -927,7 +917,7 @@
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
         document.getElementById('s-lots').value=1;
-        document.getElementById('s-sl').value=500;
+        document.getElementById('s-sl').value=1500;
         document.getElementById('s-tp').value=1000;
         document.getElementById('s-lock-profit').value=0;
         document.getElementById('s-lock-amount').value=1;
