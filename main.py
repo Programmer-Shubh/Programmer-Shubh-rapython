@@ -57,8 +57,25 @@ app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__
 
 
 @app.get("/health")
-def health():
-    return {"status": "healthy"}
+async def health():
+    # Async instant - never block event loop, never touch DB for Render 5s timeout
+    return {"status": "healthy", "timestamp": __import__("time").time()}
+
+
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+
+@app.get("/ready")
+async def ready():
+    # Light readiness check with DB ping but bounded 1s
+    try:
+        import asyncio as _aio
+        await _aio.wait_for(_aio.to_thread(lambda: Database.get_instance().fetch_one("SELECT 1 as ok")), timeout=1.0)
+        return {"status": "ready"}
+    except Exception:
+        return {"status": "ready - degraded"}
 
 
 if __name__ == "__main__":

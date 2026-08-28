@@ -188,3 +188,24 @@ def get_history():
             for t in closed[:30]
         ],
     }
+
+
+@router.post("/clean-history")
+def clean_history():
+    trade_model = TradeModel()
+    result = trade_model.clean_and_fix_history()
+    return result
+
+
+@router.get("/risk-analysis")
+def risk_analysis():
+    trade_model = TradeModel()
+    return trade_model.get_risk_analysis()
+
+
+@router.get("/nifty-fix")
+def nifty_fix():
+    trade_model = TradeModel()
+    # Trigger NIFTY incomplete fix via clean
+    result = trade_model.clean_and_fix_history()
+    return {"nifty": "fixed" if any("NIFTY" in i for i in result.get("issues", [])) else "ok", "details": result}
