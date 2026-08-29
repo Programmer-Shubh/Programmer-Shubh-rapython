@@ -53,7 +53,7 @@ def get_open_trades():
                 "strike": t["trade"]["strike_price"],
                 "transaction_type": t["trade"]["transaction_type"],
                 "quantity": t["trade"]["quantity"],
-                "lot_size": t["trade"].get("lot_size", 50),
+                "lot_size": get_lot_size(t["trade"]["symbol"]) if t["trade"].get("lot_size",50)==50 and get_lot_size(t["trade"]["symbol"])!=50 else t["trade"].get("lot_size", 50),
                 "entry_price": t["trade"]["entry_price"],
                 "current_price": t["current_price"],
                 "pnl": t["unrealized_pnl"],
