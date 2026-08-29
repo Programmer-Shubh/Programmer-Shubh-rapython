@@ -290,8 +290,8 @@ class TradeModel:
                     exit_date = entry_d
         except Exception:
             pass
-        lot = trade.get("lot_size", 50)
-        qty = trade["quantity"]
+        lot = int(trade.get("lot_size") or get_lot_size(trade.get("symbol","NIFTY")))
+        qty = int(trade["quantity"] or 1)
         is_sell = trade["transaction_type"] == "BUY"
         closing_side = "SELL" if is_sell else "BUY"
         exit_price = max(0.01, TransactionCosts.apply_fill_slippage(exit_price, closing_side, is_live=True))
