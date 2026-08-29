@@ -341,9 +341,9 @@ def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Di
     return []
 
 
-def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """DB cache (instant) -> nselib -> StocksRin -> Google -> TrueData -> Synthetic.
-    DB-first + hard 15s budget avoids slow external calls so backtest never times out (no 'Network error')."""
+def fetch_historical(symbol: str, start_date: str, end_date: str, allow_synthetic: bool = False) -> List[Dict]:
+    """Realistic only when allow_synthetic=False (backtest default).
+    DB cache -> nselib -> StocksRin -> Google -> TrueData. Synthetic only if allow_synthetic=True."""
     symbol = symbol.upper()
     # 1) Instant local cache (seeded by background refresh) - serves backtest in <10ms
     try:
@@ -370,10 +370,11 @@ def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
                 return data
         except Exception:
             continue
-    try:
-        synth = _generate_synthetic_data(symbol, start_date, end_date)
-        if synth and len(synth) >= 5:
-            return synth
-    except Exception:
-        pass
+    if allow_synthetic:
+        try:
+            synth = _generate_synthetic_data(symbol, start_date, end_date)
+            if synth and len(synth) >= 5:
+                return synth
+        except Exception:
+            pass
     return []
