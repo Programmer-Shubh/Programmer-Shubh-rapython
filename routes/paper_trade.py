@@ -187,7 +187,9 @@ def get_history():
                 "lot_size": t.get("lot_size", 50),
                 "quantity": t.get("quantity", 1),
                 "total_qty": t.get("quantity", 1) * t.get("lot_size", 50),
-                "analysis": f"SELL {t['option_type']} {'profit' if (t['entry_price']-t.get('exit_price',0))>0 else 'loss'}: premium {'down' if t.get('exit_price',0)<t['entry_price'] else 'up'} ₹{t['entry_price']:.2f}→₹{t.get('exit_price',0):.2f} × Lot {t.get('lot_size',50)} × Qty {t.get('quantity',1)} = Gross ₹{((t['entry_price']-t.get('exit_price',0)) if t['transaction_type']=='SELL' else (t.get('exit_price',0)-t['entry_price']))*t.get('quantity',1)*t.get('lot_size',50):,.2f} - Costs = Net {format_currency(t['pnl'])}" if t.get("transaction_type") else f"Net {format_currency(t['pnl'])}",
+                "transaction_type": t.get("transaction_type",""),
+                "calc": f"({t.get('exit_price',0):.2f}-{t['entry_price']:.2f})×{t.get('lot_size',50)}" if t.get("transaction_type")=="BUY" else f"({t['entry_price']:.2f}-{t.get('exit_price',0):.2f})×{t.get('lot_size',50)}",
+                "analysis": f"{t.get('transaction_type','')} {t['option_type']} {'profit' if ((t.get('exit_price',0)-t['entry_price'])>0 if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0))>0) else 'loss'}: ₹{t['entry_price']:.2f}→₹{t.get('exit_price',0):.2f} × Lot {t.get('lot_size',50)} = Gross ₹{((t.get('exit_price',0)-t['entry_price']) if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0)))*t.get('quantity',1)*t.get('lot_size',50):,.2f} - Costs = Net {format_currency(t['pnl'])}",
             }
             for t in closed[:30]
         ],
