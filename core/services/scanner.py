@@ -287,12 +287,32 @@ class OptionScanner:
                 r['close_price'] = float(r.get('close_price', 0) or 0)
                 r['open_price'] = float(r.get('open_price', 0) or 0)
             return rows
-        # DB empty/sparse: use synthetic directly for scanner speed (no network for 50 symbols)
-        # nselib per-symbol is 2s * 50 = 100s timeout on Render free tier; synthetic is instant
+        # DB sparse: try REALISTIC NSE data via nselib (real NSE bhavcopy) before synthetic
         try:
             import datetime as _dt
             end = _dt.date.today().strftime("%Y-%m-%d")
             start = (_dt.date.today() - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
+            from core.services.historical_fetcher import _fetch_nselib_historical
+            real = _fetch_nselib_historical(symbol, start, end)
+            if real and len(real) >= 30:
+                for r in real:
+                    r['high_price'] = float(r.get('high_price', 0) or 0)
+                    r['low_price'] = float(r.get('low_price', 0) or 0)
+                    r['close_price'] = float(r.get('close_price', 0) or 0)
+                    r['open_price'] = float(r.get('open_price', 0) or 0)
+                # cache to DB for instant next time
+                try:
+                    from core.models.bhavcopy_model import BhavcopyModel
+                    BhavcopyModel().import_data(real)
+                except: pass
+                return real[-90:]
+        except Exception:
+            pass
+        # last fallback synthetic only if real NSE unavailable (marked synthetic)
+        try:
+            import datetime as _dt2
+            end = _dt2.date.today().strftime("%Y-%m-%d")
+            start = (_dt2.date.today() - _dt2.timedelta(days=90)).strftime("%Y-%m-%d")
             from core.services.historical_fetcher import _generate_synthetic_data
             synth = _generate_synthetic_data(symbol, start, end)
             if synth and len(synth) >= 10:
@@ -305,7 +325,6 @@ class OptionScanner:
                 return synth[-30:]
         except Exception:
             pass
-        # Last resort: return whatever DB had
         rows.reverse()
         for r in rows:
             r['high_price'] = float(r.get('high_price', 0) or 0)
