@@ -4,6 +4,19 @@ from core.services.indicator_engine import IndicatorEngine
 from core.models.database import Database
 
 
+FNO_SYMBOLS = [
+    "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX",
+    "RELIANCE", "HDFCBANK", "ICICIBANK", "TCS", "INFY", "ITC", "SBIN",
+    "AXISBANK", "KOTAKBANK", "LT", "HINDUNILVR", "BHARTIARTL", "M&M",
+    "MARUTI", "BAJFINANCE", "WIPRO", "ONGC", "SUNPHARMA", "ULTRACEMCO",
+    "NTPC", "POWERGRID", "TATAMOTORS", "TATASTEEL", "HCLTECH", "JSWSTEEL",
+    "COALINDIA", "DRREDDY", "CIPLA", "ADANIENT", "SBILIFE", "BPCL", "GRASIM",
+    "TECHM", "DIVISLAB", "EICHERMOT", "BRITANNIA", "HINDALCO", "VEDL",
+    "INDUSINDBK", "SHREECEM", "NESTLEIND", "BAJAJFINSV", "APOLLOHOSP",
+    "UPL", "HEROMOTOCO", "TITAN"
+]
+
+
 class OptionScanner:
     def __init__(self):
         self.indicators = IndicatorEngine()
@@ -11,8 +24,7 @@ class OptionScanner:
 
     def scan(self, symbols=None) -> dict:
         if symbols is None:
-            # Full F&O list - indices + all stocks (NSE F&O 180+ but use available DB + master list)
-            symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA']
+            symbols = FNO_SYMBOLS
         bullish = []
         bearish = []
         for sym in symbols:
@@ -27,7 +39,7 @@ class OptionScanner:
 
     def scan_vwap(self, symbols=None) -> dict:
         if symbols is None:
-            symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA']
+            symbols = FNO_SYMBOLS
         long_signals = []
         short_signals = []
         for sym in symbols:
@@ -42,8 +54,7 @@ class OptionScanner:
 
     def get_top_opportunities(self, symbols=None, top_n: int = 5) -> list:
         if symbols is None:
-            # Full F&O universe - ensure stocks are scanned equally, not just indices
-            symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA']
+            symbols = FNO_SYMBOLS
         # Mix indices + stocks equally - shuffle ordered to avoid indices always winning
         # Prioritize but allow stocks to rank higher via score
         index_priority = ['NIFTY', 'BANKNIFTY', 'FINNIFTY']
@@ -591,7 +602,7 @@ class OptionScanner:
     def get_fno_top5_today(self, top_n: int = 5) -> dict:
         """Today's NSE F&O Top 5 Bullish / Bearish based on % change (today spot vs prev close).
         Uses LiveMarketData for today's spot + DB for prev close. Falls back to DB-only if live blocked."""
-        fno_symbols = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','TITAN','BAJAJFINSV','NESTLEIND','APOLLOHOSP','UPL','HEROMOTOCO']
+        fno_symbols = FNO_SYMBOLS
         movers = []
         # Live realtime via LIVE_CACHE only (instant, no per-request network).
         # Background refresh (data_refresher + Yahoo via subprocess) fills _LIVE_CACHE every 45s.
