@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from core.services.scanner import OptionScanner
-
+import time as _t
+_CACHE = {}
 router = APIRouter()
 
 
@@ -88,9 +89,14 @@ def scan_all():
 
 @router.get("/fno-top5")
 def fno_top5():
+    k="fno"; now=_t.time()
+    if k in _CACHE and now-_CACHE[k][0] < 60:
+        return _CACHE[k][1]
     try:
         scanner = OptionScanner()
-        return scanner.get_fno_top5_today()
+        res=scanner.get_fno_top5_today()
+        _CACHE[k]=(now,res)
+        return res
     except Exception as e:
         import traceback; traceback.print_exc()
         return {"date": __import__("datetime").datetime.now().strftime("%Y-%m-%d"), "bullish": [], "bearish": [], "total_scanned": 0, "error": str(e)[:300]}
@@ -98,9 +104,14 @@ def fno_top5():
 
 @router.get("/opportunities")
 def top_opportunities():
+    k="opp"; now=_t.time()
+    if k in _CACHE and now-_CACHE[k][0] < 60:
+        return _CACHE[k][1]
     try:
         scanner = OptionScanner()
-        return {"opportunities": scanner.get_top_opportunities()}
+        res={"opportunities": scanner.get_top_opportunities()}
+        _CACHE[k]=(now,res)
+        return res
     except Exception as e:
         import traceback; traceback.print_exc()
         return {"opportunities": [], "error": str(e)[:300]}
