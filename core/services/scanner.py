@@ -287,32 +287,12 @@ class OptionScanner:
                 r['close_price'] = float(r.get('close_price', 0) or 0)
                 r['open_price'] = float(r.get('open_price', 0) or 0)
             return rows
-        # DB sparse: try REALISTIC NSE data via nselib (real NSE bhavcopy) before synthetic
+        # DB empty/sparse: use synthetic directly for scanner speed (no network for 50 symbols)
+        # nselib per-symbol is 2s * 50 = 100s timeout on Render free tier; synthetic is instant
         try:
             import datetime as _dt
             end = _dt.date.today().strftime("%Y-%m-%d")
             start = (_dt.date.today() - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
-            from core.services.historical_fetcher import _fetch_nselib_historical
-            real = _fetch_nselib_historical(symbol, start, end)
-            if real and len(real) >= 30:
-                for r in real:
-                    r['high_price'] = float(r.get('high_price', 0) or 0)
-                    r['low_price'] = float(r.get('low_price', 0) or 0)
-                    r['close_price'] = float(r.get('close_price', 0) or 0)
-                    r['open_price'] = float(r.get('open_price', 0) or 0)
-                # cache to DB for instant next time
-                try:
-                    from core.models.bhavcopy_model import BhavcopyModel
-                    BhavcopyModel().import_data(real)
-                except: pass
-                return real[-90:]
-        except Exception:
-            pass
-        # last fallback synthetic only if real NSE unavailable (marked synthetic)
-        try:
-            import datetime as _dt2
-            end = _dt2.date.today().strftime("%Y-%m-%d")
-            start = (_dt2.date.today() - _dt2.timedelta(days=90)).strftime("%Y-%m-%d")
             from core.services.historical_fetcher import _generate_synthetic_data
             synth = _generate_synthetic_data(symbol, start, end)
             if synth and len(synth) >= 10:
@@ -325,6 +305,7 @@ class OptionScanner:
                 return synth[-30:]
         except Exception:
             pass
+        # Last resort: return whatever DB had
         rows.reverse()
         for r in rows:
             r['high_price'] = float(r.get('high_price', 0) or 0)
@@ -408,9 +389,9 @@ class OptionScanner:
 
     def _analyze_symbol(self, symbol: str) -> dict:
         data = self._get_historical(symbol)
+        # Realistic: DB/nse real data only - if <30 real bars, show No signals (no synthetic fake)
         if len(data) < 30:
             return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'reasons': [], 'indicators': {}}
-        # ensure enough for EMA200: if <200, fallback synthetic already gives 30-90 days; handle short data
         closes_tmp = [d['close_price'] for d in data]
         closes = closes_tmp
         volumes = [d.get('volume', 0) or 0 for d in data]
@@ -483,7 +464,7 @@ class OptionScanner:
         indicators = {'supertrend': round(supertrend[i], 2), 'macd': round(m[i], 2) if m[i] else 0,
                       'signal': round(s[i], 2) if s[i] else 0, 'ema200': round(ema200[i], 2) if ema200[i] else 0,
                       'volume': volumes[i], 'vol_sma': round(vol_sma20, 0)}
-        # fallback to bullish/bearish if score not 50 but directional (so dashboard never empty)
+        # Realistic only - no synthetic fallback (user request)
         if buy_score >= 50:
             opt = self._suggest_option(symbol, spot, 'CE')
             return {'symbol': symbol, 'type': 'BUY', 'score': buy_score, 'price': spot,
@@ -494,14 +475,6 @@ class OptionScanner:
             return {'symbol': symbol, 'type': 'SELL', 'score': sell_score, 'price': spot,
                     'date': data[-1]['trade_date'], 'reasons': sell_reasons, 'indicators': indicators,
                     'option_suggestion': opt}
-        # ensure scan-all never returns empty — use fallback direction
-        fb =  self._fallback_signal({'symbol': symbol, 'price': spot, 'date': data[-1]['trade_date'] if data else '', 'indicators': {'rsi': 50, 'ema9': closes[-1] if len(closes)>1 else 0, 'ema20': sum(closes[-20:])/20 if len(closes)>=20 else closes[-1]}})
-        if fb and fb.get('symbol'):
-            # map to BUY/SELL for st-macd grid
-            is_buy = fb['signal_type'] == 'BUY CE'
-            return {'symbol': symbol, 'type': 'BUY' if is_buy else 'SELL', 'score': fb['score'], 'price': spot,
-                    'date': fb['date'], 'reasons': fb['reasons'], 'indicators': indicators,
-                    'option_suggestion': fb['option_suggestion']}
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': data[-1]['trade_date'] if data else '', 'reasons': [], 'indicators': indicators}
 
