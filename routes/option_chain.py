@@ -160,12 +160,12 @@ def place_trade(req: TradeRequest):
     # Reject faulty leading zero like '01' (comes as 1.0)
     if raw_strike.startswith("0") and raw_strike not in ("0", "0.0") and not raw_strike.startswith("0."):
         return {"error": f"Faulty strike price '{raw_strike}' - remove leading zeros"}
-    # Validate strike step alignment
+    # Auto-align strike to nearest valid step (no error for any symbol)
     try:
         step = get_strike_step(req.symbol)
         if req.strike % step != 0:
             if abs((req.strike % step)) > 0.01 and abs(step - (req.strike % step)) > 0.01:
-                return {"error": f"Strike {req.strike} not aligned to step {step} for {req.symbol}"}
+                req.strike = round(req.strike / step) * step
     except Exception:
         pass
     # Deduplication check before insert
