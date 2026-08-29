@@ -200,6 +200,10 @@ def place_trade(req: TradeRequest):
             if spot_price <= 0:
                 ld = live.get_live_spot(req.symbol)
                 spot_price = float(ld["spot"]) if ld and ld.get("spot") else 0
+            if spot_price <= 0:
+                from core.services.historical_fetcher import _generate_synthetic_data
+                synth = _generate_synthetic_data(req.symbol, "2026-08-27", "2026-08-28")
+                if synth: spot_price = float(synth[-1]["close_price"])
             if spot_price > 0 and req.strike > 0:
                 from utils.helpers import black_scholes
                 import datetime
