@@ -194,7 +194,8 @@ def place_trade(req: TradeRequest):
                         break
         except Exception:
             pass
-    if premium <= 0:
+    # Never allow ₹1 bad premium - if premium <=5, use Black-Scholes realistic fallback
+    if premium <= 5:
         try:
             spot_price = live.get_spot_price(req.symbol)
             if spot_price <= 0:
@@ -212,10 +213,14 @@ def place_trade(req: TradeRequest):
                     dte = max(1, (exp_dt - datetime.datetime.now()).days)
                 except Exception:
                     dte = 7
-                premium = black_scholes(spot_price, req.strike, dte / 365.0, 0.20, req.option_type)
+                bs = black_scholes(spot_price, req.strike, dte / 365.0, 0.22, req.option_type)
+                if bs and bs > 5:
+                    premium = bs
+                elif premium <= 1:
+                    premium = round(spot_price*0.02,2)
         except Exception:
             pass
-    if premium <= 0:
+    if premium <= 0 or premium <= 1:
         return {"error": f"No premium data for {req.symbol} {req.strike} {req.option_type}. Try refreshing option chain."}
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
     lot_size = get_lot_size(req.symbol)
