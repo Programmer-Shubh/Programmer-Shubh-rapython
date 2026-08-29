@@ -140,3 +140,22 @@ def fetch_spot_prices():
             'source': 'Simulated',
         }
     return spots
+
+
+def get_top_movers(limit=5):
+    """Top 5 bullish/bearish F&O stocks by daily change for dashboard"""
+    today = datetime.now().strftime('%Y-%m-%d')
+    movers = []
+    for sym in AVAILABLE_SYMBOLS:
+        if sym in ('NIFTY','BANKNIFTY','FINNIFTY'): continue
+        base = SYMBOL_SPOTS.get(sym, 1000)
+        seed = int(datetime.now().timestamp() / 300) + hash(sym)
+        random.seed(seed)
+        chg = random.uniform(-3.5, 3.5)
+        price = round(base * (1 + chg/100), 2)
+        step = STRIKE_STEP.get(sym, 50 if base > 2000 else 10)
+        atm = round(price / step) * step
+        sig = 'BUY CE' if chg > 0 else 'BUY PE'
+        movers.append({'symbol': sym, 'price': price, 'change_pct': round(chg,2), 'atm': atm, 'signal': sig, 'date': today, 'premium': round(price*0.02,2)})
+    movers.sort(key=lambda x: x['change_pct'], reverse=True)
+    return {'bullish': movers[:limit], 'bearish': list(reversed(movers[-limit:])), 'date': today}

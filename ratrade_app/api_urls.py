@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     # Dashboard
     path('dashboard/spot', views.api_dashboard_spot, name='api_dashboard_spot'),
+    path('dashboard/top-movers', views.api_dashboard_top_movers, name='api_dashboard_top_movers'),
     path('dashboard/stats', views.api_dashboard_stats, name='api_dashboard_stats'),
     path('dashboard/portfolio', views.api_dashboard_portfolio, name='api_dashboard_portfolio'),
     path('dashboard/trade-history', views.api_dashboard_trade_history, name='api_dashboard_trade_history'),

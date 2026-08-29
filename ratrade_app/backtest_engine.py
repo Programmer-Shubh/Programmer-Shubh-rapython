@@ -41,15 +41,18 @@ def round_to_nearest_tick(price, tick=0.05):
     return round(round(price / tick) * tick, 2)
 
 
-def select_strike(spot, strike_type, step=50):
+def select_strike(spot, strike_type, step=50, distance=0):
     atm = round(spot / step) * step
-    if strike_type == 'ATM':
-        return atm
-    elif strike_type == 'OTM':
-        return atm + step
-    elif strike_type == 'ITM':
-        return atm - step
-    return atm
+    d = int(distance) if distance else 0
+    st = (strike_type or 'ATM').upper()
+    # distance is 0-based offset from ATM: OTM 0 = atm+step, OTM1 = atm+2*step
+    if st == 'ATM':
+        return atm + d * step
+    elif st == 'OTM':
+        return atm + (1 + d) * step
+    elif st == 'ITM':
+        return atm - (1 + d) * step
+    return atm + d * step
 
 
 def get_nearest_expiry(date, expiry_type='Monthly'):
@@ -194,7 +197,20 @@ def run_backtest(config):
             if day_trades_count >= max_trades_per_day:
                 break
 
-            strike = select_strike(entry_spot, leg_cfg.get('strike_type', 'ATM'))
+            stype = leg_cfg.get('strike_type', 'ATM')
+            # support "OTM1","OTM2","ITM2" or distance field
+            dist = leg_cfg.get('distance', leg_cfg.get('strike_distance', 0))
+            if isinstance(stype, str) and any(c.isdigit() for c in stype):
+                import re
+                m = re.match(r'(ATM|OTM|ITM)(\d+)', stype.upper())
+                if m:
+                    stype = m.group(1)
+                    dist = int(m.group(2)) - (0 if stype == 'ATM' else 1) + int(dist or 0)
+            step = 50 if symbol in ('NIFTY','FINNIFTY') else 100 if symbol=='BANKNIFTY' else 50
+            # fallback: infer step from spot
+            if spot_open > 5000 and step==50 and symbol=='BANKNIFTY':
+                step=100
+            strike = select_strike(entry_spot, stype, step=step, distance=dist)
             opt_type = leg_cfg.get('option_type', 'CE')
             position = leg_cfg.get('position', 'Buy')
             leg_lots = leg_cfg.get('lots', lots)

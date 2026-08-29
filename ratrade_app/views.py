@@ -13,8 +13,8 @@ from .models import (
 )
 from .backtest_engine import run_backtest, AVAILABLE_SYMBOLS, get_lot_size
 from .data_fetcher import (
-    generate_date_range_data, fetch_spot_prices,
-    SYMBOL_SPOTS, SYMBOL_LOT_SIZES,
+    generate_date_range_data, fetch_spot_prices, get_top_movers,
+    SYMBOL_SPOTS, SYMBOL_LOT_SIZES, STRIKE_STEP,
 )
 from .transaction_costs import calculate_total_cost_with_slippage
 
@@ -33,6 +33,10 @@ def _json_body(request):
 @require_GET
 def api_dashboard_spot(request):
     return JsonResponse(fetch_spot_prices())
+
+@require_GET
+def api_dashboard_top_movers(request):
+    return JsonResponse(get_top_movers(limit=5))
 
 
 @require_GET
