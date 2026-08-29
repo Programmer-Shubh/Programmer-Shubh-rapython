@@ -3,8 +3,8 @@ import math
 
 def get_lot_size(symbol: str) -> int:
     lots = {
-        "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120,
-        "SENSEX": 20, "BANKEX": 30,
+        "NIFTY": 50, "BANKNIFTY": 15, "FINNIFTY": 40, "MIDCPNIFTY": 75,
+        "SENSEX": 10, "BANKEX": 20,
         "RELIANCE": 250, "HDFCBANK": 550, "ICICIBANK": 700,
         "TCS": 175, "INFY": 400, "ITC": 1600, "SBIN": 700,
         "AXISBANK": 625, "KOTAKBANK": 400, "LT": 150, "HINDUNILVR": 300,
