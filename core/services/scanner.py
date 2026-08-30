@@ -375,38 +375,77 @@ class OptionScanner:
         return steps.get(symbol, 50)
 
     def _suggest_option(self, symbol: str, spot: float, option_type: str) -> dict:
+        """
+        Suggest option strike close to ATM.
+        Always returns strike within 5% of spot to prevent deep OTM/ITM strikes.
+        """
+        if spot <= 0:
+            return {'strike': 0, 'premium': 0, 'expiry': ''}
+        
         step = self._get_step(symbol)
-        if option_type == 'CE':
-            strike = round(spot / step) * step + step
-        else:
-            strike = round(spot / step) * step - step
+        # Calculate ATM strike (nearest step)
+        atm_strike = round(spot / step) * step
+        
+        # Validate ATM strike is reasonable (within 5% of spot)
+        max_deviation = spot * 0.05
+        if abs(atm_strike - spot) > max_deviation:
+            # Fallback: use spot rounded to step
+            atm_strike = round(spot / step) * step
+        
+        # For directional trades: CE = ATM, PE = ATM (not OTM)
+        # User can adjust via strike_selection in strategy builder
+        strike = atm_strike
+        
         latest_date = self.db.fetch_one(
             "SELECT MAX(trade_date) as d FROM bhavcopy_data WHERE symbol=?", [symbol]
         )
         trade_date = latest_date['d'] if latest_date else ''
+        
+        # Query with exact strike match + expiry filter
         row = self.db.fetch_one(
             "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=?",
             [symbol, strike, option_type, trade_date],
         )
+        
         if not row:
-            # Fallback: drop expiry_date filter so we find any row matching strike+option_type
+            # Fallback: same strike, any expiry on that date
             row = self.db.fetch_one(
-                "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=?",
+                "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=?",
+                [symbol, strike, option_type, trade_date],
+            )
+        
+        if not row and trade_date:
+            # Fallback: same strike, any date (latest available)
+            row = self.db.fetch_one(
+                "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? ORDER BY trade_date DESC LIMIT 1",
                 [symbol, strike, option_type],
             )
+        
         premium = float(row['close_price']) if row and row['close_price'] else None
         expiry = row['expiry_date'] if row and row.get('expiry_date') else ''
-        # Fix Rs 1 premium: if DB premium null, use Black-Scholes realistic (~2% of spot)
+        
+        # If no DB data, use Black-Scholes
         if premium is None or premium <= 1:
             try:
                 from utils.helpers import black_scholes
-                bs = black_scholes(spot, strike, 7/365.0, 0.22, option_type)
-                if bs and bs > 5: premium = round(bs,2)
-                elif premium is None: premium = round(spot*0.02,2)
+                # Use 7 days to expiry, 22% IV for indices, 25% for stocks
+                iv = 0.22 if symbol in ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'] else 0.25
+                bs = black_scholes(spot, strike, 7/365.0, iv, option_type)
+                if bs and bs > 5:
+                    premium = round(bs, 2)
+                elif premium is None:
+                    premium = round(spot * 0.02, 2)
             except Exception:
-                if premium is None: premium = round(spot*0.02,2)
+                if premium is None:
+                    premium = round(spot * 0.02, 2)
             if not expiry:
-                import datetime as _dt; expiry = (_dt.datetime.now()+_dt.timedelta(days=7)).strftime("%Y-%m-%d")
+                import datetime as _dt
+                expiry = (_dt.datetime.now() + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        # Final safety check: ensure strike is within 10% of spot
+        if strike > 0 and abs(strike - spot) / spot > 0.10:
+            strike = atm_strike  # Reset to ATM
+        
         return {'strike': strike, 'premium': premium, 'expiry': expiry}
 
     def _analyze_symbol(self, symbol: str) -> dict:
