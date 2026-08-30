@@ -329,10 +329,10 @@
                     </div>
                 </div>
             </div>
-            <div class="row mt-3">
-                <div class="col-md-6"><label class="form-label">Enter the duration of your backtest</label></div>
-                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-start" value="2026-08-12"></div>
-                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-20"></div>
+            <div class="row mt-3 align-items-end">
+                <div class="col-md-4"><label class="form-label">Enter the duration of your backtest</label><div class="d-flex gap-1 mt-1"><button class="btn btn-sm btn-outline-primary" onclick="setRange(30)">1M</button><button class="btn btn-sm btn-outline-primary" onclick="setRange(90)">3M</button><button class="btn btn-sm btn-primary" onclick="setRange(365)">1Y</button><button class="btn btn-sm btn-outline-primary" onclick="setRange(1825)">5Y</button></div></div>
+                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-start" value="2025-08-30"></div>
+                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-30"></div>
                 <div class="col-md-2"><div class="text-end"><button class="btn btn-sm btn-success" id="s-run" onclick="runBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button></div></div>
                 <div class="col-md-2"><div class="text-end"><button class="btn btn-sm btn-info" id="s-replay" onclick="runHistoricalReplay()"><i class="bi bi-repeat"></i> Historical Replay</button></div></div>
                 <div class="col-md-2"><div class="text-end"><button class="btn btn-sm btn-warning" id="s-compare" onclick="runBacktestCompare()"><i class="bi bi-graph-up"></i> Compare</button></div></div>
@@ -702,6 +702,7 @@
         if(document.getElementById('ind-oi')?.checked) ind.push({id:'open_interest',params:addMode({period:parseInt(document.getElementById('ind-oi-p').value)||20}, 'ind-oi-mode')});
         return ind;
     }
+    function setRange(days){const e=new Date();const s=new Date();s.setDate(e.getDate()-days);document.getElementById('s-start').value=s.toISOString().split('T')[0];document.getElementById('s-end').value=e.toISOString().split('T')[0];}
     async function runBacktest(){
         const btn=document.getElementById('s-run');const orig=btn.innerHTML;
         btn.innerHTML='<span class="spinner"></span> Running...';
