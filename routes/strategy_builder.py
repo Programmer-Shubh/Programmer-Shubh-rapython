@@ -763,3 +763,39 @@ def run_master_confluence(req: MasterConfluenceRequest):
         import traceback
         traceback.print_exc()
         return {"error": f"Master backtest error: {str(e)}"}
+
+
+@router.post("/walk-forward")
+def walk_forward_route(req: BacktestRequest):
+    from core.services.walk_forward import walk_forward
+    return walk_forward(req.symbol.upper(), req.start_date, req.end_date, req.indicators or [{"id":"rsi","params":{"period":14}},{"id":"ema","params":{"period":21}}], req.entry_conditions or [], req.exit_conditions or [], req.legs or [], req.advanced or {}, req.risk or {})
+
+
+@router.post("/monte-carlo")
+def monte_carlo_route(req: BacktestRequest):
+    from core.services.historical_fetcher import fetch_historical
+    from core.services.backtest_engine import BacktestEngine
+    from core.services.monte_carlo import monte_carlo
+    hist = fetch_historical(req.symbol, req.start_date, req.end_date, allow_synthetic=True)
+    if not hist or len(hist)<30:
+        from routes.strategy_builder import _generate_synthetic_fallback
+        hist = _generate_synthetic_fallback(req.symbol, req.start_date, req.end_date)
+    eng = BacktestEngine(is_live=False)
+    res = eng.run(hist, req.symbol.upper(), req.start_date, req.end_date, req.indicators or [{"id":"rsi","params":{"period":14}}], req.entry_conditions or [], req.exit_conditions or [], req.legs or [], req.advanced or {}, req.risk or {}, is_live=False)
+    return monte_carlo(res.get("metrics",{}).get("trade_list",[]))
+
+
+@router.post("/report.pdf")
+def report_pdf(req: BacktestRequest):
+    from fastapi.responses import Response
+    from core.services.historical_fetcher import fetch_historical
+    from core.services.backtest_engine import BacktestEngine
+    from core.services.report_pdf import build_report
+    hist = fetch_historical(req.symbol, req.start_date, req.end_date, allow_synthetic=True)
+    if not hist or len(hist)<30:
+        hist = _generate_synthetic_fallback(req.symbol, req.start_date, req.end_date)
+    eng = BacktestEngine(is_live=False)
+    res = eng.run(hist, req.symbol.upper(), req.start_date, req.end_date, req.indicators or [{"id":"rsi","params":{"period":14}}], req.entry_conditions or [], req.exit_conditions or [], req.legs or [], req.advanced or {}, req.risk or {}, is_live=False)
+    m = res.get("metrics",{})
+    pdf = build_report(m, m.get("trade_list",[]), req.symbol.upper(), req.start_date, req.end_date)
+    return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=RaTrade_{req.symbol}_{req.start_date}_{req.end_date}.pdf"})
