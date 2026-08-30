@@ -1,7 +1,10 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
+from typing import List, Optional, Dict
 from core.models.trade_model import TradeModel
 from core.services.transaction_costs import TransactionCosts
+from core.services.historical_replay import HistoricalReplayEngine
+from core.services.backtest_engine import BacktestEngine
 from utils.helpers import get_lot_size, format_currency
 
 router = APIRouter()
@@ -215,3 +218,104 @@ def nifty_fix():
     # Trigger NIFTY incomplete fix via clean
     result = trade_model.clean_and_fix_history()
     return {"nifty": "fixed" if any("NIFTY" in i for i in result.get("issues", [])) else "ok", "details": result}
+
+
+class HistoricalReplayRequest(BaseModel):
+    symbol: str = "NIFTY"
+    start_date: str = "2026-08-01"
+    end_date: str = "2026-08-20"
+    indicators: List[Dict] = []
+    entry_conditions: List[Dict] = []
+    exit_conditions: List[Dict] = []
+    legs: List[Dict] = []
+    advanced: Dict = {}
+    risk: Dict = {}
+
+
+@router.post("/historical-replay")
+def run_historical_replay(req: HistoricalReplayRequest):
+    """Run paper trade on historical data with EXACT backtest logic.
+    This ensures paper trade results match backtest results exactly."""
+    try:
+        engine = HistoricalReplayEngine()
+        engine.configure(
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+        )
+        result = engine.run_replay()
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/backtest-compare")
+def backtest_compare(req: HistoricalReplayRequest):
+    """Run both backtest and historical replay, return both for comparison."""
+    try:
+        # Run backtest
+        bt_engine = BacktestEngine(is_live=False)
+        historical = bt_engine._load_historical(req.symbol, req.start_date, req.end_date)
+        bt_result = bt_engine.run(
+            historical=historical,
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+            is_live=False,
+        )
+        
+        # Run historical replay (exact same logic)
+        replay_engine = HistoricalReplayEngine()
+        replay_engine.configure(
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+        )
+        replay_result = replay_engine.run_replay()
+        
+        # Compare
+        bt_metrics = bt_result.get("metrics", {})
+        replay_metrics = replay_result.get("metrics", {})
+        
+        comparison = {
+            "backtest": bt_metrics,
+            "historical_replay": replay_metrics,
+            "match": {
+                "total_return_pct": round(bt_metrics.get("total_return_pct", 0) - replay_metrics.get("total_return_pct", 0), 4),
+                "total_trades": bt_metrics.get("total_trades", 0) - replay_metrics.get("total_trades", 0),
+                "win_rate": round(bt_metrics.get("win_rate", 0) - replay_metrics.get("win_rate", 0), 4),
+                "max_drawdown": round(bt_metrics.get("max_drawdown", 0) - replay_metrics.get("max_drawdown", 0), 4),
+                "sharpe_ratio": round(bt_metrics.get("sharpe_ratio", 0) - replay_metrics.get("sharpe_ratio", 0), 4),
+            },
+            "exact_match": (
+                abs(bt_metrics.get("total_return_pct", 0) - replay_metrics.get("total_return_pct", 0)) < 0.01 and
+                bt_metrics.get("total_trades", 0) == replay_metrics.get("total_trades", 0) and
+                abs(bt_metrics.get("win_rate", 0) - replay_metrics.get("win_rate", 0)) < 0.01
+            )
+        }
+        
+        return comparison
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
