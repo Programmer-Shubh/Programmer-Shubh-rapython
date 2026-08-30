@@ -701,20 +701,26 @@ class BacktestEngine:
         key = f"{date}_{strike}_{option_type}_e"
         if key in self.premium_cache:
             return self.premium_cache[key]
-        # 1) Real DB LTP (historical)
-        row = Database.get_instance().fetch_one(
-            "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-            [self.bt_symbol, date, strike, option_type],
-        )
+        # 1) Real DB LTP (historical) - tolerate missing table (fresh DB)
+        try:
+            row = Database.get_instance().fetch_one(
+                "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+                [self.bt_symbol, date, strike, option_type],
+            )
+        except Exception:
+            row = None
         if row:
-            if row["open_price"] and float(row["open_price"]) > 0:
-                val = float(row["open_price"])
-                self.premium_cache[key] = val
-                return val
-            if row["close_price"] and float(row["close_price"]) > 0:
-                val = float(row["close_price"])
-                self.premium_cache[key] = val
-                return val
+            try:
+                if row["open_price"] and float(row["open_price"]) > 0:
+                    val = float(row["open_price"])
+                    self.premium_cache[key] = val
+                    return val
+                if row["close_price"] and float(row["close_price"]) > 0:
+                    val = float(row["close_price"])
+                    self.premium_cache[key] = val
+                    return val
+            except Exception:
+                pass
         # 2) Real LTP from live market - only in live mode to keep backtest fast and realistic via Black-Scholes
         if self.is_live:
             try:

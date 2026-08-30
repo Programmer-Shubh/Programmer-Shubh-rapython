@@ -33,7 +33,36 @@ def _generate_synthetic_fallback(symbol: str, start_date: str, end_date: str) ->
         'DIVISLAB': 3500, 'EICHERMOT': 3800, 'BRITANNIA': 4800
     }
     
-    price = base_prices.get(symbol.upper(), 1000)
+    # Ensure at least 60 trading days for indicator warmup (SuperTrend/EMA need 20+ bars)
+    # If requested range is short, extend start backward.
+    try:
+        trading_days = sum(1 for i in range((e - s).days + 1) if (s + datetime.timedelta(days=i)).weekday() < 5)
+    except Exception:
+        trading_days = 0
+    if trading_days < 60:
+        s = s - datetime.timedelta(days=90)
+
+    # Anchor synthetic to live spot so payoff/ATM matches (₹24175 not ₹19800)
+    live_spot = None
+    try:
+        from core.services.nse_client import nse_fetch_spot
+        d = nse_fetch_spot(symbol, timeout=3)
+        if d and d.get("spot"):
+            live_spot = float(d["spot"])
+    except Exception:
+        pass
+    if not live_spot:
+        try:
+            from core.services.live_market_data import LiveMarketData
+            ld = LiveMarketData().get_live_spot(symbol)
+            if ld and ld.get("spot"):
+                live_spot = float(ld["spot"])
+        except Exception:
+            pass
+    if live_spot and live_spot > 0:
+        price = live_spot * 0.97  # start 3% below live so trend builds into live level
+    else:
+        price = base_prices.get(symbol.upper(), 1000)
     random.seed(hash(symbol) ^ 0x5EED)
     
     records = []
@@ -41,6 +70,9 @@ def _generate_synthetic_fallback(symbol: str, start_date: str, end_date: str) ->
     while d <= e:
         if d.weekday() < 5:  # Skip weekends
             drift = random.uniform(-0.015, 0.015)
+            # Gentle mean-reversion toward live_spot if anchored
+            if live_spot and d > e - datetime.timedelta(days=8):
+                drift += (live_spot - price) / price * 0.08
             o = price
             c = max(1, price * (1 + drift))
             h = max(o, c) * (1 + abs(random.uniform(0, 0.004)))
@@ -372,9 +404,13 @@ def run_backtest(req: BacktestRequest):
         # Multi-source historical data: nselib primary, jugaad-data secondary, NSEpy tertiary
         from core.services.historical_fetcher import fetch_historical
         historical = fetch_historical(symbol, start_date, end_date, allow_synthetic=True)
-        if not historical:
-            # Final fallback: generate guaranteed synthetic data
-            historical = _generate_synthetic_fallback(symbol, start_date, end_date)
+        # If too few bars (<30), indicators won't warm up -> force longer synthetic
+        if not historical or len(historical) < 30:
+            synth = _generate_synthetic_fallback(symbol, start_date, end_date)
+            if synth and len(synth) >= 30:
+                historical = synth
+            elif not historical:
+                historical = synth
         if not historical or len(historical) < 5:
             return {"error": f"No data available for {symbol}. All free sources failed. Try importing bhavcopy data or check dates."}
         if len(historical) > 120:
