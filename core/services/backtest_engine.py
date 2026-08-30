@@ -117,6 +117,7 @@ class BacktestEngine:
             can_enter = not has_open and daily_trades < max_trades_day
 
             # Execute pending entry from PREVIOUS bar's signal (no look-ahead)
+            # Signal generated at bar i-1, execution at bar i open (next candle)
             if pending_entry is not None and can_enter:
                 # Execution happens at NEXT candle's OPEN (no look-ahead bias)
                 exec_idx = i
@@ -582,13 +583,15 @@ class BacktestEngine:
                 "lots": lots, "quantity": lqty, "premium": round(premium, 2),
                 "costs": costs, "signed_value": round(signed, 2),
             })
-        net_premium = abs(total_cost)
+        # Preserve credit/debit sign: positive = credit spread, negative = debit spread
+        net_premium = total_cost  # Keep sign: +ve = credit, -ve = debit
         return {
             "date": date, "strike": str(leg_details[0]["strike"]), "price": round(net_premium, 2),
             "quantity": qty, "costs": {"total": sum(l["costs"]["total"] for l in leg_details), **leg_details[0]["costs"]},
             "total_cost": round(total_cost + sum(l["costs"]["total"] for l in leg_details), 2),
             "type": "spread", "legs": leg_details,
             "is_spread": True,
+            "net_credit": round(total_cost, 2),  # Explicit: +ve = credit received, -ve = debit paid
         }
 
     def _find_delta_strike(self, spot, symbol, option_type, target_delta):
@@ -617,14 +620,6 @@ class BacktestEngine:
             tp_pct = (tp_amt / max(entry_price, 0.01)) * 100
         else:
             tp_pct = tp_amt
-        # Conservative intra-candle SL/TP hit check:
-        # Use the actual High/Low from the bar.
-        # If SL/TP levels are within the candle's high/low range, assume they could be hit.
-        # This avoids look-ahead by only checking if price moved through those levels.
-        high = float(current.get("high_price", 0) or current["close_price"])
-        low = float(current.get("low_price", 0) or current["close_price"])
-        if high < low:
-            high, low = low, high
         
         # Calculate SL/TP levels as prices
         if txn_type == "buy":
@@ -634,17 +629,22 @@ class BacktestEngine:
             sl_level = entry_price * (1 + sl_pct / 100) if sl_pct > 0 else 0
             tp_level = entry_price * (1 - tp_pct / 100) if tp_pct > 0 else 0
         
-        # CONSERVATIVE check:
-        # For long (buy): SL hit if LOW <= SL level; TP hit if HIGH >= TP level
-        # For short (sell): SL hit if HIGH >= SL level; TP hit if LOW <= TP level
+        # NO INTRA-BAR LOOK-AHEAD: Use current bar's high/low only
+        # If SL/TP levels are within the candle's high/low range, assume they could be hit
+        # This avoids look-ahead by only checking if price moved through those levels.
+        high = float(current.get("high_price", 0) or current["close_price"])
+        low = float(current.get("low_price", 0) or current["close_price"])
+        if high < low:
+            high, low = low, high
+        
         hit_sl = False
         hit_tp = False
         if txn_type == "buy":
-            # Long position
+            # Long position: SL hit if LOW <= SL level; TP hit if HIGH >= TP level
             hit_sl = sl_level > 0 and low <= sl_level
             hit_tp = tp_level > 0 and high >= tp_level
         else:
-            # Short position
+            # Short position: SL hit if HIGH >= SL level; TP hit if LOW <= TP level
             hit_sl = sl_level > 0 and high >= sl_level
             hit_tp = tp_level > 0 and low <= tp_level
         if hit_sl:
@@ -657,6 +657,7 @@ class BacktestEngine:
         """Automatically square off all open option positions on expiry day at market close.
         This prevents physical delivery risk and is critical for F&O options."""
         import datetime
+        import calendar
         # Find the last bar's date
         last_date = historical[-1]["trade_date"] if historical else ""
         # Check if any position is open and we're on or near expiry
@@ -753,15 +754,24 @@ class BacktestEngine:
                 pass
         # Black-Scholes synthetic fallback (proper option pricing)
         if spot and spot > 0 and strike and strike > 0:
-            dte = self._days_to_expiry(date, self._get_expiry_type()) / 365.0
-            iv = self.implied_volatility
+            dte_days = self._days_to_expiry(date, self._get_expiry_type())
+            dte = max(dte_days / 365.0, 1/365)  # Minimum 1 day
+            # Dynamic IV based on symbol - indices have higher IV
+            base_iv = self.implied_volatility
+            if self.bt_symbol in ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY']:
+                iv = max(base_iv, 0.18)  # Index options typically 18-25%
+            else:
+                iv = max(base_iv, 0.20)  # Stock options typically 20-30%
             from utils.helpers import black_scholes
             bs_price = black_scholes(spot, strike, dte, iv, option_type)
             if bs_price > 0:
                 val = round(bs_price, 2)
                 self.premium_cache[key] = val
                 return val
-            val2 = round(spot * 0.01, 2)
+            # Fallback: intrinsic + time value estimate
+            intrinsic = max(0, spot - strike) if option_type == "CE" else max(0, strike - spot)
+            time_val = spot * 0.015 * math.sqrt(dte)  # Approx time value
+            val2 = round(intrinsic + time_val, 2)
             self.premium_cache[key] = val2
             return val2
         self.premium_cache[key] = 1.0
@@ -899,8 +909,9 @@ class BacktestEngine:
                 exit_value += prem * lqty
             else:
                 exit_value -= prem * lqty
-        entry_cash = sum(l["signed_value"] for l in entry["legs"])
-        # entry["total_cost"] = entry_cash + entry_brokerage (Ec)
+        
+        # entry_cash: positive = net credit received, negative = net debit paid
+        entry_cash = entry.get("net_credit", sum(l["signed_value"] for l in entry["legs"]))
         entry_costs = entry["total_cost"] - entry_cash
         # Net PnL = entry_cash (credit + / debit -) + exit_value (reverse legs) - brokerage both sides
         pnl = entry_cash + exit_value - entry_costs - exit_costs_total
@@ -1050,6 +1061,21 @@ class BacktestEngine:
         for t in trade_list:
             m = t["entry_date"][:7]
             monthly_pnl[m] = monthly_pnl.get(m, 0) + t["pnl"]
+        
+        # Advanced risk metrics
+        # Sortino Ratio: uses downside deviation instead of total std dev
+        sortino = self._sortino(equity)
+        # Calmar Ratio: annualized return / max drawdown
+        calmar = self._calmar(total_return_pct, max_dd)
+        # Kelly Criterion: optimal position sizing fraction
+        kelly = self._kelly(win_rate, avg_win, avg_loss)
+        # Ulcer Index: measures depth and duration of drawdowns
+        ulcer_index = self._ulcer_index(equity)
+        # Omega Ratio: probability-weighted ratio of gains vs losses
+        omega = self._omega_ratio(trade_list)
+        # Risk of Ruin
+        risk_of_ruin = self._risk_of_ruin(win_rate, avg_win, avg_loss, total_trades)
+        
         return {
             "success": True,
             "metrics": {
@@ -1062,6 +1088,12 @@ class BacktestEngine:
                 "max_drawdown": round(max_dd, 4),
                 "profit_factor": round(profit_factor, 4),
                 "sharpe_ratio": round(sharpe, 4),
+                "sortino_ratio": round(sortino, 4),
+                "calmar_ratio": round(calmar, 4),
+                "kelly_criterion": round(kelly, 4),
+                "ulcer_index": round(ulcer_index, 4),
+                "omega_ratio": round(omega, 4),
+                "risk_of_ruin": round(risk_of_ruin, 4),
                 "total_trades": total_trades,
                 "winning_trades": wins,
                 "losing_trades": total_trades - wins,
@@ -1106,6 +1138,77 @@ class BacktestEngine:
         var = sum((r - mean) ** 2 for r in returns) / max(len(returns) - 1, 1)
         std = math.sqrt(var)
         return (mean / std) * math.sqrt(252) if std > 0 else 0
+
+    def _sortino(self, equity):
+        """Sortino Ratio: uses downside deviation instead of total std dev"""
+        if len(equity) < 2:
+            return 0
+        returns = [(equity[i] - equity[i - 1]) / max(equity[i - 1], 1) for i in range(1, len(equity))]
+        mean = sum(returns) / len(returns)
+        # Downside deviation: only negative returns
+        downside_returns = [r for r in returns if r < 0]
+        if not downside_returns:
+            return 999 if mean > 0 else 0
+        downside_var = sum(r ** 2 for r in downside_returns) / len(downside_returns)
+        downside_std = math.sqrt(downside_var)
+        return (mean / downside_std) * math.sqrt(252) if downside_std > 0 else 0
+
+    def _calmar(self, total_return_pct, max_dd):
+        """Calmar Ratio: annualized return / max drawdown"""
+        if max_dd <= 0:
+            return 0
+        # Approximate annualized return from total return
+        # Assuming backtest period ~1 year for simplicity
+        annualized_return = total_return_pct
+        return annualized_return / max_dd
+
+    def _kelly(self, win_rate, avg_win, avg_loss):
+        """Kelly Criterion: optimal fraction of capital to risk per trade"""
+        if avg_loss <= 0 or win_rate <= 0:
+            return 0
+        p = win_rate / 100.0
+        q = 1 - p
+        b = avg_win / avg_loss  # win/loss ratio
+        kelly_fraction = (p * b - q) / b if b > 0 else 0
+        return max(0, min(kelly_fraction, 1))  # Cap at 100%
+
+    def _ulcer_index(self, equity):
+        """Ulcer Index: measures depth and duration of drawdowns"""
+        if len(equity) < 2:
+            return 0
+        peak = equity[0]
+        squared_drawdowns = []
+        for v in equity:
+            if v > peak:
+                peak = v
+            dd = (peak - v) / peak if peak > 0 else 0
+            squared_drawdowns.append(dd ** 2)
+        return math.sqrt(sum(squared_drawdowns) / len(squared_drawdowns)) * 100
+
+    def _omega_ratio(self, trade_list, threshold=0):
+        """Omega Ratio: probability-weighted ratio of gains vs losses"""
+        if not trade_list:
+            return 0
+        gains = sum(t["pnl"] for t in trade_list if t["pnl"] > threshold)
+        losses = sum(abs(t["pnl"]) for t in trade_list if t["pnl"] < threshold)
+        return gains / losses if losses > 0 else 999
+
+    def _risk_of_ruin(self, win_rate, avg_win, avg_loss, total_trades):
+        """Risk of Ruin: probability of losing a significant portion of capital"""
+        if total_trades < 10 or avg_loss <= 0:
+            return 0
+        p = win_rate / 100.0
+        if p <= 0:
+            return 1
+        # Simplified risk of ruin formula
+        # ROR = ((1 - edge) / (1 + edge))^capital_units
+        edge = (p * avg_win - (1 - p) * avg_loss) / avg_loss if avg_loss > 0 else 0
+        if edge <= 0:
+            return 1
+        # Assume 10 capital units (10% per trade risk)
+        capital_units = 10
+        ror = ((1 - edge) / (1 + edge)) ** capital_units
+        return min(1, max(0, ror))
 
     def _reset(self):
         self.ohlc_cache = {}
