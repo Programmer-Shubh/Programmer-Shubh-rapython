@@ -8,81 +8,7 @@ router = APIRouter()
 
 
 
-_NSE_INDEX_MAP = {
-    "NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
-    "FINNIFTY": "NIFTY FINANCIAL SERVICES", "MIDCPNIFTY": "NIFTY MIDCAP SELECT",
-}
-
-_NSE_SPOT_CACHE = {}
-_NSE_SPOT_TTL = 30
-
-
-def _fetch_nse_spot_all():
-    """Fetch real spot prices for all indices from NSE India /api/allIndices."""
-    import time
-    now = time.time()
-    if _NSE_SPOT_CACHE and now - _NSE_SPOT_CACHE.get("_ts", 0) < _NSE_SPOT_TTL:
-        return _NSE_SPOT_CACHE
-    try:
-        import requests
-        s = requests.Session()
-        s.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json",
-        })
-        s.get("https://www.nseindia.com/api/allIndices", timeout=10)
-        r = s.get("https://www.nseindia.com/api/allIndices", timeout=10, headers={"Accept": "application/json"})
-        if r.status_code == 200:
-            data = r.json().get("data", [])
-            for item in data:
-                idx_name = item.get("index", "")
-                for sym, nse_name in _NSE_INDEX_MAP.items():
-                    if idx_name == nse_name:
-                        _NSE_SPOT_CACHE[sym] = {
-                            "spot": float(item.get("last", 0)),
-                            "change": float(item.get("percentChange", 0)),
-                            "high": float(item.get("high", 0)),
-                            "low": float(item.get("low", 0)),
-                        }
-            _NSE_SPOT_CACHE["_ts"] = now
-    except Exception:
-        pass
-    return _NSE_SPOT_CACHE
-
-
-def _fetch_google_spot(symbol: str) -> float:
-    """Scrape Google Finance for live spot price."""
-    try:
-        import requests, re
-        r = requests.get(
-            f"https://www.google.com/finance/quote/{symbol.upper()}:NSE",
-            headers={"User-Agent": "Mozilla/5.0"}, timeout=8,
-        )
-        if r.status_code == 200:
-            m = re.search(r'data-last-price="([^"]+)"', r.text)
-            if m:
-                return float(m.group(1).replace(",", ""))
-    except Exception:
-        pass
-    return 0
-
-
-def _fetch_nselib_spot(symbol: str) -> float:
-    """Fetch spot via nselib (NSE bhavcopy, reliable for all stocks)."""
-    try:
-        from nselib.capital_market import price_volume_data
-        import datetime
-        sd = (datetime.datetime.now() - datetime.timedelta(days=5)).strftime("%d-%m-%Y")
-        ed = datetime.datetime.now().strftime("%d-%m-%Y")
-        df = price_volume_data(symbol, from_date=sd, to_date=ed)
-        if df is not None and not df.empty:
-            last = df.iloc[-1]
-            cl = float(last.get("ClosePrice", last.get("LastPrice", 0)) or 0)
-            if cl > 0:
-                return float(cl)
-    except Exception:
-        pass
-    return 0
+# Dashboard uses LiveMarketData + nse_client centrally; no duplicate NSE fetchers here.
 
 
 @router.get("/spot")
@@ -136,8 +62,7 @@ def get_spots():
 
 
 def _free_latest_spot(symbol: str):
-    """3 fast alternatives: NSE quote/indices -> StocksRin (stocksrin.com) -> nselib -> Google -> DB. No Yahoo, No NiftyTrader."""
-    # 1) Live via 3 alternatives (NSE quote + NSE indices + StocksRin + TrueData) - fastest path
+    """Delegate to LiveMarketData (which uses nse_client -> Yahoo/TrueData/StocksRin fallbacks)."""
     try:
         live = LiveMarketData()
         data = live.get_live_spot(symbol)
@@ -145,23 +70,14 @@ def _free_latest_spot(symbol: str):
             return float(data["spot"]), data.get("source", "live")
     except Exception:
         pass
-    # 2) NSE via nselib (reliable for all stocks, 1-2s)
-    spot = _fetch_nselib_spot(symbol)
-    if spot > 0:
-        return spot, "nselib"
-    # 3) StocksRin (stocksrin.com) already tried inside LiveMarketData, retry direct
+    # Also try direct nse_client before DB
     try:
-        live2 = LiveMarketData()
-        d = live2.fetch_live_from_nse(symbol)
+        from core.services.nse_client import nse_fetch_spot
+        d = nse_fetch_spot(symbol, timeout=4)
         if d and d.get("spot"):
-            return float(d["spot"]), d.get("source", "stocksrin")
+            return float(d["spot"]), d.get("source", "nse")
     except Exception:
         pass
-    # 4) Google Finance fallback
-    spot = _fetch_google_spot(symbol)
-    if spot > 0:
-        return spot, "google"
-    # 5) DB fallback (last resort)
     db = Database.get_instance()
     try:
         row = db.fetch_one(

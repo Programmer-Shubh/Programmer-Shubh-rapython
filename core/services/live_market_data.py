@@ -30,53 +30,25 @@ def _with_timeout(fn, timeout, *args):
     return box.get("r")
 
 # --- 3 fast alternatives (NSE allIndices + NSE quote + StocksRin) - No NiftyTrader, No Yahoo ---
-
 def _fetch_nse_quote_spot(symbol: str):
-    """NSE quote-equity API - single request, 1.5s timeout."""
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json, text/plain, */*",
-        }
-        for url in [
-            f"https://www.nseindia.com/api/quote-equity?symbol={symbol.upper()}",
-        ]:
-            try:
-                r = requests.get(url, headers=headers, timeout=1.5)
-                if r.status_code == 200:
-                    j = r.json()
-                    spot = 0
-                    if "priceInfo" in j and j["priceInfo"]:
-                        spot = float(j["priceInfo"].get("lastPrice", 0) or j["priceInfo"].get("close", 0) or 0)
-                    if spot > 0:
-                        return {"spot": spot, "change": float(j.get("priceInfo", {}).get("pChange", 0) or 0),
-                                "high": float(j.get("priceInfo", {}).get("intraDayHighLow", {}).get("max", spot) or spot),
-                                "low": float(j.get("priceInfo", {}).get("intraDayHighLow", {}).get("min", spot) or spot),
-                                "source": "nse_quote"}
-            except Exception:
-                continue
+        from core.services.nse_client import nse_fetch_spot
+        d = nse_fetch_spot(symbol, timeout=5)
+        if d and d.get("spot"):
+            return d
     except Exception:
         pass
     return None
 
+
 def _fetch_nse_indices_spot(symbol: str):
-    """NSE /api/allIndices — fastest for indices (200ms)."""
     try:
-        _MAP = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK", "FINNIFTY": "NIFTY FINANCIAL SERVICES", "MIDCPNIFTY": "NIFTY MIDCAP SELECT"}
-        nse_name = _MAP.get(symbol.upper())
-        if not nse_name:
-            return None
-        s = requests.Session()
-        s.headers.update({"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
-        s.get("https://www.nseindia.com", timeout=3)
-        r = s.get("https://www.nseindia.com/api/allIndices", timeout=4)
-        if r.status_code == 200:
-            for item in r.json().get("data", []):
-                if item.get("index") == nse_name:
-                    spot = float(item.get("last", 0))
-                    if spot > 0:
-                        return {"spot": spot, "change": float(item.get("percentChange", 0) or 0),
-                                "high": float(item.get("high", 0) or spot), "low": float(item.get("low", 0) or spot), "source": "nse"}
+        from core.services.nse_client import nse_fetch_spot
+        d = nse_fetch_spot(symbol, timeout=5)
+        # nse_fetch_spot handles both indices (allIndices) and stocks (quote-equity)
+        if d and d.get("spot") and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"):
+            return d
+        return None if symbol.upper() not in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY") else d
     except Exception:
         pass
     return None
@@ -157,65 +129,16 @@ def _fetch_stocksrin_spot(symbol: str):
         except Exception:
             continue
 def _fetch_nse_option_chain_live(symbol: str):
-    """NSE option-chain live: /api/option-chain-indices or /api/option-chain-equities.
-    Returns {spot, rows: [{strike, ce_ltp, ce_oi, ...} ...]} or None. Session + 4s timeout."""
+    """Delegate to centralized nse_client (v3 -> v2, session/cookies/retries/validation)."""
     try:
-        is_index = symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")
-        s = requests.Session()
-        s.headers.update({"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9"})
-        s.get("https://www.nseindia.com", timeout=3)
-        url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol.upper()}" if is_index else f"https://www.nseindia.com/api/option-chain-equities?symbol={symbol.upper()}"
-        r = s.get(url, timeout=4)
-        if r.status_code != 200:
-            return None
-        j = r.json()
-        rec = j.get("records", {})
-        spot = float(rec.get("underlyingValue") or j.get("underlyingValue") or rec.get("underlying_value") or 0)
-        if spot <= 0:
-            spot = float(j.get("underlyingValue") or 0)
-        datas = rec.get("data") or j.get("data") or []
-        if not datas:
-            filtered = j.get("filtered", {})
-            datas = filtered.get("data") or []
-        rows = []
-        expiries = rec.get("expiryDates") or []
-        # pick nearest expiry
-        nearest = expiries[0] if expiries else ""
-        for d in datas:
-            if nearest and d.get("expiryDate") != nearest:
-                continue
-            strike = float(d.get("strikePrice") or d.get("strike") or 0)
-            if strike <= 0:
-                continue
-            ce = d.get("CE") or {}
-            pe = d.get("PE") or {}
-            rows.append({
-                "strike": strike,
-                "distance": 0,
-                "ce_ltp": float(ce.get("lastPrice") or ce.get("ltp") or 0),
-                "ce_oi": int(ce.get("openInterest") or ce.get("oi") or 0),
-                "ce_vol": int(ce.get("totalTradedVolume") or ce.get("volume") or 0),
-                "ce_iv": float(ce.get("impliedVolatility") or ce.get("iv") or 0),
-                "pe_ltp": float(pe.get("lastPrice") or pe.get("ltp") or 0),
-                "pe_oi": int(pe.get("openInterest") or pe.get("oi") or 0),
-                "pe_vol": int(pe.get("totalTradedVolume") or pe.get("volume") or 0),
-                "pe_iv": float(pe.get("impliedVolatility") or pe.get("iv") or 0),
-            })
-        if not rows:
-            return None
-        # fill distance after spot known
-        from utils.helpers import get_strike_step
-        try:
-            step = get_strike_step(symbol.upper())
-            atm = round(spot / step) * step if spot > 0 and step else 0
-            for rr in rows:
-                rr["distance"] = int(rr["strike"] - atm) if atm else 0
-        except Exception:
-            pass
-        rows = sorted(rows, key=lambda x: x["strike"])
-        return {"symbol": symbol.upper(), "spot": spot, "atm": 0, "rows": rows, "source": "nse_option", "timestamp": nearest, "max_pain": 0, "pcr": None}
+        from core.services.nse_client import nse_fetch_option_chain
+        data = nse_fetch_option_chain(symbol, expiry=None, timeout=6)
+        if data and data.get("rows"):
+            # Normalize to live_market_data expected shape (atm field)
+            # nse_client already computes atm, pcr, ce_total_oi etc.
+            return data
     except Exception:
-        return None
+        pass
     return None
 
 def _fetch_yahoo_spot(symbol: str):
