@@ -1079,6 +1079,7 @@
         document.getElementById('r-tp').value=3000;
         alert('Robot 2 loaded: 5m PE Pullback - Price<20EMA+VWAP, pullback to EMA bearish candle, RSI<50, Vol>VMA20, OI support, ATM, SL=high, RR 1:2');
     }
+    (function(){try{const b=document.getElementById('r-run-backtest'); if(b){ b.addEventListener('click', function(e){ e.preventDefault(); try{ robotBacktest(); }catch(err){ alert('JS err: '+err.message); console.error(err);} }); }}catch(e){}})();
     function isMarketOpenIST(){
         const now=new Date();
         const istStr=now.toLocaleString('en-US',{timeZone:'Asia/Kolkata'});
