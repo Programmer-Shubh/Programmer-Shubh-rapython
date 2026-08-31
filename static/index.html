@@ -780,6 +780,16 @@
             }
         }catch(e){btn.innerHTML=orig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+'</p>';}
     }
+    async function runHistoricalReplay(){
+        const b=document.getElementById('s-replay'); const o=b.innerHTML; b.innerHTML='<span class="spinner"></span> Replay...';
+        const body={symbol:document.getElementById('s-index').value, start_date:document.getElementById('s-start').value, end_date:document.getElementById('s-end').value, indicators:collectIndicators(), legs:(stratLegs.length?stratLegs:[{option_type:document.getElementById('s-opt').value,lots:parseInt(document.getElementById('s-lots').value)||1,transaction:document.getElementById('s-position').value.toLowerCase(),strike_selection:document.getElementById('s-strike-type').value.toLowerCase()}]), advanced:{trade_mode:document.getElementById('s-strat-type').value.toLowerCase(), slippage_pct:parseFloat(document.getElementById('s-slippage')?.value)||0.5}, risk:{max_trades_per_day:parseInt(document.getElementById('s-mtd').value)||5, daily_stop_loss:parseFloat(document.getElementById('s-sl').value)||1500, daily_take_profit:parseFloat(document.getElementById('s-tp').value)||2500}};
+        try{ const r=await P('/api/paper/historical-replay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); b.innerHTML=o; if(r.error){alert(r.error); return;} const m=r.metrics||r; alert('Historical Replay: '+m.total_trades+' trades, PnL '+m.net_pnl); document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-success p-3">Replay done: '+m.total_trades+' trades</p>'; }catch(e){ b.innerHTML=o; alert('Replay error: '+e.message); }
+    }
+    async function runBacktestCompare(){
+        const b=document.getElementById('s-compare'); const o=b.innerHTML; b.innerHTML='<span class="spinner"></span> Compare...';
+        const body={symbol:document.getElementById('s-index').value, start_date:document.getElementById('s-start').value, end_date:document.getElementById('s-end').value, indicators:collectIndicators(), legs:(stratLegs.length?stratLegs:[{option_type:document.getElementById('s-opt').value,lots:parseInt(document.getElementById('s-lots').value)||1,transaction:document.getElementById('s-position').value.toLowerCase(),strike_selection:document.getElementById('s-strike-type').value.toLowerCase()}]), advanced:{trade_mode:document.getElementById('s-strat-type').value.toLowerCase()}, risk:{max_trades_per_day:parseInt(document.getElementById('s-mtd').value)||5}};
+        try{ const r=await P('/api/paper/backtest-compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); b.innerHTML=o; if(r.error){alert(r.error); return;} alert('Compare: exact_match='+r.exact_match+' diff trades '+(r.match?.total_trades||0)); }catch(e){ b.innerHTML=o; alert('Compare error: '+e.message); }
+    }
     async function saveStrat(){
         const idx=document.getElementById('s-index').value;
         const stratType=document.getElementById('s-strat-type').value;
