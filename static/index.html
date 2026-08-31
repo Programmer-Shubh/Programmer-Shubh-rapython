@@ -1008,12 +1008,12 @@
         const lots=parseInt(document.getElementById('r-lots').value)||1;
         if(order==='AUTO'){
             autoSignal=true;
-            legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
+            legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase(), stop_loss:sl, take_profit:tp}];
             opt='AUTO'; txn='auto';
         } else {
             const parts=order.split('-');
             opt=parts[0]; txn=parts[1].toLowerCase();
-            legs=[{option_type:opt, transaction:txn, lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
+            legs=[{option_type:opt, transaction:txn, lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase(), stop_loss:sl, take_profit:tp}];
         }
         const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
@@ -1028,7 +1028,7 @@
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         const entryTime=document.getElementById('r-entry').value||'09:35';
         const exitTime=document.getElementById('r-exit').value||'15:14';
-        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal}, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
+        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal, slippage_pct:0.50, slippage:0.50}, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp, daily_loss_limit:0}};
         document.getElementById('robot-results').classList.remove('hidden');
         document.getElementById('robot-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Running backtest...</p>';
         try{
