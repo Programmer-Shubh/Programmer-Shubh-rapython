@@ -987,6 +987,8 @@ class BacktestEngine:
                         "exit_price": exit.get("price", 0),
                         "pnl": pnl,
                         "pnl_formatted": f"₹{pnl:,.2f}",
+                        "exit_reason": exit.get("reason", ""),
+                        "reason": exit.get("reason", ""),
                         "is_spread": True,
                     })
                 else:
@@ -1007,6 +1009,8 @@ class BacktestEngine:
                         "exit_price": exit.get("price", 0),
                         "pnl": pnl,
                         "pnl_formatted": f"₹{pnl:,.2f}",
+                        "exit_reason": exit.get("reason", ""),
+                        "reason": exit.get("reason", ""),
                     })
             equity.append(capital)
         total_return = capital - self.initial_capital
