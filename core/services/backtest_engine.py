@@ -44,6 +44,7 @@ class BacktestEngine:
                 TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage"))
             except Exception:
                 pass
+        self._pullback_dir = advanced_options.get("pullback_5m")  # ce/pe or None
         # Quant wiring: expiry type, trailing, momentum, entry/exit times
         self._expiry_hint = advanced_options.get("expiry", "weekly")
         # Check legs for expiry override
@@ -364,6 +365,36 @@ class BacktestEngine:
                     cond_met = cond_met and cur_v < val and prev_v >= val
             return cond_met
 
+        # PULLBACK 5m special: AND logic for 20EMA+VWAP+RSI>50+Vol>VMa+OI
+        pullback = getattr(self, "_pullback_dir", None)
+        if pullback in ("ce","pe"):
+            # pullback requires all 5 conditions
+            ema20 = pre_calc.get("ema", [None]*len(historical))[effective_idx] if "ema" in pre_calc else None
+            vwap_vals = pre_calc.get("vwap", {}).get("vwap", []) if "vwap" in pre_calc else []
+            vwap_v = vwap_vals[effective_idx] if effective_idx < len(vwap_vals) else None
+            rsi_v = pre_calc.get("rsi", [50]*len(historical))[effective_idx] if "rsi" in pre_calc else 50
+            close_v = historical[effective_idx]["close_price"]
+            open_v = historical[effective_idx].get("open_price", close_v)
+            low_v = historical[effective_idx].get("low_price", close_v)
+            high_v = historical[effective_idx].get("high_price", close_v)
+            ema_ok = ema20 is not None and ((close_v > ema20 and (pullback=="ce")) or (close_v < ema20 and (pullback=="pe")))
+            vwap_ok = vwap_v is not None and ((close_v > vwap_v and pullback=="ce") or (close_v < vwap_v and pullback=="pe"))
+            # pullback to EMA: low <= EMA <= high (touched) and close on direction
+            touched = ema20 is not None and low_v <= ema20 <= high_v
+            candle_ok = (close_v > open_v) if pullback=="ce" else (close_v < open_v)
+            rsi_ok = (rsi_v > 50) if pullback=="ce" else (rsi_v < 50)
+            vol_sig = pre_calc.get("volume", {}).get("signal", [])
+            vol_ok = (vol_sig[effective_idx]==1) if effective_idx < len(vol_sig) and pullback=="ce" else (vol_sig[effective_idx]==-1) if effective_idx < len(vol_sig) and pullback=="pe" else True
+            oi_sig = pre_calc.get("oi", {}).get("signal", [])
+            oi_ok = True
+            if oi_sig and effective_idx < len(oi_sig):
+                oi_ok = (oi_sig[effective_idx] != -1) if pullback=="ce" else (oi_sig[effective_idx] != 1)
+            if pullback=="ce":
+                return bool(ema_ok and vwap_ok and touched and candle_ok and rsi_ok and vol_ok and oi_ok)
+            else:
+                # for pe pullback, buy signal is actually bearish direction - handled via sell path
+                return False
+
         # PRIORITY 2: Selected indicator-based signals (OR per indicator - any triggers, for 2-indicator backtest)
         # Respect bullish/bearish mode per indicator (both by default)
         modes = getattr(self, "ind_modes", {})
@@ -457,6 +488,26 @@ class BacktestEngine:
                 elif op == "crosses_below":
                     cond_met = cond_met and cur_v < val and prev_v >= val
             return cond_met
+
+        # PE pullback special
+        pullback = getattr(self, "_pullback_dir", None)
+        if pullback == "pe":
+            ema20 = pre_calc.get("ema", [None]*len(historical))[effective_idx] if "ema" in pre_calc else None
+            vwap_vals = pre_calc.get("vwap", {}).get("vwap", []) if "vwap" in pre_calc else []
+            vwap_v = vwap_vals[effective_idx] if effective_idx < len(vwap_vals) else None
+            rsi_v = pre_calc.get("rsi", [50]*len(historical))[effective_idx] if "rsi" in pre_calc else 50
+            close_v = historical[effective_idx]["close_price"]
+            open_v = historical[effective_idx].get("open_price", close_v)
+            low_v = historical[effective_idx].get("low_price", close_v)
+            high_v = historical[effective_idx].get("high_price", close_v)
+            ema_ok = ema20 is not None and close_v < ema20
+            vwap_ok = vwap_v is not None and close_v < vwap_v
+            touched = ema20 is not None and low_v <= ema20 <= high_v
+            candle_ok = close_v < open_v
+            rsi_ok = rsi_v < 50
+            vol_sig = pre_calc.get("volume", {}).get("signal", [])
+            vol_ok = (vol_sig[effective_idx]==-1) if effective_idx < len(vol_sig) else True
+            return bool(ema_ok and vwap_ok and touched and candle_ok and rsi_ok and vol_ok)
 
         # PRIORITY 2: Selected indicator-based signals (OR logic) with bullish/bearish filter
         modes = getattr(self, "ind_modes", {})

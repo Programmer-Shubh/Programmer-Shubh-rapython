@@ -389,10 +389,24 @@ def run_backtest(req: BacktestRequest):
                 {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
                 {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
             ]
+        elif preset in ("ce_pullback_5m", "pullback_ce", "robot_ce_pullback"):
+            lots_v = legs[0].get("lots", lots_fb) if legs else lots_fb
+            legs = [{"option_type": "CE", "transaction": "buy", "lots": lots_v, "strike_selection": "atm", "otm_distance": 0, "stop_loss": 1500, "take_profit": 3000}]
+            advanced_in["pullback_5m"] = "ce"
+            advanced_in["sl_from_candle"] = True
+            advanced_in["rr"] = 2
+        elif preset in ("pe_pullback_5m", "pullback_pe", "robot_pe_pullback"):
+            lots_v = legs[0].get("lots", lots_fb) if legs else lots_fb
+            legs = [{"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "atm", "otm_distance": 0, "stop_loss": 1500, "take_profit": 3000}]
+            advanced_in["pullback_5m"] = "pe"
+            advanced_in["sl_from_candle"] = True
+            advanced_in["rr"] = 2
         # Indicators: if empty, inject defaults for indicator-per backtest
         indicators = req.indicators or []
         if not indicators:
-            if preset in ("bear_call_spread", "bearcall", "bear_call", "iron_condor"):
+            if preset in ("ce_pullback_5m","pullback_ce","robot_ce_pullback","pe_pullback_5m","pullback_pe","robot_pe_pullback"):
+                indicators = [{"id":"ema","params":{"period":20}},{"id":"vwap","params":{"period":20,"multiplier":2}},{"id":"rsi","params":{"period":14}},{"id":"volume_indicator","params":{"period":20}},{"id":"open_interest","params":{"period":20}}]
+            elif preset in ("bear_call_spread", "bearcall", "bear_call", "iron_condor"):
                 indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 50}}, {"id": "supertrend", "params": {"period": 10, "multiplier": 3}}]
             elif preset in ("bull_put_spread", "bullput"):
                 indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 50}}]
