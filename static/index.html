@@ -158,7 +158,7 @@
                 <div class="card-body p-0"><div id="scan-table" style="overflow-x:auto"></div></div>
             </div>
             <div class="card">
-                <div class="card-header">Open Positions <span id="live-pnl-badge" class="badge bg-secondary ms-2">Live P&L: —</span> <button class="btn btn-sm btn-danger ms-auto" onclick="killSwitch()"><i class="bi bi-stop-circle"></i> Kill Switch (Close All)</button></div>
+                <div class="card-header">Open Positions</div>
                 <div class="card-body p-0"><div id="dash-pos"></div></div>
             </div>
             <div class="card">
@@ -468,7 +468,7 @@
                         <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-01"></div>
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="3" min="1" max="10"></div>
-                        <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button type="button" class="btn btn-sm btn-success flex-fill" id="r-run-backtest" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button type="button" class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
+                        <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button class="btn btn-sm btn-success flex-fill" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
                     </div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-12 d-flex gap-2 flex-wrap">
@@ -1008,12 +1008,12 @@
         const lots=parseInt(document.getElementById('r-lots').value)||1;
         if(order==='AUTO'){
             autoSignal=true;
-            legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase(), stop_loss:sl, take_profit:tp}];
+            legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
             opt='AUTO'; txn='auto';
         } else {
             const parts=order.split('-');
             opt=parts[0]; txn=parts[1].toLowerCase();
-            legs=[{option_type:opt, transaction:txn, lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase(), stop_loss:sl, take_profit:tp}];
+            legs=[{option_type:opt, transaction:txn, lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
         }
         const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
@@ -1028,7 +1028,7 @@
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         const entryTime=document.getElementById('r-entry').value||'09:35';
         const exitTime=document.getElementById('r-exit').value||'15:14';
-        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal, slippage_pct:0.50, slippage:0.50}, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp, daily_loss_limit:0}};
+        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal}, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
         document.getElementById('robot-results').classList.remove('hidden');
         document.getElementById('robot-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Running backtest...</p>';
         try{
@@ -1040,7 +1040,7 @@
             document.getElementById('robot-metrics').innerHTML=`<div class="row g-2"><div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value">${r.symbol||sym}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlC}">${F(m.net_pnl||pnl)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Trades</div><div class="value">${m.total_trades}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}%</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Avg P/L</div><div class="value ${pnlC}">${F(m.avg_profit_per_trade||0)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max DD</div><div class="value price-down">${m.max_drawdown}%</div></div></div></div>`;
             if(r.equity_curve&&r.equity_curve.length) Plotly.newPlot('robot-eq',[{y:r.equity_curve,type:'scatter',line:{color:'#0d6efd',width:2}}],{title:'Equity Curve - '+sym+' '+order,margin:{t:30,b:30,l:50,r:20}});
             if(r.monthly_pnl&&Object.keys(r.monthly_pnl).length) Plotly.newPlot('robot-mo',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',margin:{t:30,b:30,l:50,r:20}}); else Plotly.newPlot('robot-mo',[{x:['No data'],y:[0],type:'bar'}],{title:'Monthly P&L'});
-            if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>Exit Reason</th><th>B/S</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{const reason=t.exit_reason||t.reason||'-';const badge=reason==='SL'?'badge bg-danger':reason==='TP'?'badge bg-success':reason==='stoploss'?'badge bg-danger':reason==='target'?'badge bg-success':'badge bg-secondary';h+=`<tr><td>${i+1}</td><td>${t.symbol||sym}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.exit_date} ${t.exit_time||'15:14'}</td><td><span class="${badge}">${reason}</span></td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
+            if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>B/S</th><th>Strike</th><th>Lot</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.symbol||sym}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.exit_date} ${t.exit_time||'15:14'}</td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
         }catch(e){document.getElementById('robot-metrics').innerHTML='<p class="text-danger p-3">Error: '+e.message+'</p>';}
     }
     function isMarketOpenIST(){
