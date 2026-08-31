@@ -30,14 +30,18 @@ def get_spots():
                 "source": "live",
             }
             continue
-        # 2) Try nse_client (removed broken _fetch_nse_spot_all)
-        try:
-            from core.services.nse_client import nse_fetch_spot as _nse_sp
-            _d=_nse_sp(sym, timeout=3)
-            if _d and _d.get("spot") and float(_d["spot"])>0:
-                result[sym]={"spot":float(_d["spot"]),"formatted":f"INR {float(_d['spot']):,.2f}","change":round(float(_d.get("change",0)),2),"high":float(_d.get("high",0)),"low":float(_d.get("low",0)),"source":_d.get("source","nse")}
-                continue
-        except: pass
+        # 2) Try NSE India /api/allIndices (real, always works)
+        nse_data = _fetch_nse_spot_all().get(sym)
+        if nse_data and nse_data["spot"] > 0:
+            result[sym] = {
+                "spot": nse_data["spot"],
+                "formatted": f"INR {nse_data['spot']:,.2f}",
+                "change": round(nse_data["change"], 2),
+                "high": nse_data["high"],
+                "low": nse_data["low"],
+                "source": "nse",
+            }
+            continue
         # 3) Try nselib / Google
         spot, source = _free_latest_spot(sym)
         if spot > 0:

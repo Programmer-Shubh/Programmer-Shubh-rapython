@@ -85,6 +85,20 @@ def place_trade(req: PlaceTradeRequest):
     # Prevent faulty strike '01' etc already handled, also reject strike 0
     if req.entry_price <= 0 or req.strike <= 0:
         return {"error": "Enter valid strike (>0) and premium (>0) - Strike 0 invalid, use ATM"}
+    # Deep ITM/OTM guard: ATM ±5 only
+    try:
+        from core.services.live_market_data import LiveMarketData as _LMD
+        from utils.helpers import get_strike_step
+        _lm = _LMD(); _spot = _lm.get_spot_price(req.symbol) or 0
+        if _spot<=0:
+            try: _s=_lm.get_live_spot(req.symbol); _spot=float(_s["spot"]) if _s and _s.get("spot") else 0
+            except: pass
+        _step=get_strike_step(req.symbol); _atm=round(_spot/_step)*_step if _spot>0 else 0
+        if _atm>0 and abs(req.strike-_atm)>_step*5:
+            return {"error": f"Deep {'ITM' if req.strike<_atm else 'OTM'} blocked: strike {req.strike} far from ATM {_atm} (ATM±5 only)"}
+        if _spot>0 and abs(req.strike-_spot)/_spot>0.05:
+            return {"error": f"Deep ITM/OTM blocked: >5% from spot {_spot:.2f}"}
+    except Exception: pass
     # Deduplication: if identical open position exists, block duplicate
     existing = trade_model.db.fetch_one("SELECT id FROM paper_trades WHERE symbol=? AND strike_price=? AND option_type=? AND transaction_type=? AND status='open' LIMIT 1", [req.symbol, req.strike, req.option_type, req.transaction_type])
     if existing:

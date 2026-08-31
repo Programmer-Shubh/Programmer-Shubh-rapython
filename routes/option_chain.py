@@ -168,6 +168,20 @@ def place_trade(req: TradeRequest):
                 req.strike = round(req.strike / step) * step
     except Exception:
         pass
+    # Deep ITM/OTM block: only allow ATM ±5 strikes (max 5% distance guard)
+    try:
+        spot_chk = live.get_spot_price(req.symbol)
+        if spot_chk <= 0:
+            ls2 = live.get_live_spot(req.symbol)
+            spot_chk = float(ls2["spot"]) if ls2 and ls2.get("spot") else 0
+        step_chk = get_strike_step(req.symbol)
+        atm_chk = round(spot_chk/step_chk)*step_chk if spot_chk>0 else 0
+        if atm_chk>0 and abs(req.strike - atm_chk) > step_chk*5:
+            return {"error": f"Deep {'ITM' if req.strike<atm_chk else 'OTM'} blocked: strike {req.strike} too far from ATM {atm_chk} (spot {spot_chk:.2f}). Allowed ATM ±5 strikes only."}
+        if spot_chk>0 and abs(req.strike-spot_chk)/spot_chk > 0.05:
+            return {"error": f"Deep ITM/OTM blocked: strike {req.strike} >5% away from spot {spot_chk:.2f}"}
+    except Exception:
+        pass
     # Deduplication check before insert
     from core.models.trade_model import TradeModel as _TM
     _tm = _TM()

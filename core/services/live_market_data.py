@@ -246,6 +246,19 @@ class LiveMarketData:
         return float(row2["close_price"]) if row2 and row2["close_price"] else (float(row["close_price"]) if row and row["close_price"] else 0)
 
     def get_option_ltp(self, symbol: str, strike: float, option_type: str) -> float:
+        # 1) Live chain first (real NSE LTP)
+        try:
+            chain = self.get_live_chain_cached(symbol.upper())
+            if not chain:
+                chain = _with_timeout(_fetch_nse_option_chain_live, 2.0, symbol.upper())
+            if chain and chain.get("rows"):
+                for r in chain["rows"]:
+                    if float(r.get("strike",0)) == float(strike):
+                        v = float(r.get("ce_ltp",0) if option_type=="CE" else r.get("pe_ltp",0))
+                        if v > 0:
+                            return v
+        except Exception:
+            pass
         row = self.db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?)",
             [symbol, strike, option_type, symbol],
