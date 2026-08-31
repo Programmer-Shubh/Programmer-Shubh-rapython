@@ -85,6 +85,16 @@ def place_trade(req: PlaceTradeRequest):
     # Prevent faulty strike '01' etc already handled, also reject strike 0
     if req.entry_price <= 0 or req.strike <= 0:
         return {"error": "Enter valid strike (>0) and premium (>0) - Strike 0 invalid, use ATM"}
+    # Premium sanity: option premium should not be ~spot price (EICHERMOT bug ₹3128) - must be <20% of spot
+    try:
+        from core.services.live_market_data import LiveMarketData as _LMD2
+        _sp = _LMD2().get_spot_price(req.symbol) if ' _spot' not in dir() else _spot
+        if _sp and _sp>0 and req.entry_price > _sp*0.25:
+            # allow deep ITM CE where premium ~ spot-strike, but cap at spot*0.25 or intrinsic+500
+            intrinsic = max(0, _sp - req.strike) if req.option_type=="CE" else max(0, req.strike - _sp)
+            if req.entry_price > intrinsic + 600:
+                return {"error": f"Premium ₹{req.entry_price} too high vs spot ₹{_sp:.0f} (likely spot sent as premium). Correct premium ~₹{intrinsic+80:.0f}. Use option LTP, not spot."}
+    except Exception: pass
     # Deep ITM/OTM guard: ATM ±5 only
     try:
         from core.services.live_market_data import LiveMarketData as _LMD
