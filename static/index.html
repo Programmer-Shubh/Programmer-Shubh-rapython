@@ -978,7 +978,7 @@
 
     async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];const leg=legs[0]||{};const opt=leg.option_type||'CE';const txn=leg.transaction||'buy';const lots=leg.lots||1;const sl=leg.stop_loss||1500;const tp=leg.take_profit||1000;alert(`Paper Trade from "${s.name}"\nSymbol: ${s.symbol}\nOption: ${opt}\nTransaction: ${txn}\nLots: ${lots}\nSL: ₹${sl}\nTP: ₹${tp}\n\nGo to Option Chain to place trade.`);}catch(e){alert('Error: '+e.message);}}
     async function atFromStrat(id,status){const newStatus=status==='active'?'paused':'active';await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:newStatus})});loadStrats();loadTrades();}
-    async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);document.getElementById('s-name').value=s.name||'';document.getElementById('s-sym').value=s.symbol||'BANKNIFTY';document.getElementById('s-start').value=s.start_date||'';document.getElementById('s-end').value=s.end_date||'';document.getElementById('s-tf').value=s.timeframe||'daily';}catch(e){alert('Error');}}
+    async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);document.getElementById('s-name').value=s.name||'';const si=document.getElementById('s-index'); if(si) si.value=s.symbol||'BANKNIFTY';}catch(e){alert('Error');}}
     async function delStrat(id){if(!confirm('Delete this strategy?'))return;await A('/api/strategies/'+id,{method:'DELETE'});loadStrats();}
 
 
