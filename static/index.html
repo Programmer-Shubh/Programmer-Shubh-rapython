@@ -1023,9 +1023,7 @@
         const s=document.getElementById('r-start').value; const e=document.getElementById('r-end').value;
         if(!s||!e){alert('Select start and end date'); return;}
         const indicators=[];
-        // Robot 1/2: auto-add 5m pullback set (20EMA, VWAP, RSI14, Volume20, OI20)
-        const isPullbackRobot = (document.getElementById('r-sl').value=='1500' && document.getElementById('r-tp').value=='3000' && lots==1);
-        if(isPullbackRobot){
+        if(pullbackMode){
             indicators.push({id:'ema',params:{period:20}});
             indicators.push({id:'vwap',params:{period:20,multiplier:2}});
             indicators.push({id:'rsi',params:{period:14}});
@@ -1055,7 +1053,9 @@
             if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>Exit Reason</th><th>B/S</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{const reason=t.exit_reason||t.reason||'-';const badge=reason==='SL'?'badge bg-danger':reason==='TP'?'badge bg-success':reason==='stoploss'?'badge bg-danger':reason==='target'?'badge bg-success':'badge bg-secondary';h+=`<tr><td>${i+1}</td><td>${t.symbol||sym}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.exit_date} ${t.exit_time||'15:14'}</td><td><span class="${badge}">${reason}</span></td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
         }catch(e){document.getElementById('robot-metrics').innerHTML='<p class="text-danger p-3">Error: '+e.message+'</p>';}
     }
+    let pullbackMode = null;
     function loadRobot1(){
+        pullbackMode='CE';
         document.getElementById('r-order').value='CE-BUY';
         document.getElementById('r-strike').value='ATM';
         document.getElementById('r-entry').value='09:35';
@@ -1064,13 +1064,12 @@
         document.getElementById('r-ind-ema').checked=true;
         document.getElementById('r-ind-supertrend').checked=false;
         document.getElementById('r-ind-macd').checked=false;
-        if(document.getElementById('r-ind-rsi')) document.getElementById('r-ind-rsi').checked=true;
-        // set EMA 20, RSI 14, VWAP, Volume 20, OI 20 via hidden params (backtest will use 20 EMA/VWAP/RSI>50)
         document.getElementById('r-sl').value=1500;
         document.getElementById('r-tp').value=3000;
         alert('Robot 1 loaded: 5m CE Pullback - Price>20EMA+VWAP, pullback to EMA bullish candle, RSI>50, Vol>VMA20, OI support, ATM, SL=low, RR 1:2');
     }
     function loadRobot2(){
+        pullbackMode='PE';
         document.getElementById('r-order').value='PE-BUY';
         document.getElementById('r-strike').value='ATM';
         document.getElementById('r-entry').value='09:35';
