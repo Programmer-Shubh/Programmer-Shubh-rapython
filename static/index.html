@@ -901,6 +901,7 @@
         }
         clearLegs();
         const lots=parseInt(document.getElementById('s-lots').value)||1;
+        const selDist=parseInt(document.getElementById('s-otm-distance')?.value)||2;
         if(t==='single'){ addLeg(); }
         else if(t==='longcall'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='longput'){ stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
@@ -1017,7 +1018,7 @@
         }catch(e){}
     }
     async function saveAlertConfig(){
-        const cfg={sl_pct:parseFloat(document.getElementById('alert-sl').value)||2,tp_pct:parseFloat(document.getElementById('alert-tp').value)||4,max_trades:int(document.getElementById('alert-max').value)||5,daily_loss_limit:parseFloat(document.getElementById('alert-dl').value)||5000,trailing:document.getElementById('alert-trail').value,lock_at:parseFloat(document.getElementById('alert-lock').value)||1};
+        const cfg={sl_pct:parseFloat(document.getElementById('alert-sl').value)||2,tp_pct:parseFloat(document.getElementById('alert-tp').value)||4,max_trades:parseInt(document.getElementById('alert-max').value)||5,daily_loss_limit:parseFloat(document.getElementById('alert-dl').value)||5000,trailing:document.getElementById('alert-trail').value,lock_at:parseFloat(document.getElementById('alert-lock').value)||1};
         try{await P('/api/email-alerts/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});alert('Config saved!');}catch(e){alert('Error: '+e.message);}
     }
     (function(){document.getElementById('alert-url').value=location.origin+'/api/webhook/email';})();
