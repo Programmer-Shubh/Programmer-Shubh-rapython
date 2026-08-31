@@ -206,3 +206,12 @@ def webhook_test():
 @router.post("/tradingview")
 async def webhook_tradingview(request: Request):
     return await webhook_free(request)
+
+
+@router.post("/soranoo")
+async def webhook_soranoo(request: Request):
+    """Soranoo TradingView-Free-Webhook-Alerts compatible endpoint.
+    Accepts same email-body/plain-text payload that soranoo's email_listener forwards.
+    Ref: https://github.com/soranoo/TradingView-Free-Webhook-Alerts (src/email_listener + broadcast)
+    """
+    return await webhook_free(request)
