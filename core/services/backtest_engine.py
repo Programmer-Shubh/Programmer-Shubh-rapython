@@ -10,6 +10,11 @@ from utils.helpers import get_strike_step, get_lot_size, black_scholes
 class BacktestEngine:
     def __init__(self, is_live: bool = False):
         self.indicators = IndicatorEngine()
+        try:
+            from core.services.polars_engine import PolarsEngine, HAS_POLARS
+            self.polars = PolarsEngine() if HAS_POLARS else None
+        except Exception:
+            self.polars = None
         self.initial_capital = 1000000.0
         self.ohlc_cache = {}
         self.premium_cache = {}
