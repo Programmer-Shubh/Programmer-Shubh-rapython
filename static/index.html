@@ -568,10 +568,12 @@
     async function loadFnoTop5(retries=0){
         try{
             const r=await A('/api/scanner/fno-top5');
-            if(!r.bullish?.length&&!r.bearish?.length){document.getElementById('fno-top5').innerHTML='<p class="text-muted p-2">No F&O signals - market closed <button class="btn btn-sm btn-outline-primary" onclick="loadFnoTop5()">Refresh</button></p>'; return;}
+            const liveBadge = r.is_live===false ? '<span class="badge bg-warning text-dark">Market Closed</span>' : '<span class="badge bg-success">Live NSE</span>';
+            if(!r.bullish?.length&&!r.bearish?.length){document.getElementById('fno-top5').innerHTML='<p class="text-muted p-2">'+liveBadge+' No signals now - market closed. Refresh after market open (9:15). <button class="btn btn-sm btn-outline-primary" onclick="loadFnoTop5()">Refresh</button></p>'; return;}
             document.getElementById('fno-date').textContent = r.date ? '('+r.date+')' : '';
             const bull=r.bullish||[], bear=r.bearish||[];
-            let h=`<div class="sig-box bull"><h5 class="price-up">Top 5 Bullish Today (Future & Option)</h5>`;
+            let badge = r.is_live===false ? ' <span class="badge bg-warning text-dark">Market Closed</span>' : ' <span class="badge bg-success">Live</span>';
+            let h=`<div class="sig-box bull"><h5 class="price-up">Top 5 Bullish Today (Future & Option)${badge}</h5>`;
             if(!bull.length) h+='<p class="text-muted small">No data - refresh or try later</p>';
             bull.forEach(s=>{
                 const opt=s.option_suggestion||{}; const chg=s.change_pct>=0?`+${s.change_pct}%`: `${s.change_pct}%`;
