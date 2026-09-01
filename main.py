@@ -75,6 +75,11 @@ async def healthz():
     return {"status": "ok"}
 
 
+@app.get("/api/lot-size/{symbol}")
+def lot_size(symbol: str):
+    from utils.helpers import get_lot_size
+    return {"symbol": symbol.upper(), "lot_size": get_lot_size(symbol)}
+
 @app.get("/ready")
 async def ready():
     # Light readiness check with DB ping but bounded 1s

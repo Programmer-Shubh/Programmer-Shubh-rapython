@@ -685,24 +685,47 @@ class BacktestEngine:
             sl_level = entry_price * (1 + sl_pct / 100) if sl_pct > 0 else 0
             tp_level = entry_price * (1 - tp_pct / 100) if tp_pct > 0 else 0
         
-        # NO INTRA-BAR LOOK-AHEAD: Use current bar's high/low only
-        # If SL/TP levels are within the candle's high/low range, assume they could be hit
-        # This avoids look-ahead by only checking if price moved through those levels.
-        high = float(current.get("high_price", 0) or current["close_price"])
-        low = float(current.get("low_price", 0) or current["close_price"])
-        if high < low:
-            high, low = low, high
-        
-        hit_sl = False
-        hit_tp = False
-        if txn_type == "buy":
-            # Long position: SL hit if LOW <= SL level; TP hit if HIGH >= TP level
-            hit_sl = sl_level > 0 and low <= sl_level
-            hit_tp = tp_level > 0 and high >= tp_level
+        # FIX: SL/TP is on OPTION PREMIUM, not spot - compare to BS premium at bar high/low spot
+        try:
+            from utils.helpers import black_scholes as _bs
+        except Exception:
+            _bs = None
+        high_spot = float(current.get("high_price", 0) or current["close_price"])
+        low_spot = float(current.get("low_price", 0) or current["close_price"])
+        if high_spot < low_spot:
+            high_spot, low_spot = low_spot, high_spot
+        strike = float(entry.get("strike", 0) or 0)
+        # Estimate time to expiry (days)
+        t = 5/365
+        try:
+            exp = getattr(self, "bt_expiry", "") or ""
+            cur_d = str(current.get("trade_date",""))
+            if exp and cur_d:
+                import datetime as _dt
+                d1=_dt.datetime.strptime(cur_d,"%Y-%m-%d"); d2=_dt.datetime.strptime(exp,"%Y-%m-%d")
+                t=max(0.003,(d2-d1).days/365)
+        except Exception:
+            pass
+        iv = float(getattr(self,"implied_volatility",0.14) or 0.14)
+        if _bs and strike>0:
+            try:
+                prem_high = _bs(high_spot, strike, t, iv, option_type.upper()[:2])
+                prem_low = _bs(low_spot, strike, t, iv, option_type.upper()[:2])
+            except Exception:
+                prem_high, prem_low = 9999, 0
         else:
-            # Short position: SL hit if HIGH >= SL level; TP hit if LOW <= TP level
-            hit_sl = sl_level > 0 and high >= sl_level
-            hit_tp = tp_level > 0 and low <= tp_level
+            # Fallback: use close premium as proxy
+            prem_high, prem_low = float("inf"), 0
+        # For Buy: premium falls when spot falls (CE) - use low; for Sell opposite
+        opt_high = max(prem_high, prem_low)
+        opt_low = min(prem_high, prem_low)
+        hit_sl = False; hit_tp = False
+        if txn_type == "buy":
+            hit_sl = sl_level > 0 and opt_low <= sl_level
+            hit_tp = tp_level > 0 and opt_high >= tp_level
+        else:
+            hit_sl = sl_level > 0 and opt_high >= sl_level
+            hit_tp = tp_level > 0 and opt_low <= tp_level
         if hit_sl:
             return {"reason": "stoploss", "level": sl_level}
         if hit_tp:

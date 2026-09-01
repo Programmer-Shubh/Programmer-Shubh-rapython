@@ -1,5 +1,58 @@
 import math
+import os, json, time as _time
 
+_NSE_LOTS_CACHE = None
+_NSE_LOTS_CACHE_TS = 0
+_NSE_LOTS_TTL = 24*3600
+
+def _load_nse_lots():
+    global _NSE_LOTS_CACHE, _NSE_LOTS_CACHE_TS
+    if _NSE_LOTS_CACHE and _time.time() - _NSE_LOTS_CACHE_TS < _NSE_LOTS_TTL:
+        return _NSE_LOTS_CACHE
+    # Try daily file cache
+    for p in [os.path.join(os.path.dirname(__file__), "..", "data", "nse_lots.json"), os.path.join("data","nse_lots.json")]:
+        try:
+            if os.path.exists(p):
+                with open(p,"r") as f: j=json.load(f)
+                if j.get("ts",0) > _time.time() - _NSE_LOTS_TTL and j.get("lots"):
+                    _NSE_LOTS_CACHE=j["lots"]; _NSE_LOTS_CACHE_TS=j["ts"]; return _NSE_LOTS_CACHE
+        except Exception: pass
+    # Fetch from NSE
+    try:
+        import urllib.request as _ur
+        _ur_headers={"User-Agent":"Mozilla/5.0"}
+        # NSE endpoint for F&O securities
+        for url in ["https://www.nseindia.com/api/equity-stockIndices?index=SECURITIES%20IN%20F%26O","https://archives.nseindia.com/content/fo/fo_mktlots.csv"]:
+            try:
+                req=_ur.Request(url, headers=_ur_headers)
+                with _ur.urlopen(req, timeout=5) as r:
+                    data=r.read().decode()
+                    lots={}
+                    if "symbol" in data.lower():
+                        import csv, io
+                        reader=csv.DictReader(io.StringIO(data))
+                        for row in reader:
+                            sym=(row.get("SYMBOL") or row.get("symbol") or "").strip().upper()
+                            ls=row.get("LOT SIZE") or row.get("lotSize") or row.get("marketLot") or ""
+                            try: lots[sym]=int(str(ls).strip())
+                            except: pass
+                    elif data.strip().startswith("{"):
+                        j=json.loads(data)
+                        for d in j.get("data",[]):
+                            sym=str(d.get("symbol","")).upper(); ls=d.get("marketLot") or d.get("lotSize")
+                            try: lots[sym]=int(ls)
+                            except: pass
+                    if lots:
+                        _NSE_LOTS_CACHE=lots; _NSE_LOTS_CACHE_TS=_time.time()
+                        # persist
+                        try:
+                            os.makedirs("data", exist_ok=True)
+                            with open("data/nse_lots.json","w") as f: json.dump({"ts":_NSE_LOTS_CACHE_TS,"lots":lots},f)
+                        except: pass
+                        return lots
+            except Exception: continue
+    except Exception: pass
+    return None
 
 def get_lot_size(symbol: str) -> int:
     lots = {
@@ -18,6 +71,12 @@ def get_lot_size(symbol: str) -> int:
         "SHREECEM": 30, "NESTLEIND": 40, "BAJAJFINSV": 125, "HEROMOTOCO": 300,
         "APOLLOHOSP": 75, "UPL": 1100,
     }
+    # Try live NSE lots first (daily fetch)
+    try:
+        live=_load_nse_lots()
+        if live and symbol.upper() in live:
+            return int(live[symbol.upper()])
+    except Exception: pass
     return lots.get(symbol.upper(), 50)
 
 
