@@ -479,6 +479,18 @@
                             <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
                         </div>
                     </div>
+                    <div class="card mt-2" style="border:1px dashed #ffc107"><div class="card-body p-2">
+                        <strong class="small">5m Pullback Robot Conditions (editable → Backtest)</strong>
+                        <div class="row g-2 mt-1">
+                            <div class="col-md-2"><label class="form-label small">VWAP Band (±)</label><input id="r-vwap-mult" type="number" class="form-control form-control-sm" value="2" step="0.5"></div>
+                            <div class="col-md-2"><label class="form-label small">Long RSI &lt;</label><input id="r-rsi-long" type="number" class="form-control form-control-sm" value="30"></div>
+                            <div class="col-md-2"><label class="form-label small">Short RSI &gt;</label><input id="r-rsi-short" type="number" class="form-control form-control-sm" value="70"></div>
+                            <div class="col-md-2"><label class="form-label small">EMA Period</label><input id="r-ema-p" type="number" class="form-control form-control-sm" value="20"></div>
+                            <div class="col-md-2"><label class="form-label small">RSI(14)</label><input id="r-rsi-p" type="number" class="form-control form-control-sm" value="14"></div>
+                            <div class="col-md-2"><label class="form-label small">RR (1:?)</label><input id="r-rr" type="number" class="form-control form-control-sm" value="2" step="0.5"></div>
+                        </div>
+                        <div class="small text-muted mt-1">Long: touch -2 VWAP Band + RSI&lt;30 + Green | Short: touch +2 VWAP Band + RSI&gt;70 + Red | CE: Price&gt;20EMA&VWAP, pullback to EMA + green + RSI&gt;50 + Vol&gt;VMA20 + OI support | PE: opposite | ATM, SL=entry low/high, Exit: close opposite EMA</div>
+                    </div></div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
                             <div class="d-flex gap-3 flex-wrap" style="font-size:12px">
@@ -1041,7 +1053,13 @@
         const entryTime=document.getElementById('r-entry').value||'09:35';
         const exitTime=document.getElementById('r-exit').value||'15:14';
         const preset = window._pullbackPreset || '';
-        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal, preset:preset}, strategy_preset:preset, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
+        const vwapMult=parseFloat(document.getElementById('r-vwap-mult')?.value)||2;
+        const rsiLong=parseFloat(document.getElementById('r-rsi-long')?.value)||30;
+        const rsiShort=parseFloat(document.getElementById('r-rsi-short')?.value)||70;
+        const emaP=parseInt(document.getElementById('r-ema-p')?.value)||20;
+        const rsiP=parseInt(document.getElementById('r-rsi-p')?.value)||14;
+        const rr=parseFloat(document.getElementById('r-rr')?.value)||2;
+        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal, preset:preset, vwap_band_mult:vwapMult, rsi_long:rsiLong, rsi_short:rsiShort, ema_period:emaP, rsi_period:rsiP, rr:rr}, strategy_preset:preset, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
         document.getElementById('robot-results').classList.remove('hidden');
         document.getElementById('robot-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Running backtest...</p>';
         try{

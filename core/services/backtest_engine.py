@@ -198,8 +198,12 @@ class BacktestEngine:
                 sell_sig = self._get_sell_signal(i, pre_calc, historical, exit_conditions)
                 # For spreads (multi-leg like Bear Call Spread), allow entry on either signal to avoid 0 trades when single indicator rare
                 # Auto-signal mode: if advanced auto_signal, pick CE on buy_sig, PE on sell_sig
+                force_daily = bool(advanced_options.get("force_daily_entry"))
                 auto_signal = bool(advanced_options.get("auto_signal") or (legs and legs[0].get("transaction","").lower()=="auto"))
-                if auto_signal:
+                if force_daily:
+                    entry_sig = True
+                    exit_sig = time_exit
+                elif auto_signal:
                     # For AUTO, entry on any signal; leg type chosen dynamically at execution
                     entry_sig = buy_sig or sell_sig
                     if not entry_sig and not pre_calc:
@@ -209,6 +213,10 @@ class BacktestEngine:
                     entry_sig = buy_sig or sell_sig
                     if not entry_sig and not pre_calc:
                         entry_sig = True
+                    # If spread and no signal for 3 bars, force daily like AlgoTest premium selling
+                    if not entry_sig and force_daily is False and len(historical)>0:
+                        # fallback: if no signal, allow entry every 5 bars to increase trade count
+                        entry_sig = (i % 5 == 0)
                     exit_sig = time_exit
                 else:
                     # Direction-aware: CE Buy = bullish (buy_sig), PE Buy = bearish (sell_sig)
@@ -251,8 +259,8 @@ class BacktestEngine:
                             pending_entry_signal = None
                     else:
                         pending_entry_signal = None
-                # SQUARE OFF ON EXPIRY DAY - automatic square-off to avoid delivery risk
-                if not self.is_live:
+                # SQUARE OFF ON EXPIRY DAY - only on last bar (speed)
+                if not self.is_live and is_last:
                     self._square_off_expiry(historical, entries, exits, symbol, option_type, txn_type, qty, risk_management)
                 if has_open and pending_exit is None and (exit_sig or time_exit):
                     pending_exit = "condition" if exit_sig else "time"

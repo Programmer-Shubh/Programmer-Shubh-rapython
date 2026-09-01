@@ -365,6 +365,7 @@ def run_backtest(req: BacktestRequest):
                 {"option_type": opt, "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm},
                 {"option_type": opt, "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm + 2},
             ]
+            advanced_in["force_daily_entry"]=True
         elif preset in ("bull_put_spread", "bullput", "bull_put"):
             otm = legs[0].get("otm_distance", 1) if legs else 1
             opt = legs[0].get("option_type", "PE") if legs and legs[0].get("option_type") == "PE" else "PE"
@@ -415,9 +416,19 @@ def run_backtest(req: BacktestRequest):
         entry_conditions = req.entry_conditions or []
         exit_conditions = req.exit_conditions or []
 
-        # Multi-source historical data: nselib primary, jugaad-data secondary, NSEpy tertiary
-        from core.services.historical_fetcher import fetch_historical
-        historical = fetch_historical(symbol, start_date, end_date, allow_synthetic=True)
+        # Speed: in-memory cache 60s for same symbol+dates (avoids 4s fetch per click)
+        import time as _bt_t
+        if not hasattr(run_backtest, "_cache"): run_backtest._cache={}
+        _ck=f"{symbol}_{start_date}_{end_date}"
+        _ce=run_backtest._cache.get(_ck)
+        if _ce and _bt_t.time()-_ce[0]<60:
+            historical=_ce[1]
+        else:
+            from core.services.historical_fetcher import fetch_historical
+            historical = fetch_historical(symbol, start_date, end_date, allow_synthetic=True)
+            run_backtest._cache[_ck]=(_bt_t.time(), historical)
+            # cap cache size
+            if len(run_backtest._cache)>20: run_backtest._cache.pop(next(iter(run_backtest._cache)))
         # If too few bars (<30), indicators won't warm up -> force longer synthetic
         if not historical or len(historical) < 30:
             synth = _generate_synthetic_fallback(symbol, start_date, end_date)
