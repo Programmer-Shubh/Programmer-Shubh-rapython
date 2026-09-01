@@ -435,25 +435,25 @@ def run_backtest(req: BacktestRequest):
                 sd=_dt.datetime.strptime(start_date,"%Y-%m-%d").date()
                 if sd>last_trading: start_date=(last_trading-_dt.timedelta(days=30)).strftime("%Y-%m-%d")
             except: pass
-            # yfinance+NSE direct pipeline (no third-party)
+            # NSE direct pipeline (no yfinance)
             try:
-                from core.services.historical_fetcher import _fetch_yfinance
-                _fetch_yfinance(symbol, start_date, end_date)
+                from core.services.historical_fetcher import _fetch_nse_archives_historical
+                _fetch_nse_archives_historical(symbol, start_date, end_date)
             except: pass
             historical = fetch_historical(symbol, start_date, end_date, allow_synthetic=False)
             run_backtest._cache[_ck]=(_bt_t.time(), historical)
             if len(run_backtest._cache)>20: run_backtest._cache.pop(next(iter(run_backtest._cache)))
         if not historical or len(historical) < 5:
-            # Never show error: fallback to 6-month DB -> yfinance -> synthetic so backtest always runs
+            # Never show error: fallback to 6-month DB -> NSE archives -> synthetic so backtest always runs
             try:
-                from core.services.historical_fetcher import _fetch_db_historical, _last_trading_day, _generate_synthetic_data, _fetch_yfinance_historical
+                from core.services.historical_fetcher import _fetch_db_historical, _last_trading_day, _generate_synthetic_data, _fetch_nse_archives_historical
                 import datetime as _dt2
                 ltd = _last_trading_day().strftime("%Y-%m-%d")
                 fb = _fetch_db_historical(symbol, (_dt2.date.today()-_dt2.timedelta(days=180)).strftime("%Y-%m-%d"), ltd)
                 if fb and len(fb) >= 5:
                     historical = fb[-120:]
                 else:
-                    yf = _fetch_yfinance_historical(symbol, start_date, end_date)
+                    yf = _fetch_nse_archives_historical(symbol, start_date, end_date)
                     if yf and len(yf) >= 5: historical = yf
                     else: historical = _generate_synthetic_data(symbol, start_date, end_date)
                     if historical:

@@ -21,7 +21,7 @@ _RUNNING = False
 
 
 def _seed_history(symbol: str):
-    """6-month EOD archive: yfinance -> nselib -> jugaad, always 180 days."""
+    """6-month EOD archive: NSE archives -> nselib -> jugaad, always 180 days."""
     from datetime import datetime, timedelta
     db = Database.get_instance()
     has = db.fetch_one(
