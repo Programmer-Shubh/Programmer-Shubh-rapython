@@ -273,7 +273,19 @@ class LiveMarketData:
         now = time.time()
         if symbol in _LIVE_CACHE and now - _LIVE_CACHE[symbol]["ts"] < _LIVE_CACHE_TTL:
             return _LIVE_CACHE[symbol]["data"]
-        data = self.fetch_live_from_nse(symbol)
+        data=None
+        for attempt in range(3):
+            data = self.fetch_live_from_nse(symbol)
+            if data: break
+            try: time.sleep(0.6*(attempt+1))
+            except: pass
+        if not data:
+            # DB fallback: last bhavcopy close
+            try:
+                from core.models.database import Database
+                row=Database.get_instance().fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? ORDER BY trade_date DESC LIMIT 1",[symbol.upper()])
+                if row: data={"spot":float(row["close_price"]),"formatted":f"INR {float(row['close_price']):,.2f}","change":0,"high":float(row["close_price"]),"low":float(row["close_price"]),"source":"db-fallback"}
+            except: pass
         if data:
             _LIVE_CACHE[symbol] = {"ts": now, "data": data}
         return data

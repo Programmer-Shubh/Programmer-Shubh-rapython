@@ -425,19 +425,11 @@ def run_backtest(req: BacktestRequest):
             historical=_ce[1]
         else:
             from core.services.historical_fetcher import fetch_historical
-            historical = fetch_historical(symbol, start_date, end_date, allow_synthetic=True)
+            historical = fetch_historical(symbol, start_date, end_date, allow_synthetic=False)
             run_backtest._cache[_ck]=(_bt_t.time(), historical)
-            # cap cache size
             if len(run_backtest._cache)>20: run_backtest._cache.pop(next(iter(run_backtest._cache)))
-        # If too few bars (<30), indicators won't warm up -> force longer synthetic
-        if not historical or len(historical) < 30:
-            synth = _generate_synthetic_fallback(symbol, start_date, end_date)
-            if synth and len(synth) >= 30:
-                historical = synth
-            elif not historical:
-                historical = synth
         if not historical or len(historical) < 5:
-            return {"error": f"No data available for {symbol}. All free sources failed. Try importing bhavcopy data or check dates."}
+            return {"error": f"No real NSE data for {symbol} {start_date} to {end_date}. Synthetic disabled. Import bhavcopy or try shorter range. Live NSE may be temporarily down - retry in 30s."}
         if len(historical) > 120:
             historical = historical[-120:]
         engine = BacktestEngine(is_live=False)

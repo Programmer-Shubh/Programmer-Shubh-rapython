@@ -342,8 +342,8 @@ def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Di
 
 
 def fetch_historical(symbol: str, start_date: str, end_date: str, allow_synthetic: bool = False) -> List[Dict]:
-    """Realistic only when allow_synthetic=False (backtest default).
-    DB cache -> nselib -> StocksRin -> Google -> TrueData. Synthetic only if allow_synthetic=True."""
+    """NO SYNTHETIC - Real NSE only. DB -> nselib -> jugaad -> TrueData. Returns [] if no real data."""
+    allow_synthetic=False  # force off
     symbol = symbol.upper()
     # 1) Instant local cache (seeded by background refresh) - serves backtest in <10ms
     try:
@@ -370,11 +370,4 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
                 return data
         except Exception:
             continue
-    if allow_synthetic:
-        try:
-            synth = _generate_synthetic_data(symbol, start_date, end_date)
-            if synth and len(synth) >= 5:
-                return synth
-        except Exception:
-            pass
     return []
