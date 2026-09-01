@@ -425,11 +425,17 @@ def run_backtest(req: BacktestRequest):
             historical=_ce[1]
         else:
             from core.services.historical_fetcher import fetch_historical
+            import datetime as _dt
+            # Cap future end_date to today (yfinance has no future candles)
+            try:
+                ed=_dt.datetime.strptime(end_date,"%Y-%m-%d").date(); today=_dt.date.today()
+                if ed>today: end_date=today.strftime("%Y-%m-%d")
+            except: pass
             historical = fetch_historical(symbol, start_date, end_date, allow_synthetic=False)
             run_backtest._cache[_ck]=(_bt_t.time(), historical)
             if len(run_backtest._cache)>20: run_backtest._cache.pop(next(iter(run_backtest._cache)))
         if not historical or len(historical) < 5:
-            return {"error": f"No real NSE data for {symbol} {start_date} to {end_date}. Synthetic disabled. Import bhavcopy or try shorter range. Live NSE may be temporarily down - retry in 30s."}
+            return {"error": f"No real NSE data for {symbol} {start_date} to {end_date}. Data only till today. Try {start_date} to {__import__('datetime').date.today().strftime('%Y-%m-%d')} or wait for NSE bhavcopy."}
         if len(historical) > 120:
             historical = historical[-120:]
         engine = BacktestEngine(is_live=False)
