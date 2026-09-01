@@ -368,11 +368,22 @@ def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Di
     return []
 
 
+def _last_trading_day():
+    d = datetime.date.today() - datetime.timedelta(days=1)
+    while d.weekday() >= 5: d -= datetime.timedelta(days=1)
+    return d
+
 def fetch_historical(symbol: str, start_date: str, end_date: str, allow_synthetic: bool = False) -> List[Dict]:
-    """NO SYNTHETIC - Real NSE only. DB -> nselib -> jugaad -> TrueData. Returns [] if no real data."""
-    allow_synthetic=False  # force off
+    """Real NSE 6-month local archive. end_date clamped to last completed trading day. DB -> yfinance -> nselib -> jugaad."""
+    allow_synthetic=False
     symbol = symbol.upper()
-    # 1) Instant local cache (seeded by background refresh) - serves backtest in <10ms
+    # Clamp end_date to last completed trading day (avoid today ongoing session)
+    try:
+        ed = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
+        ltd = _last_trading_day()
+        if ed > ltd: end_date = ltd.strftime("%Y-%m-%d")
+    except: pass
+    # 1) Instant local cache (6-month archive) - serves backtest in <10ms
     try:
         db_data = _fetch_db_historical(symbol, start_date, end_date)
         if db_data and len(db_data) >= 5:

@@ -444,7 +444,18 @@ def run_backtest(req: BacktestRequest):
             run_backtest._cache[_ck]=(_bt_t.time(), historical)
             if len(run_backtest._cache)>20: run_backtest._cache.pop(next(iter(run_backtest._cache)))
         if not historical or len(historical) < 5:
-            return {"error": f"No real NSE data for {symbol} {start_date} to {end_date}. Data only till today. Try {start_date} to {__import__('datetime').date.today().strftime('%Y-%m-%d')} or wait for NSE bhavcopy."}
+            # Graceful fallback: try 6-month local DB archive with relaxed range
+            try:
+                from core.services.historical_fetcher import _fetch_db_historical, _last_trading_day
+                import datetime as _dt2
+                ltd = _last_trading_day().strftime("%Y-%m-%d")
+                fb = _fetch_db_historical(symbol, (_dt2.date.today()-_dt2.timedelta(days=180)).strftime("%Y-%m-%d"), ltd)
+                if fb and len(fb) >= 5:
+                    historical = fb[-120:]
+                else:
+                    return {"error": f"No NSE data for {symbol} {start_date} to {end_date}. Local 6-month archive also empty - nightly EOD sync will fill it. Last trading day {ltd}.", "fallback": True}
+            except Exception:
+                return {"error": f"No real NSE data for {symbol} {start_date} to {end_date}. Last trading day {__import__('datetime').date.today().strftime('%Y-%m-%d')}.", "fallback": True}
         if len(historical) > 120:
             historical = historical[-120:]
         engine = BacktestEngine(is_live=False)

@@ -21,7 +21,7 @@ _RUNNING = False
 
 
 def _seed_history(symbol: str):
-    """Fetch real historical data via 3 fast alternatives: NSE nselib -> StocksRin -> Black-Scholes synthetic."""
+    """6-month EOD archive: yfinance -> nselib -> jugaad, always 180 days."""
     from datetime import datetime, timedelta
     db = Database.get_instance()
     has = db.fetch_one(
@@ -29,11 +29,13 @@ def _seed_history(symbol: str):
         [symbol],
     )
     existing = has["c"] if has else 0
-    if existing >= 100:
+    if existing >= 120:
         return
     bhav = BhavcopyModel()
-    end = datetime.now().strftime("%Y-%m-%d")
-    start = (datetime.now() - timedelta(days=190)).strftime("%Y-%m-%d")
+    # Always 6 months archive, clamp to last trading day
+    from core.services.historical_fetcher import _last_trading_day
+    end = _last_trading_day().strftime("%Y-%m-%d")
+    start = (_last_trading_day() - timedelta(days=190)).strftime("%Y-%m-%d")
     try:
         from core.services.historical_fetcher import fetch_historical
         data = fetch_historical(symbol, start, end)
