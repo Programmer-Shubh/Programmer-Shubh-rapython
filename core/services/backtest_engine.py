@@ -571,7 +571,11 @@ class BacktestEngine:
         step = get_strike_step(symbol)
         atm = round(spot / step) * step
         if strike_sel == "delta" and delta_target is not None:
-            return self._find_delta_strike(spot, symbol, option_type, float(delta_target))
+            s=self._find_delta_strike(spot, symbol, option_type, float(delta_target))
+            # clamp delta strike to ATM±4
+            return max(atm-4*step, min(atm+4*step, s))
+        # clamp otm_dist to max 4
+        otm_dist = max(0, min(int(otm_dist or 0), 4))
         offset = otm_dist * step
         if strike_sel == "itm":
             offset = -offset if option_type == "CE" else offset
@@ -579,7 +583,9 @@ class BacktestEngine:
             offset = offset if option_type == "CE" else -offset
         else:
             offset = 0
-        return atm + offset
+        strike = atm + offset
+        # final ATM±4 clamp - never deep ITM/OTM
+        return max(atm-4*step, min(atm+4*step, strike))
 
     def _enter_single(self, date, spot, symbol, leg, strike_sel, delta_target, otm_dist):
         option_type = leg.get("option_type", "CE")

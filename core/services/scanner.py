@@ -442,9 +442,12 @@ class OptionScanner:
                 import datetime as _dt
                 expiry = (_dt.datetime.now() + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
         
-        # Final safety check: ensure strike is within 10% of spot
+        # Strict ATM±4 clamp
+        max_strike = atm_strike + 4*step
+        min_strike = atm_strike - 4*step
+        strike = max(min_strike, min(max_strike, strike))
         if strike > 0 and abs(strike - spot) / spot > 0.10:
-            strike = atm_strike  # Reset to ATM
+            strike = atm_strike
         
         return {'strike': strike, 'premium': premium, 'expiry': expiry}
 

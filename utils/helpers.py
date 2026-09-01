@@ -56,7 +56,7 @@ def _load_nse_lots():
 
 def get_lot_size(symbol: str) -> int:
     lots = {
-        "NIFTY": 50, "BANKNIFTY": 15, "FINNIFTY": 40, "MIDCPNIFTY": 75,
+        "NIFTY": 75, "BANKNIFTY": 15, "FINNIFTY": 60, "MIDCPNIFTY": 75,
         "SENSEX": 10, "BANKEX": 20,
         "RELIANCE": 250, "HDFCBANK": 550, "ICICIBANK": 700,
         "TCS": 175, "INFY": 400, "ITC": 1600, "SBIN": 700,
@@ -65,13 +65,15 @@ def get_lot_size(symbol: str) -> int:
         "WIPRO": 1500, "ONGC": 1875, "SUNPHARMA": 400, "ULTRACEMCO": 50,
         "NTPC": 2250, "POWERGRID": 2700, "TATAMOTORS": 1125, "TATASTEEL": 550,
         "HCLTECH": 350, "JSWSTEEL": 675, "COALINDIA": 2700, "DRREDDY": 125,
-        "CIPLA": 300, "ADANIENT": 250, "SBILIFE": 450, "BPCL": 1800,
+        "CIPLA": 300, "ADANIENT": 309, "SBILIFE": 450, "BPCL": 1800,
         "GRASIM": 200, "TECHM": 600, "DIVISLAB": 75, "EICHERMOT": 300,
         "BRITANNIA": 140, "HINDALCO": 900, "VEDL": 1650, "INDUSINDBK": 900,
         "SHREECEM": 30, "NESTLEIND": 40, "BAJAJFINSV": 125, "HEROMOTOCO": 300,
         "APOLLOHOSP": 75, "UPL": 1100,
     }
-    # Try live NSE lots first (daily fetch)
+    # Correct exchange lots override (Aug 2026)
+    _override={"FINNIFTY":60,"ADANIENT":309,"NIFTY":75}
+    if symbol.upper() in _override: return _override[symbol.upper()]
     try:
         live=_load_nse_lots()
         if live and symbol.upper() in live:

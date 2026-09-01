@@ -19,12 +19,12 @@ async def ws_live(websocket: WebSocket):
         # Send immediate snapshot
         symbols = ["NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","RELIANCE","HDFCBANK","TCS","INFY"]
         while True:
-            # <50ms tick: try niftytrader live, fallback to DB
+            # <50ms tick: yfinance/NSE live, fallback to DB
             ticks = {}
             for sym in symbols:
                 data = live.get_live_spot(sym)
                 if data and data.get("spot"):
-                    ticks[sym] = {"spot": data["spot"], "change": data.get("change",0), "ts": int(time.time()*1000), "source": "niftytrader.in"}
+                    ticks[sym] = {"spot": data["spot"], "change": data.get("change",0), "ts": int(time.time()*1000), "source": "yfinance/NSE"}
                 else:
                     # DB fallback
                     row = live.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [sym])
@@ -67,4 +67,4 @@ async def ws_chain(websocket: WebSocket, symbol: str):
 
 @router.get("/stats")
 def ws_stats():
-    return {"connections": len(_connections), "interval_ms": 45, "source": "niftytrader.in + db fallback", "latency": "<50ms"}
+    return {"connections": len(_connections), "interval_ms": 45, "source": "yfinance/NSE + db fallback", "latency": "<50ms"}
