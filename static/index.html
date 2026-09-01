@@ -714,6 +714,7 @@
         if(document.getElementById('ind-neural')?.checked) ind.push({id:'neural_network',params:addMode({period:parseInt(document.getElementById('ind-neural-p').value)||14}, 'ind-neural-mode')});
         if(document.getElementById('ind-volind')?.checked) ind.push({id:'volume_indicator',params:addMode({period:parseInt(document.getElementById('ind-volind-p').value)||20}, 'ind-volind-mode')});
         if(document.getElementById('ind-oi')?.checked) ind.push({id:'open_interest',params:addMode({period:parseInt(document.getElementById('ind-oi-p').value)||20}, 'ind-oi-mode')});
+        if(!ind.length) ind.push({id:'rsi',params:{period:14,mode:'both'}}); // default so backtest never 0 trades
         return ind;
     }
     function setRange(days){const e=new Date();const s=new Date();s.setDate(e.getDate()-days);document.getElementById('s-start').value=s.toISOString().split('T')[0];document.getElementById('s-end').value=e.toISOString().split('T')[0];}
