@@ -49,8 +49,14 @@ class TradeModel:
             qty = t["quantity"]
             lot = t.get("lot_size", 50)
             if current_price is None or entry <= 0:
-                result.append({"trade": t, "current_price": entry if entry>0 else (current_price or 0), "unrealized_pnl": 0, "unrealized_pct": 0, "invalid": True})
-                continue
+                # Never flicker: use last known premium or entry as current
+                ck = f"{t['symbol']}_{t['option_type']}_{t['strike_price']}"
+                fallback = self._last_premiums.get(ck, entry if entry>0 else 0)
+                current_price = fallback if fallback and fallback>0 else (entry if entry>0 else 0)
+                # keep trade visible, not invalid gap
+                if entry <= 0:
+                    result.append({"trade": t, "current_price": round(current_price,2), "unrealized_pnl": 0, "unrealized_pct": 0, "invalid": False})
+                    continue
             # Automated Exit Bug Fix: check SL/target on live price and auto-close
             if auto_exit:
                 sl = float(t.get("stop_loss", 0) or 0)
@@ -105,6 +111,12 @@ class TradeModel:
                 pnl = (current_price - entry) * qty * lot
             else:
                 pnl = (entry - current_price) * qty * lot
+            # Clamp flicker: if current_price jumps >80% intraday, keep last (prevent 150->49 flash)
+            ck2 = f"{t['symbol']}_{t['option_type']}_{t['strike_price']}"
+            last = self._last_premiums.get(ck2)
+            if last and last>10 and current_price>0 and abs(current_price-last)/last > 0.80:
+                current_price = last
+                pnl = (current_price - entry) * qty * lot if t["transaction_type"]=="BUY" else (entry - current_price)*qty*lot
             result.append({
                 "trade": t,
                 "current_price": round(current_price, 2),
