@@ -90,7 +90,7 @@ def scan_all():
 @router.get("/fno-top5")
 def fno_top5():
     k="fno"; now=_t.time()
-    if k in _CACHE and now-_CACHE[k][0] < 60:
+    if k in _CACHE and now-_CACHE[k][0] < 300:
         return _CACHE[k][1]
     try:
         scanner = OptionScanner()
@@ -105,7 +105,7 @@ def fno_top5():
 @router.get("/opportunities")
 def top_opportunities():
     k="opp"; now=_t.time()
-    if k in _CACHE and now-_CACHE[k][0] < 60:
+    if k in _CACHE and now-_CACHE[k][0] < 300:
         return _CACHE[k][1]
     try:
         scanner = OptionScanner()
