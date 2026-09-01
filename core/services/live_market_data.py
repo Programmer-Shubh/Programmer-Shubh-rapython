@@ -53,6 +53,17 @@ def _fetch_nse_indices_spot(symbol: str):
         pass
     return None
 
+def _fetch_nsepython_spot(symbol: str):
+    """nsepython (open-source) - free NSE quote via nsepython library (from marketcalls/openalgo inspired)."""
+    try:
+        from nsepython import nse_quote
+        q=nse_quote(symbol)
+        if q and q.get("lastPrice"):
+            v=float(str(q.get("lastPrice")).replace(",",""))
+            if v>0: return {"spot": v, "change": float(q.get("pChange",0) or 0), "high": float(str(q.get("dayHigh",v)).replace(",","") or v), "low": float(str(q.get("dayLow",v)).replace(",","") or v), "source": "nsepython"}
+    except: pass
+    return None
+
 def _fetch_nselib_spot(symbol: str):
     """nselib price_volume_data — reliable for stocks but can hang (no internal timeout), so bound it."""
     try:
@@ -267,7 +278,7 @@ class LiveMarketData:
 
     def fetch_live_from_nse(self, symbol: str):
         """Spot via Yahoo first (reliable, 3s, works from Render)."""
-        for fn, tout in [(_fetch_truedata_spot, 1.8), (_fetch_nse_quote_spot, 1.8), (_fetch_nse_indices_spot, 1.8), (_fetch_stocksrin_spot, 1.5)]:
+        for fn, tout in [(_fetch_nsepython_spot, 2.0), (_fetch_truedata_spot, 1.8), (_fetch_nse_quote_spot, 1.8), (_fetch_nse_indices_spot, 1.8), (_fetch_stocksrin_spot, 1.5)]:
             try:
                 d = _with_timeout(fn, tout, symbol)
                 if d:
