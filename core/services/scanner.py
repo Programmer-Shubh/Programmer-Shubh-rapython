@@ -638,6 +638,13 @@ class OptionScanner:
             return {'symbol': symbol, 'type': 'SHORT', 'score': short_score, 'price': spot,
                     'date': data[-1]['trade_date'], 'reasons': short_reasons, 'indicators': indicators,
                     'option_suggestion': opt}
+        # Fallback so scanner always shows trades realtime (like Top5)
+        if long_score > short_score and long_score > 0:
+            opt=self._suggest_option(symbol, spot, 'CE')
+            return {'symbol': symbol, 'type': 'LONG', 'score': max(32,long_score), 'price': spot,'date': data[-1]['trade_date'] if data else '', 'reasons': long_reasons or ['Uptrend bias'], 'indicators': indicators,'option_suggestion': opt}
+        if short_score > 0:
+            opt=self._suggest_option(symbol, spot, 'PE')
+            return {'symbol': symbol, 'type': 'SHORT', 'score': max(32,short_score), 'price': spot,'date': data[-1]['trade_date'] if data else '', 'reasons': short_reasons or ['Downtrend bias'], 'indicators': indicators,'option_suggestion': opt}
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': data[-1]['trade_date'] if data else '', 'reasons': [], 'indicators': indicators}
 
