@@ -816,6 +816,31 @@ def run_master_confluence(req: MasterConfluenceRequest):
         return {"error": f"Master backtest error: {str(e)}"}
 
 
+@router.post("/backtrader")
+def backtrader_route(req: BacktestRequest):
+    """Advance Backtrader engine (SMA crossover) - uses 6-month NSE archive, no yfinance."""
+    try:
+        import backtrader as bt, pandas as pd
+        from core.services.historical_fetcher import fetch_historical
+        hist = fetch_historical(req.symbol, req.start_date, req.end_date)
+        if not hist or len(hist) < 5:
+            return {"error": "No NSE data for Backtrader"}
+        df = pd.DataFrame([{"datetime": pd.to_datetime(h["trade_date"]), "open": h["open_price"], "high": h["high_price"], "low": h["low_price"], "close": h["close_price"], "volume": h["volume"]} for h in hist])
+        df.set_index("datetime", inplace=True)
+        cerebro = bt.Cerebro(); cerebro.broker.setcash(100000)
+        data = bt.feeds.PandasData(dataname=df); cerebro.adddata(data)
+        class SmaCross(bt.Strategy):
+            def __init__(self): self.sma1=bt.indicators.SMA(period=9); self.sma2=bt.indicators.SMA(period=21)
+            def next(self):
+                if not self.position and self.sma1[0] > self.sma2[0]: self.buy()
+                elif self.position and self.sma1[0] < self.sma2[0]: self.close()
+        cerebro.addstrategy(SmaCross); cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="ta")
+        res = cerebro.run(); ta = res[0].analyzers.ta.get_analysis()
+        total = ta.get("total",{}).get("total",0); won = ta.get("won",{}).get("total",0)
+        final = cerebro.broker.getvalue()
+        return {"engine": "backtrader", "initial": 100000, "final": round(final,2), "total_trades": total, "win_rate": round(won/max(total,1)*100,2), "return_pct": round((final-100000)/100000*100,2)}
+    except Exception as e: return {"error": str(e)}
+
 @router.post("/walk-forward")
 def walk_forward_route(req: BacktestRequest):
     from core.services.walk_forward import walk_forward
