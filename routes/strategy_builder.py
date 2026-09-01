@@ -421,7 +421,7 @@ def run_backtest(req: BacktestRequest):
         if not hasattr(run_backtest, "_cache"): run_backtest._cache={}
         _ck=f"{symbol}_{start_date}_{end_date}"
         _ce=run_backtest._cache.get(_ck)
-        if _ce and _bt_t.time()-_ce[0]<60:
+        if _ce and _bt_t.time()-_ce[0]<300:
             historical=_ce[1]
         else:
             from core.services.historical_fetcher import fetch_historical
