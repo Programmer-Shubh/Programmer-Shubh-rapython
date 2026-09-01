@@ -746,10 +746,12 @@
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50;
         const body={symbol:idx,start_date:startDate,end_date:endDate,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+        // Clamp end to last trading day before send (avoid today 429)
+        try{const ltd=new Date();ltd.setDate(ltd.getDate()-1);while(ltd.getDay()===0||ltd.getDay()===6) ltd.setDate(ltd.getDate()-1);const ltdStr=ltd.toISOString().split('T')[0];if(endDate>ltdStr) body.end_date=ltdStr;}catch(e){}
+        let r=null; for(let a=0;a<3;a++){try{r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); break;}catch(e){if(a===2) throw e; await new Promise(rr=>setTimeout(rr,1200*(a+1)));}}
         try{
-            const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             btn.innerHTML=orig;
-            if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');return;}
+            if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+' <button class="btn btn-sm btn-primary" onclick="runBacktest()">Retry</button></p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');return;}
             const m=r.metrics||r; window._lastBacktestMetrics=m;
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
@@ -791,7 +793,7 @@
                 h+='</tbody></table>';
                 document.getElementById('bt-tl').innerHTML=h;
             }
-        }catch(e){btn.innerHTML=orig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+'</p>';}
+        }catch(e){btn.innerHTML=orig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3">Network busy (Render cold start). Auto-retry in 3s... <span class="spinner"></span><br><small>'+e.message.slice(0,200)+'</small> <button class="btn btn-sm btn-primary" onclick="runBacktest()">Retry now</button></p>'; setTimeout(()=>runBacktest(),3000);}
     }
     async function runHistoricalReplay(){
         const b=document.getElementById('s-replay'); const o=b.innerHTML; b.innerHTML='<span class="spinner"></span> Replay...';
