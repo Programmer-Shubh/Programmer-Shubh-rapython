@@ -104,10 +104,10 @@ def place_trade(req: PlaceTradeRequest):
             try: _s=_lm.get_live_spot(req.symbol); _spot=float(_s["spot"]) if _s and _s.get("spot") else 0
             except: pass
         _step=get_strike_step(req.symbol); _atm=round(_spot/_step)*_step if _spot>0 else 0
-        if _atm>0 and abs(req.strike-_atm)>_step*5:
-            return {"error": f"Deep {'ITM' if req.strike<_atm else 'OTM'} blocked: strike {req.strike} far from ATM {_atm} (ATM±5 only)"}
-        if _spot>0 and abs(req.strike-_spot)/_spot>0.05:
-            return {"error": f"Deep ITM/OTM blocked: >5% from spot {_spot:.2f}"}
+        if _atm>0 and abs(req.strike-_atm)>_step*4:
+            return {"error": f"Deep {'ITM' if req.strike<_atm else 'OTM'} blocked: strike {req.strike} far from ATM {_atm} (ATM±4 only, spot {_spot:.0f})"}
+        if _spot>0 and abs(req.strike-_spot)/_spot>0.04:
+            return {"error": f"Deep ITM/OTM blocked: >4% from spot {_spot:.2f} (ATM±4 only)"}
     except Exception: pass
     # Deduplication: if identical open position exists, block duplicate
     existing = trade_model.db.fetch_one("SELECT id FROM paper_trades WHERE symbol=? AND strike_price=? AND option_type=? AND transaction_type=? AND status='open' LIMIT 1", [req.symbol, req.strike, req.option_type, req.transaction_type])

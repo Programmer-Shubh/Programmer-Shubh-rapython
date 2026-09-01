@@ -426,10 +426,19 @@ def run_backtest(req: BacktestRequest):
         else:
             from core.services.historical_fetcher import fetch_historical
             import datetime as _dt
-            # Cap future end_date to today (yfinance has no future candles)
+            # Clamp end_date to last completed trading day (no today/future NSE data)
             try:
                 ed=_dt.datetime.strptime(end_date,"%Y-%m-%d").date(); today=_dt.date.today()
-                if ed>today: end_date=today.strftime("%Y-%m-%d")
+                last_trading = today - _dt.timedelta(days=1)
+                while last_trading.weekday()>=5: last_trading -= _dt.timedelta(days=1)
+                if ed>last_trading: end_date=last_trading.strftime("%Y-%m-%d")
+                sd=_dt.datetime.strptime(start_date,"%Y-%m-%d").date()
+                if sd>last_trading: start_date=(last_trading-_dt.timedelta(days=30)).strftime("%Y-%m-%d")
+            except: pass
+            # yfinance+NSE direct pipeline (no third-party)
+            try:
+                from core.services.historical_fetcher import _fetch_yfinance
+                _fetch_yfinance(symbol, start_date, end_date)
             except: pass
             historical = fetch_historical(symbol, start_date, end_date, allow_synthetic=False)
             run_backtest._cache[_ck]=(_bt_t.time(), historical)

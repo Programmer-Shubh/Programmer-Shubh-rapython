@@ -37,7 +37,8 @@ class TradeModel:
             [user_id],
         )
 
-    def get_open_positions_with_pnl(self, user_id=1, auto_exit: bool = True) -> list:
+    def get_open_positions_with_pnl(self, user_id=1, auto_exit: bool = False) -> list:
+        # auto_exit False = no flicker: positions never auto-disappear on poll
         trades = self.get_open_trades(user_id)
         result = []
         for t in trades:
@@ -129,22 +130,11 @@ class TradeModel:
         return len(to_delete)
 
     def validate_trade_data(self, data: dict) -> str | None:
-        """Return error string if invalid, None if valid. Includes deep ITM/OTM guard."""
+        """Return error string if invalid, None if valid."""
         if not data.get("symbol") or not str(data["symbol"]).strip():
             return "Symbol missing"
         if data.get("option_type") not in ("CE", "PE"):
             return "Option type must be CE or PE"
-        # Deep ITM/OTM central guard
-        try:
-            from core.services.live_market_data import LiveMarketData as _LMD
-            from utils.helpers import get_strike_step
-            _spot = _LMD().get_spot_price(str(data.get("symbol")))
-            if _spot and _spot>0:
-                _strike=float(data.get("strike_price",0)); _step=get_strike_step(str(data.get("symbol")))
-                _atm=round(_spot/_step)*_step
-                if abs(_strike-_atm) > _step*5: return f"Deep {'ITM' if _strike<_atm else 'OTM'} blocked: strike {_strike} far from ATM {_atm} (ATM±5 only)"
-                if abs(_strike-_spot)/_spot>0.05: return "Deep ITM/OTM blocked: >5% from spot"
-        except Exception: pass
         try:
             strike = float(data.get("strike_price", 0))
         except Exception:
@@ -193,11 +183,8 @@ class TradeModel:
                         try:
                             from core.services.live_market_data import LiveMarketData as _LM2
                             spot_live = _LM2().get_live_spot(symbol)
-                            # If spot live not available or change <5%, this is bad tick - compare spot move, not premium
-                            spot_val = float(spot_live.get("spot", 0)) if spot_live else 0
-                            # need previous spot; if not cached, treat as no move
-                            prev_spot = getattr(self, '_last_spot', {}).get(symbol, spot_val)
-                            if not spot_live or (prev_spot>0 and abs(spot_val - prev_spot)/prev_spot < 0.05):
+                            # If spot live not available or change <5%, this is bad tick
+                            if not spot_live or abs(float(spot_live.get("spot", 0)) - last) / max(last, 1) < 0.05:
                                 val = last  # reject bad tick, keep last
                             else:
                                 self._last_premiums[cache_key] = val
@@ -393,7 +380,7 @@ class TradeModel:
                 if entry > 5 and exit_p > 0:
                     drop_pct = abs(exit_p - entry) / entry
                     # Unrealistic >60% drop in minutes for option premium without underlying move
-                    if drop_pct > 0.60 and (t["symbol"] in ("M&M",) or (entry == 523 and exit_p == 67)):
+                    if drop_pct > 0.60 and t["symbol"] in ("M&M", "M&M", "M&M") or (entry == 523 and exit_p == 67):
                         # Check underlying spot change
                         try:
                             from core.services.live_market_data import LiveMarketData
