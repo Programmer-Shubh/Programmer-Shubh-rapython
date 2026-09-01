@@ -10,4 +10,4 @@ websockets>=12.0
 nselib>=2.5.1
 reportlab>=4.1.0
 jugaad-data>=0.28
-nsepython>=3.0
+nsepython>=2.9
