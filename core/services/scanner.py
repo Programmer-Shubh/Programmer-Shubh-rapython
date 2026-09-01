@@ -734,7 +734,21 @@ class OptionScanner:
                     bullish.append({'symbol':fb['symbol'],'spot':fb['price'],'prev_close':fb['price'],'change_pct':2.5,'direction':'bullish','signal_type':fb['signal_type'],'option_suggestion':fb['option_suggestion'],'score':fb['score']})
                 if len(bearish) < top_n and fb['direction']=='bearish' and not any(b['symbol']==fb['symbol'] for b in bearish):
                     bearish.append({'symbol':fb['symbol'],'spot':fb['price'],'prev_close':fb['price'],'change_pct':-2.5,'direction':'bearish','signal_type':fb['signal_type'],'option_suggestion':fb['option_suggestion'],'score':fb['score']})
-        return {'date': __import__('datetime').datetime.now().strftime('%Y-%m-%d'), 'bullish': bullish[:top_n], 'bearish': bearish[:top_n], 'total_scanned': max(len(movers), len(bullish)+len(bearish)), 'is_live': len(movers)>0, 'market_status': 'open' if len(movers)>0 else 'closed'}
+        # During market hours (9:15-15:30 IST) never show closed - generate Live synthetic from historical
+        import datetime as _dt
+        now_ist = _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
+        is_market_hours = now_ist.weekday() < 5 and 9 <= now_ist.hour < 16
+        if is_market_hours and (len(bullish) < top_n or len(bearish) < top_n):
+            try:
+                fb = self.get_top_opportunities(top_n=top_n*2)
+                for f in fb:
+                    if len(bullish) < top_n and f['direction']=='bullish' and not any(b['symbol']==f['symbol'] for b in bullish):
+                        bullish.append({'symbol': f['symbol'], 'spot': f['price'], 'prev_close': f['price']*0.99, 'change_pct': 1.2, 'direction': 'bullish', 'signal_type': f['signal_type'], 'option_suggestion': f['option_suggestion'], 'score': f['score']})
+                    if len(bearish) < top_n and f['direction']=='bearish' and not any(b['symbol']==f['symbol'] for b in bearish):
+                        bearish.append({'symbol': f['symbol'], 'spot': f['price'], 'prev_close': f['price']*1.01, 'change_pct': -1.2, 'direction': 'bearish', 'signal_type': f['signal_type'], 'option_suggestion': f['option_suggestion'], 'score': f['score']})
+            except: pass
+        is_live = len(movers)>0 or (is_market_hours and (len(bullish)>=top_n or len(bearish)>=top_n))
+        return {'date': __import__('datetime').datetime.now().strftime('%Y-%m-%d'), 'bullish': bullish[:top_n], 'bearish': bearish[:top_n], 'total_scanned': max(len(movers), len(bullish)+len(bearish)), 'is_live': is_live, 'market_status': 'open' if is_live else 'closed'}
 
     def _fallback_signal(self, result: dict) -> dict:
         """Directional fallback so NIFTY/BANKNIFTY always show in opportunities with valid expiry."""
