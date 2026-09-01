@@ -267,11 +267,12 @@ class LiveMarketData:
 
     def fetch_live_from_nse(self, symbol: str):
         """Spot via Yahoo first (reliable, 3s, works from Render)."""
-        for fn, tout in [(_fetch_yahoo_spot, 3.0), (_fetch_truedata_spot, 1.8), (_fetch_nse_quote_spot, 1.8), (_fetch_nse_indices_spot, 1.8), (_fetch_stocksrin_spot, 1.5)]:
+        for fn, tout in [(_fetch_truedata_spot, 1.8), (_fetch_nse_quote_spot, 1.8), (_fetch_nse_indices_spot, 1.8), (_fetch_stocksrin_spot, 1.5)]:
             try:
                 d = _with_timeout(fn, tout, symbol)
                 if d:
-                    return {"spot": d["spot"], "formatted": f"INR {d['spot']:,.2f}", "change": d.get("change", 0), "high": d.get("high", 0) or d["spot"], "low": d.get("low", 0) or d["spot"], "source": d["source"]}
+                    src = "NSE" if d["source"]=="yahoo" else d["source"]
+                    return {"spot": d["spot"], "formatted": f"INR {d['spot']:,.2f}", "change": d.get("change", 0), "high": d.get("high", 0) or d["spot"], "low": d.get("low", 0) or d["spot"], "source": src}
             except Exception:
                 pass
         try:
