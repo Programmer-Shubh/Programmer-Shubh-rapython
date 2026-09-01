@@ -42,7 +42,7 @@ class TradeModeRequest(BaseModel):
 @router.get("/open")
 def get_open_trades():
     trade_model = TradeModel()
-    positions = trade_model.get_open_positions_with_pnl()
+    positions = trade_model.get_open_positions_with_pnl(auto_exit=False)
     total_pnl = sum(p["unrealized_pnl"] for p in positions)
     return {
         "count": len(positions),

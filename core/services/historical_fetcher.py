@@ -4,8 +4,8 @@ import re
 import json
 from typing import List, Dict
 
-# Sources: nselib (primary) -> jugaad-data (NSE archives) -> NSEpy -> StocksRin -> Google -> TrueData -> Synthetic
-# NiftyTrader removed (slow), Yahoo removed (no option chain).
+# Sources: DB -> yfinance (direct) -> nselib -> jugaad-data (NSE bhavcopy) -> StocksRin -> Google -> TrueData
+# NiftyTrader REMOVED. yfinance + NSE Bhavcopy = Independent Free Pipeline. Chunking 30-40d for multi-year.
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -308,6 +308,33 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
         d += datetime.timedelta(days=1)
     return records
 
+def _fetch_yfinance_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """yfinance direct - free, no key, chunked 40d to avoid rate limit. Ticker: NIFTY->^NSEI, BANKNIFTY->^NSEBANK, else SYMBOL.NS"""
+    try:
+        import yfinance as yf
+        sd=datetime.datetime.strptime(start_date,"%Y-%m-%d"); ed=datetime.datetime.strptime(end_date,"%Y-%m-%d")+datetime.timedelta(days=1)
+        ymap={"NIFTY":"^NSEI","BANKNIFTY":"^NSEBANK","FINNIFTY":"NIFTY_FIN_SERVICE.NS","MIDCPNIFTY":"NIFTY_MID_SELECT.NS","SENSEX":"^BSESN","BANKEX":"^BSESN"}
+        ticker=ymap.get(symbol.upper(), symbol.upper()+".NS")
+        out=[]
+        cur=sd
+        while cur < ed:
+            ce=min(cur+datetime.timedelta(days=40), ed)
+            try:
+                df=yf.download(ticker, start=cur.strftime("%Y-%m-%d"), end=ce.strftime("%Y-%m-%d"), progress=False, auto_adjust=False, timeout=10)
+                if df is not None and not df.empty:
+                    for idx,row in df.iterrows():
+                        td=idx.strftime("%Y-%m-%d") if hasattr(idx,"strftime") else str(idx)[:10]
+                        if td < start_date or td > end_date: continue
+                        cl=float(row.get("Close",0) or 0); 
+                        if cl<=0: continue
+                        out.append({"symbol":symbol,"trade_date":td,"open_price":round(float(row.get("Open",cl)),2),"high_price":round(float(row.get("High",cl)),2),"low_price":round(float(row.get("Low",cl)),2),"close_price":round(cl,2),"volume":int(float(row.get("Volume",0) or 0)),"oi":0})
+            except Exception: pass
+            cur=ce
+        if len(out)>=5: 
+            out.sort(key=lambda r:r["trade_date"]); return out
+    except Exception: pass
+    return []
+
 def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """Instant local cache: bhavcopy_data spot rows (seeded by background refresh). No network."""
     try:
@@ -355,7 +382,7 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
     # 2) External sources with tight 4s budget (Quantman instant) - then synthetic
     import time as _t
     _deadline = _t.time() + 4
-    for fetcher in [_fetch_nselib_historical, _fetch_jugaad_historical, _fetch_nsepy_historical, _fetch_stocksrin_historical, _fetch_google_finance, _fetch_truedata_historical]:
+    for fetcher in [_fetch_yfinance_historical, _fetch_nselib_historical, _fetch_jugaad_historical, _fetch_stocksrin_historical, _fetch_google_finance, _fetch_truedata_historical]:
         try:
             if _t.time() > _deadline:
                 break
