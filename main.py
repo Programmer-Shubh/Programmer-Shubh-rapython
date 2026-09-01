@@ -17,16 +17,17 @@ async def _start_background_refresh():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Auto-fix lot sizes for existing trades (Aug 2026)
     try:
         from utils.helpers import get_lot_size
         _db = Database.get_instance()
         for sym in ["NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","ADANIENT","BAJFINANCE","RELIANCE","HDFCBANK","ICICIBANK","TCS","INFY","SBIN","KOTAKBANK","LT","M&M","MARUTI"]:
-            correct = get_lot_size(sym)
-            _db.execute("UPDATE paper_trades SET lot_size=? WHERE symbol=? AND lot_size!=?", [correct, sym, correct])
-    except Exception:
-        pass
-    await _start_background_refresh()
+            try:
+                correct = get_lot_size(sym)
+                _db.execute("UPDATE paper_trades SET lot_size=? WHERE symbol=? AND lot_size!=?", [correct, sym, correct])
+            except: pass
+    except: pass
+    try: await _start_background_refresh()
+    except: pass
     yield
 
 
