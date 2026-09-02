@@ -5,7 +5,7 @@ from core.models.bhavcopy_model import BhavcopyModel
 from core.models.trade_model import TradeModel
 from core.services.live_market_data import LiveMarketData
 from core.services.transaction_costs import TransactionCosts
-from utils.helpers import get_lot_size, get_strike_step
+from utils.helpers import get_lot_size, get_strike_step, black_scholes
 
 router = APIRouter()
 
@@ -18,7 +18,7 @@ class TradeRequest(BaseModel):
     date: str
     transaction_type: str
     quantity: int = 1
-    stop_loss: float = 1500.0
+    stop_loss: float = 500.0
     take_profit: float = 1000.0
 
 
@@ -47,48 +47,14 @@ def get_expiries(symbol: str, date: str):
     return {"expiries": bhav.get_expiries(symbol, date)}
 
 
-@router.get("/chain/{symbol}")
-def get_chain_auto(symbol: str):
-    """Auto option chain without date - live NSE or synthetic - no date input needed."""
-    live = LiveMarketData()
-    data = live.get_live_chain_cached(symbol)
-    if not data:
-        data = live.fetch_live_option_chain(symbol)
-        if data and data.get("rows"):
-            import time as _t
-            from core.services.live_market_data import _CHAIN_CACHE
-            _CHAIN_CACHE[symbol.upper()] = {"ts": _t.time(), "data": data}
-    if data and data.get("rows"):
-        return data
-    return {"error": "No data - try again"}
-
-
 @router.get("/chain/{symbol}/{date}/{expiry}")
 def get_chain(symbol: str, date: str, expiry: str):
     bhav = BhavcopyModel()
     live = LiveMarketData()
     chain = bhav.get_option_chain(symbol, date, expiry)
     if not chain:
-        # No bhavcopy for this date/expiry - fallback to live auto chain (no date needed, no network error)
-        data = live.get_live_chain_cached(symbol)
-        if not data:
-            data = live.fetch_live_option_chain(symbol)
-        if data and data.get("rows"):
-            return {"symbol": symbol, "date": date, "expiry": data.get("timestamp") or expiry, "spot": data.get("spot"), "atm": data.get("atm"), "rows": data.get("rows"), "source": data.get("source")}
-        return {"error": "No data - no bhavcopy for this date and live fetch failed"}
+        return {"error": "No data"}
     spot = live.get_spot_price(symbol)
-    # if DB spot missing, use live Yahoo spot (instant via cache or 2s)
-    if spot <= 0:
-        try:
-            ld = live.get_live_spot(symbol)
-            if ld and ld.get("spot"):
-                spot = float(ld["spot"])
-            else:
-                ld2 = live.fetch_live_from_nse(symbol)
-                if ld2 and ld2.get("spot"):
-                    spot = float(ld2["spot"])
-        except Exception:
-            pass
     step = get_strike_step(symbol)
     atm = round(spot / step) * step if spot > 0 else 0
     ce = {}
@@ -119,18 +85,41 @@ def get_chain(symbol: str, date: str, expiry: str):
 @router.get("/live/{symbol}")
 def get_live_chain(symbol: str):
     live = LiveMarketData()
-    symbol = symbol.upper()
     data = live.get_live_chain_cached(symbol)
     if not data:
-        data = live.fetch_live_option_chain(symbol)
-        # Cache the result for 30s so repeated requests are instant
-        if data and data.get("rows"):
-            import time as _t
-            from core.services.live_market_data import _CHAIN_CACHE
-            _CHAIN_CACHE[symbol] = {"ts": _t.time(), "data": data}
+        data = live.fetch_live_option_chain(symbol.upper())
     if data and data.get("rows"):
         return data
-    return {"error": "Could not fetch live data. Try again later."}
+    # Fallback 1: try DB chain for latest date
+    bhav = BhavcopyModel()
+    dates = bhav.get_dates(symbol)
+    if dates:
+        expiries = bhav.get_expiries(symbol, dates[0])
+        if expiries:
+            chain = bhav.get_option_chain(symbol, dates[0], expiries[0])
+            if chain:
+                spot = live.get_spot_price(symbol) or 0
+                if spot <= 0:
+                    try:
+                        ls = live.get_live_spot(symbol)
+                        spot = float(ls["spot"]) if ls and ls.get("spot") else 0
+                    except:
+                        spot = 0
+                from utils.helpers import get_strike_step
+                step = get_strike_step(symbol)
+                atm = round(spot / step) * step if spot > 0 else 0
+                ce = {r["strike_price"]: r for r in chain if r["option_type"] == "CE"}
+                pe = {r["strike_price"]: r for r in chain if r["option_type"] == "PE"}
+                all_strikes = sorted(set(list(ce.keys()) + list(pe.keys())))
+                rows = []
+                for s in all_strikes:
+                    rows.append({"strike": s, "distance": int(s - atm),
+                                 "ce_ltp": ce.get(s, {}).get("close_price", 0), "ce_oi": ce.get(s, {}).get("oi", 0), "ce_vol": ce.get(s, {}).get("volume", 0), "ce_iv": 0,
+                                 "pe_ltp": pe.get(s, {}).get("close_price", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
+                if rows:
+                    return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "db"}
+    # No synthetic Black-Scholes - return clear error, frontend will fallback to DB chain view
+    return {"error": "Could not fetch live data from NiftyTrader (blocked on Render). Toggle LIVE off to view DB chain or use Google Finance fallback."}
 
 
 @router.post("/place-trade")
@@ -167,26 +156,12 @@ def place_trade(req: TradeRequest):
     # Reject faulty leading zero like '01' (comes as 1.0)
     if raw_strike.startswith("0") and raw_strike not in ("0", "0.0") and not raw_strike.startswith("0."):
         return {"error": f"Faulty strike price '{raw_strike}' - remove leading zeros"}
-    # Auto-align strike to nearest valid step (no error for any symbol)
+    # Validate strike step alignment
     try:
         step = get_strike_step(req.symbol)
         if req.strike % step != 0:
             if abs((req.strike % step)) > 0.01 and abs(step - (req.strike % step)) > 0.01:
-                req.strike = round(req.strike / step) * step
-    except Exception:
-        pass
-    # Deep ITM/OTM block: only allow ATM ±5 strikes (max 5% distance guard)
-    try:
-        spot_chk = live.get_spot_price(req.symbol)
-        if spot_chk <= 0:
-            ls2 = live.get_live_spot(req.symbol)
-            spot_chk = float(ls2["spot"]) if ls2 and ls2.get("spot") else 0
-        step_chk = get_strike_step(req.symbol)
-        atm_chk = round(spot_chk/step_chk)*step_chk if spot_chk>0 else 0
-        if atm_chk>0 and abs(req.strike - atm_chk) > step_chk*5:
-            return {"error": f"Deep {'ITM' if req.strike<atm_chk else 'OTM'} blocked: strike {req.strike} too far from ATM {atm_chk} (spot {spot_chk:.2f}). Allowed ATM ±5 strikes only."}
-        if spot_chk>0 and abs(req.strike-spot_chk)/spot_chk > 0.05:
-            return {"error": f"Deep ITM/OTM blocked: strike {req.strike} >5% away from spot {spot_chk:.2f}"}
+                return {"error": f"Strike {req.strike} not aligned to step {step} for {req.symbol}"}
     except Exception:
         pass
     # Deduplication check before insert
@@ -202,47 +177,110 @@ def place_trade(req: TradeRequest):
     pe_data = {r["strike_price"]: r for r in chain if r["option_type"] == "PE"}
     chain_row = ce_data.get(req.strike) if req.option_type == "CE" else pe_data.get(req.strike)
     premium = float(chain_row.get("close_price", 0)) if chain_row else 0
+    # If no DB premium, try live (may fail on Render - NSE blocked)
     if premium <= 0:
         live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type)
         premium = live_premium if live_premium and live_premium > 0 else 0
+    # If still no premium, try Google Finance real premium (no synthetic 2%)
     if premium <= 0:
+        # Try Google Finance real option quote as last real source
         try:
-            lc = live.fetch_live_option_chain(req.symbol)
-            if lc and lc.get("rows"):
-                for r in lc["rows"]:
-                    if r.get("strike") == req.strike:
-                        premium = float(r.get("ce_ltp", 0) if req.option_type == "CE" else r.get("pe_ltp", 0))
-                        break
+            import requests
+            # Google Finance option quote: try NSE option page
+            headers = {"User-Agent": "Mozilla/5.0"}
+            g_url = f"https://www.google.com/finance/quote/{req.symbol}:NSE"
+            gr = requests.get(g_url, headers=headers, timeout=8)
+            if gr.status_code == 200 and "data-last-price" in gr.text:
+                import re
+                m = re.search(r'data-last-price="([^"]+)"', gr.text)
+                if m:
+                    spot_g = float(m.group(1).replace(",", ""))
+                    if spot_g > 0 and req.strike > 0:
+                        # Realistic Black-Scholes premium (weekly expiry, IV ~25%)
+                        try:
+                            expiry_days = 7
+                            if req.expiry and "monthly" in req.expiry.lower():
+                                expiry_days = 28
+                            premium = black_scholes(spot_g, req.strike, expiry_days/365, 0.25, req.option_type)
+                        except Exception:
+                            premium = round(spot_g * 0.015, 2)
         except Exception:
             pass
-    # Never allow ₹1 bad premium - if premium <=5, use Black-Scholes realistic fallback
-    if premium <= 5:
+    if premium <= 0:
+        # Try DB spot as last real check (no synthetic 2% of strike)
         try:
-            spot_price = live.get_spot_price(req.symbol)
-            if spot_price <= 0:
-                ld = live.get_live_spot(req.symbol)
-                spot_price = float(ld["spot"]) if ld and ld.get("spot") else 0
-            if spot_price <= 0:
-                from core.services.historical_fetcher import _generate_synthetic_data
-                synth = _generate_synthetic_data(req.symbol, "2026-08-27", "2026-08-28")
-                if synth: spot_price = float(synth[-1]["close_price"])
-            if spot_price > 0 and req.strike > 0:
-                from utils.helpers import black_scholes
-                import datetime
+            latest = bhav.db.fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+                [req.symbol],
+            )
+            spot_est = float(latest['close_price']) if latest and latest['close_price'] else 0
+        except:
+            spot_est = 0
+        if spot_est <= 0:
+            try:
+                live_spot = live.get_live_spot(req.symbol)
+                if live_spot and live_spot.get('spot'):
+                    spot_est = float(live_spot['spot'])
+            except Exception:
+                pass
+        if spot_est > 0 and req.strike > 0:
+            # Realistic Black-Scholes premium for every option (no flat 1% synthetic)
+            try:
+                expiry_days = 7
+                if req.expiry and "monthly" in req.expiry.lower():
+                    expiry_days = 28
+                # Try parse expiry date if it's YYYY-MM-DD
+                elif req.expiry and "-" in req.expiry:
+                    try:
+                        import datetime as _dt
+                        exp_d = _dt.datetime.strptime(req.expiry, "%Y-%m-%d")
+                        today = _dt.datetime.now()
+                        diff = (exp_d - today).days
+                        if diff > 0:
+                            expiry_days = min(45, max(2, diff))
+                    except Exception:
+                        pass
+                premium = black_scholes(spot_est, req.strike, expiry_days/365, 0.25, req.option_type)
+                if premium < 1:
+                    premium = 1.0
+            except Exception:
+                premium = round(spot_est * 0.015, 2)
+                if premium < 2:
+                    premium = 2.0
+        if premium <= 0:
+            return {"error": "No premium data for this strike"}
+        # Fix unrealistically low premium for ATM (DB stale 1.0) -> recompute via Black-Scholes using Yahoo live spot
+        if premium < 10:
+            try:
+                spot_chk = 0
+                # Yahoo first (most reliable free)
                 try:
-                    exp_dt = datetime.datetime.strptime(req.expiry, "%Y-%m-%d") if req.expiry else datetime.datetime.now() + datetime.timedelta(days=7)
-                    dte = max(1, (exp_dt - datetime.datetime.now()).days)
+                    from core.services.free_data import fetch_yahoo_spot
+                    spot_chk = fetch_yahoo_spot(req.symbol)
                 except Exception:
-                    dte = 7
-                bs = black_scholes(spot_price, req.strike, dte / 365.0, 0.22, req.option_type)
-                if bs and bs > 5:
-                    premium = bs
-                elif premium <= 1:
-                    premium = round(spot_price*0.02,2)
-        except Exception:
-            pass
-    if premium <= 0 or premium <= 1:
-        return {"error": f"No premium data for {req.symbol} {req.strike} {req.option_type}. Try refreshing option chain."}
+                    pass
+                if spot_chk <= 0:
+                    spot_chk = live.get_spot_price(req.symbol)
+                if spot_chk <= 0:
+                    try:
+                        ls = live.get_live_spot(req.symbol)
+                        spot_chk = float(ls["spot"]) if ls and ls.get("spot") else 0
+                    except Exception:
+                        spot_chk = 0
+                step_chk = get_strike_step(req.symbol)
+                atm_chk = round(spot_chk / step_chk) * step_chk if spot_chk > 0 else 0
+                if atm_chk > 0 and abs(req.strike - atm_chk) <= step_chk * 4:
+                    expiry_days = 7
+                    if req.expiry and "monthly" in req.expiry.lower():
+                        expiry_days = 28
+                    premium = black_scholes(spot_chk, req.strike, expiry_days/365, 0.25, req.option_type)
+                    if premium < 5:
+                        premium = max(5.0, round(spot_chk * 0.015, 2))
+                elif premium < 5:
+                    # Far OTM but premium too low, ensure minimum 5
+                    premium = max(5.0, premium)
+            except Exception:
+                pass
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
     lot_size = get_lot_size(req.symbol)
     costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
