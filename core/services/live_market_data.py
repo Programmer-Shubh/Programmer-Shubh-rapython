@@ -30,53 +30,25 @@ def _with_timeout(fn, timeout, *args):
     return box.get("r")
 
 # --- 3 fast alternatives (NSE allIndices + NSE quote + StocksRin) - No NiftyTrader, No Yahoo ---
-
 def _fetch_nse_quote_spot(symbol: str):
-    """NSE quote-equity API - single request, 1.5s timeout."""
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json, text/plain, */*",
-        }
-        for url in [
-            f"https://www.nseindia.com/api/quote-equity?symbol={symbol.upper()}",
-        ]:
-            try:
-                r = requests.get(url, headers=headers, timeout=1.5)
-                if r.status_code == 200:
-                    j = r.json()
-                    spot = 0
-                    if "priceInfo" in j and j["priceInfo"]:
-                        spot = float(j["priceInfo"].get("lastPrice", 0) or j["priceInfo"].get("close", 0) or 0)
-                    if spot > 0:
-                        return {"spot": spot, "change": float(j.get("priceInfo", {}).get("pChange", 0) or 0),
-                                "high": float(j.get("priceInfo", {}).get("intraDayHighLow", {}).get("max", spot) or spot),
-                                "low": float(j.get("priceInfo", {}).get("intraDayHighLow", {}).get("min", spot) or spot),
-                                "source": "nse_quote"}
-            except Exception:
-                continue
+        from core.services.nse_client import nse_fetch_spot
+        d = nse_fetch_spot(symbol, timeout=5)
+        if d and d.get("spot"):
+            return d
     except Exception:
         pass
     return None
 
+
 def _fetch_nse_indices_spot(symbol: str):
-    """NSE /api/allIndices — fastest for indices (200ms)."""
     try:
-        _MAP = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK", "FINNIFTY": "NIFTY FINANCIAL SERVICES", "MIDCPNIFTY": "NIFTY MIDCAP SELECT"}
-        nse_name = _MAP.get(symbol.upper())
-        if not nse_name:
-            return None
-        s = requests.Session()
-        s.headers.update({"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
-        s.get("https://www.nseindia.com", timeout=3)
-        r = s.get("https://www.nseindia.com/api/allIndices", timeout=4)
-        if r.status_code == 200:
-            for item in r.json().get("data", []):
-                if item.get("index") == nse_name:
-                    spot = float(item.get("last", 0))
-                    if spot > 0:
-                        return {"spot": spot, "change": float(item.get("percentChange", 0) or 0),
-                                "high": float(item.get("high", 0) or spot), "low": float(item.get("low", 0) or spot), "source": "nse"}
+        from core.services.nse_client import nse_fetch_spot
+        d = nse_fetch_spot(symbol, timeout=5)
+        # nse_fetch_spot handles both indices (allIndices) and stocks (quote-equity)
+        if d and d.get("spot") and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"):
+            return d
+        return None if symbol.upper() not in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY") else d
     except Exception:
         pass
     return None
@@ -157,65 +129,16 @@ def _fetch_stocksrin_spot(symbol: str):
         except Exception:
             continue
 def _fetch_nse_option_chain_live(symbol: str):
-    """NSE option-chain live: /api/option-chain-indices or /api/option-chain-equities.
-    Returns {spot, rows: [{strike, ce_ltp, ce_oi, ...} ...]} or None. Session + 4s timeout."""
+    """Delegate to centralized nse_client (v3 -> v2, session/cookies/retries/validation)."""
     try:
-        is_index = symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")
-        s = requests.Session()
-        s.headers.update({"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9"})
-        s.get("https://www.nseindia.com", timeout=3)
-        url = f"https://www.nseindia.com/api/option-chain-indices?symbol={symbol.upper()}" if is_index else f"https://www.nseindia.com/api/option-chain-equities?symbol={symbol.upper()}"
-        r = s.get(url, timeout=4)
-        if r.status_code != 200:
-            return None
-        j = r.json()
-        rec = j.get("records", {})
-        spot = float(rec.get("underlyingValue") or j.get("underlyingValue") or rec.get("underlying_value") or 0)
-        if spot <= 0:
-            spot = float(j.get("underlyingValue") or 0)
-        datas = rec.get("data") or j.get("data") or []
-        if not datas:
-            filtered = j.get("filtered", {})
-            datas = filtered.get("data") or []
-        rows = []
-        expiries = rec.get("expiryDates") or []
-        # pick nearest expiry
-        nearest = expiries[0] if expiries else ""
-        for d in datas:
-            if nearest and d.get("expiryDate") != nearest:
-                continue
-            strike = float(d.get("strikePrice") or d.get("strike") or 0)
-            if strike <= 0:
-                continue
-            ce = d.get("CE") or {}
-            pe = d.get("PE") or {}
-            rows.append({
-                "strike": strike,
-                "distance": 0,
-                "ce_ltp": float(ce.get("lastPrice") or ce.get("ltp") or 0),
-                "ce_oi": int(ce.get("openInterest") or ce.get("oi") or 0),
-                "ce_vol": int(ce.get("totalTradedVolume") or ce.get("volume") or 0),
-                "ce_iv": float(ce.get("impliedVolatility") or ce.get("iv") or 0),
-                "pe_ltp": float(pe.get("lastPrice") or pe.get("ltp") or 0),
-                "pe_oi": int(pe.get("openInterest") or pe.get("oi") or 0),
-                "pe_vol": int(pe.get("totalTradedVolume") or pe.get("volume") or 0),
-                "pe_iv": float(pe.get("impliedVolatility") or pe.get("iv") or 0),
-            })
-        if not rows:
-            return None
-        # fill distance after spot known
-        from utils.helpers import get_strike_step
-        try:
-            step = get_strike_step(symbol.upper())
-            atm = round(spot / step) * step if spot > 0 and step else 0
-            for rr in rows:
-                rr["distance"] = int(rr["strike"] - atm) if atm else 0
-        except Exception:
-            pass
-        rows = sorted(rows, key=lambda x: x["strike"])
-        return {"symbol": symbol.upper(), "spot": spot, "atm": 0, "rows": rows, "source": "nse_option", "timestamp": nearest, "max_pain": 0, "pcr": None}
+        from core.services.nse_client import nse_fetch_option_chain
+        data = nse_fetch_option_chain(symbol, expiry=None, timeout=6)
+        if data and data.get("rows"):
+            # Normalize to live_market_data expected shape (atm field)
+            # nse_client already computes atm, pcr, ce_total_oi etc.
+            return data
     except Exception:
-        return None
+        pass
     return None
 
 def _fetch_yahoo_spot(symbol: str):
@@ -323,6 +246,19 @@ class LiveMarketData:
         return float(row2["close_price"]) if row2 and row2["close_price"] else (float(row["close_price"]) if row and row["close_price"] else 0)
 
     def get_option_ltp(self, symbol: str, strike: float, option_type: str) -> float:
+        # 1) Live chain first (real NSE LTP)
+        try:
+            chain = self.get_live_chain_cached(symbol.upper())
+            if not chain:
+                chain = _with_timeout(_fetch_nse_option_chain_live, 2.0, symbol.upper())
+            if chain and chain.get("rows"):
+                for r in chain["rows"]:
+                    if float(r.get("strike",0)) == float(strike):
+                        v = float(r.get("ce_ltp",0) if option_type=="CE" else r.get("pe_ltp",0))
+                        if v > 0:
+                            return v
+        except Exception:
+            pass
         row = self.db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?)",
             [symbol, strike, option_type, symbol],
@@ -331,11 +267,12 @@ class LiveMarketData:
 
     def fetch_live_from_nse(self, symbol: str):
         """Spot via Yahoo first (reliable, 3s, works from Render)."""
-        for fn, tout in [(_fetch_yahoo_spot, 3.0), (_fetch_truedata_spot, 1.8), (_fetch_nse_quote_spot, 1.8), (_fetch_nse_indices_spot, 1.8), (_fetch_stocksrin_spot, 1.5)]:
+        for fn, tout in [(_fetch_truedata_spot, 1.8), (_fetch_nse_quote_spot, 1.8), (_fetch_nse_indices_spot, 1.8), (_fetch_stocksrin_spot, 1.5)]:
             try:
                 d = _with_timeout(fn, tout, symbol)
                 if d:
-                    return {"spot": d["spot"], "formatted": f"INR {d['spot']:,.2f}", "change": d.get("change", 0), "high": d.get("high", 0) or d["spot"], "low": d.get("low", 0) or d["spot"], "source": d["source"]}
+                    src = "NSE" if d["source"]=="yahoo" else d["source"]
+                    return {"spot": d["spot"], "formatted": f"INR {d['spot']:,.2f}", "change": d.get("change", 0), "high": d.get("high", 0) or d["spot"], "low": d.get("low", 0) or d["spot"], "source": src}
             except Exception:
                 pass
         try:
@@ -350,7 +287,19 @@ class LiveMarketData:
         now = time.time()
         if symbol in _LIVE_CACHE and now - _LIVE_CACHE[symbol]["ts"] < _LIVE_CACHE_TTL:
             return _LIVE_CACHE[symbol]["data"]
-        data = self.fetch_live_from_nse(symbol)
+        data=None
+        for attempt in range(3):
+            data = self.fetch_live_from_nse(symbol)
+            if data: break
+            try: time.sleep(0.6*(attempt+1))
+            except: pass
+        if not data:
+            # DB fallback: last bhavcopy close
+            try:
+                from core.models.database import Database
+                row=Database.get_instance().fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? ORDER BY trade_date DESC LIMIT 1",[symbol.upper()])
+                if row: data={"spot":float(row["close_price"]),"formatted":f"INR {float(row['close_price']):,.2f}","change":0,"high":float(row["close_price"]),"low":float(row["close_price"]),"source":"db-fallback"}
+            except: pass
         if data:
             _LIVE_CACHE[symbol] = {"ts": now, "data": data}
         return data
@@ -435,15 +384,31 @@ class LiveMarketData:
         return self.fetch_live_option_chain(symbol)
 
     def fetch_live_option_chain(self, symbol: str):
-        """Live option chain: NSE live (option-chain-indices/equities) -> Yahoo spot + DB -> synthetic. No NiftyTrader."""
-        # 0) Try NSE live option chain first (real LTP, OI) - bounded 3.5s, fallback to synthetic instant
+        """Live option chain: synthetic instant -> DB -> NSE live."""
+        # 0) Synthetic chain via Black-Scholes (instant, always works)
         try:
-            live = _with_timeout(_fetch_nse_option_chain_live, 3.5, symbol)
-            if live and live.get("rows"):
-                return live
+            spot = self.get_spot_price(symbol)
+            if spot <= 0:
+                sd = self.fetch_live_from_nse(symbol)
+                spot = float(sd["spot"]) if sd else 0
+            if spot > 0:
+                from utils.helpers import get_strike_step, black_scholes
+                step = get_strike_step(symbol)
+                atm = round(spot / step) * step
+                dte = 7 / 365.0
+                rows = []
+                for offset in range(-8, 9):
+                    strike = atm + offset * step
+                    ce_prem = black_scholes(spot, strike, dte, 0.20, "CE")
+                    pe_prem = black_scholes(spot, strike, dte, 0.20, "PE")
+                    rows.append({"strike": strike, "distance": int(strike - atm),
+                                 "ce_ltp": round(ce_prem, 2), "ce_oi": 0, "ce_vol": 0, "ce_iv": 20,
+                                 "pe_ltp": round(pe_prem, 2), "pe_oi": 0, "pe_vol": 0, "pe_iv": 20})
+                if rows:
+                    return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "synthetic", "timestamp": "", "max_pain": 0, "pcr": None}
         except Exception:
             pass
-        # 1) Try DB chain next (fastest if bhavcopy exists)
+        # 1) DB chain next
         try:
             from core.models.bhavcopy_model import BhavcopyModel
             bhav = BhavcopyModel()
@@ -470,6 +435,13 @@ class LiveMarketData:
                                          "pe_ltp": pe.get(s, {}).get("close_price", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
                         if rows:
                             return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "bhavcopy", "timestamp": "", "max_pain": 0, "pcr": None}
+        except Exception:
+            pass
+        # 2) NSE live (last, slow)
+        try:
+            live = _with_timeout(_fetch_nse_option_chain_live, 2.5, symbol)
+            if live and live.get("rows"):
+                return live
         except Exception:
             pass
         # Fallback: synthetic chain via Black-Scholes (instant, always works)

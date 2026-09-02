@@ -17,7 +17,17 @@ async def _start_background_refresh():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await _start_background_refresh()
+    try:
+        from utils.helpers import get_lot_size
+        _db = Database.get_instance()
+        for sym in ["NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","ADANIENT","BAJFINANCE","RELIANCE","HDFCBANK","ICICIBANK","TCS","INFY","SBIN","KOTAKBANK","LT","M&M","MARUTI"]:
+            try:
+                correct = get_lot_size(sym)
+                _db.execute("UPDATE paper_trades SET lot_size=? WHERE symbol=? AND lot_size!=?", [correct, sym, correct])
+            except: pass
+    except: pass
+    try: await _start_background_refresh()
+    except: pass
     yield
 
 
@@ -66,6 +76,11 @@ async def health():
 async def healthz():
     return {"status": "ok"}
 
+
+@app.get("/api/lot-size/{symbol}")
+def lot_size(symbol: str):
+    from utils.helpers import get_lot_size
+    return {"symbol": symbol.upper(), "lot_size": get_lot_size(symbol)}
 
 @app.get("/ready")
 async def ready():

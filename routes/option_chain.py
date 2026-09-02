@@ -160,12 +160,26 @@ def place_trade(req: TradeRequest):
     # Reject faulty leading zero like '01' (comes as 1.0)
     if raw_strike.startswith("0") and raw_strike not in ("0", "0.0") and not raw_strike.startswith("0."):
         return {"error": f"Faulty strike price '{raw_strike}' - remove leading zeros"}
-    # Validate strike step alignment
+    # Auto-align strike to nearest valid step (no error for any symbol)
     try:
         step = get_strike_step(req.symbol)
         if req.strike % step != 0:
             if abs((req.strike % step)) > 0.01 and abs(step - (req.strike % step)) > 0.01:
-                return {"error": f"Strike {req.strike} not aligned to step {step} for {req.symbol}"}
+                req.strike = round(req.strike / step) * step
+    except Exception:
+        pass
+    # Deep ITM/OTM block: only allow ATM ±5 strikes (max 5% distance guard)
+    try:
+        spot_chk = live.get_spot_price(req.symbol)
+        if spot_chk <= 0:
+            ls2 = live.get_live_spot(req.symbol)
+            spot_chk = float(ls2["spot"]) if ls2 and ls2.get("spot") else 0
+        step_chk = get_strike_step(req.symbol)
+        atm_chk = round(spot_chk/step_chk)*step_chk if spot_chk>0 else 0
+        if atm_chk>0 and abs(req.strike - atm_chk) > step_chk*5:
+            return {"error": f"Deep {'ITM' if req.strike<atm_chk else 'OTM'} blocked: strike {req.strike} too far from ATM {atm_chk} (spot {spot_chk:.2f}). Allowed ATM ±5 strikes only."}
+        if spot_chk>0 and abs(req.strike-spot_chk)/spot_chk > 0.05:
+            return {"error": f"Deep ITM/OTM blocked: strike {req.strike} >5% away from spot {spot_chk:.2f}"}
     except Exception:
         pass
     # Deduplication check before insert
@@ -194,12 +208,17 @@ def place_trade(req: TradeRequest):
                         break
         except Exception:
             pass
-    if premium <= 0:
+    # Never allow ₹1 bad premium - if premium <=5, use Black-Scholes realistic fallback
+    if premium <= 5:
         try:
             spot_price = live.get_spot_price(req.symbol)
             if spot_price <= 0:
                 ld = live.get_live_spot(req.symbol)
                 spot_price = float(ld["spot"]) if ld and ld.get("spot") else 0
+            if spot_price <= 0:
+                from core.services.historical_fetcher import _generate_synthetic_data
+                synth = _generate_synthetic_data(req.symbol, "2026-08-27", "2026-08-28")
+                if synth: spot_price = float(synth[-1]["close_price"])
             if spot_price > 0 and req.strike > 0:
                 from utils.helpers import black_scholes
                 import datetime
@@ -208,10 +227,14 @@ def place_trade(req: TradeRequest):
                     dte = max(1, (exp_dt - datetime.datetime.now()).days)
                 except Exception:
                     dte = 7
-                premium = black_scholes(spot_price, req.strike, dte / 365.0, 0.20, req.option_type)
+                bs = black_scholes(spot_price, req.strike, dte / 365.0, 0.22, req.option_type)
+                if bs and bs > 5:
+                    premium = bs
+                elif premium <= 1:
+                    premium = round(spot_price*0.02,2)
         except Exception:
             pass
-    if premium <= 0:
+    if premium <= 0 or premium <= 1:
         return {"error": f"No premium data for {req.symbol} {req.strike} {req.option_type}. Try refreshing option chain."}
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
     lot_size = get_lot_size(req.symbol)
