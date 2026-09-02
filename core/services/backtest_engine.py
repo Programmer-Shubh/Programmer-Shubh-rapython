@@ -524,8 +524,7 @@ class BacktestEngine:
         strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
         premium = self._entry_premium(date, spot, strike, option_type)
         premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
-        # post-slippage floor — prevents 1.0 -> 0.99 bleed (ADANIENT bug)
-        premium = max(premium, round(spot * 0.015, 2), 5.0)
+        premium = max(premium, 1.5)
         costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
         entry_time = getattr(self, '_entry_time', '09:35')
         return {
@@ -574,7 +573,7 @@ class BacktestEngine:
                 strike = self._select_strike(spot, symbol, option_type, leg_sel, leg_delta, leg_otm)
             premium = self._entry_premium(date, spot, strike, option_type)
             premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
-            premium = max(premium, round(spot * 0.015, 2), 5.0)
+            premium = max(premium, 1.5)
             costs = TransactionCosts.calculate(premium * lqty, txn_type == "sell", self.is_live)
             # Correct sign: sell = +premium (credit received), buy = -premium (debit paid)
             signed = premium * lqty if txn_type == "sell" else -premium * lqty
@@ -764,10 +763,11 @@ class BacktestEngine:
                 iv = max(iv, 0.20)
             from utils.helpers import black_scholes
             raw = black_scholes(spot, strike, dte, iv, option_type)
-            if raw <= 5:
+            # Quantman: only floor deep OTM Rs1 (like option_chain Rs0.99 guard), not Rs5 — preserves spread credit
+            if raw <= 1.5:
                 raw2 = black_scholes(spot, strike, dte, max(iv, 0.22), option_type)
-                raw = raw2 if raw2 > 5 else round(spot * 0.02, 2)
-            val = max(round(raw, 2), round(spot * 0.015, 2), 5.0)
+                raw = raw2 if raw2 > 1.5 else round(spot * 0.01, 2)
+            val = max(round(raw, 2), 1.5)
             self.premium_cache[key] = val
             return val
         self.premium_cache[key] = 5.0
@@ -832,15 +832,10 @@ class BacktestEngine:
                 iv = max(iv, 0.20)
             from utils.helpers import black_scholes
             raw = black_scholes(spot, strike, dte, iv, option_type)
-            # raw already max(1.0, ...); if illiquid (<=5) try higher IV then spot*0.02 like option_chain.py:218-241
-            if raw <= 5:
+            if raw <= 1.5:
                 raw2 = black_scholes(spot, strike, dte, max(iv, 0.22), option_type)
-                if raw2 > 5:
-                    raw = raw2
-                else:
-                    raw = round(spot * 0.02, 2)
-            val = round(raw, 2)
-            val = max(val, round(spot * 0.015, 2), 5.0)
+                raw = raw2 if raw2 > 1.5 else round(spot * 0.01, 2)
+            val = max(round(raw, 2), 1.5)
             self.premium_cache[key] = val
             return val
         self.premium_cache[key] = 5.0
