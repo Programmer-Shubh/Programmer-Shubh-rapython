@@ -445,19 +445,3 @@ class LiveMarketData:
         except Exception:
             pass
         return None
-                step = get_strike_step(symbol)
-                atm = round(spot / step) * step
-                dte = 7 / 365.0
-                rows = []
-                for offset in range(-8, 9):
-                    strike = atm + offset * step
-                    ce_prem = black_scholes(spot, strike, dte, 0.20, "CE")
-                    pe_prem = black_scholes(spot, strike, dte, 0.20, "PE")
-                    rows.append({"strike": strike, "distance": int(strike - atm),
-                                 "ce_ltp": round(ce_prem, 2), "ce_oi": 0, "ce_vol": 0, "ce_iv": 20,
-                                 "pe_ltp": round(pe_prem, 2), "pe_oi": 0, "pe_vol": 0, "pe_iv": 20})
-                if rows:
-                    return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "synthetic", "timestamp": "", "max_pain": 0, "pcr": None}
-        except Exception:
-            pass
-        return None
