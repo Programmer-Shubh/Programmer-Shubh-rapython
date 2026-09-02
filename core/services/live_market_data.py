@@ -384,15 +384,9 @@ class LiveMarketData:
         return self.fetch_live_option_chain(symbol)
 
     def fetch_live_option_chain(self, symbol: str):
-        """Live option chain: NSE live (option-chain-indices/equities) -> Yahoo spot + DB -> synthetic. No NiftyTrader."""
-        # 0) Try NSE live option chain first (real LTP, OI) - bounded 3.5s, fallback to synthetic instant
-        try:
-            live = _with_timeout(_fetch_nse_option_chain_live, 1.8, symbol)
-            if live and live.get("rows"):
-                return live
-        except Exception:
-            pass
-        # 1) Try DB chain next (fastest if bhavcopy exists)
+        """Live option chain: DB -> synthetic instant -> NSE live (avoid 429 timeout)."""
+        # 0) DB chain first (instant <50ms) - Render free pe NSE block se bachao
+        # 1) Synthetic fallback instant, NSE last
         try:
             from core.models.bhavcopy_model import BhavcopyModel
             bhav = BhavcopyModel()
@@ -444,4 +438,9 @@ class LiveMarketData:
                     return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "synthetic", "timestamp": "", "max_pain": 0, "pcr": None}
         except Exception:
             pass
+        # Last: try NSE live if synthetic also failed (bounded)
+        try:
+            live = _with_timeout(_fetch_nse_option_chain_live, 1.5, symbol)
+            if live and live.get("rows"): return live
+        except: pass
         return None
