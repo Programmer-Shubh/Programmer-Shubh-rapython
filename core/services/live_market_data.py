@@ -374,16 +374,9 @@ class LiveMarketData:
         return self.fetch_live_option_chain(symbol)
 
     def fetch_live_option_chain(self, symbol: str):
-        """Live option chain: NSE API -> DB -> synthetic. Fast, no hangs."""
+        """Live option chain: DB bhavcopy -> synthetic. Instant, no network blocking."""
         sym = symbol.upper()
-        # 1) NSE live option chain (real LTP, OI, IV) - 2s max
-        try:
-            live = _with_timeout(_fetch_nse_option_chain_live, 2.0, sym)
-            if live and live.get("rows") and len(live["rows"]) > 0:
-                return live
-        except Exception:
-            pass
-        # 2) DB bhavcopy chain (instant)
+        # 1) DB bhavcopy chain + DB spot (instant, no network)
         try:
             from core.models.bhavcopy_model import BhavcopyModel
             bhav = BhavcopyModel()
@@ -393,10 +386,15 @@ class LiveMarketData:
                 if expiries:
                     chain = bhav.get_option_chain(sym, dates[0], expiries[0])
                     if chain and len(chain) >= 4:
-                        spot = self.get_spot_price(sym)
-                        if spot <= 0:
-                            sd = self.fetch_live_from_nse(sym)
-                            spot = float(sd["spot"]) if sd else 0
+                        spot = 0
+                        try:
+                            row = Database.get_instance().fetch_one(
+                                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+                                [sym])
+                            if row and row["close_price"] and float(row["close_price"]) > 0:
+                                spot = float(row["close_price"])
+                        except Exception:
+                            pass
                         from utils.helpers import get_strike_step
                         step = get_strike_step(sym)
                         atm = round(spot / step) * step if spot > 0 else 0
@@ -412,16 +410,26 @@ class LiveMarketData:
                             return {"symbol": sym, "spot": spot, "atm": atm, "rows": rows, "source": "bhavcopy", "timestamp": "", "max_pain": 0, "pcr": None}
         except Exception:
             pass
-        # 3) Synthetic chain via Black-Scholes (instant)
+        # 2) Synthetic chain - DB spot or Google Finance (instant/fast)
         try:
-            spot = self.get_spot_price(sym)
-            if spot <= 0:
-                # Try DB spot directly (fast, no network)
+            spot = 0
+            # Try DB first (instant)
+            try:
                 row = Database.get_instance().fetch_one(
                     "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
                     [sym])
                 if row and row["close_price"] and float(row["close_price"]) > 0:
                     spot = float(row["close_price"])
+            except Exception:
+                pass
+            # Try Google Finance if DB empty (works from cloud, ~1s)
+            if spot <= 0:
+                try:
+                    g = _with_timeout(fetch_google_spot, 1.5, sym)
+                    if g and g > 0:
+                        spot = float(g)
+                except Exception:
+                    pass
             if spot > 0:
                 from utils.helpers import get_strike_step, black_scholes
                 step = get_strike_step(sym)
@@ -437,6 +445,13 @@ class LiveMarketData:
                                  "pe_ltp": round(pe_prem, 2), "pe_oi": 0, "pe_vol": 0, "pe_iv": 20})
                 if rows:
                     return {"symbol": sym, "spot": spot, "atm": atm, "rows": rows, "source": "synthetic", "timestamp": "", "max_pain": 0, "pcr": None}
+        except Exception:
+            pass
+        # 3) NSE live (async, non-blocking) - only if DB empty
+        try:
+            live = _with_timeout(_fetch_nse_option_chain_live, 3.0, sym)
+            if live and live.get("rows") and len(live["rows"]) > 0:
+                return live
         except Exception:
             pass
         return None
