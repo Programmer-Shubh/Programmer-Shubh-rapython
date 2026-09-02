@@ -205,22 +205,26 @@
                 <div class="card-body p-0"><div id="closed-trd"></div></div>
             </div>
         </div>
-        <!-- STRATEGY BUILDER -->
+        <!-- STRATEGY BUILDER — Quantman.trade style -->
         <div id="pg-strategy" class="pg hidden">
             <div class="card mb-2" style="border-left:4px solid #0d6efd">
                 <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
                     <div class="d-flex gap-2 align-items-center">
-                        <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Builder</h4><span class="badge bg-primary">Quantman Style</span>
+                        <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Builder</h4><span class="badge bg-primary">Quantman Style</span><small class="text-muted ms-2">Create Backtest / Live Algo — like quantman.trade/runs/new</small>
                     </div>
                     <div class="d-flex gap-2 align-items-center">
                         <div class="input-group input-group-sm" style="width:260px"><span class="input-group-text">Run Name</span><input type="text" class="form-control" id="s-name" placeholder="Nifty Breakout Strategy"></div>
                         <button class="btn btn-sm btn-outline-secondary" onclick="resetStrat()">Reset</button>
-                        <button class="btn btn-sm btn-primary" onclick="saveStrat()"><i class="bi bi-check-circle"></i> Save</button>
+                        <button class="btn btn-sm btn-primary" onclick="saveStrat()"><i class="bi bi-check-circle"></i> Save Strategy</button>
                     </div>
                 </div>
             </div>
+            <div class="step-indicator mb-2"><div class="step active">1 Instrument</div><div class="step">2 Legs & Strike</div><div class="step">3 Risk & Re-entry</div><div class="step">4 Indicators</div><div class="step">5 Backtest</div></div>
+            <div class="card mb-2"><div class="card-body p-2">
+            <div class="d-flex gap-1 mb-2 flex-wrap" id="q-instruments"></div>
+            </div></div>
             <div id="custom-form">
-                <div class="col-md-4"><label class="form-label">Instrument Settings</label>
+                <div class="col-md-4"><label class="form-label">Instrument Settings <span class="badge bg-info">Quantman: NIFTY/BANKNIFTY lot auto</span></label>
                     <div class="row g-1">
                         <div class="col"><label class="form-label small">Symbol (All F&O)</label><select class="form-select form-select-sm" id="s-index"><option>Loading...</option></select></div>
                         <div class="col"><label class="form-label small">Select Underlying</label><select class="form-select form-select-sm" id="s-underlying"><option selected>Index</option><option>Stock</option><option>Underlying</option></select></div>
@@ -344,11 +348,15 @@
                     </div>
                 </div>
             </div>
-            <div class="row mt-3">
-                <div class="col-md-6"><label class="form-label">Enter the duration of your backtest</label></div>
-                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-start" value="2026-08-01"></div>
-                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-20"></div>
-                <div class="col-md-2"><div class="text-end"><button class="btn btn-sm btn-success" id="s-run" onclick="runBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button></div></div>
+            <div class="row mt-3 align-items-end">
+                <div class="col-md-3"><label class="form-label"><i class="bi bi-calendar3"></i> Backtest Period <span class="badge bg-primary">Quantman: min 60 bars</span></label><div class="d-flex gap-1"><input type="date" class="form-control form-control-sm" id="s-start" value="2026-08-01"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-20"></div><div class="d-flex gap-1 mt-1"><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1M')">1M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('3M')">3M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('6M')">6M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1Y')">1Y</button></div></div>
+                <div class="col-md-3 d-flex gap-2">
+                    <button class="btn btn-success flex-fill" id="s-run" onclick="runBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button>
+                    <button class="btn btn-outline-primary" onclick="saveStrat()"><i class="bi bi-save"></i> Save</button>
+                    <button class="btn btn-outline-dark" onclick="runBacktestMonteCarlo()" title="Monte Carlo"><i class="bi bi-shuffle"></i> MC</button>
+                    <button class="btn btn-outline-danger" onclick="downloadReportPDF()" title="PDF Report"><i class="bi bi-file-earmark-pdf"></i> PDF</button>
+                </div>
+                <div class="col-md-6"><small class="text-muted">Like quantman.trade: Backtest uses NSE archives → nselib → Google fallback (no manual bhavcopy). Results show 4 key metrics + Equity + Monthly P&L + Trade List.</small></div>
             </div>
             <div id="bt-results" class="hidden">
                 <div class="row mt-3" id="bt-metrics"></div>
@@ -1152,7 +1160,14 @@
         }
     }
 
+    function setBT(p){const e=new Date(); const s=new Date(e); if(p==='1M') s.setMonth(e.getMonth()-1); else if(p==='3M') s.setMonth(e.getMonth()-3); else if(p==='6M') s.setMonth(e.getMonth()-6); else if(p==='1Y') s.setFullYear(e.getFullYear()-1); const fmt=d=>d.toISOString().split('T')[0]; document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}
+    function renderQInstruments(){const wrap=document.getElementById('q-instruments'); if(!wrap) return; const syms=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY']; const cur=document.getElementById('s-index')?.value||'NIFTY'; wrap.innerHTML=syms.map(s=>`<button class="btn btn-sm ${cur===s?'btn-primary':'btn-outline-primary'}" onclick="document.getElementById('s-index').value='${s}';renderQInstruments();if(stratLegs.length)updatePayoff();">${s}</button>`).join('')+' <small class="text-muted ms-2">Quick select — or use dropdown below (50 F&O)</small>';}
+    async function runBacktestMonteCarlo(){const btn=document.getElementById('s-run'); const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Monte Carlo (2000 shuffles)...</p>'; try{const r=await P('/api/backtest/monte-carlo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); document.getElementById('bt-metrics').innerHTML='<div class="alert alert-info"><strong>Monte Carlo</strong> p5:'+r.p5+' p50:'+r.p50+' p95:'+r.p95+' prob_profit:'+(r.prob_profit||'-')+'</div>';}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
+    async function downloadReportPDF(){const body=_collectBacktestBody(); if(!body) return; try{const r=await fetch('/api/backtest/report.pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='RaTrade_'+body.symbol+'_'+body.start_date+'.pdf'; a.click();}catch(e){alert(e.message);}}
+    function _collectBacktestBody(){const idx=document.getElementById('s-index').value; const sd=document.getElementById('s-start').value, ed=document.getElementById('s-end').value; if(!sd||!ed){alert('Select start and end date'); return null;} const lots=parseInt(document.getElementById('s-lots').value)||1; const sl=parseFloat(document.getElementById('s-sl').value)||500; const tp=parseFloat(document.getElementById('s-tp').value)||1000; const mtd=parseInt(document.getElementById('s-mtd').value)||5; const indicators=collectIndicators(); let legs=stratLegs.length?JSON.parse(JSON.stringify(stratLegs)):[]; if(!legs.length){const position=document.getElementById('s-position').value; const optType=document.getElementById('s-opt').value; const strikeType=document.getElementById('s-strike-type').value.toLowerCase(); const dteVal=parseInt(document.getElementById('s-dte').value)||7; const deltaVal=parseFloat(document.getElementById('s-delta').value)||0.3; legs=[{option_type:optType,lots:lots,transaction:position.toLowerCase(),stop_loss:sl,take_profit:tp,strike_selection:strikeType,otm_distance:2,expiry:document.getElementById('s-expiry').value.toLowerCase(),dte:dteVal,delta_target: strikeType==='delta'?deltaVal:null}];} const stratType=document.getElementById('s-strat-type').value.toLowerCase(); const entryTime=document.getElementById('s-entry-time').value; const exitTime=document.getElementById('s-exit-time').value; const momentum=parseInt(document.getElementById('s-momentum').value)||0; const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50; return {symbol:idx,start_date:sd,end_date:ed,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};}
     (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-6); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e){}})();
+    document.getElementById('s-index')?.addEventListener('change', renderQInstruments);
+    setTimeout(renderQInstruments, 800);
     addCondition();
     loadDash();
     loadStrategySymbols();
