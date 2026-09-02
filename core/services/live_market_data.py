@@ -221,29 +221,24 @@ class LiveMarketData:
         self.db = Database.get_instance()
 
     def get_spot_price(self, symbol: str) -> float:
-        # 1) Live cache (2 sec TTL - instant)
+        # 1) DB fallback first (instant, no network)
+        try:
+            row = self.db.fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
+                [symbol, symbol],
+            )
+            if row and row["close_price"] and float(row["close_price"]) > 0:
+                return float(row["close_price"])
+        except Exception:
+            pass
+        # 2) Live cache (2 sec TTL)
         try:
             live = self.get_live_spot(symbol)
             if live and live.get("spot"):
                 return float(live["spot"])
         except Exception:
             pass
-        # 2) DB fallback (instant) before network calls for speed
-        row = self.db.fetch_one(
-            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
-            [symbol, symbol],
-        )
-        if row and row["close_price"] and float(row["close_price"]) > 0:
-            return float(row["close_price"])
-        row2 = None
-        try:
-            row2 = self.db.fetch_one(
-                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type='CE' AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) ORDER BY ABS(strike_price - (SELECT AVG(strike_price) FROM bhavcopy_data WHERE symbol=? AND option_type='CE')) LIMIT 1",
-                [symbol, symbol, symbol],
-            )
-        except Exception:
-            pass
-        return float(row2["close_price"]) if row2 and row2["close_price"] else (float(row["close_price"]) if row and row["close_price"] else 0)
+        return 0
 
     def get_option_ltp(self, symbol: str, strike: float, option_type: str) -> float:
         # 1) Live chain first (cached or quick synthetic)
@@ -379,16 +374,16 @@ class LiveMarketData:
         return self.fetch_live_option_chain(symbol)
 
     def fetch_live_option_chain(self, symbol: str):
-        """Live option chain: NSE API first -> DB bhavcopy -> synthetic. No Yahoo."""
+        """Live option chain: NSE API -> DB -> synthetic. Fast, no hangs."""
         sym = symbol.upper()
-        # 1) NSE live option chain (real LTP, OI, IV) - primary source
+        # 1) NSE live option chain (real LTP, OI, IV) - 2s max
         try:
-            live = _with_timeout(_fetch_nse_option_chain_live, 3.0, sym)
+            live = _with_timeout(_fetch_nse_option_chain_live, 2.0, sym)
             if live and live.get("rows") and len(live["rows"]) > 0:
                 return live
         except Exception:
             pass
-        # 2) DB bhavcopy chain (instant if data exists)
+        # 2) DB bhavcopy chain (instant)
         try:
             from core.models.bhavcopy_model import BhavcopyModel
             bhav = BhavcopyModel()
@@ -417,12 +412,16 @@ class LiveMarketData:
                             return {"symbol": sym, "spot": spot, "atm": atm, "rows": rows, "source": "bhavcopy", "timestamp": "", "max_pain": 0, "pcr": None}
         except Exception:
             pass
-        # 3) Synthetic chain via Black-Scholes (instant fallback)
+        # 3) Synthetic chain via Black-Scholes (instant)
         try:
             spot = self.get_spot_price(sym)
             if spot <= 0:
-                sd = self.fetch_live_from_nse(sym)
-                spot = float(sd["spot"]) if sd else 0
+                # Try DB spot directly (fast, no network)
+                row = Database.get_instance().fetch_one(
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+                    [sym])
+                if row and row["close_price"] and float(row["close_price"]) > 0:
+                    spot = float(row["close_price"])
             if spot > 0:
                 from utils.helpers import get_strike_step, black_scholes
                 step = get_strike_step(sym)
