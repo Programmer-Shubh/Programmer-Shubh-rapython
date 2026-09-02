@@ -384,15 +384,31 @@ class LiveMarketData:
         return self.fetch_live_option_chain(symbol)
 
     def fetch_live_option_chain(self, symbol: str):
-        """Live option chain: NSE live -> DB -> synthetic."""
-        # 0) Try NSE live option chain first (real LTP, OI)
+        """Live option chain: synthetic instant -> DB -> NSE live."""
+        # 0) Synthetic chain via Black-Scholes (instant, always works)
         try:
-            live = _with_timeout(_fetch_nse_option_chain_live, 2.5, symbol)
-            if live and live.get("rows"):
-                return live
+            spot = self.get_spot_price(symbol)
+            if spot <= 0:
+                sd = self.fetch_live_from_nse(symbol)
+                spot = float(sd["spot"]) if sd else 0
+            if spot > 0:
+                from utils.helpers import get_strike_step, black_scholes
+                step = get_strike_step(symbol)
+                atm = round(spot / step) * step
+                dte = 7 / 365.0
+                rows = []
+                for offset in range(-8, 9):
+                    strike = atm + offset * step
+                    ce_prem = black_scholes(spot, strike, dte, 0.20, "CE")
+                    pe_prem = black_scholes(spot, strike, dte, 0.20, "PE")
+                    rows.append({"strike": strike, "distance": int(strike - atm),
+                                 "ce_ltp": round(ce_prem, 2), "ce_oi": 0, "ce_vol": 0, "ce_iv": 20,
+                                 "pe_ltp": round(pe_prem, 2), "pe_oi": 0, "pe_vol": 0, "pe_iv": 20})
+                if rows:
+                    return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "synthetic", "timestamp": "", "max_pain": 0, "pcr": None}
         except Exception:
             pass
-        # 1) Try DB chain next
+        # 1) DB chain next
         try:
             from core.models.bhavcopy_model import BhavcopyModel
             bhav = BhavcopyModel()
@@ -421,14 +437,14 @@ class LiveMarketData:
                             return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "bhavcopy", "timestamp": "", "max_pain": 0, "pcr": None}
         except Exception:
             pass
-        # 2) Synthetic chain via Black-Scholes (instant, always works)
+        # 2) NSE live (last, slow)
         try:
-            spot = self.get_spot_price(symbol)
-            if spot <= 0:
-                sd = self.fetch_live_from_nse(symbol)
-                spot = float(sd["spot"]) if sd else 0
-            if spot > 0:
-                from utils.helpers import get_strike_step, black_scholes
+            live = _with_timeout(_fetch_nse_option_chain_live, 2.5, symbol)
+            if live and live.get("rows"):
+                return live
+        except Exception:
+            pass
+        return None
                 step = get_strike_step(symbol)
                 atm = round(spot / step) * step
                 dte = 7 / 365.0
