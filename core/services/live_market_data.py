@@ -11,7 +11,7 @@ except Exception:
 _LIVE_CACHE = {}
 _LIVE_CACHE_TTL = 2  # fast streaming: 2 sec
 _CHAIN_CACHE = {}
-_CHAIN_CACHE_TTL = 2
+_CHAIN_CACHE_TTL = 30  # 30 sec - option chain doesn't change every tick
 
 
 def _with_timeout(fn, timeout, *args):
@@ -246,11 +246,11 @@ class LiveMarketData:
         return float(row2["close_price"]) if row2 and row2["close_price"] else (float(row["close_price"]) if row and row["close_price"] else 0)
 
     def get_option_ltp(self, symbol: str, strike: float, option_type: str) -> float:
-        # 1) Live chain first (real NSE LTP)
+        # 1) Live chain first (cached or quick synthetic)
         try:
             chain = self.get_live_chain_cached(symbol.upper())
             if not chain:
-                chain = _with_timeout(_fetch_nse_option_chain_live, 2.0, symbol.upper())
+                chain = self.fetch_live_option_chain(symbol.upper())
             if chain and chain.get("rows"):
                 for r in chain["rows"]:
                     if float(r.get("strike",0)) == float(strike):
@@ -266,15 +266,15 @@ class LiveMarketData:
         return float(row["close_price"]) if row else None
 
     def fetch_live_from_nse(self, symbol: str):
-        """Spot via Yahoo first (reliable, 3s, works from Render)."""
-        for fn, tout in [(_fetch_truedata_spot, 1.8), (_fetch_nse_quote_spot, 1.8), (_fetch_nse_indices_spot, 1.8), (_fetch_stocksrin_spot, 1.5)]:
+        """Spot via NSE API only (no Yahoo). Fast with proper session."""
+        for fn, tout in [(_fetch_nse_indices_spot, 1.8), (_fetch_nse_quote_spot, 1.8), (_fetch_stocksrin_spot, 1.5)]:
             try:
                 d = _with_timeout(fn, tout, symbol)
                 if d:
-                    src = "NSE" if d["source"]=="yahoo" else d["source"]
-                    return {"spot": d["spot"], "formatted": f"INR {d['spot']:,.2f}", "change": d.get("change", 0), "high": d.get("high", 0) or d["spot"], "low": d.get("low", 0) or d["spot"], "source": src}
+                    return {"spot": d["spot"], "formatted": f"INR {d['spot']:,.2f}", "change": d.get("change", 0), "high": d.get("high", 0) or d["spot"], "low": d.get("low", 0) or d["spot"], "source": d["source"]}
             except Exception:
                 pass
+        # Google Finance fallback (last resort)
         try:
             g = _with_timeout(fetch_google_spot, 1.2, symbol)
             if g and g > 0:
@@ -287,12 +287,7 @@ class LiveMarketData:
         now = time.time()
         if symbol in _LIVE_CACHE and now - _LIVE_CACHE[symbol]["ts"] < _LIVE_CACHE_TTL:
             return _LIVE_CACHE[symbol]["data"]
-        data=None
-        for attempt in range(3):
-            data = self.fetch_live_from_nse(symbol)
-            if data: break
-            try: time.sleep(0.6*(attempt+1))
-            except: pass
+        data = self.fetch_live_from_nse(symbol)
         if not data:
             # DB fallback: last bhavcopy close
             try:
@@ -384,30 +379,31 @@ class LiveMarketData:
         return self.fetch_live_option_chain(symbol)
 
     def fetch_live_option_chain(self, symbol: str):
-        """Live option chain: NSE live -> DB chain -> synthetic. Real data first, synthetic last."""
-        # 1) NSE live option chain first (real LTP, OI)
+        """Live option chain: NSE API first -> DB bhavcopy -> synthetic. No Yahoo."""
+        sym = symbol.upper()
+        # 1) NSE live option chain (real LTP, OI, IV) - primary source
         try:
-            live = _with_timeout(_fetch_nse_option_chain_live, 3.5, symbol)
-            if live and live.get("rows"):
+            live = _with_timeout(_fetch_nse_option_chain_live, 3.0, sym)
+            if live and live.get("rows") and len(live["rows"]) > 0:
                 return live
         except Exception:
             pass
-        # 2) DB chain next (fastest if bhavcopy exists)
+        # 2) DB bhavcopy chain (instant if data exists)
         try:
             from core.models.bhavcopy_model import BhavcopyModel
             bhav = BhavcopyModel()
-            dates = bhav.get_dates(symbol)
+            dates = bhav.get_dates(sym)
             if dates:
-                expiries = bhav.get_expiries(symbol, dates[0])
+                expiries = bhav.get_expiries(sym, dates[0])
                 if expiries:
-                    chain = bhav.get_option_chain(symbol, dates[0], expiries[0])
+                    chain = bhav.get_option_chain(sym, dates[0], expiries[0])
                     if chain and len(chain) >= 4:
-                        spot = self.get_spot_price(symbol)
+                        spot = self.get_spot_price(sym)
                         if spot <= 0:
-                            sd = self.fetch_live_from_nse(symbol)
+                            sd = self.fetch_live_from_nse(sym)
                             spot = float(sd["spot"]) if sd else 0
                         from utils.helpers import get_strike_step
-                        step = get_strike_step(symbol)
+                        step = get_strike_step(sym)
                         atm = round(spot / step) * step if spot > 0 else 0
                         ce = {r["strike_price"]: r for r in chain if r["option_type"] == "CE"}
                         pe = {r["strike_price"]: r for r in chain if r["option_type"] == "PE"}
@@ -418,18 +414,18 @@ class LiveMarketData:
                                          "ce_ltp": ce.get(s, {}).get("close_price", 0), "ce_oi": ce.get(s, {}).get("oi", 0), "ce_vol": ce.get(s, {}).get("volume", 0), "ce_iv": 0,
                                          "pe_ltp": pe.get(s, {}).get("close_price", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
                         if rows:
-                            return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "bhavcopy", "timestamp": "", "max_pain": 0, "pcr": None}
+                            return {"symbol": sym, "spot": spot, "atm": atm, "rows": rows, "source": "bhavcopy", "timestamp": "", "max_pain": 0, "pcr": None}
         except Exception:
             pass
-        # Fallback: synthetic chain via Black-Scholes (instant, always works)
+        # 3) Synthetic chain via Black-Scholes (instant fallback)
         try:
-            spot = self.get_spot_price(symbol)
+            spot = self.get_spot_price(sym)
             if spot <= 0:
-                sd = self.fetch_live_from_nse(symbol)
+                sd = self.fetch_live_from_nse(sym)
                 spot = float(sd["spot"]) if sd else 0
             if spot > 0:
                 from utils.helpers import get_strike_step, black_scholes
-                step = get_strike_step(symbol)
+                step = get_strike_step(sym)
                 atm = round(spot / step) * step
                 dte = 7 / 365.0
                 rows = []
@@ -441,7 +437,7 @@ class LiveMarketData:
                                  "ce_ltp": round(ce_prem, 2), "ce_oi": 0, "ce_vol": 0, "ce_iv": 20,
                                  "pe_ltp": round(pe_prem, 2), "pe_oi": 0, "pe_vol": 0, "pe_iv": 20})
                 if rows:
-                    return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "synthetic", "timestamp": "", "max_pain": 0, "pcr": None}
+                    return {"symbol": sym, "spot": spot, "atm": atm, "rows": rows, "source": "synthetic", "timestamp": "", "max_pain": 0, "pcr": None}
         except Exception:
             pass
         return None

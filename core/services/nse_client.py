@@ -89,18 +89,20 @@ def _get_session(force_refresh: bool = False) -> requests.Session:
     if _session is not None and not force_refresh and (now - _session_ts) < _SESSION_TTL:
         return _session
     with _lock:
-        # double-check
         if _session is not None and not force_refresh and (time.monotonic() - _session_ts) < _SESSION_TTL:
             return _session
         s = requests.Session()
         s.headers.update(_build_headers())
-        # Warmup: hit landing page to get nsit, nseappid, ak_bmsc, bm_sv
-        try:
-            s.get(_WARMUP_URL, timeout=6)
-            # tiny delay to let cookies settle
-            time.sleep(0.25)
-        except Exception:
-            pass
+        # Warmup: hit multiple NSE pages to get cookies (nsit, nseappid, ak_bmsc, bm_sv)
+        warmup_urls = [_WARMUP_URL, _NSE_BASE]
+        for url in warmup_urls:
+            try:
+                r = s.get(url, timeout=4)
+                if r.status_code == 200:
+                    break
+            except Exception:
+                pass
+        time.sleep(0.2)
         _session = s
         _session_ts = time.monotonic()
         return _session
@@ -109,8 +111,8 @@ def _get_session(force_refresh: bool = False) -> requests.Session:
 def _request_with_retry(
     url: str,
     *,
-    timeout: float = 6,
-    max_retries: int = 2,
+    timeout: float = 4,
+    max_retries: int = 1,
     expect_json: bool = True,
 ) -> Optional[requests.Response]:
     """GET with retries, 401 session refresh, 429 backoff. Returns Response or None."""

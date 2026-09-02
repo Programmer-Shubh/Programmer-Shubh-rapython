@@ -49,12 +49,15 @@ def get_expiries(symbol: str, date: str):
 
 @router.get("/chain/{symbol}")
 def get_chain_auto(symbol: str):
-    """Auto option chain without date - live NSE (Yahoo spot + NSE option live) or synthetic - no date input needed."""
+    """Auto option chain without date - live NSE or synthetic - no date input needed."""
     live = LiveMarketData()
-    # try cached live first (2s TTL)
     data = live.get_live_chain_cached(symbol)
     if not data:
         data = live.fetch_live_option_chain(symbol)
+        if data and data.get("rows"):
+            import time as _t
+            from core.services.live_market_data import _CHAIN_CACHE
+            _CHAIN_CACHE[symbol.upper()] = {"ts": _t.time(), "data": data}
     if data and data.get("rows"):
         return data
     return {"error": "No data - try again"}
@@ -117,10 +120,14 @@ def get_chain(symbol: str, date: str, expiry: str):
 def get_live_chain(symbol: str):
     live = LiveMarketData()
     symbol = symbol.upper()
-    # 1) Live chain: DB/bhavcopy -> synthetic (NSE spot + Black-Scholes, no NiftyTrader)
     data = live.get_live_chain_cached(symbol)
     if not data:
         data = live.fetch_live_option_chain(symbol)
+        # Cache the result for 30s so repeated requests are instant
+        if data and data.get("rows"):
+            import time as _t
+            from core.services.live_market_data import _CHAIN_CACHE
+            _CHAIN_CACHE[symbol] = {"ts": _t.time(), "data": data}
     if data and data.get("rows"):
         return data
     return {"error": "Could not fetch live data. Try again later."}

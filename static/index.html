@@ -1252,7 +1252,7 @@
     setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },30000);
     setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 3000);
     let _chainLoading=false;
-    setInterval(()=>{ try{ if(!_chainLoading && !document.getElementById('pg-chain').classList.contains('hidden') && document.getElementById('c-live') && document.getElementById('c-live').checked) cLoadChain(); }catch(e){} }, 3000);
+    setInterval(()=>{ try{ if(!_chainLoading && !document.getElementById('pg-chain').classList.contains('hidden') && document.getElementById('c-live') && document.getElementById('c-live').checked) cLoadChain(); }catch(e){} }, 30000);
     // Auto-load saved robots on robot page visit
     document.querySelector('.nav button[onclick*=\"robot\"]')?.addEventListener('click', ()=> setTimeout(loadRobotSaved, 300));
 
