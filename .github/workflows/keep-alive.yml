@@ -2,7 +2,7 @@ name: Keep Render Awake
 
 on:
   schedule:
-    - cron: '*/9 * * * *'  # Every 9 minutes (Render sleeps after 15 mins)
+    - cron: '*/5 * * * *'  # Every 5 minutes - always online like quantman.trade
   workflow_dispatch:
 
 jobs:

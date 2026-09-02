@@ -3,9 +3,8 @@ import requests
 import re
 import json
 from typing import List, Dict
-
-# Sources: nselib (primary) -> jugaad-data (NSE archives) -> NSEpy -> StocksRin -> Google -> TrueData -> Synthetic
-# NiftyTrader removed (slow), Yahoo removed (no option chain).
+# Sources: DB -> nselib (NSE) -> jugaad-data (NSE bhavcopy) -> StocksRin -> Google -> TrueData
+# yfinance REMOVED. Direct NSE Bhavcopy = Independent Free Pipeline.
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -308,6 +307,35 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
         d += datetime.timedelta(days=1)
     return records
 
+def _fetch_nse_archives_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Direct NSE archives CSV (nseindia.com/content/historical) - free, no key, replaces yfinance."""
+    try:
+        import csv, io
+        sd=datetime.datetime.strptime(start_date,"%Y-%m-%d"); ed=datetime.datetime.strptime(end_date,"%Y-%m-%d")
+        out=[]
+        cur=sd
+        while cur <= ed:
+            if cur.weekday() < 5:
+                try:
+                    url=f"https://www.nseindia.com/api/historical/equities?symbol={symbol.upper()}&series=[\"EQ\"]&from={cur.strftime('%d-%m-%Y')}&to={cur.strftime('%d-%m-%Y')}"
+                    # fallback to archives CSV
+                    r=requests.get(f"https://archives.nseindia.com/content/historical/EQUITIES/{cur.strftime('%Y')}/{cur.strftime('%b').upper()}/cm{cur.strftime('%d%b%Y').upper()}bhav.csv", headers=_HEADERS, timeout=4)
+                    if r.status_code==200:
+                        reader=csv.DictReader(io.StringIO(r.text))
+                        for row in reader:
+                            if (row.get("SYMBOL") or "").strip().upper() != symbol.upper(): continue
+                            cl=_clean_num(row.get("CLOSE") or row.get("LAST"))
+                            if cl<=0: continue
+                            td=cur.strftime("%Y-%m-%d")
+                            out.append({"symbol":symbol,"trade_date":td,"open_price":_clean_num(row.get("OPEN")), "high_price":_clean_num(row.get("HIGH")), "low_price":_clean_num(row.get("LOW")), "close_price":round(cl,2),"volume":int(_clean_num(row.get("TOTTRDQTY"))),"oi":0})
+                            break
+                except: pass
+            cur+=datetime.timedelta(days=1)
+            if len(out)>=120: break
+        if len(out)>=5: return out
+    except: pass
+    return []
+
 def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """Instant local cache: bhavcopy_data spot rows (seeded by background refresh). No network."""
     try:
@@ -341,21 +369,32 @@ def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Di
     return []
 
 
-def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """DB cache (instant) -> nselib -> StocksRin -> Google -> TrueData -> Synthetic.
-    DB-first + hard 15s budget avoids slow external calls so backtest never times out (no 'Network error')."""
+def _last_trading_day():
+    d = datetime.date.today() - datetime.timedelta(days=1)
+    while d.weekday() >= 5: d -= datetime.timedelta(days=1)
+    return d
+
+def fetch_historical(symbol: str, start_date: str, end_date: str, allow_synthetic: bool = False) -> List[Dict]:
+    """Real NSE 6-month local archive. end_date clamped to last completed trading day. DB -> NSE archives -> nselib -> jugaad."""
+    allow_synthetic=False
     symbol = symbol.upper()
-    # 1) Instant local cache (seeded by background refresh) - serves backtest in <10ms
+    # Clamp end_date to last completed trading day (avoid today ongoing session)
+    try:
+        ed = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
+        ltd = _last_trading_day()
+        if ed > ltd: end_date = ltd.strftime("%Y-%m-%d")
+    except: pass
+    # 1) Instant local cache (6-month archive) - serves backtest in <10ms
     try:
         db_data = _fetch_db_historical(symbol, start_date, end_date)
         if db_data and len(db_data) >= 5:
             return db_data
     except Exception:
         pass
-    # 2) External sources with tight 4s budget (Quantman instant) - then synthetic
+    # 2) External sources with tight 2s budget - instant, else DB synthetic
     import time as _t
-    _deadline = _t.time() + 4
-    for fetcher in [_fetch_nselib_historical, _fetch_jugaad_historical, _fetch_nsepy_historical, _fetch_stocksrin_historical, _fetch_google_finance, _fetch_truedata_historical]:
+    _deadline = _t.time() + 2
+    for fetcher in [_fetch_nselib_historical, _fetch_nse_archives_historical, _fetch_stocksrin_historical, _fetch_truedata_historical]:
         try:
             if _t.time() > _deadline:
                 break
@@ -370,10 +409,4 @@ def fetch_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
                 return data
         except Exception:
             continue
-    try:
-        synth = _generate_synthetic_data(symbol, start_date, end_date)
-        if synth and len(synth) >= 5:
-            return synth
-    except Exception:
-        pass
     return []

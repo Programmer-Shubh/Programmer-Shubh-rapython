@@ -14,10 +14,10 @@ class TransactionCosts:
     STAMP_DUTY_SELL_PCT = 0.003  # 0.003% on sell
     # GST: 18% on (brokerage + exchange + SEBI + stamp)
     GST_PCT = 18.0
-    # STT: 0.1% on sell side for delivery, 0.025% for options intraday
-    # For options: 0.05% on sell side (intraday), 0.1% for delivery
-    STT_PCT_SELL = 0.05  # 0.05% on sell (options intraday)
-    STT_PCT_BUY = 0.025  # 0.025% on buy (options, if squared off same day)
+    # STT: 0.1% on sell side for options (premium value) - both intraday and delivery
+    # STT on buy side for options: NIL (removed in 2018)
+    STT_PCT_SELL = 0.1  # 0.1% on sell (options premium)
+    STT_PCT_BUY = 0.0   # 0% on buy (options)
 
     # Latency simulation (milliseconds) - only used in backtest
     LATENCY_MS = 50  # 50ms typical broker API latency
@@ -49,23 +49,23 @@ class TransactionCosts:
         brokerage = cls.BROKERAGE_PER_TRADE
 
         # Exchange transaction charge: 0.00325% of turnover
-        exchange_txn = turnover * cls.EXCHANGE_TXN_PCT
+        exchange_txn = turnover * cls.EXCHANGE_TXN_PCT / 100
 
         # SEBI fee: 0.0001% of turnover
-        sebi_fee = turnover * cls.SEBI_FEE_PCT
+        sebi_fee = turnover * cls.SEBI_FEE_PCT / 100
 
         # Stamp duty: different rates for buy vs sell
         # Buy: 0.015%, Sell: 0.003% (options, as per latest SEBI circular)
         if is_sell:
-            stamp_duty = turnover * cls.STAMP_DUTY_SELL_PCT
+            stamp_duty = turnover * cls.STAMP_DUTY_SELL_PCT / 100
         else:
-            stamp_duty = turnover * cls.STAMP_DUTY_BUY_PCT
+            stamp_duty = turnover * cls.STAMP_DUTY_BUY_PCT / 100
 
-        # STT: 0.05% on sell side for options intraday; 0.025% on buy if squared off same day
+        # STT: 0.1% on sell side for options (premium value); 0% on buy side
         if is_sell:
-            stt = turnover * cls.STT_PCT_SELL
+            stt = turnover * cls.STT_PCT_SELL / 100
         else:
-            stt = turnover * cls.STT_PCT_BUY
+            stt = turnover * cls.STT_PCT_BUY / 100
 
         # GST: 18% on (brokerage + exchange + SEBI + stamp)
         subtotal = brokerage + exchange_txn + sebi_fee + stamp_duty + stt

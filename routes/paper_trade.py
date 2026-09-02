@@ -1,7 +1,10 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
+from typing import List, Optional, Dict
 from core.models.trade_model import TradeModel
 from core.services.transaction_costs import TransactionCosts
+from core.services.historical_replay import HistoricalReplayEngine
+from core.services.backtest_engine import BacktestEngine
 from utils.helpers import get_lot_size, format_currency
 
 router = APIRouter()
@@ -39,7 +42,7 @@ class TradeModeRequest(BaseModel):
 @router.get("/open")
 def get_open_trades():
     trade_model = TradeModel()
-    positions = trade_model.get_open_positions_with_pnl()
+    positions = trade_model.get_open_positions_with_pnl(auto_exit=False)
     total_pnl = sum(p["unrealized_pnl"] for p in positions)
     return {
         "count": len(positions),
@@ -53,7 +56,7 @@ def get_open_trades():
                 "strike": t["trade"]["strike_price"],
                 "transaction_type": t["trade"]["transaction_type"],
                 "quantity": t["trade"]["quantity"],
-                "lot_size": t["trade"].get("lot_size", 50),
+                "lot_size": get_lot_size(t["trade"]["symbol"]) if t["trade"].get("lot_size",50)==50 and get_lot_size(t["trade"]["symbol"])!=50 else t["trade"].get("lot_size", 50),
                 "entry_price": t["trade"]["entry_price"],
                 "current_price": t["current_price"],
                 "pnl": t["unrealized_pnl"],
@@ -82,6 +85,30 @@ def place_trade(req: PlaceTradeRequest):
     # Prevent faulty strike '01' etc already handled, also reject strike 0
     if req.entry_price <= 0 or req.strike <= 0:
         return {"error": "Enter valid strike (>0) and premium (>0) - Strike 0 invalid, use ATM"}
+    # Premium sanity: option premium should not be ~spot price (EICHERMOT bug ₹3128) - must be <20% of spot
+    try:
+        from core.services.live_market_data import LiveMarketData as _LMD2
+        _sp = _LMD2().get_spot_price(req.symbol) if ' _spot' not in dir() else _spot
+        if _sp and _sp>0 and req.entry_price > _sp*0.25:
+            # allow deep ITM CE where premium ~ spot-strike, but cap at spot*0.25 or intrinsic+500
+            intrinsic = max(0, _sp - req.strike) if req.option_type=="CE" else max(0, req.strike - _sp)
+            if req.entry_price > intrinsic + 600:
+                return {"error": f"Premium ₹{req.entry_price} too high vs spot ₹{_sp:.0f} (likely spot sent as premium). Correct premium ~₹{intrinsic+80:.0f}. Use option LTP, not spot."}
+    except Exception: pass
+    # Deep ITM/OTM guard: ATM ±5 only
+    try:
+        from core.services.live_market_data import LiveMarketData as _LMD
+        from utils.helpers import get_strike_step
+        _lm = _LMD(); _spot = _lm.get_spot_price(req.symbol) or 0
+        if _spot<=0:
+            try: _s=_lm.get_live_spot(req.symbol); _spot=float(_s["spot"]) if _s and _s.get("spot") else 0
+            except: pass
+        _step=get_strike_step(req.symbol); _atm=round(_spot/_step)*_step if _spot>0 else 0
+        if _atm>0 and abs(req.strike-_atm)>_step*4:
+            return {"error": f"Deep {'ITM' if req.strike<_atm else 'OTM'} blocked: strike {req.strike} far from ATM {_atm} (ATM±4 only, spot {_spot:.0f})"}
+        if _spot>0 and abs(req.strike-_spot)/_spot>0.04:
+            return {"error": f"Deep ITM/OTM blocked: >4% from spot {_spot:.2f} (ATM±4 only)"}
+    except Exception: pass
     # Deduplication: if identical open position exists, block duplicate
     existing = trade_model.db.fetch_one("SELECT id FROM paper_trades WHERE symbol=? AND strike_price=? AND option_type=? AND transaction_type=? AND status='open' LIMIT 1", [req.symbol, req.strike, req.option_type, req.transaction_type])
     if existing:
@@ -184,6 +211,12 @@ def get_history():
                 "exit": t.get("exit_price", 0),
                 "pnl": t["pnl"],
                 "pnl_formatted": format_currency(t["pnl"]),
+                "lot_size": get_lot_size(t["symbol"]) if t.get("lot_size",50)==50 and get_lot_size(t["symbol"])!=50 else t.get("lot_size", 50),
+                "quantity": t.get("quantity", 1),
+                "total_qty": t.get("quantity", 1) * (get_lot_size(t["symbol"]) if t.get("lot_size",50)==50 and get_lot_size(t["symbol"])!=50 else t.get("lot_size", 50)),
+                "transaction_type": t.get("transaction_type",""),
+                "calc": f"({t.get('exit_price',0):.2f}-{t['entry_price']:.2f})×{t.get('lot_size',50)}" if t.get("transaction_type")=="BUY" else f"({t['entry_price']:.2f}-{t.get('exit_price',0):.2f})×{t.get('lot_size',50)}",
+                "analysis": f"{t.get('transaction_type','')} {t['option_type']} {'profit' if ((t.get('exit_price',0)-t['entry_price'])>0 if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0))>0) else 'loss'}: ₹{t['entry_price']:.2f}→₹{t.get('exit_price',0):.2f} × Lot {t.get('lot_size',50)} = Gross ₹{((t.get('exit_price',0)-t['entry_price']) if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0)))*t.get('quantity',1)*t.get('lot_size',50):,.2f} - Costs = Net {format_currency(t['pnl'])}",
             }
             for t in closed[:30]
         ],
@@ -209,3 +242,104 @@ def nifty_fix():
     # Trigger NIFTY incomplete fix via clean
     result = trade_model.clean_and_fix_history()
     return {"nifty": "fixed" if any("NIFTY" in i for i in result.get("issues", [])) else "ok", "details": result}
+
+
+class HistoricalReplayRequest(BaseModel):
+    symbol: str = "NIFTY"
+    start_date: str = "2026-08-01"
+    end_date: str = "2026-08-20"
+    indicators: List[Dict] = []
+    entry_conditions: List[Dict] = []
+    exit_conditions: List[Dict] = []
+    legs: List[Dict] = []
+    advanced: Dict = {}
+    risk: Dict = {}
+
+
+@router.post("/historical-replay")
+def run_historical_replay(req: HistoricalReplayRequest):
+    """Run paper trade on historical data with EXACT backtest logic.
+    This ensures paper trade results match backtest results exactly."""
+    try:
+        engine = HistoricalReplayEngine()
+        engine.configure(
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+        )
+        result = engine.run_replay()
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/backtest-compare")
+def backtest_compare(req: HistoricalReplayRequest):
+    """Run both backtest and historical replay, return both for comparison."""
+    try:
+        # Run backtest
+        bt_engine = BacktestEngine(is_live=False)
+        historical = bt_engine._load_historical(req.symbol, req.start_date, req.end_date)
+        bt_result = bt_engine.run(
+            historical=historical,
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+            is_live=False,
+        )
+        
+        # Run historical replay (exact same logic)
+        replay_engine = HistoricalReplayEngine()
+        replay_engine.configure(
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+        )
+        replay_result = replay_engine.run_replay()
+        
+        # Compare
+        bt_metrics = bt_result.get("metrics", {})
+        replay_metrics = replay_result.get("metrics", {})
+        
+        comparison = {
+            "backtest": bt_metrics,
+            "historical_replay": replay_metrics,
+            "match": {
+                "total_return_pct": round(bt_metrics.get("total_return_pct", 0) - replay_metrics.get("total_return_pct", 0), 4),
+                "total_trades": bt_metrics.get("total_trades", 0) - replay_metrics.get("total_trades", 0),
+                "win_rate": round(bt_metrics.get("win_rate", 0) - replay_metrics.get("win_rate", 0), 4),
+                "max_drawdown": round(bt_metrics.get("max_drawdown", 0) - replay_metrics.get("max_drawdown", 0), 4),
+                "sharpe_ratio": round(bt_metrics.get("sharpe_ratio", 0) - replay_metrics.get("sharpe_ratio", 0), 4),
+            },
+            "exact_match": (
+                abs(bt_metrics.get("total_return_pct", 0) - replay_metrics.get("total_return_pct", 0)) < 0.01 and
+                bt_metrics.get("total_trades", 0) == replay_metrics.get("total_trades", 0) and
+                abs(bt_metrics.get("win_rate", 0) - replay_metrics.get("win_rate", 0)) < 0.01
+            )
+        }
+        
+        return comparison
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}

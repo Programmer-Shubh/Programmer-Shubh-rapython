@@ -65,6 +65,8 @@ def _parse_tv_message(raw: str) -> dict:
 
 
 def _place_from_signal(data: dict, source: str = "webhook") -> dict:
+    # Unified via execution_engine: supports mode PAPER/LIVE (broker)
+    mode = (data.get("mode") or data.get("broker_mode") or "PAPER").upper()
     symbol = (data.get("symbol") or data.get("ticker") or "NIFTY").upper()
     action = (data.get("action") or data.get("side") or "BUY").upper()
     if action not in ("BUY","SELL"):
@@ -75,6 +77,16 @@ def _place_from_signal(data: dict, source: str = "webhook") -> dict:
     strike = float(data.get("strike") or data.get("strike_price") or 0)
     expiry = data.get("expiry") or data.get("expiry_date") or ""
     qty = int(data.get("quantity") or data.get("qty") or 1)
+    # If webhook comes with full legs (Strategy Builder), route via execution_engine directly
+    if data.get("legs"):
+        try:
+            from core.services.execution_engine import execute
+            legs = data.get("legs")
+            sl = float(data.get("stop_loss") or data.get("sl") or 1500)
+            tp = float(data.get("take_profit") or data.get("target") or data.get("tp") or 1000)
+            return execute(legs, symbol, mode=mode, sl=sl, tp=tp)
+        except Exception as e:
+            return {"error": str(e)}
     # If strike missing, pick ATM from live spot
     live = LiveMarketData()
     if strike <= 0:
@@ -193,4 +205,13 @@ def webhook_test():
 
 @router.post("/tradingview")
 async def webhook_tradingview(request: Request):
+    return await webhook_free(request)
+
+
+@router.post("/soranoo")
+async def webhook_soranoo(request: Request):
+    """Soranoo TradingView-Free-Webhook-Alerts compatible endpoint.
+    Accepts same email-body/plain-text payload that soranoo's email_listener forwards.
+    Ref: https://github.com/soranoo/TradingView-Free-Webhook-Alerts (src/email_listener + broadcast)
+    """
     return await webhook_free(request)

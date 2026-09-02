@@ -21,7 +21,7 @@ _RUNNING = False
 
 
 def _seed_history(symbol: str):
-    """Fetch real historical data via 3 fast alternatives: NSE nselib -> StocksRin -> Black-Scholes synthetic."""
+    """6-month EOD archive: NSE archives -> nselib -> jugaad, always 180 days."""
     from datetime import datetime, timedelta
     db = Database.get_instance()
     has = db.fetch_one(
@@ -29,11 +29,13 @@ def _seed_history(symbol: str):
         [symbol],
     )
     existing = has["c"] if has else 0
-    if existing >= 100:
+    if existing >= 120:
         return
     bhav = BhavcopyModel()
-    end = datetime.now().strftime("%Y-%m-%d")
-    start = (datetime.now() - timedelta(days=190)).strftime("%Y-%m-%d")
+    # Always 6 months archive, clamp to last trading day
+    from core.services.historical_fetcher import _last_trading_day
+    end = _last_trading_day().strftime("%Y-%m-%d")
+    start = (_last_trading_day() - timedelta(days=190)).strftime("%Y-%m-%d")
     try:
         from core.services.historical_fetcher import fetch_historical
         data = fetch_historical(symbol, start, end)
@@ -140,6 +142,48 @@ async def run_refresh_loop():
         await asyncio.to_thread(refresh_all, True)
     except Exception as e:
         logger.warning("[refresh] initial light refresh failed: %s", e)
+    # Nightly auto-import at 18:30 IST (13:00 UTC): 1Y bhavcopy for deep backtest
+    async def _nightly_import_loop():
+        import datetime as _dt
+        while True:
+            try:
+                now_ist = _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
+                # Run at 18:30 IST daily
+                target = now_ist.replace(hour=18, minute=30, second=0, microsecond=0)
+                if now_ist >= target:
+                    target += _dt.timedelta(days=1)
+                wait_sec = (target - now_ist).total_seconds()
+                await asyncio.sleep(wait_sec)
+                await asyncio.to_thread(_nightly_bhavcopy_import)
+            except Exception as e:
+                logger.warning("[nightly] loop error: %s", e)
+                await asyncio.sleep(3600)
+
+    def _nightly_bhavcopy_import():
+        try:
+            from core.services.historical_fetcher import fetch_historical
+            from core.models.bhavcopy_model import BhavcopyModel
+            bhav = BhavcopyModel()
+            # Last 1 year for all F&O - chunked to avoid NSE block
+            end = __import__("datetime").date.today().strftime("%Y-%m-%d")
+            start = (__import__("datetime").date.today() - __import__("datetime").timedelta(days=365)).strftime("%Y-%m-%d")
+            for sym in ALL_SYMBOLS:
+                try:
+                    # Skip if already has 200+ rows in last year
+                    has = bhav.get_dates(sym)
+                    if len([d for d in has if d >= start]) >= 200:
+                        continue
+                    data = fetch_historical(sym, start, end, allow_synthetic=False)
+                    if data and len(data) >= 5:
+                        bhav.import_data(data)
+                        logger.info(f"[nightly] {sym} imported {len(data)}")
+                    import time as _t; _t.sleep(0.8)
+                except Exception as ex:
+                    logger.warning(f"[nightly] {sym} fail: {ex}")
+        except Exception as e:
+            logger.warning(f"[nightly] import error: {e}")
+
+    asyncio.get_running_loop().create_task(_nightly_import_loop())
     while True:
         await asyncio.sleep(_REFRESH_INTERVAL)
         try:

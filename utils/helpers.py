@@ -1,10 +1,63 @@
 import math
+import os, json, time as _time
 
+_NSE_LOTS_CACHE = None
+_NSE_LOTS_CACHE_TS = 0
+_NSE_LOTS_TTL = 24*3600
+
+def _load_nse_lots():
+    global _NSE_LOTS_CACHE, _NSE_LOTS_CACHE_TS
+    if _NSE_LOTS_CACHE and _time.time() - _NSE_LOTS_CACHE_TS < _NSE_LOTS_TTL:
+        return _NSE_LOTS_CACHE
+    # Try daily file cache
+    for p in [os.path.join(os.path.dirname(__file__), "..", "data", "nse_lots.json"), os.path.join("data","nse_lots.json")]:
+        try:
+            if os.path.exists(p):
+                with open(p,"r") as f: j=json.load(f)
+                if j.get("ts",0) > _time.time() - _NSE_LOTS_TTL and j.get("lots"):
+                    _NSE_LOTS_CACHE=j["lots"]; _NSE_LOTS_CACHE_TS=j["ts"]; return _NSE_LOTS_CACHE
+        except Exception: pass
+    # Fetch from NSE
+    try:
+        import urllib.request as _ur
+        _ur_headers={"User-Agent":"Mozilla/5.0"}
+        # NSE endpoint for F&O securities
+        for url in ["https://www.nseindia.com/api/equity-stockIndices?index=SECURITIES%20IN%20F%26O","https://archives.nseindia.com/content/fo/fo_mktlots.csv"]:
+            try:
+                req=_ur.Request(url, headers=_ur_headers)
+                with _ur.urlopen(req, timeout=5) as r:
+                    data=r.read().decode()
+                    lots={}
+                    if "symbol" in data.lower():
+                        import csv, io
+                        reader=csv.DictReader(io.StringIO(data))
+                        for row in reader:
+                            sym=(row.get("SYMBOL") or row.get("symbol") or "").strip().upper()
+                            ls=row.get("LOT SIZE") or row.get("lotSize") or row.get("marketLot") or ""
+                            try: lots[sym]=int(str(ls).strip())
+                            except: pass
+                    elif data.strip().startswith("{"):
+                        j=json.loads(data)
+                        for d in j.get("data",[]):
+                            sym=str(d.get("symbol","")).upper(); ls=d.get("marketLot") or d.get("lotSize")
+                            try: lots[sym]=int(ls)
+                            except: pass
+                    if lots:
+                        _NSE_LOTS_CACHE=lots; _NSE_LOTS_CACHE_TS=_time.time()
+                        # persist
+                        try:
+                            os.makedirs("data", exist_ok=True)
+                            with open("data/nse_lots.json","w") as f: json.dump({"ts":_NSE_LOTS_CACHE_TS,"lots":lots},f)
+                        except: pass
+                        return lots
+            except Exception: continue
+    except Exception: pass
+    return None
 
 def get_lot_size(symbol: str) -> int:
     lots = {
-        "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120,
-        "SENSEX": 20, "BANKEX": 30,
+        "NIFTY": 75, "BANKNIFTY": 15, "FINNIFTY": 60, "MIDCPNIFTY": 75,
+        "SENSEX": 10, "BANKEX": 20,
         "RELIANCE": 250, "HDFCBANK": 550, "ICICIBANK": 700,
         "TCS": 175, "INFY": 400, "ITC": 1600, "SBIN": 700,
         "AXISBANK": 625, "KOTAKBANK": 400, "LT": 150, "HINDUNILVR": 300,
@@ -12,12 +65,20 @@ def get_lot_size(symbol: str) -> int:
         "WIPRO": 1500, "ONGC": 1875, "SUNPHARMA": 400, "ULTRACEMCO": 50,
         "NTPC": 2250, "POWERGRID": 2700, "TATAMOTORS": 1125, "TATASTEEL": 550,
         "HCLTECH": 350, "JSWSTEEL": 675, "COALINDIA": 2700, "DRREDDY": 125,
-        "CIPLA": 300, "ADANIENT": 250, "SBILIFE": 450, "BPCL": 1800,
+        "CIPLA": 300, "ADANIENT": 309, "SBILIFE": 450, "BPCL": 1800,
         "GRASIM": 200, "TECHM": 600, "DIVISLAB": 75, "EICHERMOT": 300,
         "BRITANNIA": 140, "HINDALCO": 900, "VEDL": 1650, "INDUSINDBK": 900,
         "SHREECEM": 30, "NESTLEIND": 40, "BAJAJFINSV": 125, "HEROMOTOCO": 300,
         "APOLLOHOSP": 75, "UPL": 1100,
     }
+    # Correct exchange lots override (Aug 2026)
+    _override={"FINNIFTY":60,"ADANIENT":309,"NIFTY":75}
+    if symbol.upper() in _override: return _override[symbol.upper()]
+    try:
+        live=_load_nse_lots()
+        if live and symbol.upper() in live:
+            return int(live[symbol.upper()])
+    except Exception: pass
     return lots.get(symbol.upper(), 50)
 
 

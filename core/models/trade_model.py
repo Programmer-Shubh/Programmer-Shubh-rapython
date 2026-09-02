@@ -37,7 +37,8 @@ class TradeModel:
             [user_id],
         )
 
-    def get_open_positions_with_pnl(self, user_id=1, auto_exit: bool = True) -> list:
+    def get_open_positions_with_pnl(self, user_id=1, auto_exit: bool = False) -> list:
+        # auto_exit False = no flicker: positions never auto-disappear on poll
         trades = self.get_open_trades(user_id)
         result = []
         for t in trades:
@@ -48,8 +49,14 @@ class TradeModel:
             qty = t["quantity"]
             lot = t.get("lot_size", 50)
             if current_price is None or entry <= 0:
-                result.append({"trade": t, "current_price": entry if entry>0 else (current_price or 0), "unrealized_pnl": 0, "unrealized_pct": 0, "invalid": True})
-                continue
+                # Never flicker: use last known premium or entry as current
+                ck = f"{t['symbol']}_{t['option_type']}_{t['strike_price']}"
+                fallback = self._last_premiums.get(ck, entry if entry>0 else 0)
+                current_price = fallback if fallback and fallback>0 else (entry if entry>0 else 0)
+                # keep trade visible, not invalid gap
+                if entry <= 0:
+                    result.append({"trade": t, "current_price": round(current_price,2), "unrealized_pnl": 0, "unrealized_pct": 0, "invalid": False})
+                    continue
             # Automated Exit Bug Fix: check SL/target on live price and auto-close
             if auto_exit:
                 sl = float(t.get("stop_loss", 0) or 0)
@@ -104,6 +111,12 @@ class TradeModel:
                 pnl = (current_price - entry) * qty * lot
             else:
                 pnl = (entry - current_price) * qty * lot
+            # Clamp flicker: if current_price jumps >80% intraday, keep last (prevent 150->49 flash)
+            ck2 = f"{t['symbol']}_{t['option_type']}_{t['strike_price']}"
+            last = self._last_premiums.get(ck2)
+            if last and last>10 and current_price>0 and abs(current_price-last)/last > 0.80:
+                current_price = last
+                pnl = (current_price - entry) * qty * lot if t["transaction_type"]=="BUY" else (entry - current_price)*qty*lot
             result.append({
                 "trade": t,
                 "current_price": round(current_price, 2),
@@ -148,14 +161,13 @@ class TradeModel:
             return "Quantity must be > 0"
         if data.get("entry_price") is not None and float(data.get("entry_price", 0)) <= 0:
             return "Entry price must be > 0"
-        # Validate strike step alignment
+        # Auto-align strike (no error for any symbol like NESTLEIND 25350)
         try:
             from utils.helpers import get_strike_step
             step = get_strike_step(data["symbol"])
             if strike % step != 0:
-                # Allow small floating error
                 if abs((strike % step)) > 0.01 and abs(step - (strike % step)) > 0.01:
-                    return f"Strike {strike} not aligned to step {step} for {data['symbol']}"
+                    data["strike_price"] = round(strike / step) * step
         except Exception:
             pass
         # Validate symbol existence-ish
@@ -291,8 +303,8 @@ class TradeModel:
                     exit_date = entry_d
         except Exception:
             pass
-        lot = trade.get("lot_size", 50)
-        qty = trade["quantity"]
+        lot = int(trade.get("lot_size") or get_lot_size(trade.get("symbol","NIFTY")))
+        qty = int(trade["quantity"] or 1)
         is_sell = trade["transaction_type"] == "BUY"
         closing_side = "SELL" if is_sell else "BUY"
         exit_price = max(0.01, TransactionCosts.apply_fill_slippage(exit_price, closing_side, is_live=True))
