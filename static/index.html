@@ -533,7 +533,7 @@
             </div>
         </div>
         <div class="card chain-table-card">
-            <div class="card-body p-2" id="chain-body"><p class="text-muted p-2">Select date and expiry to load option chain.</p></div>
+            <div class="card-body p-2" id="chain-body"><p class="text-muted p-2"><span class="spinner"></span> Loading option chain...</p></div>
         </div>
     </div>
     <script>
@@ -545,7 +545,7 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy')loadStrategySymbols();if(id==='webhook')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();}if(id==='strategy')loadStrategySymbols();if(id==='webhook')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -634,29 +634,33 @@
     async function deleteTrade(id){if(!confirm('Delete trade #'+id+'? This cannot be undone.'))return;const r=await P('/api/trades/'+id,{method:'DELETE'});if(!r.error)loadTrades();else alert('Error: '+r.error);}
     async function setTradeMode(id,mode){const r=await P('/api/trades/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,trade_mode:mode})});if(!r.error)loadTrades();else alert('Error: '+r.error);}
 
-    async function cLoadSymbols(){const syms=await A('/api/chain/symbols');const sel=document.getElementById('c-sym');sel.innerHTML='';const master=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','LT','AXISBANK','KOTAKBANK','HINDUNILVR','BHARTIARTL','MARUTI','M&M','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL'];let all=[...new Set([...(syms.symbols||[]), ...master])].sort();all.forEach(x=>{sel.innerHTML+='<option value="'+x+'" '+(x==='NIFTY'?'selected':'')+'>'+x+'</option>';});document.getElementById('c-live').checked=true;toggleLiveMode();}
+    async function cLoadSymbols(){try{const syms=await A('/api/chain/symbols');const sel=document.getElementById('c-sym');sel.innerHTML='';const master=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','LT','AXISBANK','KOTAKBANK','HINDUNILVR','BHARTIARTL','MARUTI','M&M','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL'];let all=[...new Set([...(syms.symbols||[]), ...master])].sort();all.forEach(x=>{sel.innerHTML+='<option value="'+x+'" '+(x==='NIFTY'?'selected':'')+'>'+x+'</option>';});}catch(e){console.error('cLoadSymbols failed',e);}document.getElementById('c-live').checked=true;toggleLiveMode();}
     async function cLoadDates(){const s=document.getElementById('c-sym').value;if(!s)return;const d=await A('/api/chain/dates/'+s);document.getElementById('c-date').value=d.dates?d.dates[0]:'';cLoadExpiries();}
     async function cLoadExpiries(){const s=document.getElementById('c-sym').value,d=document.getElementById('c-date').value;if(!d)return;const e=await A('/api/chain/expiries/'+s+'/'+d);document.getElementById('c-exp').innerHTML=e.expiries?e.expiries.map(x=>'<option>'+x+'</option>').join(''):'<option>No Expiry</option>';}
     function toggleLiveMode(){if(document.getElementById('c-live').checked){document.getElementById('c-date').parentElement.style.display='none';document.getElementById('c-exp').parentElement.style.display='none';document.getElementById('c-spot').style.display='block';cLoadChain();}else{document.getElementById('c-date').parentElement.style.display='';document.getElementById('c-exp').parentElement.style.display='';document.getElementById('c-spot').style.display='none';cLoadChain();}}
     function toggleEasyMode(){const easy=document.getElementById('easyMode')?.checked; const adv=document.getElementById('overallSettings'); if(adv) adv.style.display=easy?'none':''; document.querySelectorAll('#pg-strategy .indicator-card').forEach(c=>c.style.display=easy?'none':''); const mom=document.getElementById('s-momentum')?.closest('.col-md-2'); if(mom) mom.style.display=easy?'none':''; const nre=document.getElementById('s-no-reentry')?.closest('.col-md-2'); if(nre) nre.style.display=easy?'none':''; }
     setTimeout(()=>{ try{ toggleEasyMode(); }catch(e){} },800);
     async function cLoadChain(){
+        if(_chainLoading)return;_chainLoading=true;
         const live=document.getElementById('c-live').checked;
         const s=document.getElementById('c-sym').value;
         let c;let h='';let htm='';
+        document.getElementById('chain-body').innerHTML='<p class="text-muted p-2"><span class="spinner"></span> Loading option chain...</p>';
         if(live){
             if(!s)return;
-            c=await A('/api/chain/live/'+s.toUpperCase());
-            if(c.error){document.getElementById('chain-body').innerHTML='<p class="text-danger">'+c.error+'</p>';document.getElementById('c-date').value='';document.getElementById('c-exp').innerHTML='<option>Live Data</option>';return;}
+            try{c=await A('/api/chain/live/'+s.toUpperCase());}catch(e){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-danger p-2">Network error: '+e.message.slice(0,100)+' <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';return;}
+            if(c.error){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-danger p-2">'+c.error+' <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';document.getElementById('c-date').value='';document.getElementById('c-exp').innerHTML='<option>Live Data</option>';return;}
+            if(!c.rows||!c.rows.length){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-warning p-2">No data returned. <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';return;}
             document.getElementById('c-date').value='';
             document.getElementById('c-exp').innerHTML='<option>Live</option>';
             document.getElementById('c-spot').style.display='block';
             document.getElementById('c-spot').innerHTML='<span class="badge bg-danger text-white">LIVE</span> <span class="badge bg-info text-dark">Spot: \u20B9'+c.spot.toFixed(2)+' | ATM: '+c.atm+'</span> <span class="badge bg-info text-dark ms-2">Source: '+(c.source||'live')+'</span>';
         }else{
             const d=document.getElementById('c-date').value,e=document.getElementById('c-exp').value;
-            if(!d||!e)return;
-            c=await A('/api/chain/chain/'+s+'/'+d+'/'+e);
-            if(c.error){document.getElementById('chain-body').innerHTML='<p>'+c.error+'</p>';return;}
+            if(!d||!e){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-muted p-2">Select date and expiry to load option chain.</p>';return;}
+            try{c=await A('/api/chain/chain/'+s+'/'+d+'/'+e);}catch(e2){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-danger p-2">Network error: '+e2.message.slice(0,100)+' <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';return;}
+            if(c.error){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-danger p-2">'+c.error+' <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';return;}
+            if(!c.rows||!c.rows.length){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-warning p-2">No chain data. <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';return;}
             document.getElementById('c-spot').style.display='none';
         }
         htm='<table class="table table-sm table-bordered chain-table"><thead><tr><th colspan="5" class="text-center" style="background:#d1e7dd;color:#0f5132">CALLS (CE)</th><th class="text-center" style="background:#fff3cd">STRIKE</th><th colspan="5" class="text-center" style="background:#f8d7da;color:#842029">PUTS (PE)</th></tr><tr><th class="text-end small">Vol</th><th class="text-end small">OI</th><th class="text-end small">Chng OI</th><th class="text-center small">Action</th><th class="text-end small">LTP</th><th class="text-center small">Premium</th><th class="text-end small">LTP</th><th class="text-center small">Action</th><th class="text-end small">Chng OI</th><th class="text-end small">OI</th><th class="text-end small">Vol</th></tr></thead><tbody>';
@@ -669,6 +673,7 @@
             htm+=`<tr class="${rowBg}"><td class="text-end small text-muted">${r.ce_vol.toLocaleString()}</td><td class="text-end small">${r.ce_oi.toLocaleString()}</td><td class="text-end small">${r.ce_oi>0?'+':''}${r.ce_oi.toLocaleString()}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','CE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','CE',${r.strike})">Sell</button></td><td class="text-end small">₹${r.ce_ltp.toFixed(2)}</td><td class="text-center fw-bold ${strikeClass} small">${r.strike} <br><small class="text-muted">CE: ₹${r.ce_ltp.toFixed(2)} | PE: ₹${r.pe_ltp.toFixed(2)}</small></td><td class="text-end small">₹${r.pe_ltp.toFixed(2)}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','PE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','PE',${r.strike})">Sell</button></td><td class="text-end small">${r.pe_oi>0?'+':''}${r.pe_oi.toLocaleString()}</td><td class="text-end small">${r.pe_oi.toLocaleString()}</td><td class="text-end small text-muted">${r.pe_vol.toLocaleString()} ${peLabel}</td></tr>`;prevDist=r.distance;});
         htm+='</tbody></table>';
         document.getElementById('chain-body').innerHTML=htm;
+        _chainLoading=false;
     }
     function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);});}
 
@@ -1246,7 +1251,8 @@
     // Fallback HTTP refresh if WS not connected
     setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },30000);
     setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 3000);
-    setInterval(()=>{ try{ if(!document.getElementById('pg-chain').classList.contains('hidden') && document.getElementById('c-live') && document.getElementById('c-live').checked) cLoadChain(); }catch(e){} }, 2500);
+    let _chainLoading=false;
+    setInterval(()=>{ try{ if(!_chainLoading && !document.getElementById('pg-chain').classList.contains('hidden') && document.getElementById('c-live') && document.getElementById('c-live').checked) cLoadChain(); }catch(e){} }, 3000);
     // Auto-load saved robots on robot page visit
     document.querySelector('.nav button[onclick*=\"robot\"]')?.addEventListener('click', ()=> setTimeout(loadRobotSaved, 300));
 
