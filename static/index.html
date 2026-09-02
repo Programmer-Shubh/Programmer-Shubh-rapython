@@ -759,8 +759,24 @@
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50;
         const body={symbol:idx,start_date:startDate,end_date:endDate,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+        // Quantman-style auto-retry 3x with backoff for 429/Cloudflare (same as quickStrat)
+        let r=null; let lastErr='';
+        for(let a=0;a<3;a++){
+            try{
+                r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+                if(r && !r.error) break;
+                if(r && r.error && r.error.includes('429')){ await new Promise(res=>setTimeout(res, 900*(a+1))); continue; }
+                break;
+            }catch(e){
+                lastErr=e.message||'';
+                const is429 = lastErr.includes('429') || lastErr.includes('Just a moment') || lastErr.includes('Enable JavaScript') || lastErr.includes('Cloudflare') || lastErr.includes('<!DOCTYPE');
+                if(is429 && a<2){ await new Promise(res=>setTimeout(res, 900*(a+1))); continue; }
+                if(a===2){ btn.innerHTML=orig; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+lastErr.slice(0,300)+' <button class=\"btn btn-sm btn-primary\" onclick=\"runBacktest()\">Retry</button></p>'; return; }
+                await new Promise(res=>setTimeout(res, 800));
+            }
+        }
         try{
-            const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            if(!r) throw new Error(lastErr||'No response');
             btn.innerHTML=orig;
             if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');return;}
             const m=r.metrics||r; window._lastBacktestMetrics=m;
