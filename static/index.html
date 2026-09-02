@@ -105,10 +105,9 @@
         .bt-table tbody tr:nth-child(even){background:#fafafa}
         .bt-table tbody tr:hover{background:#f0f7ff}
         .section-title{font-size:12px;font-weight:700;color:#0d6efd;margin:8px 0 4px;text-transform:uppercase}
-        .quant-card{border:1px solid #dee2e6;border-radius:8px;padding:12px;text-align:center;cursor:pointer;transition:all 0.2s;background:#fff;height:100%;position:relative}
+        .quant-card{border:1px solid #dee2e6;border-radius:8px;padding:12px;text-align:center;cursor:pointer;transition:all 0.2s;background:#fff;height:100%}
         .quant-card:hover{border-color:#0d6efd;box-shadow:0 2px 8px rgba(13,110,253,0.15);transform:translateY(-2px)}
-        .quant-card.active{border-color:#0d6efd;background:#e7f1ff;box-shadow:0 0 0 2px #0d6efd33}
-        .quant-card.active::after{content:"✓";position:absolute;top:6px;right:6px;background:#0d6efd;color:#fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:18px;text-align:center}
+        .quant-card.active{border-color:#0d6efd;background:#e7f1ff}
         .quant-card .icon{font-size:22px;margin-bottom:6px}
         .quant-card .title{font-size:11px;font-weight:700}
         .quant-card .desc{font-size:10px;color:#6c757d;line-height:1.2}
@@ -138,13 +137,12 @@
         <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
         <button onclick="go('robot',this)"><i class="bi bi-robot"></i> Call/Put Robot</button>
     </div>
-
     <div class="wrap">
         <!-- DASHBOARD -->
         <div id="pg-dashboard" class="pg">
             <div class="row" id="mkt-cards"></div>
             <div class="card">
-                 <div class="card-header">Top 5 Opportunities <button class="btn btn-sm btn-primary" onclick="loadOpps()"><i class="bi bi-arrow-clockwise"></i> Refresh</button> <small class="text-muted" id="opp-status"></small></div>
+                <div class="card-header">Top 5 Opportunities <button class="btn btn-sm btn-primary" onclick="loadOpps()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
                 <div class="card-body p-0"><div id="opp-table" style="overflow-x:auto"></div></div>
             </div>
             <div class="card">
@@ -152,8 +150,16 @@
                 <div class="card-body p-0"><div id="fno-top5" class="sig-grid" style="padding:12px"></div></div>
             </div>
             <div class="card">
-                <div class="card-header">Scanner <button class="btn btn-sm btn-primary" onclick="loadDashScanner()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
-                <div class="card-body p-0"><div id="scan-table" style="overflow-x:auto"></div></div>
+                <div class="card-header">Scanner</div>
+                <div class="card-body">
+                    <div class="tabs">
+                        <button class="active" onclick="stab('st',this)">SuperTrend + MACD</button>
+                        <button onclick="stab('vwap',this)">VWAP + RSI + EMA</button>
+                    </div>
+                    <div id="scan-stats" class="row"></div>
+                    <div id="scan-st" class="sig-grid"></div>
+                    <div id="scan-vwap" class="sig-grid hidden"></div>
+                </div>
             </div>
             <div class="card">
                 <div class="card-header">Open Positions</div>
@@ -205,10 +211,9 @@
                 <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
                     <div class="d-flex gap-2 align-items-center">
                         <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Builder</h4><span class="badge bg-primary">Quantman Style</span>
-                        <div class="form-check form-switch ms-2"><input class="form-check-input" type="checkbox" id="easyMode" checked onchange="toggleEasyMode()"><label class="form-check-label small" for="easyMode">Easy Mode</label></div>
                     </div>
                     <div class="d-flex gap-2 align-items-center">
-                        <div class="input-group input-group-sm" style="width:240px"><span class="input-group-text">Run Name</span><input type="text" class="form-control" id="s-name" placeholder="Nifty Breakout Strategy"></div>
+                        <div class="input-group input-group-sm" style="width:260px"><span class="input-group-text">Run Name</span><input type="text" class="form-control" id="s-name" placeholder="Nifty Breakout Strategy"></div>
                         <button class="btn btn-sm btn-outline-secondary" onclick="resetStrat()">Reset</button>
                         <button class="btn btn-sm btn-primary" onclick="saveStrat()"><i class="bi bi-check-circle"></i> Save</button>
                     </div>
@@ -241,33 +246,45 @@
                 <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Leg Builder</button>
             </div>
             <div class="collapse show mt-2" id="legBuilder">
-                <div class="row g-2 align-items-end" style="display:none">
+                <div class="row g-2 align-items-end">
                     <div class="col-md-2"><label class="form-label small">Total Lot</label><input type="number" class="form-control form-control-sm" id="s-lots" value="1" min="1"></div>
                     <div class="col-md-2"><label class="form-label small">Position</label><select class="form-select form-select-sm" id="s-position"><option>Buy</option><option selected>Sell</option></select></div>
                     <div class="col-md-2"><label class="form-label small">Option Type</label><select class="form-select form-select-sm" id="s-opt"><option>CE</option><option selected>PE</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">Strike Type</label><select class="form-select form-select-sm" id="s-strike-type"><option>ATM</option><option selected>OTM</option><option>ITM</option><option>Delta</option></select><input type="number" class="form-control form-control-sm mt-1 d-none" id="s-delta" value="0.3" step="0.05" min="0.1" max="0.9" placeholder="Delta 0.3"><select class="form-select form-select-sm mt-1" id="s-otm-distance"><option value="1">Distance 1</option><option value="2" selected>Distance 2</option><option value="3">Distance 3</option><option value="4">Distance 4</option><option value="5">Distance 5</option></select></div>
+                    <div class="col-md-2"><label class="form-label small">Strike Type</label><select class="form-select form-select-sm" id="s-strike-type"><option>ATM</option><option selected>OTM</option><option>ITM</option><option>Delta</option></select><input type="number" class="form-control form-control-sm mt-1 d-none" id="s-delta" value="0.3" step="0.05" min="0.1" max="0.9" placeholder="Delta 0.3"></div>
                     <div class="col-md-2"><label class="form-label small">Expiry</label><select class="form-select form-select-sm" id="s-expiry"><option>Weekly</option><option selected>Monthly</option></select><input type="number" class="form-control form-control-sm mt-1" id="s-dte" value="7" min="1" max="60" title="DTE"></div>
                     <div class="col-md-2 d-flex align-items-end"><button class="btn btn-sm btn-success w-100" onclick="addLeg()">Add Leg</button></div>
                 </div>
-                <div class="card mt-2" id="legsTableCard"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
+                <div class="mt-2 d-flex gap-1 flex-wrap">
+                    <span class="small text-muted me-1">Templates:</span>
+                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('single')">Single</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('straddle')">Straddle (ATM CE+PE Sell)</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('strangle')">Strangle (OTM CE+PE Sell)</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bullspread')">Bull Call Spread</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bearspread')">Bear Call Spread</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('bearputspread')">Bear Put Spread</button>
+                    <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('bullputspread')">Bull Put Spread</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironcondor')">Iron Condor</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="clearLegs()">Clear</button>
+                </div>
+                <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
                 <!-- Quantman Strategy Gallery -->
                 <div class="card mt-3">
                     <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Quantman Strategies — Click to Build</strong><small class="text-muted">Live Payoff + Greeks</small></div>
                     <div class="card-body p-2">
                         <div class="row g-2">
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longcall',this)"><div class="icon">📈</div><div class="title">Long Call</div><div class="desc">Buy CE ATM<br>Unlimited gain</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longput',this)"><div class="icon">📉</div><div class="title">Long Put</div><div class="desc">Buy PE ATM<br>Bearish</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortcall',this)"><div class="icon">🔻</div><div class="title">Short Call</div><div class="desc">Sell CE OTM<br>Theta decay</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortput',this)"><div class="icon">🔺</div><div class="title">Short Put</div><div class="desc">Sell PE OTM<br>Premium</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bullspread',this)"><div class="icon">⚡</div><div class="title">Bull Call Spread</div><div class="desc">Buy ATM + Sell OTM CE</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bearputspread',this)"><div class="icon">🛡️</div><div class="title">Bear Put Spread</div><div class="desc">Buy ATM PE + Sell OTM</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('straddle',this)"><div class="icon">🔄</div><div class="title">Long Straddle</div><div class="desc">Buy CE+PE ATM<br>Volatility</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('strangle',this)"><div class="icon">↔️</div><div class="title">Short Strangle</div><div class="desc">Sell OTM CE+PE<br>Range</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironcondor',this)"><div class="icon">🏛️</div><div class="title">Iron Condor</div><div class="desc">Sell OTM 1 + Buy OTM 3 (CE/PE)</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironbutterfly',this)"><div class="icon">🦋</div><div class="title">Iron Butterfly</div><div class="desc">ATM Straddle + OTM Wings</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('butterfly',this)"><div class="icon">✈️</div><div class="title">Long Butterfly</div><div class="desc">1-2-1 CE<br>Limited risk</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('calendar',this)"><div class="icon">📅</div><div class="title">Calendar Spread</div><div class="desc">Sell Weekly + Buy Monthly</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longcall')"><div class="icon">📈</div><div class="title">Long Call</div><div class="desc">Buy CE ATM<br>Unlimited gain</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longput')"><div class="icon">📉</div><div class="title">Long Put</div><div class="desc">Buy PE ATM<br>Bearish</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortcall')"><div class="icon">🔻</div><div class="title">Short Call</div><div class="desc">Sell CE OTM<br>Theta decay</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortput')"><div class="icon">🔺</div><div class="title">Short Put</div><div class="desc">Sell PE OTM<br>Premium</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bullspread')"><div class="icon">⚡</div><div class="title">Bull Call Spread</div><div class="desc">Buy ATM + Sell OTM CE</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bearputspread')"><div class="icon">🛡️</div><div class="title">Bear Put Spread</div><div class="desc">Buy ATM PE + Sell OTM</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('straddle')"><div class="icon">🔄</div><div class="title">Long Straddle</div><div class="desc">Buy CE+PE ATM<br>Volatility</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('strangle')"><div class="icon">↔️</div><div class="title">Short Strangle</div><div class="desc">Sell OTM CE+PE<br>Range</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironcondor')"><div class="icon">🏛️</div><div class="title">Iron Condor</div><div class="desc">Sell OTM 1 + Buy OTM 3 (CE/PE)</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironbutterfly')"><div class="icon">🦋</div><div class="title">Iron Butterfly</div><div class="desc">ATM Straddle + OTM Wings</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('butterfly')"><div class="icon">✈️</div><div class="title">Long Butterfly</div><div class="desc">1-2-1 CE<br>Limited risk</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('calendar')"><div class="icon">📅</div><div class="title">Calendar Spread</div><div class="desc">Sell Weekly + Buy Monthly</div></div></div>
                         </div>
                     </div>
                 </div>
@@ -286,8 +303,8 @@
             </div>
             <div class="collapse show mt-2" id="overallSettings">
                 <div class="row g-2">
-                    <div class="col-md-3"><label class="form-label small">Overall Stop Loss</label><input type="number" class="form-control form-control-sm" id="s-sl" value="1500" min="0" step="50"></div>
-                    <div class="col-md-3"><label class="form-label small">Overall Target</label><input type="number" class="form-control form-control-sm" id="s-tp" value="2500" min="0" step="50"></div>
+                    <div class="col-md-3"><label class="form-label small">Overall Stop Loss</label><input type="number" class="form-control form-control-sm" id="s-sl" value="500" min="0" step="50"></div>
+                    <div class="col-md-3"><label class="form-label small">Overall Target</label><input type="number" class="form-control form-control-sm" id="s-tp" value="1000" min="0" step="50"></div>
                     <div class="col-md-3"><label class="form-label small">Re-entry on SL</label><select class="form-select form-select-sm" id="s-reentry-sl"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
                     <div class="col-md-3"><label class="form-label small">Re-entry on Tgt</label><select class="form-select form-select-sm" id="s-reentry-tp"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
                 </div>
@@ -327,14 +344,11 @@
                     </div>
                 </div>
             </div>
-            <div class="alert py-2 mb-2" style="background:linear-gradient(135deg,#0d6efd,#6610f2);color:#fff"><strong>Quantman Style Backtest</strong> — NSE direct data (6-month archive), no yfinance, ATM±4 safe strikes <span class="badge bg-light text-dark ms-2">Live</span></div>
-            <div class="row mt-3 align-items-end">
-                <div class="col-md-4"><label class="form-label">Enter the duration of your backtest</label><div class="d-flex gap-1 mt-1"><button class="btn btn-sm btn-outline-primary" onclick="setRange(30)">1M</button><button class="btn btn-sm btn-outline-primary" onclick="setRange(90)">3M</button><button class="btn btn-sm btn-primary" onclick="setRange(365)">1Y</button><button class="btn btn-sm btn-outline-primary" onclick="setRange(1825)">5Y</button></div></div>
-                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-start" value="2025-08-30"></div>
-                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-30"></div>
+            <div class="row mt-3">
+                <div class="col-md-6"><label class="form-label">Enter the duration of your backtest</label></div>
+                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-start" value="2026-08-01"></div>
+                <div class="col-md-2"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-20"></div>
                 <div class="col-md-2"><div class="text-end"><button class="btn btn-sm btn-success" id="s-run" onclick="runBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button></div></div>
-                <div class="col-md-2"><div class="text-end"><button class="btn btn-sm btn-info" id="s-replay" onclick="runHistoricalReplay()"><i class="bi bi-repeat"></i> Historical Replay</button></div></div>
-                <div class="col-md-2"><div class="text-end"><button class="btn btn-sm btn-warning" id="s-compare" onclick="runBacktestCompare()"><i class="bi bi-graph-up"></i> Compare</button></div></div>
             </div>
             <div id="bt-results" class="hidden">
                 <div class="row mt-3" id="bt-metrics"></div>
@@ -458,7 +472,7 @@
                         <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
                         <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="r-lots" class="form-control form-control-sm" value="1" min="1"></div>
                         <div class="col-md-1"><label class="form-label small">Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
+                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="500" min="0" step="100"></div>
                         <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="1000" min="0" step="100"></div>
                     </div>
                     <div class="row g-2 mt-2">
@@ -474,22 +488,9 @@
                             <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
                             <button class="btn btn-sm btn-outline-success" onclick="robotPaperTrade()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
                             <button class="btn btn-sm btn-outline-danger" onclick="robotLiveTrade()"><i class="bi bi-lightning"></i> Live Trade</button>
-                            <button class="btn btn-sm btn-warning" onclick="loadPullbackRobot('ce')"><i class="bi bi-robot"></i> 5m Pullback Robot</button>
                             <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
                         </div>
                     </div>
-                    <div class="card mt-2" style="border:1px dashed #ffc107"><div class="card-body p-2">
-                        <strong class="small">5m Pullback Robot Conditions (editable → Backtest)</strong>
-                        <div class="row g-2 mt-1">
-                            <div class="col-md-2"><label class="form-label small">VWAP Band (±)</label><input id="r-vwap-mult" type="number" class="form-control form-control-sm" value="2" step="0.5"></div>
-                            <div class="col-md-2"><label class="form-label small">Long RSI &lt;</label><input id="r-rsi-long" type="number" class="form-control form-control-sm" value="30"></div>
-                            <div class="col-md-2"><label class="form-label small">Short RSI &gt;</label><input id="r-rsi-short" type="number" class="form-control form-control-sm" value="70"></div>
-                            <div class="col-md-2"><label class="form-label small">EMA Period</label><input id="r-ema-p" type="number" class="form-control form-control-sm" value="20"></div>
-                            <div class="col-md-2"><label class="form-label small">RSI(14)</label><input id="r-rsi-p" type="number" class="form-control form-control-sm" value="14"></div>
-                            <div class="col-md-2"><label class="form-label small">RR (1:?)</label><input id="r-rr" type="number" class="form-control form-control-sm" value="2" step="0.5"></div>
-                        </div>
-                        <div class="small text-muted mt-1">Long: touch -2 VWAP Band + RSI&lt;30 + Green | Short: touch +2 VWAP Band + RSI&gt;70 + Red | CE: Price&gt;20EMA&VWAP, pullback to EMA + green + RSI&gt;50 + Vol&gt;VMA20 + OI support | PE: opposite | ATM, SL=entry low/high, Exit: close opposite EMA</div>
-                    </div></div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
                             <div class="d-flex gap-3 flex-wrap" style="font-size:12px">
@@ -533,7 +534,7 @@
             </div>
         </div>
         <div class="card chain-table-card">
-            <div class="card-body p-2" id="chain-body"><p class="text-muted p-2"><span class="spinner"></span> Loading option chain...</p></div>
+            <div class="card-body p-2" id="chain-body"><p class="text-muted p-2">Select date and expiry to load option chain.</p></div>
         </div>
     </div>
     <script>
@@ -545,7 +546,7 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();}if(id==='strategy')loadStrategySymbols();if(id==='webhook')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy')loadStrategySymbols();if(id==='webhook')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -565,15 +566,12 @@
 
      
 
-    async function loadFnoTop5(retries=0){
+    async function loadFnoTop5(){
         try{
             const r=await A('/api/scanner/fno-top5');
-            const liveBadge = r.is_live===false ? '<span class="badge bg-warning text-dark">Market Closed</span>' : '<span class="badge bg-success">Live NSE</span>';
-            if(!r.bullish?.length&&!r.bearish?.length){document.getElementById('fno-top5').innerHTML='<p class="text-muted p-2">'+liveBadge+' No signals now - market closed. Refresh after market open (9:15). <button class="btn btn-sm btn-outline-primary" onclick="loadFnoTop5()">Refresh</button></p>'; return;}
             document.getElementById('fno-date').textContent = r.date ? '('+r.date+')' : '';
             const bull=r.bullish||[], bear=r.bearish||[];
-            let badge = r.is_live===false ? ' <span class="badge bg-warning text-dark">Market Closed</span>' : ' <span class="badge bg-success">Live</span>';
-            let h=`<div class="sig-box bull"><h5 class="price-up">Top 5 Bullish Today (Future & Option)${badge}</h5>`;
+            let h=`<div class="sig-box bull"><h5 class="price-up">Top 5 Bullish Today (Future & Option)</h5>`;
             if(!bull.length) h+='<p class="text-muted small">No data - refresh or try later</p>';
             bull.forEach(s=>{
                 const opt=s.option_suggestion||{}; const chg=s.change_pct>=0?`+${s.change_pct}%`: `${s.change_pct}%`;
@@ -589,78 +587,76 @@
             });
             h+='</div>';
             document.getElementById('fno-top5').innerHTML=h;
-        }catch(e){document.getElementById('fno-top5').innerHTML='<p class="text-muted p-2">F&O offline <button class="btn btn-sm btn-outline-primary" onclick="loadFnoTop5()">Refresh</button></p>';}
+        }catch(e){ document.getElementById('fno-top5').innerHTML='<p class="text-danger p-2">Failed to load F&O Top 5</p>';}
     }
     async function loadDash(){
-        try{const s=await A('/api/dashboard/spot');document.getElementById('status').innerHTML='<span class="live-dot"></span> Connected';let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${d.source}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h;}catch(e){document.getElementById('status').innerHTML='<span class="live-dot" style="background:#dc3545;box-shadow:0 0 6px #dc3545"></span> Connected';}
+        try{const s=await A('/api/dashboard/spot');document.getElementById('status').innerHTML='<span class="live-dot"></span> Connected';let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${d.source}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h;}catch(e){document.getElementById('status').innerHTML='Offline';}
         loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();
     }
-    function stratBtns(x){const bull=(x.direction==='bullish'||x.dir==='bullish')||(!x.direction&&!x.dir&&((x.signal_type||x.type||'').includes('CE')||(x.type==='BUY')));const opt=x.option_suggestion||{};const sym=x.symbol,strike=opt.strike||0,exp=opt.expiry||'';if(bull)return`<button class="btn btn-sm btn-buy" onclick="quickStrat('${sym}','BUY','CE',${strike},'${exp}')">Buy Call</button> <button class="btn btn-sm btn-sell" onclick="quickStrat('${sym}','SELL','PE',${strike},'${exp}')">Sell Put</button>`;return`<button class="btn btn-sm btn-sell" onclick="quickStrat('${sym}','BUY','PE',${strike},'${exp}')">Buy Put</button> <button class="btn btn-sm btn-buy" onclick="quickStrat('${sym}','SELL','CE',${strike},'${exp}')">Sell Call</button>`;}
-     async function loadOpps(retries=0){try{const r=await A('/api/scanner/opportunities');const o=r.opportunities||[];if(!o.length){const h=new Date().getHours();const isMH=h>=9&&h<16;document.getElementById('opp-table').innerHTML='<p class="text-muted p-3"><span class="badge '+(isMH?'bg-success':'bg-warning text-dark')+'">'+(isMH?'Live':'Market Closed')+'</span> '+(isMH?'Market open - loading...':'No opportunities now')+' <button class="btn btn-sm btn-outline-primary" onclick="loadOpps()">Refresh</button></p>';if(isMH) setTimeout(()=>loadOpps(),4000); return;}let h='<table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Spot</th><th>Strike</th><th>Expiry</th><th>Premium</th><th>Reasons</th><th>Action</th></tr>';o.forEach(x=>{const sig=x.signal_type||x.type;const opt=x.option_suggestion||{};const prem=opt.premium?'₹'+opt.premium.toFixed(2):'<span class="badge badge-active">LIVE</span>';h+=`<tr><td class="fw-bold">${x.symbol}</td><td>${B(sig,sig.includes('CE')?'buy':'sell')}</td><td><span class="score-badge">${x.score}/100</span></td><td>₹${(x.price||0).toLocaleString()}</td><td>${opt.strike||'-'}</td><td>${opt.expiry||'-'}</td><td>${prem}</td><td>${R(x.reasons||[])}</td><td style="white-space:nowrap">${stratBtns(x)}</td></tr>`;});h+='</table>';document.getElementById('opp-table').innerHTML=h;}catch(e){document.getElementById('opp-table').innerHTML='<p class="text-muted p-3"><span class="badge bg-success">Live</span> Loading... <button class="btn btn-sm btn-outline-primary" onclick="loadOpps()">Refresh</button></p>'; setTimeout(()=>loadOpps(),3000);}}
-    async function loadDashScanner(){try{const r=await A('/api/scanner/scan-all');const st=r.st_macd||{};const vw=r.vwap||{};const bullish=(st.bullish||[]).concat(vw.long||[]);const bearish=(st.bearish||[]).concat(vw.short||[]);if(!bullish.length&&!bearish.length){const h=new Date().getHours();const isMH=h>=9&&h<16;document.getElementById('scan-table').innerHTML='<p class="text-muted p-2"><span class="badge '+(isMH?'bg-success':'bg-warning text-dark')+'">'+(isMH?'Live':'Market Closed')+'</span> '+(isMH?'Market open - loading...':'No signals')+' <button class="btn btn-sm btn-outline-primary" onclick="loadDashScanner()">Refresh</button></p>';if(isMH) setTimeout(()=>loadDashScanner(),4000); return;}renderScannerTable('scan-table',bullish,bearish);}catch(e){document.getElementById('scan-table').innerHTML='<p class="text-muted p-2"><span class="badge bg-success">Live</span> Loading scanner... <button class="btn btn-sm btn-outline-primary" onclick="loadDashScanner()">Refresh</button></p>'; setTimeout(()=>loadDashScanner(),3000);}}
-    function renderScannerTable(cid,bullish,bearish){const bull=bullish.slice(0,5),bear=bearish.slice(0,5);if(!bull.length&&!bear.length){document.getElementById(cid).innerHTML='<p class="text-muted p-3">No signals</p>';return;}const mk=(arr,dir)=>arr.map(x=>({...x,dir})).sort((a,b)=>(b.score||0)-(a.score||0));let h='';if(bull.length){h+='<div class="small fw-bold price-up mt-2">Top 5 Bullish</div><table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Spot</th><th>Strike</th><th>Expiry</th><th>Premium</th><th>Reasons</th><th>Indicator</th><th>Action</th></tr>';mk(bull,'bullish').forEach(x=>{const sig=x.signal_type||x.type||'BUY CE';const opt=x.option_suggestion||{};const prem=opt.premium?'₹'+opt.premium.toFixed(2):'-';const ind=x.indicators?Object.entries(x.indicators).map(([k,v])=>k+':'+v).join(', '):(x.reasons||[]).slice(0,1).join(',');h+=`<tr><td class="fw-bold">${x.symbol}</td><td>${B(sig,'buy')}</td><td><span class="score-badge">${x.score||0}/100</span></td><td>₹${(x.price||0).toLocaleString()}</td><td>${opt.strike||'-'}</td><td>${opt.expiry||'-'}</td><td>${prem}</td><td>${R(x.reasons||[])}</td><td class="small text-muted">${ind}</td><td style="white-space:nowrap">${stratBtns(x)}</td></tr>`;});h+='</table>';}if(bear.length){h+='<div class="small fw-bold price-down mt-3">Top 5 Bearish</div><table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Spot</th><th>Strike</th><th>Expiry</th><th>Premium</th><th>Reasons</th><th>Indicator</th><th>Action</th></tr>';mk(bear,'bearish').forEach(x=>{const sig=x.signal_type||x.type||'BUY PE';const opt=x.option_suggestion||{};const prem=opt.premium?'₹'+opt.premium.toFixed(2):'-';const ind=x.indicators?Object.entries(x.indicators).map(([k,v])=>k+':'+v).join(', '):(x.reasons||[]).slice(0,1).join(',');h+=`<tr><td class="fw-bold">${x.symbol}</td><td>${B(sig,'sell')}</td><td><span class="score-badge">${x.score||0}/100</span></td><td>₹${(x.price||0).toLocaleString()}</td><td>${opt.strike||'-'}</td><td>${opt.expiry||'-'}</td><td>${prem}</td><td>${R(x.reasons||[])}</td><td class="small text-muted">${ind}</td><td style="white-space:nowrap">${stratBtns(x)}</td></tr>`;});h+='</table>';}document.getElementById(cid).innerHTML=h;}
+    function stratBtns(x){const bull=(x.direction==='bullish')||(!x.direction&&((x.signal_type||x.type).includes('CE')));const opt=x.option_suggestion||{};const sym=x.symbol,strike=opt.strike||0,exp=opt.expiry||'';if(bull)return`<button class="btn btn-sm btn-buy" onclick="quickStrat('${sym}','BUY','CE',${strike},'${exp}')">Buy Call</button> <button class="btn btn-sm btn-sell" onclick="quickStrat('${sym}','SELL','PE',${strike},'${exp}')">Sell Put</button>`;return`<button class="btn btn-sm btn-sell" onclick="quickStrat('${sym}','BUY','PE',${strike},'${exp}')">Buy Put</button> <button class="btn btn-sm btn-buy" onclick="quickStrat('${sym}','SELL','CE',${strike},'${exp}')">Sell Call</button>`;}
+    async function loadOpps(){try{const r=await A('/api/scanner/opportunities');const o=r.opportunities||[];if(!o.length){document.getElementById('opp-table').innerHTML='<p class="text-muted p-3">No opportunities. Import more data.</p>';return;}let h='<table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Spot</th><th>Strike</th><th>Expiry</th><th>Premium</th><th>Reasons</th><th>Action</th></tr>';o.forEach(x=>{const sig=x.signal_type||x.type;const opt=x.option_suggestion||{};const prem=opt.premium?'₹'+opt.premium.toFixed(2):'<span class="badge badge-active">LIVE</span>';h+=`<tr><td class="fw-bold">${x.symbol}</td><td>${B(sig,sig.includes('CE')?'buy':'sell')}</td><td><span class="score-badge">${x.score}/100</span></td><td>₹${(x.price||0).toLocaleString()}</td><td>${opt.strike||'-'}</td><td>${opt.expiry||'-'}</td><td>${prem}</td><td>${R(x.reasons||[])}</td><td style="white-space:nowrap">${stratBtns(x)}</td></tr>`;});h+='</table>';document.getElementById('opp-table').innerHTML=h;}catch(e){document.getElementById('opp-table').innerHTML='<p class="text-danger">Error: '+e.message+'</p>';}}
+    async function loadDashScanner(){try{const r=await A('/api/scanner/scan-all');const st=r.st_macd||{};const vw=r.vwap||{};document.getElementById('scan-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Scanned</div><div class="value">${st.total_scanned||0}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Bullish</div><div class="value price-up">${(st.bullish||[]).length}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Bearish</div><div class="value price-down">${(st.bearish||[]).length}</div></div></div><div class="col"><div class="card stat-card"><div class="label">VWAP Signals</div><div class="value">${(vw.long||[]).length+(vw.short||[]).length}</div></div></div>`;renderSig('scan-st',st.bullish||[],st.bearish||[],'SuperTrend + MACD');renderSig('scan-vwap',vw.long||[],vw.short||[],'VWAP + RSI + EMA');}catch(e){}}
     function renderSig(cid,buy,sell,title){let h=`<div class="sig-box bull"><h5 class="price-up">${title} - Bullish (Buy CE)</h5>`;if(!buy.length)h+='<p class="text-muted small">No signals</p>';buy.forEach(s=>{h+=sigItem(s,'buy');});h+=`</div><div class="sig-box bear"><h5 class="price-down">${title} - Bearish (Buy PE)</h5>`;if(!sell.length)h+='<p class="text-muted small">No signals</p>';sell.forEach(s=>{h+=sigItem(s,'sell');});h+='</div>';document.getElementById(cid).innerHTML=h;}
     function sigItem(s,dir){const opt=s.option_suggestion||{};const prem=opt.premium?' | Premium: ₹'+opt.premium.toFixed(2):'';const ind=s.indicators||{};const indH=Object.entries(ind).map(([k,v])=>`<span class="reason-tag">${k}: ${v}</span>`).join('');const d={symbol:s.symbol,direction:dir==='buy'?'bullish':'bearish',signal_type:dir==='buy'?'BUY CE':'BUY PE',option_suggestion:opt};return`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span>${B(dir==='buy'?'BUY CE':'BUY PE',dir==='buy'?'buy':'sell')}</div><div class="meta">₹${(s.price||0).toLocaleString()} | ${s.date||''} | Strike: ${opt.strike||'-'}${prem}</div><div>${R(s.reasons||[])}</div><div style="margin-top:3px">${indH}</div><div style="margin-top:6px"><span class="score-badge">Score: ${s.score}/100</span></div><div style="margin-top:6px">${stratBtns(d)}</div></div>`;}
-    function quickTrade(sym,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:'BUY',quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert('Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
-    async function quickStrat(sym,action,type,strike,expiry){ // ATM±4 frontend guard: block deep ITM/OTM before API call (all 3 scanners)
-        try{const sp=await A('/api/dashboard/spot');const sd=sp[sym];if(sd&&sd.formatted){const spot=sd.spot||parseFloat(String(sd.formatted).replace(/[^0-9.]/g,''));const stepMap={NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:50,SENSEX:100};const step=stepMap[sym]||50;const atm=Math.round(spot/step)*step;if(atm&&Math.abs(strike-atm)>step*4){alert('Deep ITM/OTM blocked: strike '+strike+' far from ATM '+atm+' (ATM±4 only). Spot ₹'+spot.toFixed(0));return;}} }catch(e){}
-        const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','1000');const body={symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||1000)};for(let a=0;a<3;a++){try{const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(r.error&&r.error.includes('429')){await new Promise(r=>setTimeout(r,800*(a+1))); continue;} if(r.error){alert('Error: '+r.error); return;} if(r.trade_id){alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();loadDash();return;} }catch(e){await new Promise(r=>setTimeout(r,800*(a+1))); if(a===2) alert('Network: '+e.message+' - auto retry failed, 5s me dobara try kare');}}}
+    function quickTrade(sym,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:'BUY',quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert('Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
+    function quickStrat(sym,action,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike,expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
     function stratBtnsForTrade(t){const opt=t.option_type||'CE';const bull=(opt==='CE');return bull?`<button class="btn btn-sm btn-buy" onclick="quickStrat('${t.symbol}','BUY','CE',${t.strike},'')">Buy Call</button> <button class="btn btn-sm btn-sell" onclick="quickStrat('${t.symbol}','SELL','PE',${t.strike},'')">Sell Put</button>`:`<button class="btn btn-sm btn-sell" onclick="quickStrat('${t.symbol}','BUY','PE',${t.strike},'')">Buy Put</button> <button class="btn btn-sm btn-buy" onclick="quickStrat('${t.symbol}','SELL','CE',${t.strike},'')">Sell Call</button>`;}
     let _lastDashPosHTML = null;
     async function loadDashPositions(){
         try{
             const p=await A('/api/dashboard/portfolio');
             if(p.positions&&p.positions.length){
-                let h='<table><tr><th>#</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Lot</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
+                let h='<table><tr><th>#</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
                 p.positions.forEach(t=>{
                     const isLive=t.trade_mode==='live';
                     const curPrice = (t.current_price!=null? t.current_price : t.entry_price);
                     const pnl = (t.pnl!=null? t.pnl : 0);
                     const sideBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
-                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${t.strike}</td><td>${t.lot_size||50}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
+                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${t.strike}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
                 });
                 h+='</table>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
             }else{
-                document.getElementById('dash-pos').innerHTML='<p class="text-muted p-3">No open positions</p>';
-                _lastDashPosHTML=null;
+                // Keep last HTML if we had trades before, avoid flicker to "No positions" on transient error
+                if(_lastDashPosHTML && document.getElementById('dash-pos').innerHTML.includes('<table>')){
+                    // keep previous, do not overwrite
+                } else {
+                    document.getElementById('dash-pos').innerHTML='<p class="text-muted p-3">No open positions</p>';
+                }
             }
         }catch(e){
             console.error('loadDashPositions failed',e);
-            document.getElementById('dash-pos').innerHTML='<p class="text-muted p-3">No open positions</p>';
+            // Do not clear table on error - keep last known trades visible
+            if(!document.getElementById('dash-pos').innerHTML.trim() || document.getElementById('dash-pos').innerHTML.includes('No open')){
+                // keep as is
+            }
         }
     }
-    async function loadDashHistory(){try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry</th><th>Exit</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Lot</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Action</th></tr>';c.trades.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.lot_size||50}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id});setTimeout(loadDashHistory,500)">Delete</button></td></tr>`;});h+='</table>';document.getElementById('dash-hist').innerHTML=h;}else{document.getElementById('dash-hist').innerHTML='<p class="text-muted p-3">No trades yet</p>';};}catch(e){}}
+    async function loadDashHistory(){try{const c=await A('/api/dashboard/trade-history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';c.trades.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;});h+='</table>';document.getElementById('dash-hist').innerHTML=h;}else{document.getElementById('dash-hist').innerHTML='<p class="text-muted p-3">No trades yet</p>';};}catch(e){}}
     async function closeTrade(id,price){if(!confirm('Close #'+id+'?'))return;await P('/api/trades/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,exit_price:price,date:new Date().toISOString().split('T')[0]})});loadDash();loadTrades();}
     async function deleteTrade(id){if(!confirm('Delete trade #'+id+'? This cannot be undone.'))return;const r=await P('/api/trades/'+id,{method:'DELETE'});if(!r.error)loadTrades();else alert('Error: '+r.error);}
     async function setTradeMode(id,mode){const r=await P('/api/trades/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,trade_mode:mode})});if(!r.error)loadTrades();else alert('Error: '+r.error);}
 
-    async function cLoadSymbols(){try{const syms=await A('/api/chain/symbols');const sel=document.getElementById('c-sym');sel.innerHTML='';const master=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','LT','AXISBANK','KOTAKBANK','HINDUNILVR','BHARTIARTL','MARUTI','M&M','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL'];let all=[...new Set([...(syms.symbols||[]), ...master])].sort();all.forEach(x=>{sel.innerHTML+='<option value="'+x+'" '+(x==='NIFTY'?'selected':'')+'>'+x+'</option>';});}catch(e){console.error('cLoadSymbols failed',e);}document.getElementById('c-live').checked=true;toggleLiveMode();}
+    async function cLoadSymbols(){const syms=await A('/api/chain/symbols');const sel=document.getElementById('c-sym');sel.innerHTML='';const master=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','LT','AXISBANK','KOTAKBANK','HINDUNILVR','BHARTIARTL','MARUTI','M&M','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL'];let all=[...new Set([...(syms.symbols||[]), ...master])].sort();all.forEach(x=>{sel.innerHTML+='<option value="'+x+'" '+(x==='NIFTY'?'selected':'')+'>'+x+'</option>';});document.getElementById('c-live').checked=true;toggleLiveMode();}
     async function cLoadDates(){const s=document.getElementById('c-sym').value;if(!s)return;const d=await A('/api/chain/dates/'+s);document.getElementById('c-date').value=d.dates?d.dates[0]:'';cLoadExpiries();}
     async function cLoadExpiries(){const s=document.getElementById('c-sym').value,d=document.getElementById('c-date').value;if(!d)return;const e=await A('/api/chain/expiries/'+s+'/'+d);document.getElementById('c-exp').innerHTML=e.expiries?e.expiries.map(x=>'<option>'+x+'</option>').join(''):'<option>No Expiry</option>';}
     function toggleLiveMode(){if(document.getElementById('c-live').checked){document.getElementById('c-date').parentElement.style.display='none';document.getElementById('c-exp').parentElement.style.display='none';document.getElementById('c-spot').style.display='block';cLoadChain();}else{document.getElementById('c-date').parentElement.style.display='';document.getElementById('c-exp').parentElement.style.display='';document.getElementById('c-spot').style.display='none';cLoadChain();}}
-    function toggleEasyMode(){const easy=document.getElementById('easyMode')?.checked; const adv=document.getElementById('overallSettings'); if(adv) adv.style.display=easy?'none':''; document.querySelectorAll('#pg-strategy .indicator-card').forEach(c=>c.style.display=easy?'none':''); const mom=document.getElementById('s-momentum')?.closest('.col-md-2'); if(mom) mom.style.display=easy?'none':''; const nre=document.getElementById('s-no-reentry')?.closest('.col-md-2'); if(nre) nre.style.display=easy?'none':''; }
-    setTimeout(()=>{ try{ toggleEasyMode(); }catch(e){} },800);
     async function cLoadChain(){
-        if(_chainLoading)return;_chainLoading=true;
         const live=document.getElementById('c-live').checked;
         const s=document.getElementById('c-sym').value;
         let c;let h='';let htm='';
-        document.getElementById('chain-body').innerHTML='<p class="text-muted p-2"><span class="spinner"></span> Loading option chain...</p>';
         if(live){
             if(!s)return;
-            try{c=await A('/api/chain/live/'+s.toUpperCase());}catch(e){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-danger p-2">Network error: '+e.message.slice(0,100)+' <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';return;}
-            if(c.error){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-danger p-2">'+c.error+' <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';document.getElementById('c-date').value='';document.getElementById('c-exp').innerHTML='<option>Live Data</option>';return;}
-            if(!c.rows||!c.rows.length){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-warning p-2">No data returned. <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';return;}
+            c=await A('/api/chain/live/'+s.toUpperCase());
+            if(c.error){document.getElementById('chain-body').innerHTML='<p class="text-danger">'+c.error+'</p>';document.getElementById('c-date').value='';document.getElementById('c-exp').innerHTML='<option>Live Data</option>';return;}
             document.getElementById('c-date').value='';
             document.getElementById('c-exp').innerHTML='<option>Live</option>';
             document.getElementById('c-spot').style.display='block';
             document.getElementById('c-spot').innerHTML='<span class="badge bg-danger text-white">LIVE</span> <span class="badge bg-info text-dark">Spot: \u20B9'+c.spot.toFixed(2)+' | ATM: '+c.atm+'</span> <span class="badge bg-info text-dark ms-2">Source: '+(c.source||'live')+'</span>';
         }else{
             const d=document.getElementById('c-date').value,e=document.getElementById('c-exp').value;
-            if(!d||!e){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-muted p-2">Select date and expiry to load option chain.</p>';return;}
-            try{c=await A('/api/chain/chain/'+s+'/'+d+'/'+e);}catch(e2){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-danger p-2">Network error: '+e2.message.slice(0,100)+' <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';return;}
-            if(c.error){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-danger p-2">'+c.error+' <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';return;}
-            if(!c.rows||!c.rows.length){_chainLoading=false;document.getElementById('chain-body').innerHTML='<p class="text-warning p-2">No chain data. <button class="btn btn-sm btn-primary" onclick="cLoadChain()">Retry</button></p>';return;}
+            if(!d||!e)return;
+            c=await A('/api/chain/chain/'+s+'/'+d+'/'+e);
+            if(c.error){document.getElementById('chain-body').innerHTML='<p>'+c.error+'</p>';return;}
             document.getElementById('c-spot').style.display='none';
         }
         htm='<table class="table table-sm table-bordered chain-table"><thead><tr><th colspan="5" class="text-center" style="background:#d1e7dd;color:#0f5132">CALLS (CE)</th><th class="text-center" style="background:#fff3cd">STRIKE</th><th colspan="5" class="text-center" style="background:#f8d7da;color:#842029">PUTS (PE)</th></tr><tr><th class="text-end small">Vol</th><th class="text-end small">OI</th><th class="text-end small">Chng OI</th><th class="text-center small">Action</th><th class="text-end small">LTP</th><th class="text-center small">Premium</th><th class="text-end small">LTP</th><th class="text-center small">Action</th><th class="text-end small">Chng OI</th><th class="text-end small">OI</th><th class="text-end small">Vol</th></tr></thead><tbody>';
@@ -673,16 +669,15 @@
             htm+=`<tr class="${rowBg}"><td class="text-end small text-muted">${r.ce_vol.toLocaleString()}</td><td class="text-end small">${r.ce_oi.toLocaleString()}</td><td class="text-end small">${r.ce_oi>0?'+':''}${r.ce_oi.toLocaleString()}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','CE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','CE',${r.strike})">Sell</button></td><td class="text-end small">₹${r.ce_ltp.toFixed(2)}</td><td class="text-center fw-bold ${strikeClass} small">${r.strike} <br><small class="text-muted">CE: ₹${r.ce_ltp.toFixed(2)} | PE: ₹${r.pe_ltp.toFixed(2)}</small></td><td class="text-end small">₹${r.pe_ltp.toFixed(2)}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','PE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','PE',${r.strike})">Sell</button></td><td class="text-end small">${r.pe_oi>0?'+':''}${r.pe_oi.toLocaleString()}</td><td class="text-end small">${r.pe_oi.toLocaleString()}</td><td class="text-end small text-muted">${r.pe_vol.toLocaleString()} ${peLabel}</td></tr>`;prevDist=r.distance;});
         htm+='</tbody></table>';
         document.getElementById('chain-body').innerHTML=htm;
-        _chainLoading=false;
     }
-    function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);});}
+    function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','500');const tp=prompt('TP (₹):','1000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||500),take_profit:parseFloat(tp||1000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);});}
 
     let _lastOpenTrdHTML = null;
     async function loadTrades(){
         try{const o=await A('/api/trades/open');const st=await A('/api/dashboard/stats');
             document.getElementById('trd-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Open Trades</div><div class="value text-primary">${st.open_count}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Closed Trades</div><div class="value">${st.closed_count}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Total P&L</div><div class="value ${C(st.total_pnl)}">${F(st.total_pnl)}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Win Rate</div><div class="value">${st.win_rate}%</div></div></div>`;
             if(o.positions&&o.positions.length){
-                let h='<table><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Lot</th><th>Qty</th><th>Entry</th><th>Current</th><th>Target</th><th>SL</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
+                let h='<table><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Current</th><th>Target</th><th>SL</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
                 o.positions.forEach(t=>{
                     const isLive=t.trade_mode==='live';
                     const cur = (t.current_price!=null? t.current_price : t.entry_price);
@@ -692,11 +687,14 @@
                 });
                 h+='</table>';document.getElementById('open-trd').innerHTML=h;_lastOpenTrdHTML=h;
             }else{
-                document.getElementById('open-trd').innerHTML='<p class="text-muted p-3">No open positions</p>';
-                _lastOpenTrdHTML=null;
+                if(_lastOpenTrdHTML && document.getElementById('open-trd').innerHTML.includes('<table>')){
+                    // keep previous trades visible - avoid flicker when other tab clicked
+                } else {
+                    document.getElementById('open-trd').innerHTML='<p class="text-muted p-3">No open positions</p>';
+                }
             }
-        }catch(e){ console.error('loadTrades failed',e); document.getElementById('open-trd').innerHTML='<p class="text-muted p-3">No open positions</p>'; }
-        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Lot</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Badge</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=t.pnl>=0?'Target Hit':'Stoploss Hit';const sbg=t.pnl>=0?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const badge=B(t.trade_mode==='live'?'LIVE':t.trade_mode==='paper'?'PAPER':'BT', t.trade_mode==='live'?'sell':'buy');const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td>${badge}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<p class="text-muted p-3">No trades yet</p>';}
+        }catch(e){ console.error('loadTrades failed',e); }
+        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Badge</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=t.pnl>=0?'Target Hit':'Stoploss Hit';const sbg=t.pnl>=0?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const badge=B(t.trade_mode==='live'?'LIVE':t.trade_mode==='paper'?'PAPER':'BT', t.trade_mode==='live'?'sell':'buy');const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td>${ex}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td>${badge}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<p class="text-muted p-3">No trades yet</p>';}
         }catch(e){}
         // Quantman Drawdown Days in stats
         try{ if(window._lastBacktestMetrics && window._lastBacktestMetrics.max_dd_duration!==undefined) document.getElementById('q-drawdown').textContent='Drawdown Days: '+(window._lastBacktestMetrics.max_dd_duration||0)+' | Trades in DD: '+(window._lastBacktestMetrics.max_trades_in_dd||0); }catch(e){}
@@ -722,10 +720,8 @@
         if(document.getElementById('ind-neural')?.checked) ind.push({id:'neural_network',params:addMode({period:parseInt(document.getElementById('ind-neural-p').value)||14}, 'ind-neural-mode')});
         if(document.getElementById('ind-volind')?.checked) ind.push({id:'volume_indicator',params:addMode({period:parseInt(document.getElementById('ind-volind-p').value)||20}, 'ind-volind-mode')});
         if(document.getElementById('ind-oi')?.checked) ind.push({id:'open_interest',params:addMode({period:parseInt(document.getElementById('ind-oi-p').value)||20}, 'ind-oi-mode')});
-        if(!ind.length) ind.push({id:'rsi',params:{period:14,mode:'both'}}); // default so backtest never 0 trades
         return ind;
     }
-    function setRange(days){const e=new Date();const s=new Date();s.setDate(e.getDate()-days);document.getElementById('s-start').value=s.toISOString().split('T')[0];document.getElementById('s-end').value=e.toISOString().split('T')[0];}
     async function runBacktest(){
         const btn=document.getElementById('s-run');const orig=btn.innerHTML;
         btn.innerHTML='<span class="spinner"></span> Running...';
@@ -734,7 +730,7 @@
         const endDate=document.getElementById('s-end').value;
         if(!startDate||!endDate){btn.innerHTML=orig;alert('Select start and end date');return;}
         const lots=parseInt(document.getElementById('s-lots').value)||1;
-        const sl=parseFloat(document.getElementById('s-sl').value)||1500;
+        const sl=parseFloat(document.getElementById('s-sl').value)||500;
         const tp=parseFloat(document.getElementById('s-tp').value)||1000;
         const mtd=parseInt(document.getElementById('s-mtd').value)||5;
         const indicators=collectIndicators();
@@ -755,12 +751,10 @@
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50;
         const body={symbol:idx,start_date:startDate,end_date:endDate,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
-        // Clamp end to last trading day before send (avoid today 429)
-        try{const ltd=new Date();ltd.setDate(ltd.getDate()-1);while(ltd.getDay()===0||ltd.getDay()===6) ltd.setDate(ltd.getDate()-1);const ltdStr=ltd.toISOString().split('T')[0];if(endDate>ltdStr) body.end_date=ltdStr;}catch(e){}
-        let r=null; for(let a=0;a<3;a++){try{r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); break;}catch(e){if(a===2) throw e; await new Promise(rr=>setTimeout(rr,1200*(a+1)));}}
         try{
+            const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             btn.innerHTML=orig;
-            if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+' <button class="btn btn-sm btn-primary" onclick="runBacktest()">Retry</button></p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');return;}
+            if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');return;}
             const m=r.metrics||r; window._lastBacktestMetrics=m;
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
@@ -793,26 +787,15 @@
             else{Plotly.newPlot('mo-chart',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
             if(r.trade_list&&r.trade_list.length){
                 document.getElementById('bt-trades').classList.remove('hidden');
-                let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Exit Reason</th><th>Type</th><th>Strike</th><th>B/S</th><th>Qty</th><th>Lots</th><th>Entry Price</th><th>Exit Price</th><th>P/L</th></tr></thead><tbody>';
+                let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Type</th><th>Strike</th><th>B/S</th><th>Qty</th><th>Lots</th><th>Entry Price</th><th>Exit Price</th><th>Vix</th><th>P/L</th></tr></thead><tbody>';
                 let tradeIdx=0;
                 r.trade_list.forEach(t=>{
-                    const reason=t.exit_reason||t.reason||'-'; const badge=reason==='stoploss'?'badge bg-danger':reason==='target'?'badge bg-success':reason==='SL'?'badge bg-danger':reason==='TP'?'badge bg-success':reason==='intraday'?'badge bg-secondary':'badge bg-secondary';
-                    if(t.is_group){h+=`<tr class="table-active"><td>${++tradeIdx}</td><td>${t.symbol||''}</td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td><span class="${badge}">${reason}</span></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`}
-                    else{h+=`<tr><td>${tradeIdx}.1</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td><span class="${badge}">${reason}</span></td><td>${t.option_type||'-'}</td><td>${t.strike}</td><td>${t.position||'Sell'}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+t.entry_price.toFixed(2):'-'}</td><td>${t.exit_price?'₹'+t.exit_price.toFixed(2):'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;}});
+                    if(t.is_group){h+=`<tr class="table-active"><td>${++tradeIdx}</td><td>${t.symbol||''}</td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="text-muted small">${t.vix||'12.0'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`}
+                    else{h+=`<tr><td>${tradeIdx}.1</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike}</td><td>${t.position||'Sell'}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+t.entry_price.toFixed(2):'-'}</td><td>${t.exit_price?'₹'+t.exit_price.toFixed(2):'-'}</td><td class="text-muted small">${t.vix||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;}});
                 h+='</tbody></table>';
                 document.getElementById('bt-tl').innerHTML=h;
             }
-        }catch(e){btn.innerHTML=orig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3">Network busy (Render cold start). Auto-retry in 3s... <span class="spinner"></span><br><small>'+e.message.slice(0,200)+'</small> <button class="btn btn-sm btn-primary" onclick="runBacktest()">Retry now</button></p>'; setTimeout(()=>runBacktest(),3000);}
-    }
-    async function runHistoricalReplay(){
-        const b=document.getElementById('s-replay'); const o=b.innerHTML; b.innerHTML='<span class="spinner"></span> Replay...';
-        const body={symbol:document.getElementById('s-index').value, start_date:document.getElementById('s-start').value, end_date:document.getElementById('s-end').value, indicators:collectIndicators(), legs:(stratLegs.length?stratLegs:[{option_type:document.getElementById('s-opt').value,lots:parseInt(document.getElementById('s-lots').value)||1,transaction:document.getElementById('s-position').value.toLowerCase(),strike_selection:document.getElementById('s-strike-type').value.toLowerCase()}]), advanced:{trade_mode:document.getElementById('s-strat-type').value.toLowerCase(), slippage_pct:parseFloat(document.getElementById('s-slippage')?.value)||0.5}, risk:{max_trades_per_day:parseInt(document.getElementById('s-mtd').value)||5, daily_stop_loss:parseFloat(document.getElementById('s-sl').value)||1500, daily_take_profit:parseFloat(document.getElementById('s-tp').value)||2500}};
-        try{ const r=await P('/api/paper/historical-replay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); b.innerHTML=o; if(r.error){alert(r.error); return;} const m=r.metrics||r; alert('Historical Replay: '+m.total_trades+' trades, PnL '+m.net_pnl); document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-success p-3">Replay done: '+m.total_trades+' trades</p>'; }catch(e){ b.innerHTML=o; alert('Replay error: '+e.message); }
-    }
-    async function runBacktestCompare(){
-        const b=document.getElementById('s-compare'); const o=b.innerHTML; b.innerHTML='<span class="spinner"></span> Compare...';
-        const body={symbol:document.getElementById('s-index').value, start_date:document.getElementById('s-start').value, end_date:document.getElementById('s-end').value, indicators:collectIndicators(), legs:(stratLegs.length?stratLegs:[{option_type:document.getElementById('s-opt').value,lots:parseInt(document.getElementById('s-lots').value)||1,transaction:document.getElementById('s-position').value.toLowerCase(),strike_selection:document.getElementById('s-strike-type').value.toLowerCase()}]), advanced:{trade_mode:document.getElementById('s-strat-type').value.toLowerCase()}, risk:{max_trades_per_day:parseInt(document.getElementById('s-mtd').value)||5}};
-        try{ const r=await P('/api/paper/backtest-compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); b.innerHTML=o; if(r.error){alert(r.error); return;} alert('Compare: exact_match='+r.exact_match+' diff trades '+(r.match?.total_trades||0)); }catch(e){ b.innerHTML=o; alert('Compare error: '+e.message); }
+        }catch(e){btn.innerHTML=orig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+'</p>';}
     }
     async function saveStrat(){
         const idx=document.getElementById('s-index').value;
@@ -854,31 +837,15 @@
         const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         if(r.id){alert('Strategy saved! ID: '+r.id);loadStrats();}else{alert('Error saving strategy');}
     }
-    let stratLegs=[{option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:1,expiry:'weekly',offset:0}];
-    setTimeout(()=>{ try{ renderLegs(); updatePayoff(); }catch(e){} },400);
+    let stratLegs=[];
     let _payoffSpot=24500;
     async function fetchPayoffSpot(){ try{ const s=document.getElementById('s-index').value||'NIFTY'; const d=await A('/api/chain/live/'+s); if(d.spot) _payoffSpot=d.spot; else if(d.rows) _payoffSpot=d.spot; }catch(e){} }
     function renderLegs(){
         const card=document.getElementById('legsTableCard'); const tbody=document.querySelector('#legsTable tbody');
         if(!stratLegs.length){card.style.display='none'; tbody.innerHTML=''; document.getElementById('payoffCard').style.display='none'; return;}
         card.style.display='block';
-        tbody.innerHTML=stratLegs.map((l,i)=>{
-            const curStrike = l.strike_selection==='atm'?'atm':`${l.strike_selection}${l.otm_distance||1}`;
-            return `<tr><td>${i+1}</td><td><select class="form-select form-select-sm" onchange="updateLeg(${i},'transaction',this.value)"><option value="buy" ${l.transaction==='buy'?'selected':''}>BUY</option><option value="sell" ${l.transaction==='sell'?'selected':''}>SELL</option></select></td><td><select class="form-select form-select-sm" onchange="updateLeg(${i},'option_type',this.value)"><option value="CE" ${l.option_type==='CE'?'selected':''}>CE</option><option value="PE" ${l.option_type==='PE'?'selected':''}>PE</option></select></td><td><select class="form-select form-select-sm" onchange="updateLegStrike(${i},this.value)"><option value="atm" ${curStrike==='atm'?'selected':''}>ATM</option><option value="otm1" ${curStrike==='otm1'?'selected':''}>OTM 1</option><option value="otm2" ${curStrike==='otm2'?'selected':''}>OTM 2</option><option value="otm3" ${curStrike==='otm3'?'selected':''}>OTM 3</option><option value="itm1" ${curStrike==='itm1'?'selected':''}>ITM 1</option><option value="itm2" ${curStrike==='itm2'?'selected':''}>ITM 2</option><option value="itm3" ${curStrike==='itm3'?'selected':''}>ITM 3</option></select></td><td><input type="number" class="form-control form-control-sm" value="${l.lots}" min="1" max="100" style="width:65px" onchange="updateLeg(${i},'lots',this.value)"></td><td><select class="form-select form-select-sm" onchange="updateLeg(${i},'expiry',this.value)"><option value="weekly" ${l.expiry==='weekly'?'selected':''}>Weekly</option><option value="monthly" ${l.expiry==='monthly'?'selected':''}>Monthly</option></select></td><td><button class="btn btn-sm btn-danger" onclick="removeLeg(${i})"><i class="bi bi-x"></i></button></td></tr>`;
-        }).join('');
-        // keep payoff in sync
-        try{ updatePayoff(); }catch(e){}
-    }
-    function updateLeg(i, field, val){
-        if(field==='lots') stratLegs[i].lots=parseInt(val)||1;
-        else stratLegs[i][field]=val;
-        renderLegs();
-    }
-    function updateLegStrike(i, val){
-        if(val==='atm'){ stratLegs[i].strike_selection='atm'; stratLegs[i].otm_distance=0; }
-        else if(val.startsWith('otm')){ stratLegs[i].strike_selection='otm'; stratLegs[i].otm_distance=parseInt(val.slice(3))||1; }
-        else if(val.startsWith('itm')){ stratLegs[i].strike_selection='itm'; stratLegs[i].otm_distance=parseInt(val.slice(3))||1; }
-        renderLegs();
+        tbody.innerHTML=stratLegs.map((l,i)=>`<tr><td>${i+1}</td><td><span class="badge ${l.transaction==='buy'?'badge-buy':'badge-sell'}">${l.transaction.toUpperCase()}</span></td><td>${l.option_type}</td><td>${l.strike_selection}${l.strike_selection==='delta'?'('+l.delta_target+')':''}${l.otm_distance?'+'+l.otm_distance:''}</td><td>${l.lots}</td><td>${l.expiry}</td><td><button class="btn btn-sm btn-danger" onclick="removeLeg(${i})"><i class="bi bi-x"></i></button></td></tr>`).join('');
+        updatePayoff();
     }
     function addLeg(){
         const lots=parseInt(document.getElementById('s-lots').value)||1;
@@ -888,30 +855,14 @@
         const expiry=document.getElementById('s-expiry').value.toLowerCase();
         const dte=parseInt(document.getElementById('s-dte').value)||7;
         const delta=parseFloat(document.getElementById('s-delta').value)||0.3;
-        const otmDist=parseInt(document.getElementById('s-otm-distance').value)||2;
         // expiry offset: weekly=0, monthly=2 weeks extra
         const offset = expiry==='weekly'?0:0;
-        stratLegs.push({option_type:opt, transaction:pos, strike_selection:strikeSel, otm_distance:otmDist, lots:lots, expiry:expiry, offset:offset, delta_target: strikeSel==='delta'?delta:null, dte:dte});
+        stratLegs.push({option_type:opt, transaction:pos, strike_selection:strikeSel, otm_distance:2, lots:lots, expiry:expiry, offset:offset, delta_target: strikeSel==='delta'?delta:null, dte:dte});
         renderLegs();
-    }
-    function setAndAdd(type, dist){
-        document.getElementById('s-strike-type').value=type;
-        document.getElementById('s-otm-distance').value=dist;
-        document.getElementById('s-delta').classList.toggle('d-none', type!=='Delta');
-        addLeg();
     }
     function removeLeg(i){stratLegs.splice(i,1);renderLegs();}
     function clearLegs(){stratLegs=[];renderLegs();}
-    function applyTemplate(t, el){
-        // Quantman tick
-        if(el){
-            document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
-            const card = el.closest ? el.closest('.quant-card') : el;
-            if(card) card.classList.add('active'); else el.classList.add('active');
-        } else {
-            // fallback when called programmatically without element, highlight matching card
-            document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
-        }
+    function applyTemplate(t){
         clearLegs();
         const lots=parseInt(document.getElementById('s-lots').value)||1;
         if(t==='single'){ addLeg(); }
@@ -920,14 +871,14 @@
         else if(t==='shortcall'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='shortput'){ stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='straddle'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
-        else if(t==='strangle'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
-        else if(t==='bullspread'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:selDist}); renderLegs(); }
-        else if(t==='bearspread'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:selDist}); renderLegs(); }
-        else if(t==='bearputspread'){ stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:selDist}); renderLegs(); }
-        else if(t==='bullputspread'){ stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:selDist+2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
-        else if(t==='ironcondor'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:selDist+2,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:selDist+2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
-        else if(t==='ironbutterfly'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
-        else if(t==='butterfly'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:selDist,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:selDist*2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='strangle'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='bullspread'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:2}); renderLegs(); }
+        else if(t==='bearspread'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:2}); renderLegs(); }
+        else if(t==='bearputspread'){ stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:2}); renderLegs(); }
+        else if(t==='bullputspread'){ stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:3,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='ironcondor'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:3,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:3,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='ironbutterfly'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
+        else if(t==='butterfly'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='calendar'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'monthly',offset:0}); renderLegs(); }
         updatePayoff();
     }
@@ -968,13 +919,15 @@
         document.getElementById('payoff-spot').textContent='Spot: \u20B9'+spot.toFixed(2)+' | ATM: '+atm;
         document.getElementById('payoff-metrics').innerHTML=`<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">\u20B9${maxProfit.toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">\u20B9${Math.abs(maxLoss).toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">${beText}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">${rr}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Lots×LotSize</div><div class="value">${stratLegs.reduce((a,l)=>a+l.lots,0)}×${lot}</div></div></div>`;
         try{ Plotly.newPlot('payoff-chart', [{x:xs, y:ys, type:'scatter', mode:'lines', fill:'tozeroy', line:{color: maxProfit>Math.abs(maxLoss)?'#198754':'#0d6efd', width:2}, fillcolor:'rgba(13,110,253,0.08)'}, {x:[spot], y:[0], mode:'markers', marker:{color:'#dc3545', size:10}, name:'Spot'}], {title:'', xaxis:{title:'Spot at Expiry'}, yaxis:{title:'P&L (₹)'}, shapes:[{type:'line', x0:xs[0], x1:xs[xs.length-1], y0:0, y1:0, line:{color:'#6c757d', dash:'dash'}}], margin:{t:10,b:40,l:60,r:20}, paper_bgcolor:'#fff', plot_bgcolor:'#fff'}, {displayModeBar:false}); }catch(e){}
+        // highlight quant cards
+        document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
     }
     document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta');});
     document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); });
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
         document.getElementById('s-lots').value=1;
-        document.getElementById('s-sl').value=1500;
+        document.getElementById('s-sl').value=500;
         document.getElementById('s-tp').value=1000;
         document.getElementById('s-lock-profit').value=0;
         document.getElementById('s-lock-amount').value=1;
@@ -988,7 +941,7 @@
 
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3">No strategies yet. Create your first strategy!</p>';return;}let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const statusCls=s.status==='active'?'active':s.status==='draft'?'draft':'paused';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span class="badge badge-${statusCls}">${s.status}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px"><button class="btn btn-sm btn-success" onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})">Edit</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
 
-    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];const leg=legs[0]||{};const opt=leg.option_type||'CE';const txn=leg.transaction||'buy';const lots=leg.lots||1;const sl=leg.stop_loss||1500;const tp=leg.take_profit||1000;alert(`Paper Trade from "${s.name}"\nSymbol: ${s.symbol}\nOption: ${opt}\nTransaction: ${txn}\nLots: ${lots}\nSL: ₹${sl}\nTP: ₹${tp}\n\nGo to Option Chain to place trade.`);}catch(e){alert('Error: '+e.message);}}
+    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];const leg=legs[0]||{};const opt=leg.option_type||'CE';const txn=leg.transaction||'buy';const lots=leg.lots||1;const sl=leg.stop_loss||500;const tp=leg.take_profit||1000;alert(`Paper Trade from "${s.name}"\nSymbol: ${s.symbol}\nOption: ${opt}\nTransaction: ${txn}\nLots: ${lots}\nSL: ₹${sl}\nTP: ₹${tp}\n\nGo to Option Chain to place trade.`);}catch(e){alert('Error: '+e.message);}}
     async function atFromStrat(id,status){const newStatus=status==='active'?'paused':'active';await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:newStatus})});loadStrats();loadTrades();}
     async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);document.getElementById('s-name').value=s.name||'';document.getElementById('s-sym').value=s.symbol||'BANKNIFTY';document.getElementById('s-start').value=s.start_date||'';document.getElementById('s-end').value=s.end_date||'';document.getElementById('s-tf').value=s.timeframe||'daily';}catch(e){alert('Error');}}
     async function delStrat(id){if(!confirm('Delete this strategy?'))return;await A('/api/strategies/'+id,{method:'DELETE'});loadStrats();}
@@ -1012,7 +965,7 @@
         try{const r=await A('/api/email-alerts/trades');
         const trades=r.trades||[];
         if(!trades.length){document.getElementById('alert-trades').innerHTML='<p class="text-muted p-3">No trades yet.</p>';return;}
-        let h='<table class="bt-table"><thead><tr><th>#</th><th>Source</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Lot</th><th>Entry</th><th>SL</th><th>Target</th><th>Status</th><th>P&L</th></tr></thead><tbody>';
+        let h='<table class="bt-table"><thead><tr><th>#</th><th>Source</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Entry</th><th>SL</th><th>Target</th><th>Status</th><th>P&L</th></tr></thead><tbody>';
         trades.forEach(t=>{
             const cls=t.pnl>=0?'price-up':'price-down';
             const stBadge=t.status==='closed'?'badge-sell':t.status==='sl_hit'?'badge-sell':'badge-buy';
@@ -1051,7 +1004,7 @@
             opt=parts[0]; txn=parts[1].toLowerCase();
             legs=[{option_type:opt, transaction:txn, lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
         }
-        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
+        const sl=parseFloat(document.getElementById('r-sl').value)||500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
         const mtd=parseInt(document.getElementById('r-mtd').value)||1;
         const s=document.getElementById('r-start').value; const e=document.getElementById('r-end').value;
@@ -1064,14 +1017,7 @@
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         const entryTime=document.getElementById('r-entry').value||'09:35';
         const exitTime=document.getElementById('r-exit').value||'15:14';
-        const preset = window._pullbackPreset || '';
-        const vwapMult=parseFloat(document.getElementById('r-vwap-mult')?.value)||2;
-        const rsiLong=parseFloat(document.getElementById('r-rsi-long')?.value)||30;
-        const rsiShort=parseFloat(document.getElementById('r-rsi-short')?.value)||70;
-        const emaP=parseInt(document.getElementById('r-ema-p')?.value)||20;
-        const rsiP=parseInt(document.getElementById('r-rsi-p')?.value)||14;
-        const rr=parseFloat(document.getElementById('r-rr')?.value)||2;
-        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal, preset:preset, vwap_band_mult:vwapMult, rsi_long:rsiLong, rsi_short:rsiShort, ema_period:emaP, rsi_period:rsiP, rr:rr}, strategy_preset:preset, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
+        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal}, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
         document.getElementById('robot-results').classList.remove('hidden');
         document.getElementById('robot-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Running backtest...</p>';
         try{
@@ -1083,15 +1029,8 @@
             document.getElementById('robot-metrics').innerHTML=`<div class="row g-2"><div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value">${r.symbol||sym}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlC}">${F(m.net_pnl||pnl)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Trades</div><div class="value">${m.total_trades}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}%</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Avg P/L</div><div class="value ${pnlC}">${F(m.avg_profit_per_trade||0)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max DD</div><div class="value price-down">${m.max_drawdown}%</div></div></div></div>`;
             if(r.equity_curve&&r.equity_curve.length) Plotly.newPlot('robot-eq',[{y:r.equity_curve,type:'scatter',line:{color:'#0d6efd',width:2}}],{title:'Equity Curve - '+sym+' '+order,margin:{t:30,b:30,l:50,r:20}});
             if(r.monthly_pnl&&Object.keys(r.monthly_pnl).length) Plotly.newPlot('robot-mo',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',margin:{t:30,b:30,l:50,r:20}}); else Plotly.newPlot('robot-mo',[{x:['No data'],y:[0],type:'bar'}],{title:'Monthly P&L'});
-            if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>B/S</th><th>Strike</th><th>Lot</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.symbol||sym}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.exit_date} ${t.exit_time||'15:14'}</td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
+            if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>B/S</th><th>Strike</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.symbol||sym}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.exit_date} ${t.exit_time||'15:14'}</td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
         }catch(e){document.getElementById('robot-metrics').innerHTML='<p class="text-danger p-3">Error: '+e.message+'</p>';}
-    }
-    function loadPullbackRobot(dir){
-        if(dir==='ce'){ document.getElementById('r-order').value='CE-BUY'; } else { document.getElementById('r-order').value='PE-BUY'; }
-        document.getElementById('r-strike').value='ATM';
-        document.getElementById('r-sl').value=1500; document.getElementById('r-tp').value=3000;
-        window._pullbackPreset = dir==='ce' ? 'ce_pullback_5m' : 'pe_pullback_5m';
-        alert('Robot '+(dir==='ce'?'1':'2')+' loaded: 5m '+(dir==='ce'?'CE':'PE')+' Pullback (20EMA+VWAP+RSI14+Vol+OI, ATM, SL candle low/high, 1:2). Click Run Backtest.');
     }
     function isMarketOpenIST(){
         const now=new Date();
@@ -1118,7 +1057,7 @@
         const sym=document.getElementById('r-sym').value;
         let order=document.getElementById('r-order').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
+        const sl=parseFloat(document.getElementById('r-sl').value)||500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
         const strikeType=document.getElementById('r-strike').value;
         const expiry=document.getElementById('r-expiry').value;
@@ -1153,7 +1092,7 @@
         const order=document.getElementById('r-order').value;
         const strikeType=document.getElementById('r-strike').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
+        const sl=parseFloat(document.getElementById('r-sl').value)||500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
         let legs=[];
         if(order==='AUTO'){ legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType.toLowerCase()}]; }
@@ -1186,7 +1125,7 @@
             else document.getElementById('r-order').value=(leg.option_type||'CE')+'-'+(leg.transaction||'buy').toUpperCase();
             document.getElementById('r-strike').value=(leg.strike_selection||'atm').toUpperCase();
             document.getElementById('r-lots').value=leg.lots||1;
-            const rm=_parseJsonField(s.risk_management,{}); document.getElementById('r-sl').value=rm.daily_stop_loss||1500; document.getElementById('r-tp').value=rm.daily_take_profit||1000;
+            const rm=_parseJsonField(s.risk_management,{}); document.getElementById('r-sl').value=rm.daily_stop_loss||500; document.getElementById('r-tp').value=rm.daily_take_profit||1000;
             const ao=_parseJsonField(s.advanced_options,{}); if(ao.entry_time) document.getElementById('r-entry').value=ao.entry_time; if(ao.exit_time) document.getElementById('r-exit').value=ao.exit_time;
             if(s.start_date) document.getElementById('r-start').value=s.start_date; if(s.end_date) document.getElementById('r-end').value=s.end_date;
             alert('Robot ID '+id+' loaded to form');
@@ -1200,7 +1139,7 @@
         const order=document.getElementById('r-order').value;
         let optR, txnR; if(order==='AUTO'){ optR='CE'; txnR='BUY'; } else { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
+        const sl=parseFloat(document.getElementById('r-sl').value)||500;
         const tp=parseFloat(document.getElementById('r-tp').value)||1000;
         const expiry=document.getElementById('r-expiry').value;
         try{
@@ -1213,7 +1152,7 @@
         }
     }
 
-    (function(){ try{document.getElementById('s-start').value='2026-08-12'; document.getElementById('s-end').value=new Date().toISOString().split('T')[0];}catch(e){}})();
+    (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-6); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e){}})();
     addCondition();
     loadDash();
     loadStrategySymbols();
@@ -1251,8 +1190,7 @@
     // Fallback HTTP refresh if WS not connected
     setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },30000);
     setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 3000);
-    let _chainLoading=false;
-    setInterval(()=>{ try{ if(!_chainLoading && !document.getElementById('pg-chain').classList.contains('hidden') && document.getElementById('c-live') && document.getElementById('c-live').checked) cLoadChain(); }catch(e){} }, 30000);
+    setInterval(()=>{ try{ if(!document.getElementById('pg-chain').classList.contains('hidden') && document.getElementById('c-live') && document.getElementById('c-live').checked) cLoadChain(); }catch(e){} }, 2500);
     // Auto-load saved robots on robot page visit
     document.querySelector('.nav button[onclick*=\"robot\"]')?.addEventListener('click', ()=> setTimeout(loadRobotSaved, 300));
 
