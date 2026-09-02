@@ -410,10 +410,10 @@ class LiveMarketData:
                             return {"symbol": sym, "spot": spot, "atm": atm, "rows": rows, "source": "bhavcopy", "timestamp": "", "max_pain": 0, "pcr": None}
         except Exception:
             pass
-        # 2) Synthetic chain - DB spot or Google Finance (instant/fast)
+        # 2) Synthetic chain - DB spot or hardcoded fallback (instant, NO network)
+        _HARDCODED_SPOT = {"NIFTY": 24500, "BANKNIFTY": 52000, "FINNIFTY": 25000, "MIDCPNIFTY": 12500, "RELIANCE": 2900, "TCS": 3200, "INFY": 1500, "HDFCBANK": 1700, "ICICIBANK": 1200, "SBIN": 800}
         try:
             spot = 0
-            # Try DB first (instant)
             try:
                 row = Database.get_instance().fetch_one(
                     "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
@@ -422,14 +422,8 @@ class LiveMarketData:
                     spot = float(row["close_price"])
             except Exception:
                 pass
-            # Try Google Finance if DB empty (works from cloud, ~1s)
             if spot <= 0:
-                try:
-                    g = _with_timeout(fetch_google_spot, 1.5, sym)
-                    if g and g > 0:
-                        spot = float(g)
-                except Exception:
-                    pass
+                spot = _HARDCODED_SPOT.get(sym, 1000)
             if spot > 0:
                 from utils.helpers import get_strike_step, black_scholes
                 step = get_strike_step(sym)
@@ -445,13 +439,6 @@ class LiveMarketData:
                                  "pe_ltp": round(pe_prem, 2), "pe_oi": 0, "pe_vol": 0, "pe_iv": 20})
                 if rows:
                     return {"symbol": sym, "spot": spot, "atm": atm, "rows": rows, "source": "synthetic", "timestamp": "", "max_pain": 0, "pcr": None}
-        except Exception:
-            pass
-        # 3) NSE live (async, non-blocking) - only if DB empty
-        try:
-            live = _with_timeout(_fetch_nse_option_chain_live, 3.0, sym)
-            if live and live.get("rows") and len(live["rows"]) > 0:
-                return live
         except Exception:
             pass
         return None
