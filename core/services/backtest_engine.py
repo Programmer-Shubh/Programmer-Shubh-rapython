@@ -524,6 +524,8 @@ class BacktestEngine:
         strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
         premium = self._entry_premium(date, spot, strike, option_type)
         premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
+        # post-slippage floor — prevents 1.0 -> 0.99 bleed (ADANIENT bug)
+        premium = max(premium, round(spot * 0.015, 2), 5.0)
         costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
         entry_time = getattr(self, '_entry_time', '09:35')
         return {
@@ -572,6 +574,7 @@ class BacktestEngine:
                 strike = self._select_strike(spot, symbol, option_type, leg_sel, leg_delta, leg_otm)
             premium = self._entry_premium(date, spot, strike, option_type)
             premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
+            premium = max(premium, round(spot * 0.015, 2), 5.0)
             costs = TransactionCosts.calculate(premium * lqty, txn_type == "sell", self.is_live)
             # Correct sign: sell = +premium (credit received), buy = -premium (debit paid)
             signed = premium * lqty if txn_type == "sell" else -premium * lqty
@@ -751,21 +754,24 @@ class BacktestEngine:
                     return float(row_retry["close_price"])
             except Exception:
                 pass
-        # Black-Scholes synthetic fallback (proper option pricing)
+        # Black-Scholes fallback — same fix as option_chain/scanner
         if spot and spot > 0 and strike and strike > 0:
-            dte = self._days_to_expiry(date, self._get_expiry_type()) / 365.0
+            dte = max(self._days_to_expiry(date, self._get_expiry_type()) / 365.0, 1/365)
             iv = self.implied_volatility
+            if self.bt_symbol in ('NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'):
+                iv = max(iv, 0.18)
+            else:
+                iv = max(iv, 0.20)
             from utils.helpers import black_scholes
-            bs_price = black_scholes(spot, strike, dte, iv, option_type)
-            if bs_price > 0:
-                val = round(bs_price, 2)
-                self.premium_cache[key] = val
-                return val
-            val2 = round(spot * 0.01, 2)
-            self.premium_cache[key] = val2
-            return val2
-        self.premium_cache[key] = 1.0
-        return 1.0
+            raw = black_scholes(spot, strike, dte, iv, option_type)
+            if raw <= 5:
+                raw2 = black_scholes(spot, strike, dte, max(iv, 0.22), option_type)
+                raw = raw2 if raw2 > 5 else round(spot * 0.02, 2)
+            val = max(round(raw, 2), round(spot * 0.015, 2), 5.0)
+            self.premium_cache[key] = val
+            return val
+        self.premium_cache[key] = 5.0
+        return 5.0
 
     def _get_expiry_type(self):
         # Check legs for expiry hint
@@ -816,21 +822,29 @@ class BacktestEngine:
                 return val
         except Exception:
             pass
-        # Black-Scholes fallback
+        # Black-Scholes fallback — same fix as option_chain/scanner: premium <=5 → BS 22% → spot*0.02, and post-slippage floor
         if spot and spot > 0 and strike and strike > 0:
-            dte = self._days_to_expiry(date, self._get_expiry_type()) / 365.0
+            dte = max(self._days_to_expiry(date, self._get_expiry_type()) / 365.0, 1/365)
             iv = self.implied_volatility
+            if self.bt_symbol in ('NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'):
+                iv = max(iv, 0.18)
+            else:
+                iv = max(iv, 0.20)
             from utils.helpers import black_scholes
-            bs_price = black_scholes(spot, strike, dte, iv, option_type)
-            if bs_price > 0:
-                val = round(bs_price, 2)
-                self.premium_cache[key] = val
-                return val
-            val2 = round(spot * 0.01, 2)
-            self.premium_cache[key] = val2
-            return val2
-        self.premium_cache[key] = 1.0
-        return 1.0
+            raw = black_scholes(spot, strike, dte, iv, option_type)
+            # raw already max(1.0, ...); if illiquid (<=5) try higher IV then spot*0.02 like option_chain.py:218-241
+            if raw <= 5:
+                raw2 = black_scholes(spot, strike, dte, max(iv, 0.22), option_type)
+                if raw2 > 5:
+                    raw = raw2
+                else:
+                    raw = round(spot * 0.02, 2)
+            val = round(raw, 2)
+            val = max(val, round(spot * 0.015, 2), 5.0)
+            self.premium_cache[key] = val
+            return val
+        self.premium_cache[key] = 5.0
+        return 5.0
 
     def _days_to_expiry(self, bar_date, expiry_type="weekly"):
         import datetime
@@ -871,7 +885,12 @@ class BacktestEngine:
         if entry.get("is_spread"):
             self._close_spread(entries, exits, entry, reason, exit_date)
             return
-        exit_prem = max(0.01, exit_prem)
+        # same floor as entry — never Rs0.99
+        try:
+            spot_c = self._close_spot_for_date(exit_date) or float(entry.get("strike",0) or 0)
+            exit_prem = max(exit_prem, spot_c*0.015 if spot_c else 5.0, 5.0)
+        except Exception:
+            exit_prem = max(exit_prem, 5.0)
         exit_costs = TransactionCosts.calculate(exit_prem * qty, txn_type == "buy", self.is_live)
         if txn_type == "buy":
             pnl = (exit_prem * qty - exit_costs["total"]) - entry["total_cost"]
