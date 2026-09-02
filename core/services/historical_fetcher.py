@@ -394,7 +394,7 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
     # 2) External sources with tight 4s budget (Quantman instant) - then synthetic
     import time as _t
     _deadline = _t.time() + 4
-    for fetcher in [_fetch_nse_archives_historical, _fetch_nselib_historical, _fetch_jugaad_historical, _fetch_stocksrin_historical, _fetch_google_finance, _fetch_truedata_historical]:
+    for fetcher in [_fetch_nselib_historical, _fetch_nse_archives_historical, _fetch_stocksrin_historical, _fetch_truedata_historical]:
         try:
             if _t.time() > _deadline:
                 break
