@@ -97,8 +97,8 @@ def get_live_chain(symbol: str):
                 _rows = []
                 for r in nse["rows"]:
                     _rows.append({"strike": r["strike"], "distance": int(r["strike"] - _atm) if _atm else 0,
-                                  "ce_ltp": r.get("ce_ltp", 0), "ce_oi": r.get("ce_oi", 0), "ce_vol": r.get("ce_vol", 0), "ce_iv": r.get("ce_iv", 0),
-                                  "pe_ltp": r.get("pe_ltp", 0), "pe_oi": r.get("pe_oi", 0), "pe_vol": r.get("pe_vol", 0), "pe_iv": r.get("pe_iv", 0)})
+                                  "ce_ltp": r.get("ce_ltp", 0), "ce_oi": r.get("ce_oi", 0), "ce_vol": r.get("ce_vol", 0), "ce_iv": r.get("ce_iv", 0), "ce_oi_change": r.get("ce_oi_change", 0),
+                                  "pe_ltp": r.get("pe_ltp", 0), "pe_oi": r.get("pe_oi", 0), "pe_vol": r.get("pe_vol", 0), "pe_iv": r.get("pe_iv", 0), "pe_oi_change": r.get("pe_oi_change", 0)})
                 return {"symbol": sym, "spot": nse.get("spot", 0), "atm": _atm, "rows": _rows,
                         "source": "nse", "expiry": nse.get("expiry", ""), "pcr": nse.get("pcr"),
                         "timestamp": nse.get("timestamp", "")}
