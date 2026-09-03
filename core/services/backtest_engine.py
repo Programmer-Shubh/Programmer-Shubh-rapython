@@ -159,9 +159,10 @@ class BacktestEngine:
             if has_open and not (trade_mode == "intraday" and is_last):
                 entry = entries[len(exits)]
                 if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
-                    hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp)
+                    hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
                     if hit:
-                        self._close_position(entries, exits, entry, hit["level"], hit["reason"], cur_date, qty, txn_type)
+                        sl_exit = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                        self._close_position(entries, exits, entry, sl_exit, hit["reason"], cur_date, qty, txn_type)
                         daily_pnl += exits[-1]["pnl"]
                         if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
                             kill_switch_on = True
@@ -608,47 +609,80 @@ class BacktestEngine:
                 best = test
         return best
 
-    def _check_sl_tp(self, current, entry, option_type, txn_type, sl_amt, tp_amt):
+    def _check_sl_tp(self, current, entry, option_type, txn_type, sl_amt, tp_amt, qty=0):
         entry_price = float(entry["price"])
-        # Use fixed percent based on sl_amt/tp_amt magnitude
-        if sl_amt > 20:
-            sl_pct = (sl_amt / max(entry_price, 0.01)) * 100
+        qty = int(qty or entry.get("quantity", 0) or 0)
+        if qty <= 0:
+            qty = 1
+        # Overall SL/TP from UI are RUPEES per trade (e.g. 1500). Convert to premium points.
+        # Old bug: (sl_amt / entry_price)*100 treated Rs as % of premium, giving 3000%
+        # levels that never hit, so Sell trades bled -23k instead of -1500 exit.
+        def _to_level(amt, is_sl):
+            if amt is None or float(amt) <= 0:
+                return 0
+            amt = float(amt)
+            if amt > 20:
+                # Rupees -> points
+                points = amt / max(qty, 1)
+                if txn_type == "buy":
+                    lvl = (entry_price - points) if is_sl else (entry_price + points)
+                else:
+                    lvl = (entry_price + points) if is_sl else (entry_price - points)
+                # Target for Sell can't go below tick; SL always above entry
+                return max(0.05, lvl)
+            # <=20: legacy percent of premium
+            pct = amt
+            if txn_type == "buy":
+                return entry_price * (1 - pct / 100) if is_sl else entry_price * (1 + pct / 100)
+            else:
+                return entry_price * (1 + pct / 100) if is_sl else entry_price * (1 - pct / 100)
+
+        sl_level = _to_level(sl_amt, True)
+        tp_level = _to_level(tp_amt, False)
+
+        # SL/TP is on OPTION PREMIUM, not spot - estimate premium range for this
+        # bar via Black-Scholes at bar high/low spot, then compare levels.
+        # (Comparing premium levels directly to spot high/low is wrong: spot is
+        # ~24000 while premium is ~50, so Sell SL would trigger on every bar.)
+        try:
+            from utils.helpers import black_scholes as _bs
+        except Exception:
+            _bs = None
+        high_spot = float(current.get("high_price", 0) or current["close_price"])
+        low_spot = float(current.get("low_price", 0) or current["close_price"])
+        if high_spot < low_spot:
+            high_spot, low_spot = low_spot, high_spot
+        strike = float(entry.get("strike", 0) or 0)
+        t = 5 / 365
+        try:
+            exp = getattr(self, "bt_expiry", "") or ""
+            cur_d = str(current.get("trade_date", ""))
+            if exp and cur_d:
+                import datetime as _dt
+                d1 = _dt.datetime.strptime(cur_d, "%Y-%m-%d")
+                d2 = _dt.datetime.strptime(exp, "%Y-%m-%d")
+                t = max(0.003, (d2 - d1).days / 365)
+        except Exception:
+            pass
+        iv = float(getattr(self, "implied_volatility", 0.14) or 0.14)
+        if _bs and strike > 0:
+            try:
+                prem_high = _bs(high_spot, strike, t, iv, option_type.upper()[:2])
+                prem_low = _bs(low_spot, strike, t, iv, option_type.upper()[:2])
+            except Exception:
+                prem_high, prem_low = 9999, 0
         else:
-            sl_pct = sl_amt
-        if tp_amt > 20:
-            tp_pct = (tp_amt / max(entry_price, 0.01)) * 100
-        else:
-            tp_pct = tp_amt
-        # Conservative intra-candle SL/TP hit check:
-        # Use the actual High/Low from the bar.
-        # If SL/TP levels are within the candle's high/low range, assume they could be hit.
-        # This avoids look-ahead by only checking if price moved through those levels.
-        high = float(current.get("high_price", 0) or current["close_price"])
-        low = float(current.get("low_price", 0) or current["close_price"])
-        if high < low:
-            high, low = low, high
-        
-        # Calculate SL/TP levels as prices
-        if txn_type == "buy":
-            sl_level = entry_price * (1 - sl_pct / 100) if sl_pct > 0 else 0
-            tp_level = entry_price * (1 + tp_pct / 100) if tp_pct > 0 else 0
-        else:
-            sl_level = entry_price * (1 + sl_pct / 100) if sl_pct > 0 else 0
-            tp_level = entry_price * (1 - tp_pct / 100) if tp_pct > 0 else 0
-        
-        # CONSERVATIVE check:
-        # For long (buy): SL hit if LOW <= SL level; TP hit if HIGH >= TP level
-        # For short (sell): SL hit if HIGH >= SL level; TP hit if LOW <= TP level
+            prem_high, prem_low = float("inf"), 0
+        opt_high = max(prem_high, prem_low)
+        opt_low = min(prem_high, prem_low)
         hit_sl = False
         hit_tp = False
         if txn_type == "buy":
-            # Long position
-            hit_sl = sl_level > 0 and low <= sl_level
-            hit_tp = tp_level > 0 and high >= tp_level
+            hit_sl = sl_level > 0 and opt_low <= sl_level
+            hit_tp = tp_level > 0 and opt_high >= tp_level
         else:
-            # Short position
-            hit_sl = sl_level > 0 and high >= sl_level
-            hit_tp = tp_level > 0 and low <= tp_level
+            hit_sl = sl_level > 0 and opt_high >= sl_level
+            hit_tp = tp_level > 0 and opt_low <= tp_level
         if hit_sl:
             return {"reason": "stoploss", "level": sl_level}
         if hit_tp:

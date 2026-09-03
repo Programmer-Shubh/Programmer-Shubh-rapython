@@ -192,9 +192,10 @@ class HistoricalReplayEngine:
                 open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
                 entry = self.trades[open_trade_idx]
                 if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
-                    hit = self.bt_engine._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp)
+                    hit = self.bt_engine._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
                     if hit:
-                        exit_prem = hit["level"]
+                        from core.services.transaction_costs import TransactionCosts as _TC
+                        exit_prem = _TC.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", False)
                         self.bt_engine._close_position(self.trades, [], entry, exit_prem, 
                             hit["reason"], cur_date, qty, txn_type)
                         if self.trades[open_trade_idx].get("exit_date") is None:
