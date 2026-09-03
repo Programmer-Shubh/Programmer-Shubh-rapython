@@ -81,6 +81,7 @@ class Database:
                     status TEXT DEFAULT 'open',
                     trade_mode TEXT DEFAULT 'paper',
                     exit_status TEXT DEFAULT 'manual',
+                    entry_iv REAL DEFAULT NULL,
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
@@ -141,6 +142,14 @@ class Database:
             cols = {r[1] for r in self.fetch_all("PRAGMA table_info(strategies)")}
             if "status" not in cols:
                 self.execute("ALTER TABLE strategies ADD COLUMN status TEXT DEFAULT 'active'")
+        except Exception:
+            pass
+        # Add entry_iv column: pins the model IV used at order time so old open
+        # positions never reprice when the per-symbol IV map is tuned
+        try:
+            cols = {r[1] for r in self.fetch_all("PRAGMA table_info(paper_trades)")}
+            if "entry_iv" not in cols:
+                self.execute("ALTER TABLE paper_trades ADD COLUMN entry_iv REAL DEFAULT NULL")
         except Exception:
             pass
 

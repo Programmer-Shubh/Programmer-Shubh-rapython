@@ -173,6 +173,20 @@ def place_trade(req: TradeRequest):
                 return {"error": f"Strike {req.strike} not aligned to step {step} for {req.symbol}"}
     except Exception:
         pass
+    # ATM-distance guard: trades must land near live ATM (stale scanner/chain data
+    # produces garbage strikes like SENSEX 4900 vs spot 76826). Fail open when
+    # live spot is unavailable.
+    try:
+        _live0 = LiveMarketData()
+        _spot0 = _live0.get_spot_price(req.symbol) or 0
+        if _spot0 > 0:
+            _step0 = get_strike_step(req.symbol)
+            _atm0 = round(_spot0 / _step0) * _step0
+            _dev = abs(float(req.strike) - _atm0) / _spot0
+            if _dev > 0.05:
+                return {"error": f"Strike {req.strike} is {_dev*100:.1f}% away from live ATM {_atm0} (spot {_spot0:,.2f}) - stale data? Refresh chain/scanner and retry near ATM"}
+    except Exception:
+        pass
     # Deduplication check before insert
     from core.models.trade_model import TradeModel as _TM
     _tm = _TM()
@@ -210,7 +224,7 @@ def place_trade(req: TradeRequest):
                             expiry_days = 7
                             if req.expiry and "monthly" in req.expiry.lower():
                                 expiry_days = 28
-                            premium = model_premium(spot_g, req.strike, expiry_days, req.option_type)
+                            premium = model_premium(spot_g, req.strike, expiry_days, req.option_type, symbol=req.symbol)
                         except Exception:
                             premium = max(round(spot_g * 0.015, 2), 1.5)
         except Exception:
@@ -249,7 +263,7 @@ def place_trade(req: TradeRequest):
                             expiry_days = min(45, max(2, diff))
                     except Exception:
                         pass
-                premium = model_premium(spot_est, req.strike, expiry_days, req.option_type)
+                premium = model_premium(spot_est, req.strike, expiry_days, req.option_type, symbol=req.symbol)
             except Exception:
                 premium = max(round(spot_est * 0.015, 2), 1.5)
         if premium <= 0:
@@ -280,13 +294,14 @@ def place_trade(req: TradeRequest):
                     expiry_days = 7
                     if req.expiry and "monthly" in req.expiry.lower():
                         expiry_days = 28
-                    premium = model_premium(spot_chk, req.strike, expiry_days, req.option_type)
+                    premium = model_premium(spot_chk, req.strike, expiry_days, req.option_type, symbol=req.symbol)
             except Exception:
                 pass
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
     lot_size = get_lot_size(req.symbol)
     costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
     trade_model = TradeModel()
+    from utils.helpers import model_iv as _model_iv
     trade_id = trade_model.insert_trade({
         "symbol": req.symbol,
         "option_type": req.option_type,
@@ -300,5 +315,6 @@ def place_trade(req: TradeRequest):
         "target": req.take_profit,
         "total_cost": costs["total"],
         "entry_date": req.date,
+        "entry_iv": _model_iv(req.symbol),
     })
     return {"trade_id": trade_id, "entry_price": round(adj_premium, 2), "costs": costs}

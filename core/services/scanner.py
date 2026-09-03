@@ -443,7 +443,7 @@ class OptionScanner:
         if premium is None or premium < 10:
             try:
                 from utils.helpers import model_premium
-                premium = model_premium(spot, strike, 7, option_type)
+                premium = model_premium(spot, strike, 7, option_type, symbol=symbol)
             except Exception:
                 premium = 0
             if not premium or premium <= 0:

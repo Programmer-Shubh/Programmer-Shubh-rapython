@@ -28,18 +28,23 @@ def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500
         bhav = BhavcopyModel()
         # reuse paper_trade route logic via direct DB insert with costs
         from routes.option_chain import TradeRequest
-        # fallback premium: Black-Scholes
+        # fallback premium: unified model (same IV/floor as order entry + LTP)
         premium = 0
         try:
-            from utils.helpers import black_scholes
-            premium = black_scholes(spot, strike, 7/365, 0.22, leg["option_type"])
+            from utils.helpers import model_premium, model_iv
+            premium = model_premium(spot, strike, 7, leg["option_type"], symbol=symbol)
         except Exception:
-            premium = spot*0.02
+            premium = max(spot*0.02, 1.5) if spot > 0 else 0
         adj = TransactionCosts.apply_fill_slippage(premium, leg["transaction"].upper(), is_live=False)
         lot = get_lot_size(symbol)
         costs = TransactionCosts.calculate(adj * int(leg.get("lots",1)) * lot, leg["transaction"].lower()=="sell", is_live=False)
         tm = TradeModel()
-        tid = tm.insert_trade({"symbol":symbol,"option_type":leg["option_type"],"strike_price":strike,"expiry_date":"","transaction_type":leg["transaction"].upper(),"quantity":int(leg.get("lots",1)),"lot_size":lot,"entry_price":adj,"stop_loss":sl,"target":tp,"total_cost":costs["total"],"entry_date":__import__("datetime").date.today().strftime("%Y-%m-%d")})
+        try:
+            from utils.helpers import model_iv as _miv
+            _eiv = _miv(symbol)
+        except Exception:
+            _eiv = None
+        tid = tm.insert_trade({"symbol":symbol,"option_type":leg["option_type"],"strike_price":strike,"expiry_date":"","transaction_type":leg["transaction"].upper(),"quantity":int(leg.get("lots",1)),"lot_size":lot,"entry_price":adj,"stop_loss":sl,"target":tp,"total_cost":costs["total"],"entry_date":__import__("datetime").date.today().strftime("%Y-%m-%d"),"entry_iv":_eiv})
         return {"mode":"PAPER","trade_id":tid,"strike":strike,"premium":adj}
     # Live: route to broker
     broker_map = {"DHAN":"dhan","FYERS":"fyers","ANGEL":"angel"}

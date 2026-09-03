@@ -8,12 +8,17 @@ class TradeModel:
         self.db = Database.get_instance()
 
     def insert_trade(self, data: dict) -> int:
+        # entry_iv: pin model IV at order time (old positions never reprice on map tunes)
+        try:
+            self.db.execute("ALTER TABLE paper_trades ADD COLUMN entry_iv REAL DEFAULT NULL")
+        except Exception:
+            pass
         return self.db.execute(
             """INSERT INTO paper_trades
                (user_id, strategy_id, symbol, option_type, strike_price, expiry_date,
                 transaction_type, quantity, lot_size, entry_price, stop_loss, target,
-                auto_action, total_cost, entry_date, trade_mode, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', datetime('now'), datetime('now'))""",
+                auto_action, total_cost, entry_date, trade_mode, entry_iv, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', datetime('now'), datetime('now'))""",
             [
                 data.get("user_id", 1), data.get("strategy_id"), data["symbol"],
                 data["option_type"], data["strike_price"], data.get("expiry_date", ""),
@@ -22,6 +27,7 @@ class TradeModel:
                 data["entry_price"], data.get("stop_loss", 1500), data.get("target", 1000),
                 data.get("auto_action", "OFF"), data.get("total_cost", 0),
                 data.get("entry_date", ""), data.get("trade_mode", "paper"),
+                data.get("entry_iv"),
             ],
         )
 
@@ -54,7 +60,8 @@ class TradeModel:
             # the just-written raw value and never fires)
             prev = self._last_premiums.get(ck)
             current_price = self.get_option_premium(
-                t["symbol"], t["option_type"], t["strike_price"], t["expiry_date"]
+                t["symbol"], t["option_type"], t["strike_price"], t["expiry_date"],
+                iv=t.get("entry_iv"),
             )
             entry = t["entry_price"]
             qty = t["quantity"]
@@ -203,7 +210,7 @@ class TradeModel:
     # Cache for bad-tick filter: last premium per (symbol, option_type, strike)
     _last_premiums = {}
 
-    def get_option_premium(self, symbol, option_type, strike, expiry) -> float:
+    def get_option_premium(self, symbol, option_type, strike, expiry, iv=None) -> float:
         if strike is None or float(strike or 0) <= 0:
             return None
         strike = float(strike)
@@ -264,10 +271,12 @@ class TradeModel:
         except Exception:
             pass
         # 4) Unified model with live spot (SAME model_premium as order entry:
-        # IV 25%, floor 1.5 - so Current matches Entry, no instant fake P&L)
+        # per-symbol IV pinned at entry (entry_iv) so old positions never
+        # reprice when the IV map is tuned - Current matches Entry, no fake P&L)
         try:
             from core.services.live_market_data import LiveMarketData
-            from utils.helpers import get_strike_step, model_premium
+            from utils.helpers import get_strike_step, model_premium, model_iv
+            pin_iv = float(iv) if iv and float(iv) > 0 else model_iv(symbol)
             # Get live spot for realistic pricing (Yahoo-first, NSE blocked on cloud)
             spot = 0
             try:
@@ -291,7 +300,7 @@ class TradeModel:
                         dte = max(1, (exp_dt - _dt.datetime.now()).days)
                     except Exception:
                         dte = 7
-                bs = model_premium(spot, float(strike), dte, option_type)
+                bs = model_premium(spot, float(strike), dte, option_type, symbol=symbol, iv=pin_iv)
                 if bs and bs > 0:
                     # Ensure premium not unrealistic vs last: limit change to 30% per check
                     last = self._last_premiums.get(cache_key)

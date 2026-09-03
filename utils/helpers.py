@@ -143,24 +143,48 @@ def black_scholes(spot: float, strike: float, time: float, iv: float, option_typ
 
 
 # ---- Unified option model (single source of truth for ALL symbols) ----
-# Entry (order placement), Current (open positions), and Backtest MUST use the
-# same IV + floor, else every trade instantly shows a fake profit/loss.
-# History of the "har trade Rs 5" bug: place-trade inflated every model premium
-# below 5 to exactly max(5.0, ...) -> all symbols showed Entry 5.00.
+# Entry (order placement), Current (open positions), Scanner suggestion and
+# Backtest MUST use the same IV + floor, else every trade instantly shows a
+# fake profit/loss. NSE option chain is blocked from cloud IPs (Render), so on
+# cloud the model priced off LIVE Yahoo spot is the closest NSE match.
+# IVs are NSE-typical: indices ~13-16%, stocks ~30% (high-vol ~35%).
 OPTION_MODEL_IV = 0.25
 OPTION_MODEL_MIN = 1.5
 
+_SYMBOL_IV = {
+    "NIFTY": 0.13, "BANKNIFTY": 0.15, "FINNIFTY": 0.14, "MIDCPNIFTY": 0.16,
+    "SENSEX": 0.13, "BANKEX": 0.14,
+    "ADANIENT": 0.35, "VEDL": 0.35, "INDUSINDBK": 0.35,
+}
 
-def model_premium(spot: float, strike: float, expiry_days: float, option_type: str) -> float:
-    """Shared model premium: BS(IV 25%) with floor 1.5. Used by order entry,
-    open-position LTP, and backtest alike. Real DB premiums are used as-is
-    (never inflated) - only model values get the floor."""
+
+def model_iv(symbol: str | None) -> float:
+    """Per-symbol model IV: NSE-typical values so ATM premium lands near NSE LTP."""
+    if not symbol:
+        return OPTION_MODEL_IV
+    s = str(symbol).upper().strip()
+    if s in _SYMBOL_IV:
+        return _SYMBOL_IV[s]
+    # Indices default 0.14, stocks default 0.30
+    if s in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX",
+             "INDIAVIX"):
+        return 0.14
+    return 0.30
+
+
+def model_premium(spot: float, strike: float, expiry_days: float, option_type: str, symbol: str | None = None, iv: float | None = None) -> float:
+    """Shared model premium: BS(per-symbol NSE-typical IV) with floor 1.5.
+    Used by order entry, open-position LTP, scanner suggestion and backtest
+    alike. Real DB premiums are used as-is (never inflated) - only model
+    values get the floor. Pass iv= to pin a trade's entry IV (old positions
+    never reprice when the map is tuned)."""
     try:
         t = float(expiry_days) / 365.0 if expiry_days and float(expiry_days) > 0 else 7 / 365.0
     except Exception:
         t = 7 / 365.0
+    use_iv = float(iv) if iv and float(iv) > 0 else model_iv(symbol)
     try:
-        bs = black_scholes(float(spot), float(strike), t, OPTION_MODEL_IV, option_type)
+        bs = black_scholes(float(spot), float(strike), t, use_iv, option_type)
     except Exception:
         bs = 0
     if not bs or bs <= 0:
