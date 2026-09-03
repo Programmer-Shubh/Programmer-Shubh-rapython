@@ -4,10 +4,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from core.models.database import Database
 try:
-    from core.services.free_data import fetch_yahoo_spot, fetch_google_spot
+    from core.services.free_data import fetch_yahoo_spot, fetch_google_spot, fetch_cloud_spot
 except Exception:
-    fetch_yahoo_spot = lambda s: 0
-    fetch_google_spot = lambda s: 0
+    def fetch_yahoo_spot(s): return 0
+    def fetch_google_spot(s): return 0
+    def fetch_cloud_spot(s): return {}
 
 _LIVE_CACHE = {}
 _LIVE_CACHE_TTL = 300  # 5 min cache on cloud (NSE blocked)
@@ -32,28 +33,13 @@ class LiveMarketData:
         self.db = Database.get_instance()
 
     def get_spot_price(self, symbol: str) -> float:
-        # Try live cache first
+        # Try live cache first (Yahoo cloud-first)
         try:
             live = self.get_live_spot(symbol)
-            if live and live.get("spot"):
+            if live and live.get("spot") and float(live["spot"]) > 0:
                 return float(live["spot"])
         except Exception:
             pass
-        # 1) DB bhavcopy (latest close price)
-        row = self.db.fetch_one(
-            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
-            [symbol, symbol],
-        )
-        if row and row["close_price"] and float(row["close_price"]) > 0:
-            return float(row["close_price"])
-        # 2) Google Finance fallback (works on Render cloud)
-        try:
-            g = fetch_google_spot(symbol)
-            if g and g > 0:
-                return float(g)
-        except Exception:
-            pass
-        # 3) Synthetic Black-Scholes fallback (last resort on cloud)
         return 0.0
 
     def get_option_ltp(self, symbol: str, strike: float, option_type: str) -> float:
@@ -68,29 +54,39 @@ class LiveMarketData:
 
     def get_live_spot(self, symbol: str) -> dict:
         now = time.time()
-        if symbol in _LIVE_CACHE and now - _LIVE_CACHE[symbol]["ts"] < _LIVE_CACHE_TTL:
-            return _LIVE_CACHE[symbol]["data"]
-        # DB bhavcopy first
-        row = self.db.fetch_one(
-            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
-            [symbol, symbol],
-        )
-        if row and row["close_price"] and float(row["close_price"]) > 0:
-            spot = float(row["close_price"])
-            _LIVE_CACHE[symbol] = {"ts": now, "data": {"spot": spot, "formatted": f"INR {spot:,.2f}", "change": 0, "high": spot, "low": spot, "source": "db"}}
-            return _LIVE_CACHE[symbol]["data"]
-        # Google Finance fallback
+        sym = symbol.upper()
+        if sym in _LIVE_CACHE and now - _LIVE_CACHE[sym]["ts"] < _LIVE_CACHE_TTL:
+            return _LIVE_CACHE[sym]["data"]
+        # 1) Cloud live: Yahoo -> Stooq -> Google (works on Render, NSE blocked)
         try:
-            g = fetch_google_spot(symbol)
-            if g and g > 0:
-                spot = float(g)
-                _LIVE_CACHE[symbol] = {"ts": now, "data": {"spot": spot, "formatted": f"INR {spot:,.2f}", "change": 0, "high": spot, "low": spot, "source": "google"}}
-                return _LIVE_CACHE[symbol]["data"]
+            q = fetch_cloud_spot(sym)
+            if q and float(q.get("spot") or 0) > 0:
+                spot = float(q["spot"])
+                data = {"spot": spot, "formatted": f"INR {spot:,.2f}",
+                        "change": float(q.get("change") or 0),
+                        "high": float(q.get("high") or spot), "low": float(q.get("low") or spot),
+                        "source": q.get("source", "yahoo")}
+                _LIVE_CACHE[sym] = {"ts": now, "data": data}
+                return data
         except Exception:
             pass
-        # Synthetic fallback
-        _LIVE_CACHE[symbol] = {"ts": now, "data": {"spot": 0, "formatted": "INR 0.00", "change": 0, "high": 0, "low": 0, "source": "synthetic"}}
-        return _LIVE_CACHE[symbol]["data"]
+        # 2) DB bhavcopy (stale close, only if cloud fails)
+        try:
+            row = self.db.fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
+                [sym, sym],
+            )
+            if row and row["close_price"] and float(row["close_price"]) > 0:
+                spot = float(row["close_price"])
+                data = {"spot": spot, "formatted": f"INR {spot:,.2f}", "change": 0, "high": spot, "low": spot, "source": "db"}
+                _LIVE_CACHE[sym] = {"ts": now, "data": data}
+                return data
+        except Exception:
+            pass
+        # 3) No data
+        data = {"spot": 0, "formatted": "No Data", "change": 0, "high": 0, "low": 0, "source": "na"}
+        _LIVE_CACHE[sym] = {"ts": now, "data": data}
+        return data
 
     def get_live_spots_cached(self, symbols):
         now = time.time()
@@ -128,12 +124,16 @@ class LiveMarketData:
         return result
 
     def fetch_option_chain_nse(self, symbol: str) -> dict:
-        """Fetch live option chain from niftytrader.in (single source)."""
-        return self.fetch_live_option_chain(symbol)
+        """Deprecated on cloud (NSE blocked) - returns None, routes use DB+synthetic."""
+        return None
 
     def fetch_live_option_chain(self, symbol: str) -> dict:
+        """Deprecated on cloud (NSE blocked) - returns None, routes use DB+synthetic."""
+        return None
+
+    def _fetch_chain_page_unused(self, symbol: str) -> dict:
         try:
-            data = self._fetch_chain_page(symbol)
+            data = None
             if not data:
                 return None
             page_props = data.get("pageProps", {})

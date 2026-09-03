@@ -13,47 +13,42 @@ router = APIRouter()
 
 @router.get("/spot")
 def get_spots():
+    # Cloud-first live prices: Yahoo -> Stooq -> Google -> DB (NSE blocked on Render)
     live = LiveMarketData()
-    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
+    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "RELIANCE", "HDFCBANK", "TCS", "INFY"]
     result = {}
-    # 1) Try live NiftyTrader cache
-    live_data_map = live.get_live_spots_cached(symbols)
     for sym in symbols:
-        live_data = live_data_map.get(sym)
-        if live_data:
-            result[sym] = {
-                "spot": live_data["spot"],
-                "formatted": f"INR {live_data['spot']:,.2f}",
-                "change": live_data.get("change", 0),
-                "high": live_data.get("high", 0),
-                "low": live_data.get("low", 0),
-                "source": "live",
-            }
-            continue
-        # 2) Try NSE India /api/allIndices (real, always works)
-        nse_data = _fetch_nse_spot_all().get(sym)
-        if nse_data and nse_data["spot"] > 0:
-            result[sym] = {
-                "spot": nse_data["spot"],
-                "formatted": f"INR {nse_data['spot']:,.2f}",
-                "change": round(nse_data["change"], 2),
-                "high": nse_data["high"],
-                "low": nse_data["low"],
-                "source": "nse",
-            }
-            continue
-        # 3) Try nselib / Google
-        spot, source = _free_latest_spot(sym)
+        try:
+            d = live.get_live_spot(sym)
+        except Exception:
+            d = None
+        spot = float(d.get("spot") or 0) if d else 0
         if spot > 0:
-            change_pct = _free_change_pct(sym, spot)
             result[sym] = {
                 "spot": round(spot, 2),
                 "formatted": f"INR {spot:,.2f}",
-                "change": round(change_pct, 2),
-                "high": 0, "low": 0,
-                "source": source,
+                "change": round(float(d.get("change") or 0), 2),
+                "high": float(d.get("high") or 0),
+                "low": float(d.get("low") or 0),
+                "source": d.get("source", "yahoo"),
             }
         else:
+            # DB stale close as last resort (instead of No Data)
+            try:
+                db = Database.get_instance()
+                row = db.fetch_one(
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+                    [sym],
+                )
+                if row and row["close_price"] and float(row["close_price"]) > 0:
+                    s2 = float(row["close_price"])
+                    result[sym] = {
+                        "spot": round(s2, 2), "formatted": f"INR {s2:,.2f}",
+                        "change": 0, "high": 0, "low": 0, "source": "db",
+                    }
+                    continue
+            except Exception:
+                pass
             result[sym] = {
                 "spot": None, "formatted": "No Data",
                 "change": 0, "high": 0, "low": 0, "source": "na",
@@ -62,20 +57,12 @@ def get_spots():
 
 
 def _free_latest_spot(symbol: str):
-    """Delegate to LiveMarketData (which uses nse_client -> Yahoo/TrueData/StocksRin fallbacks)."""
+    """Cloud-first: LiveMarketData (Yahoo->Stooq->Google), then DB stale close."""
     try:
         live = LiveMarketData()
         data = live.get_live_spot(symbol)
         if data and data.get("spot") and float(data["spot"]) > 0:
-            return float(data["spot"]), data.get("source", "live")
-    except Exception:
-        pass
-    # Also try direct nse_client before DB
-    try:
-        from core.services.nse_client import nse_fetch_spot
-        d = nse_fetch_spot(symbol, timeout=4)
-        if d and d.get("spot"):
-            return float(d["spot"]), d.get("source", "nse")
+            return float(data["spot"]), data.get("source", "yahoo")
     except Exception:
         pass
     db = Database.get_instance()
