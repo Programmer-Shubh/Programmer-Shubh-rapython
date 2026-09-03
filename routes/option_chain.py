@@ -52,20 +52,19 @@ def get_chain(symbol: str, date: str, expiry: str):
     bhav = BhavcopyModel()
     live = LiveMarketData()
     chain = bhav.get_option_chain(symbol, date, expiry)
-    if not chain:
-        return {"error": "No data"}
     spot = live.get_spot_price(symbol)
     step = get_strike_step(symbol)
     atm = round(spot / step) * step if spot > 0 else 0
     ce = {}
     pe = {}
-    for r in chain:
-        strike = r["strike_price"]
-        item = {"strike": strike, "ltp": r["close_price"], "oi": r.get("oi", 0), "vol": r.get("volume", 0), "open": r.get("open_price", 0), "high": r.get("high_price", 0), "low": r.get("low_price", 0)}
-        if r["option_type"] == "CE":
-            ce[strike] = item
-        else:
-            pe[strike] = item
+    if chain:
+        for r in chain:
+            strike = r["strike_price"]
+            item = {"strike": strike, "ltp": r["close_price"], "oi": r.get("oi", 0), "vol": r.get("volume", 0), "open": r.get("open_price", 0), "high": r.get("high_price", 0), "low": r.get("low_price", 0)}
+            if r["option_type"] == "CE":
+                ce[strike] = item
+            else:
+                pe[strike] = item
     all_strikes = sorted(set(list(ce.keys()) + list(pe.keys())))
     rows = []
     for strike in all_strikes:
@@ -74,10 +73,10 @@ def get_chain(symbol: str, date: str, expiry: str):
             "distance": int(strike - atm),
             "ce_ltp": ce.get(strike, {}).get("ltp", 0),
             "ce_oi": ce.get(strike, {}).get("oi", 0),
-            "ce_vol": ce.get(strike, {}).get("vol", 0),
+            "ce_vol": ce.get(strike, {}).get("volume", 0),
             "pe_ltp": pe.get(strike, {}).get("ltp", 0),
             "pe_oi": pe.get(strike, {}).get("oi", 0),
-            "pe_vol": pe.get(strike, {}).get("vol", 0),
+            "pe_vol": pe.get(strike, {}).get("volume", 0),
         })
     return {"symbol": symbol, "date": date, "expiry": expiry, "spot": spot, "atm": atm, "rows": rows}
 
@@ -85,41 +84,50 @@ def get_chain(symbol: str, date: str, expiry: str):
 @router.get("/live/{symbol}")
 def get_live_chain(symbol: str):
     live = LiveMarketData()
-    data = live.get_live_chain_cached(symbol)
-    if not data:
-        data = live.fetch_live_option_chain(symbol.upper())
-    if data and data.get("rows"):
-        return data
-    # Fallback 1: try DB chain for latest date
+    # 1) DB chain first (always available after seed)
     bhav = BhavcopyModel()
     dates = bhav.get_dates(symbol)
+    chain = None
     if dates:
         expiries = bhav.get_expiries(symbol, dates[0])
         if expiries:
             chain = bhav.get_option_chain(symbol, dates[0], expiries[0])
-            if chain:
-                spot = live.get_spot_price(symbol) or 0
-                if spot <= 0:
-                    try:
-                        ls = live.get_live_spot(symbol)
-                        spot = float(ls["spot"]) if ls and ls.get("spot") else 0
-                    except:
-                        spot = 0
-                from utils.helpers import get_strike_step
-                step = get_strike_step(symbol)
-                atm = round(spot / step) * step if spot > 0 else 0
-                ce = {r["strike_price"]: r for r in chain if r["option_type"] == "CE"}
-                pe = {r["strike_price"]: r for r in chain if r["option_type"] == "PE"}
-                all_strikes = sorted(set(list(ce.keys()) + list(pe.keys())))
-                rows = []
-                for s in all_strikes:
-                    rows.append({"strike": s, "distance": int(s - atm),
-                                 "ce_ltp": ce.get(s, {}).get("close_price", 0), "ce_oi": ce.get(s, {}).get("oi", 0), "ce_vol": ce.get(s, {}).get("volume", 0), "ce_iv": 0,
-                                 "pe_ltp": pe.get(s, {}).get("close_price", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
-                if rows:
-                    return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "db"}
-    # No synthetic Black-Scholes - return clear error, frontend will fallback to DB chain view
-    return {"error": "Could not fetch live data from NiftyTrader (blocked on Render). Toggle LIVE off to view DB chain or use Google Finance fallback."}
+    # 2) Get spot price: DB → Google → synthetic
+    spot = live.get_spot_price(symbol)
+    step = get_strike_step(symbol)
+    atm = round(spot / step) * step if spot > 0 else 0
+    ce = {}
+    pe = {}
+    if chain:
+        for r in chain:
+            strike = r["strike_price"]
+            item = {"strike": strike, "ltp": r["close_price"], "oi": r.get("oi", 0), "vol": r.get("volume", 0), "open": r.get("open_price", 0), "high": r.get("high_price", 0), "low": r.get("low_price", 0)}
+            if r["option_type"] == "CE":
+                ce[strike] = item
+            else:
+                pe[strike] = item
+    all_strikes = sorted(set(list(ce.keys()) + list(pe.keys())))
+    rows = []
+    for s in all_strikes:
+        rows.append({"strike": s, "distance": int(s - atm),
+                     "ce_ltp": ce.get(s, {}).get("ltp", 0), "ce_oi": ce.get(s, {}).get("oi", 0), "ce_vol": ce.get(s, {}).get("volume", 0), "ce_iv": 0,
+                     "pe_ltp": pe.get(s, {}).get("close_price", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
+    if rows:
+        return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "db"}
+    # 3) Fallback: synthetic Black-Scholes chain (cloud only, no NSE)
+    from utils.helpers import black_scholes, get_lot_size
+    import random
+    random.seed(int(time.time()))
+    synthetic_rows = []
+    for i in range(15):
+        strike = round(spot * 0.95 + i * step * 0.5) if spot > 0 else round(1000 + i * 50)
+        iv = max(0.15, random.random() * 0.30)
+        ce_price = black_scholes(spot, strike, 7/365, iv, "CE") if spot > 0 else 0
+        pe_price = black_scholes(spot, strike, 7/365, iv, "PE") if spot > 0 else 0
+        synthetic_rows.append({"strike": strike, "distance": int(strike - atm), "ce_ltp": ce_price, "ce_oi": 0, "ce_vol": 0, "pe_ltp": pe_price, "pe_oi": 0, "pe_vol": 0})
+    if synthetic_rows:
+        return {"symbol": symbol, "spot": spot, "atm": atm, "rows": synthetic_rows, "source": "synthetic", "note": "NSE blocked on Render - synthetic data"}
+    return {"error": "No chain data available"}
 
 
 @router.post("/place-trade")

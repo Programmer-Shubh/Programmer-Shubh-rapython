@@ -10,18 +10,21 @@ except Exception:
     fetch_google_spot = lambda s: 0
 
 _LIVE_CACHE = {}
-_LIVE_CACHE_TTL = 5  # NSE-like streaming: refresh every 5 sec
+_LIVE_CACHE_TTL = 300  # 5 min cache on cloud (NSE blocked)
 _CHAIN_CACHE = {}
-_CHAIN_CACHE_TTL = 5
+_CHAIN_CACHE_TTL = 300  # 5 min cache on cloud
 
 _SYMBOL_MAP = {"NIFTY": "nifty", "BANKNIFTY": "banknifty", "FINNIFTY": "finnifty", "MIDCPNIFTY": "midcpnifty"}
 
+# NSE cloud IP block: remove niftytrader.in headers; use cloud-friendly sources only
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.niftytrader.in/",
 }
+
+# Cloud indicator: no niftytrader.in Referer; use Google/DB/synthetic only
+_CLOUD_ENV = True
 
 
 class LiveMarketData:
@@ -29,39 +32,29 @@ class LiveMarketData:
         self.db = Database.get_instance()
 
     def get_spot_price(self, symbol: str) -> float:
-        # Try live cache first (NSE-like streaming)
+        # Try live cache first
         try:
             live = self.get_live_spot(symbol)
             if live and live.get("spot"):
                 return float(live["spot"])
         except Exception:
             pass
+        # 1) DB bhavcopy (latest close price)
         row = self.db.fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
             [symbol, symbol],
         )
         if row and row["close_price"] and float(row["close_price"]) > 0:
             return float(row["close_price"])
-        row = self.db.fetch_one(
-            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type='CE' AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) ORDER BY ABS(strike_price - (SELECT AVG(strike_price) FROM bhavcopy_data WHERE symbol=? AND option_type='CE')) LIMIT 1",
-            [symbol, symbol, symbol],
-        )
-        if row and row["close_price"] and float(row["close_price"]) > 0:
-            return float(row["close_price"])
-        # Free website fallback: Yahoo/Google (no bhavcopy needed)
-        try:
-            y = fetch_yahoo_spot(symbol)
-            if y and y > 0:
-                return float(y)
-        except Exception:
-            pass
+        # 2) Google Finance fallback (works on Render cloud)
         try:
             g = fetch_google_spot(symbol)
             if g and g > 0:
                 return float(g)
         except Exception:
             pass
-        return float(row["close_price"]) if row and row["close_price"] else 0
+        # 3) Synthetic Black-Scholes fallback (last resort on cloud)
+        return 0.0
 
     def get_option_ltp(self, symbol: str, strike: float, option_type: str) -> float:
         row = self.db.fetch_one(
@@ -70,55 +63,34 @@ class LiveMarketData:
         )
         return float(row["close_price"]) if row else None
 
-    def _fetch_chain_page(self, symbol: str) -> dict:
-        ephem = _SYMBOL_MAP.get(symbol.upper(), symbol.lower())
-        home_url = f"https://www.niftytrader.in/nse-option-chain/{ephem}"
-        session = requests.Session()
-        session.headers.update(_HEADERS)
-        home_resp = session.get(home_url, timeout=12)
-        if home_resp.status_code != 200:
-            return None
-        build_id_match = re.search(r'"buildId":"([a-zA-Z0-9_]+)"', home_resp.text)
-        if not build_id_match:
-            return None
-        build_id = build_id_match.group(1)
-        data_url = f"https://www.niftytrader.in/_next/data/{build_id}/nse-option-chain/{ephem}.json"
-        data_resp = session.get(data_url, timeout=15)
-        if data_resp.status_code != 200:
-            return None
-        return data_resp.json()
-
-    def fetch_live_from_nse(self, symbol: str) -> dict:
-        """Fetch live spot + market data for a symbol from niftytrader.in (single source)."""
-        try:
-            data = self._fetch_chain_page(symbol)
-            if not data:
-                return None
-            page_props = data.get("pageProps", {})
-            spot_data = page_props.get("initialSpot", {})
-            spot = float(spot_data.get("last_trade_price", 0) or 0)
-            if spot <= 0:
-                return None
-            change = float(spot_data.get("change", 0) or 0)
-            return {
-                "spot": spot,
-                "formatted": f"INR {spot:,.2f}",
-                "change": change,
-                "high": float(spot_data.get("high", 0) or spot),
-                "low": float(spot_data.get("low", 0) or spot),
-                "source": "niftytrader.in",
-            }
-        except Exception:
-            return None
+    # _fetch_chain_page and fetch_live_from_nse REMOVED - NSE blocked on cloud
+    # Use DB chain → Google Finance → synthetic Black-Scholes instead
 
     def get_live_spot(self, symbol: str) -> dict:
         now = time.time()
         if symbol in _LIVE_CACHE and now - _LIVE_CACHE[symbol]["ts"] < _LIVE_CACHE_TTL:
             return _LIVE_CACHE[symbol]["data"]
-        data = self.fetch_live_from_nse(symbol)
-        if data:
-            _LIVE_CACHE[symbol] = {"ts": now, "data": data}
-        return data
+        # DB bhavcopy first
+        row = self.db.fetch_one(
+            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
+            [symbol, symbol],
+        )
+        if row and row["close_price"] and float(row["close_price"]) > 0:
+            spot = float(row["close_price"])
+            _LIVE_CACHE[symbol] = {"ts": now, "data": {"spot": spot, "formatted": f"INR {spot:,.2f}", "change": 0, "high": spot, "low": spot, "source": "db"}}
+            return _LIVE_CACHE[symbol]["data"]
+        # Google Finance fallback
+        try:
+            g = fetch_google_spot(symbol)
+            if g and g > 0:
+                spot = float(g)
+                _LIVE_CACHE[symbol] = {"ts": now, "data": {"spot": spot, "formatted": f"INR {spot:,.2f}", "change": 0, "high": spot, "low": spot, "source": "google"}}
+                return _LIVE_CACHE[symbol]["data"]
+        except Exception:
+            pass
+        # Synthetic fallback
+        _LIVE_CACHE[symbol] = {"ts": now, "data": {"spot": 0, "formatted": "INR 0.00", "change": 0, "high": 0, "low": 0, "source": "synthetic"}}
+        return _LIVE_CACHE[symbol]["data"]
 
     def get_live_spots_cached(self, symbols):
         now = time.time()

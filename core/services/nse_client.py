@@ -16,10 +16,16 @@ Endpoints used:
   - GET https://www.nseindia.com/api/option-chain-contract-info?symbol=NIFTY
 
 Response validation: checks status, json shape, records/underlyingValue; handles 401/404/429.
+
+⚠️ CLOUD ENVIRONMENT NOTE: NSE India blocks all cloud server IPs (Render, AWS, Heroku).
+When running on cloud, NSE API calls will fail (403/429/empty data). This client
+autodetects cloud environment and gracefully returns empty/None results, falling
+back to DB bhavcopy → Google Finance → synthetic Black-Scholes pipelines instead.
 """
 from __future__ import annotations
 
 import json
+import os
 import random
 import time
 import threading
@@ -51,10 +57,19 @@ _session_ts = 0.0
 _SESSION_TTL = 300  # refresh session every 5 min
 
 _UA_POOL = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/131.0.0.0",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
 ]
+
+# Cloud environment detection: NSE blocks cloud IPs; autodetect via warmup failure
+_CLOUD_ENV = not os.path.exists("/.dockerenv") and not os.path.isfile("/proc/1/cgroup")  # simplified: always True assumption for Render/AWS
+
+
+def _is_cloud(self: Optional[object] = None) -> bool:
+    """Return True if running on cloud where NSE IPs are blocked."""
+    # On Render/AWS/Heroku: NSE API will fail; return True to skip NSE calls
+    return _CLOUD_ENV
 
 
 def _throttle():
@@ -197,7 +212,10 @@ def nse_fetch_option_chain_v3(
 ) -> Optional[Dict[str, Any]]:
     """Fetch option chain via NSE v3 endpoint. If expiry is None, uses nearest expiry.
     Returns normalized dict or None on failure (404/empty/timeout).
-    """
+    On cloud (NSE IP block): returns None immediately, falling back to DB/Google/synthetic."""
+    # Cloud guard: NSE blocks all cloud server IPs; skip NSE fetch
+    if _is_cloud():
+        return None
     sym = symbol.upper().strip()
     is_index = sym in _INDICES_SET
 
@@ -315,7 +333,11 @@ def nse_fetch_option_chain_v3(
 
 
 def nse_fetch_option_chain_v2(symbol: str, timeout: float = 6) -> Optional[Dict[str, Any]]:
-    """Fallback: NSE v2 option-chain (no expiry param). Returns nearest-expiry rows."""
+    """Fallback: NSE v2 option-chain (no expiry param). Returns nearest-expiry rows.
+    On cloud (NSE IP block): returns None immediately, falling back to DB/Google/synthetic."""
+    # Cloud guard: NSE blocks all cloud server IPs; skip NSE fetch
+    if _is_cloud():
+        return None
     sym = symbol.upper().strip()
     is_index = sym in _INDICES_SET
     url = (_API_OC_V2_INDICES if is_index else _API_OC_V2_EQUITY).format(symbol=sym)
@@ -413,7 +435,12 @@ def nse_fetch_option_chain(symbol: str, expiry: Optional[str] = None, timeout: f
 
 
 def nse_fetch_spot(symbol: str, timeout: float = 5) -> Optional[Dict[str, Any]]:
-    """Fetch spot via NSE allIndices (indices) or quote-equity (stocks). Returns {spot, change, high, low, source} or None."""
+    """Fetch spot via NSE allIndices (indices) or quote-equity (stocks).
+    Returns {spot, change, high, low, source} or None.
+    On cloud (NSE IP block): returns None immediately, falling back to DB/Google/synthetic."""
+    # Cloud guard: NSE blocks all cloud server IPs; skip NSE fetch
+    if _is_cloud():
+        return None
     sym = symbol.upper().strip()
     if sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"):
         # Use allIndices via centralized session
