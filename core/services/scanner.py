@@ -378,7 +378,19 @@ class OptionScanner:
         """
         Suggest option strike close to ATM.
         Always returns strike within 5% of spot to prevent deep OTM/ITM strikes.
+        Uses LIVE spot (Yahoo-first) + shared model_premium (IV 25%, floor 1.5) -
+        the SAME inputs as order entry, so scanner-shown premium == trade entry
+        for every symbol (no more scanner Rs 13 -> entry Rs 1.50 mismatch).
         """
+        # Live-spot override: scanner historical spot may be stale (old bhavcopy);
+        # order entry prices off live spot, so suggestion must too.
+        try:
+            from core.services.live_market_data import LiveMarketData
+            ls = LiveMarketData().get_live_spot(symbol)
+            if ls and float(ls.get("spot") or 0) > 0:
+                spot = float(ls["spot"])
+        except Exception:
+            pass
         if spot <= 0:
             return {'strike': 0, 'premium': 0, 'expiry': ''}
         
@@ -424,20 +436,18 @@ class OptionScanner:
         premium = float(row['close_price']) if row and row['close_price'] else None
         expiry = row['expiry_date'] if row and row.get('expiry_date') else ''
         
-        # If no DB data, use Black-Scholes
-        if premium is None or premium <= 1:
+        # Mirror order entry exactly: DB premium below 10 for an ATM strike is
+        # treated as stale -> shared unified model (IV 25%, floor 1.5).
+        # Same model as entry and open-position LTP, so the shown rate is the
+        # rate the trade gets. No spot*0.02 flat, no >5 gate.
+        if premium is None or premium < 10:
             try:
-                from utils.helpers import black_scholes
-                # Use 7 days to expiry, 22% IV for indices, 25% for stocks
-                iv = 0.22 if symbol in ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'] else 0.25
-                bs = black_scholes(spot, strike, 7/365.0, iv, option_type)
-                if bs and bs > 5:
-                    premium = round(bs, 2)
-                elif premium is None:
-                    premium = round(spot * 0.02, 2)
+                from utils.helpers import model_premium
+                premium = model_premium(spot, strike, 7, option_type)
             except Exception:
-                if premium is None:
-                    premium = round(spot * 0.02, 2)
+                premium = 0
+            if not premium or premium <= 0:
+                premium = 0
             if not expiry:
                 import datetime as _dt
                 expiry = (_dt.datetime.now() + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
