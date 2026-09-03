@@ -459,6 +459,23 @@ class OptionScanner:
         
         return {'strike': strike, 'premium': premium, 'expiry': expiry}
 
+    def _row_live_spot(self, symbol: str, fallback: float):
+        """Live spot for scanner ROWS (Yahoo-first, 300s cache). Returns
+        (spot, date_str, live_bool). Rows must show the same live spot the
+        suggestion strike/premium were built on - never a stale DB close next
+        to a live strike (the mixed-row bug)."""
+        try:
+            from core.services.live_market_data import LiveMarketData
+            d = LiveMarketData().get_live_spot(symbol)
+            px = float(d.get("spot") or 0)
+            if px > 0:
+                import datetime as _dt
+                today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
+                return px, today, True
+        except Exception:
+            pass
+        return fallback, None, False
+
     def _analyze_symbol(self, symbol: str) -> dict:
         data = self._get_historical(symbol)
         # Realistic: DB/nse real data only - if <30 real bars, show No signals (no synthetic fake)
@@ -468,14 +485,13 @@ class OptionScanner:
         closes = closes_tmp
         volumes = [d.get('volume', 0) or 0 for d in data]
         spot = closes[-1]
-        # Live NSE price if available in cache (real-time, not synthetic)
+        # Row spot/date go live when available (same spot the suggestion uses)
+        _row_date = data[-1]['trade_date']
+        _row_live = False
         try:
-            from core.services.live_market_data import _LIVE_CACHE
-            import time as _tm
-            if symbol in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[symbol]["ts"] < 60:
-                lv = float(_LIVE_CACHE[symbol]["data"].get("spot", 0) or 0)
-                if lv > 0:
-                    spot = lv
+            _lv, _ld, _ok = self._row_live_spot(symbol, spot)
+            if _ok:
+                spot, _row_date, _row_live = _lv, _ld, True
         except Exception:
             pass
         supertrend = self.indicators.calculate_supertrend(data, 10, 3.0)
@@ -540,24 +556,24 @@ class OptionScanner:
         if buy_score >= 50:
             opt = self._suggest_option(symbol, spot, 'CE')
             return {'symbol': symbol, 'type': 'BUY', 'score': buy_score, 'price': spot,
-                    'date': data[-1]['trade_date'], 'reasons': buy_reasons, 'indicators': indicators,
+                    'date': _row_date, 'live': _row_live, 'reasons': buy_reasons, 'indicators': indicators,
                     'option_suggestion': opt}
         elif sell_score >= 50:
             opt = self._suggest_option(symbol, spot, 'PE')
             return {'symbol': symbol, 'type': 'SELL', 'score': sell_score, 'price': spot,
-                    'date': data[-1]['trade_date'], 'reasons': sell_reasons, 'indicators': indicators,
+                    'date': _row_date, 'live': _row_live, 'reasons': sell_reasons, 'indicators': indicators,
                     'option_suggestion': opt}
         # Bearish/Bullish fallback using real RSI vs 50 so both sides populate
         if buy_score > sell_score and buy_score > 0:
             opt = self._suggest_option(symbol, spot, 'CE')
             return {'symbol': symbol, 'type': 'BUY', 'score': max(30, buy_score), 'price': spot,
-                    'date': data[-1]['trade_date'], 'reasons': buy_reasons or ['Uptrend bias'], 'indicators': indicators, 'option_suggestion': opt}
+                    'date': _row_date, 'live': _row_live, 'reasons': buy_reasons or ['Uptrend bias'], 'indicators': indicators, 'option_suggestion': opt}
         if sell_score > 0:
             opt = self._suggest_option(symbol, spot, 'PE')
             return {'symbol': symbol, 'type': 'SELL', 'score': max(30, sell_score), 'price': spot,
-                    'date': data[-1]['trade_date'], 'reasons': sell_reasons or ['Downtrend bias'], 'indicators': indicators, 'option_suggestion': opt}
+                    'date': _row_date, 'live': _row_live, 'reasons': sell_reasons or ['Downtrend bias'], 'indicators': indicators, 'option_suggestion': opt}
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
-                'date': data[-1]['trade_date'] if data else '', 'reasons': [], 'indicators': indicators}
+                'date': _row_date if data else '', 'live': _row_live, 'reasons': [], 'indicators': indicators}
 
     def _analyze_vwap_symbol(self, symbol: str) -> dict:
         data = self._get_historical(symbol)
@@ -567,14 +583,13 @@ class OptionScanner:
         highs = [d['high_price'] for d in data]
         lows = [d['low_price'] for d in data]
         spot = closes[-1]
-        # Live NSE price override if cached (real-time stocksrin.com/NSE quote)
+        # Row spot/date go live when available (same spot the suggestion uses)
+        _row_date = data[-1]['trade_date']
+        _row_live = False
         try:
-            from core.services.live_market_data import _LIVE_CACHE
-            import time as _tm
-            if symbol in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[symbol]["ts"] < 60:
-                lv = float(_LIVE_CACHE[symbol]["data"].get("spot", 0) or 0)
-                if lv > 0:
-                    spot = lv
+            _lv, _ld, _ok = self._row_live_spot(symbol, spot)
+            if _ok:
+                spot, _row_date, _row_live = _lv, _ld, True
         except Exception:
             pass
         vwap_data = self.indicators.calculate_vwap(data, 20, 2.0)
@@ -639,22 +654,22 @@ class OptionScanner:
         if long_score >= 50:
             opt = self._suggest_option(symbol, spot, 'CE')
             return {'symbol': symbol, 'type': 'LONG', 'score': long_score, 'price': spot,
-                    'date': data[-1]['trade_date'], 'reasons': long_reasons, 'indicators': indicators,
+                    'date': _row_date, 'live': _row_live, 'reasons': long_reasons, 'indicators': indicators,
                     'option_suggestion': opt}
         elif short_score >= 50:
             opt = self._suggest_option(symbol, spot, 'PE')
             return {'symbol': symbol, 'type': 'SHORT', 'score': short_score, 'price': spot,
-                    'date': data[-1]['trade_date'], 'reasons': short_reasons, 'indicators': indicators,
+                    'date': _row_date, 'live': _row_live, 'reasons': short_reasons, 'indicators': indicators,
                     'option_suggestion': opt}
         # Fallback so scanner always shows trades realtime (like Top5)
         if long_score > short_score and long_score > 0:
             opt=self._suggest_option(symbol, spot, 'CE')
-            return {'symbol': symbol, 'type': 'LONG', 'score': max(32,long_score), 'price': spot,'date': data[-1]['trade_date'] if data else '', 'reasons': long_reasons or ['Uptrend bias'], 'indicators': indicators,'option_suggestion': opt}
+            return {'symbol': symbol, 'type': 'LONG', 'score': max(32,long_score), 'price': spot,'date': _row_date if data else '', 'live': _row_live, 'reasons': long_reasons or ['Uptrend bias'], 'indicators': indicators,'option_suggestion': opt}
         if short_score > 0:
             opt=self._suggest_option(symbol, spot, 'PE')
-            return {'symbol': symbol, 'type': 'SHORT', 'score': max(32,short_score), 'price': spot,'date': data[-1]['trade_date'] if data else '', 'reasons': short_reasons or ['Downtrend bias'], 'indicators': indicators,'option_suggestion': opt}
+            return {'symbol': symbol, 'type': 'SHORT', 'score': max(32,short_score), 'price': spot,'date': _row_date if data else '', 'live': _row_live, 'reasons': short_reasons or ['Downtrend bias'], 'indicators': indicators,'option_suggestion': opt}
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
-                'date': data[-1]['trade_date'] if data else '', 'reasons': [], 'indicators': indicators}
+                'date': _row_date if data else '', 'live': _row_live, 'reasons': [], 'indicators': indicators}
 
     def get_fno_top5_today(self, top_n: int = 5) -> dict:
         """Today's NSE F&O Top 5 Bullish / Bearish based on % change (today spot vs prev close).
