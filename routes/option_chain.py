@@ -104,11 +104,19 @@ def get_live_chain(symbol: str):
                         "timestamp": nse.get("timestamp", "")}
     except Exception:
         pass
-    # 1) DB chain (always available after seed)
+    # 1) DB chain ONLY if fresh (trade_date == today IST). A stale EOD chain
+    # shows old LTPs (e.g. POWERGRID 370 CE 3.75) while orders price off live
+    # spot (270 PE 5.91) -> chain vs entry mismatch on every symbol. Stale DB
+    # falls through to the model chain below, which always matches order entry.
     bhav = BhavcopyModel()
     dates = bhav.get_dates(symbol)
     chain = None
-    if dates:
+    try:
+        import datetime as _dt
+        _today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
+    except Exception:
+        _today = ""
+    if dates and dates[0] == _today:
         expiries = bhav.get_expiries(symbol, dates[0])
         if expiries:
             chain = bhav.get_option_chain(symbol, dates[0], expiries[0])
@@ -222,6 +230,17 @@ def place_trade(req: TradeRequest):
     pe_data = {r["strike_price"]: r for r in chain if r["option_type"] == "PE"}
     chain_row = ce_data.get(req.strike) if req.option_type == "CE" else pe_data.get(req.strike)
     premium = float(chain_row.get("close_price", 0)) if chain_row else 0
+    # Historical-date honesty: if the order date is NOT today and the DB has no
+    # premium for this strike/date, NEVER fall back to live pricing (that mixes
+    # a stale chain view with a live rate, e.g. chain 370@3.75 vs entry 5.91).
+    # Fail with a clear message so the rate always matches the visible chain.
+    try:
+        import datetime as _dt
+        _ist = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
+    except Exception:
+        _ist = ""
+    if premium <= 0 and req.date and _ist and str(req.date) < _ist:
+        return {"error": f"No {req.option_type} {req.strike} premium on {req.date} for {req.symbol} - pick a strike visible in that date's chain (live rate not applied to past dates)"}
     # If no DB premium, try live (may fail on Render - NSE blocked)
     if premium <= 0:
         live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type)
