@@ -24,7 +24,8 @@ _YAHOO_MAP = {
     "INDUSINDBK": "INDUSINDBK.NS",
     "VEDL": "VEDL.NS",
     "SBILIFE": "SBILIFE.NS",
-    "BANKEX": "^BSEBANK",
+    # NOTE: BANKEX (BSE Bankex) has no Yahoo/Stooq quote - left out on purpose
+    # so rows honestly show the last DB date instead of a fake live price.
 }
 
 # Stooq symbols (2nd fallback, also cloud-friendly)
