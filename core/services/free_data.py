@@ -21,6 +21,10 @@ _YAHOO_MAP = {
     "KOTAKBANK": "KOTAKBANK.NS",
     "LT": "LT.NS",
     "BAJFINANCE": "BAJFINANCE.NS",
+    "INDUSINDBK": "INDUSINDBK.NS",
+    "VEDL": "VEDL.NS",
+    "SBILIFE": "SBILIFE.NS",
+    "BANKEX": "^BSEBANK",
 }
 
 # Stooq symbols (2nd fallback, also cloud-friendly)

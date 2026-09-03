@@ -263,10 +263,11 @@ class TradeModel:
                 return val
         except Exception:
             pass
-        # 4) Black-Scholes realistic simulation with live spot (NOT nearest any distance - that caused unrealistic 523->67)
+        # 4) Unified model with live spot (SAME model_premium as order entry:
+        # IV 25%, floor 1.5 - so Current matches Entry, no instant fake P&L)
         try:
             from core.services.live_market_data import LiveMarketData
-            from utils.helpers import black_scholes, get_strike_step
+            from utils.helpers import get_strike_step, model_premium
             # Get live spot for realistic pricing (Yahoo-first, NSE blocked on cloud)
             spot = 0
             try:
@@ -290,12 +291,8 @@ class TradeModel:
                         dte = max(1, (exp_dt - _dt.datetime.now()).days)
                     except Exception:
                         dte = 7
-                # IV 25% + min premium 5.0 = SAME model as order entry (routes/option_chain.py),
-                # so current never prints ₹1 right after a ₹5 entry (instant wrong-exit bug)
-                iv = 0.25
-                bs = black_scholes(spot, float(strike), dte/365.0, iv, option_type)
+                bs = model_premium(spot, float(strike), dte, option_type)
                 if bs and bs > 0:
-                    bs = max(round(bs, 2), 5.0)
                     # Ensure premium not unrealistic vs last: limit change to 30% per check
                     last = self._last_premiums.get(cache_key)
                     if last and last > 5:

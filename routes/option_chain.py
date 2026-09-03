@@ -6,7 +6,7 @@ from core.models.bhavcopy_model import BhavcopyModel
 from core.models.trade_model import TradeModel
 from core.services.live_market_data import LiveMarketData
 from core.services.transaction_costs import TransactionCosts
-from utils.helpers import get_lot_size, get_strike_step, black_scholes
+from utils.helpers import get_lot_size, get_strike_step, black_scholes, model_premium
 
 router = APIRouter()
 
@@ -205,14 +205,14 @@ def place_trade(req: TradeRequest):
                 if m:
                     spot_g = float(m.group(1).replace(",", ""))
                     if spot_g > 0 and req.strike > 0:
-                        # Realistic Black-Scholes premium (weekly expiry, IV ~25%)
+                        # Unified model premium (IV 25%, floor 1.5) - same as open positions
                         try:
                             expiry_days = 7
                             if req.expiry and "monthly" in req.expiry.lower():
                                 expiry_days = 28
-                            premium = black_scholes(spot_g, req.strike, expiry_days/365, 0.25, req.option_type)
+                            premium = model_premium(spot_g, req.strike, expiry_days, req.option_type)
                         except Exception:
-                            premium = round(spot_g * 0.015, 2)
+                            premium = max(round(spot_g * 0.015, 2), 1.5)
         except Exception:
             pass
     if premium <= 0:
@@ -233,7 +233,7 @@ def place_trade(req: TradeRequest):
             except Exception:
                 pass
         if spot_est > 0 and req.strike > 0:
-            # Realistic Black-Scholes premium for every option (no flat 1% synthetic)
+            # Unified model premium (IV 25%, floor 1.5) - same as open positions
             try:
                 expiry_days = 7
                 if req.expiry and "monthly" in req.expiry.lower():
@@ -249,16 +249,14 @@ def place_trade(req: TradeRequest):
                             expiry_days = min(45, max(2, diff))
                     except Exception:
                         pass
-                premium = black_scholes(spot_est, req.strike, expiry_days/365, 0.25, req.option_type)
-                if premium < 1:
-                    premium = 1.0
+                premium = model_premium(spot_est, req.strike, expiry_days, req.option_type)
             except Exception:
-                premium = round(spot_est * 0.015, 2)
-                if premium < 2:
-                    premium = 2.0
+                premium = max(round(spot_est * 0.015, 2), 1.5)
         if premium <= 0:
             return {"error": "No premium data for this strike"}
-        # Fix unrealistically low premium for ATM (DB stale 1.0) -> recompute via Black-Scholes using Yahoo live spot
+        # Stale-DB guard: DB close like 1.0 for ATM is unrealistic -> recompute with
+        # live spot via the SAME unified model (floor 1.5, never inflated to 5).
+        # Real DB premiums are otherwise used as-is.
         if premium < 10:
             try:
                 spot_chk = 0
@@ -282,12 +280,7 @@ def place_trade(req: TradeRequest):
                     expiry_days = 7
                     if req.expiry and "monthly" in req.expiry.lower():
                         expiry_days = 28
-                    premium = black_scholes(spot_chk, req.strike, expiry_days/365, 0.25, req.option_type)
-                    if premium < 5:
-                        premium = max(5.0, round(spot_chk * 0.015, 2))
-                elif premium < 5:
-                    # Far OTM but premium too low, ensure minimum 5
-                    premium = max(5.0, premium)
+                    premium = model_premium(spot_chk, req.strike, expiry_days, req.option_type)
             except Exception:
                 pass
     adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)

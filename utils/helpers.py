@@ -140,3 +140,29 @@ def black_scholes(spot: float, strike: float, time: float, iv: float, option_typ
     else:
         price = strike * math.exp(-r * time) * normal_cdf(-d2) - spot * normal_cdf(-d1)
     return max(1.0, round(price, 2))
+
+
+# ---- Unified option model (single source of truth for ALL symbols) ----
+# Entry (order placement), Current (open positions), and Backtest MUST use the
+# same IV + floor, else every trade instantly shows a fake profit/loss.
+# History of the "har trade Rs 5" bug: place-trade inflated every model premium
+# below 5 to exactly max(5.0, ...) -> all symbols showed Entry 5.00.
+OPTION_MODEL_IV = 0.25
+OPTION_MODEL_MIN = 1.5
+
+
+def model_premium(spot: float, strike: float, expiry_days: float, option_type: str) -> float:
+    """Shared model premium: BS(IV 25%) with floor 1.5. Used by order entry,
+    open-position LTP, and backtest alike. Real DB premiums are used as-is
+    (never inflated) - only model values get the floor."""
+    try:
+        t = float(expiry_days) / 365.0 if expiry_days and float(expiry_days) > 0 else 7 / 365.0
+    except Exception:
+        t = 7 / 365.0
+    try:
+        bs = black_scholes(float(spot), float(strike), t, OPTION_MODEL_IV, option_type)
+    except Exception:
+        bs = 0
+    if not bs or bs <= 0:
+        return 0
+    return max(round(float(bs), 2), OPTION_MODEL_MIN)
