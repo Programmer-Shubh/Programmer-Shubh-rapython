@@ -42,6 +42,17 @@ class TradeModel:
         trades = self.get_open_trades(user_id)
         result = []
         for t in trades:
+            # Per-trade cache key WITH expiry, strike normalized to float so it matches
+            # get_option_premium's key exactly (same strike, different expiry must not mix)
+            try:
+                _ck_strike = float(t["strike_price"])
+            except Exception:
+                _ck_strike = t["strike_price"]
+            ck = f"{t['symbol']}_{t['option_type']}_{_ck_strike}_{t.get('expiry_date','')}"
+            # Snapshot cache BEFORE lookup: get_option_premium() writes raw BS into
+            # cache, so prev must be captured here (else the 80% clamp below reads
+            # the just-written raw value and never fires)
+            prev = self._last_premiums.get(ck)
             current_price = self.get_option_premium(
                 t["symbol"], t["option_type"], t["strike_price"], t["expiry_date"]
             )
@@ -50,7 +61,6 @@ class TradeModel:
             lot = t.get("lot_size", 50)
             if current_price is None or entry <= 0:
                 # Never flicker: use last known premium or entry as current
-                ck = f"{t['symbol']}_{t['option_type']}_{t['strike_price']}"
                 fallback = self._last_premiums.get(ck, entry if entry>0 else 0)
                 current_price = fallback if fallback and fallback>0 else (entry if entry>0 else 0)
                 # keep trade visible, not invalid gap
@@ -107,16 +117,33 @@ class TradeModel:
                         continue  # Don't include in open positions, it's closed
                     except Exception:
                         pass
+            # Same-day anchor (EVERY poll, not just first): option premium cannot
+            # stay outside [0.4x, 1.6x] of today's entry while the underlying
+            # barely moved. Prevents instant ₹5->₹1 flashes, wrong-price exits,
+            # and the +30%-per-tick ratchet toward a stale/raw model value.
+            # Multi-day trades are NOT clamped (overnight gaps are real).
+            try:
+                if entry > 0 and t.get("entry_date") == self._ist_today():
+                    lo, hi = entry * 0.4, entry * 1.6
+                    if current_price < lo or current_price > hi:
+                        current_price = min(max(current_price, lo), hi)
+            except Exception:
+                pass
             if t["transaction_type"] == "BUY":
                 pnl = (current_price - entry) * qty * lot
             else:
                 pnl = (entry - current_price) * qty * lot
-            # Clamp flicker: if current_price jumps >80% intraday, keep last (prevent 150->49 flash)
-            ck2 = f"{t['symbol']}_{t['option_type']}_{t['strike_price']}"
-            last = self._last_premiums.get(ck2)
+            # Clamp flicker vs PRE-tick value: if current jumps >80%, keep prev
+            # (prevent 150->49 flash). Uses prev, not the raw value just cached
+            # by get_option_premium() above.
+            last = prev
             if last and last>10 and current_price>0 and abs(current_price-last)/last > 0.80:
                 current_price = last
                 pnl = (current_price - entry) * qty * lot if t["transaction_type"]=="BUY" else (entry - current_price)*qty*lot
+                # Restore kept value: get_option_premium() already overwrote cache with raw
+                self._last_premiums[ck] = last
+            else:
+                self._last_premiums[ck] = current_price
             result.append({
                 "trade": t,
                 "current_price": round(current_price, 2),
@@ -177,9 +204,11 @@ class TradeModel:
     _last_premiums = {}
 
     def get_option_premium(self, symbol, option_type, strike, expiry) -> float:
-        if strike <= 0:
+        if strike is None or float(strike or 0) <= 0:
             return None
-        cache_key = f"{symbol}_{option_type}_{strike}"
+        strike = float(strike)
+        # Key WITH expiry: same strike, different expiry must not share premium (value-mix bug)
+        cache_key = f"{symbol}_{option_type}_{strike}_{expiry or ''}"
         # 1) Try live LTP first (real market, 2s cache)
         try:
             from core.services.live_market_data import LiveMarketData as _LMD
@@ -238,17 +267,13 @@ class TradeModel:
         try:
             from core.services.live_market_data import LiveMarketData
             from utils.helpers import black_scholes, get_strike_step
-            # Get live spot for realistic pricing
+            # Get live spot for realistic pricing (Yahoo-first, NSE blocked on cloud)
             spot = 0
             try:
                 lm = LiveMarketData()
                 sp = lm.get_live_spot(symbol)
                 if sp and sp.get("spot"):
                     spot = float(sp["spot"])
-                else:
-                    sp2 = lm.fetch_live_from_nse(symbol)
-                    if sp2 and sp2.get("spot"):
-                        spot = float(sp2["spot"])
             except Exception:
                 pass
             if spot <= 0:
@@ -265,13 +290,13 @@ class TradeModel:
                         dte = max(1, (exp_dt - _dt.datetime.now()).days)
                     except Exception:
                         dte = 7
-                # Realistic IV 20-25% for Indian options, use 22% for better accuracy vs Quantman 14-20%
-                iv = 0.22
+                # IV 25% + min premium 5.0 = SAME model as order entry (routes/option_chain.py),
+                # so current never prints ₹1 right after a ₹5 entry (instant wrong-exit bug)
+                iv = 0.25
                 bs = black_scholes(spot, float(strike), dte/365.0, iv, option_type)
                 if bs and bs > 0:
-                    # Apply realistic Bid/Ask spread: liquid options 2-3%, illiquid 5-8%
-                    # For paper trading, return mid price; execution spread applied via TransactionCosts
-                    # Ensure premium not unrealistic vs entry: if last premium exists, limit change to 30% per check
+                    bs = max(round(bs, 2), 5.0)
+                    # Ensure premium not unrealistic vs last: limit change to 30% per check
                     last = self._last_premiums.get(cache_key)
                     if last and last > 5:
                         max_change = 0.30  # max 30% move per tick to prevent 523->67 jump

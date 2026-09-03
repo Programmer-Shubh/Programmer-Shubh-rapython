@@ -4,7 +4,7 @@ from core.services.live_market_data import LiveMarketData
 from utils.helpers import get_lot_size, get_strike_step
 from core.services.transaction_costs import TransactionCosts
 
-def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500, tp: float = 1000) -> Dict:
+def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500, tp: float = 3000) -> Dict:
     """legs: [{option_type, transaction, lots, strike_selection, otm_distance}]"""
     mode = mode.upper()
     live = LiveMarketData()

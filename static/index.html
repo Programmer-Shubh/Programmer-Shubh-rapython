@@ -614,13 +614,17 @@
         try{
             const p=await A('/api/dashboard/portfolio');
             if(p.positions&&p.positions.length){
-                let h='<table><tr><th>#</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
+                let h='<table><tr><th>#</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Qty</th><th>Lot Size</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
                 p.positions.forEach(t=>{
                     const isLive=t.trade_mode==='live';
-                    const curPrice = (t.current_price!=null? t.current_price : t.entry_price);
-                    const pnl = (t.pnl!=null? t.pnl : 0);
+                    const ep = Number(t.entry_price)||0;
+                    const curPrice = Number(t.current_price ?? t.entry_price)||0;
+                    const strike = Number(t.strike)||0;
+                    const qty = Number(t.qty)||1;
+                    const lot = Number(t.lot_size)||0;
+                    const pnl = Number(t.pnl)||0;
                     const sideBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
-                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${t.strike}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
+                    h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${strike}</td><td>${qty}</td><td>${lot}</td><td>₹${ep.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-dark" onclick="closeTrade(${t.id},${curPrice})">Close</button></td></tr>`;
                 });
                 h+='</table>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
             }else{
@@ -1201,11 +1205,11 @@
                     if(msg.type==='tick' && msg.ticks){
                         let h='';
                         for(const [sym,d] of Object.entries(msg.ticks)){
-                            const prev=_prevSpots[sym]||0; const cur=d.spot||0;
+                            const prev=_prevSpots[sym]||0; const cur=Number(d.spot)||0;
                             const flash=cur>prev?'price-flash-up':cur<prev?'price-flash-down':'';
                             _prevSpots[sym]=cur;
                             const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:''; 
-                            const fmt=d.spot?`INR ${d.spot.toLocaleString('en-IN',{minimumFractionDigits:2})}`:'No Data';
+                            const fmt=cur>0?`INR ${cur.toLocaleString('en-IN',{minimumFractionDigits:2})}`:'No Data';
                             h+=`<div class="col"><div class="card stat-card ${flash}"><div class="label">${sym}</div><div class="value">${fmt}</div>${chg}<div class="label">${d.source||'live'}</div></div></div>`;
                         }
                         if(h) document.getElementById('mkt-cards').innerHTML=h;
