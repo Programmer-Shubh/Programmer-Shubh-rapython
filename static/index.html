@@ -58,7 +58,10 @@
         .tabs{display:flex;gap:0;border-bottom:2px solid #dee2e6;margin-bottom:12px}
         .tabs button{background:none;border:none;color:#6c757d;padding:8px 16px;cursor:pointer;font-size:12px;border-bottom:2px solid transparent;margin-bottom:-2px}
         .tabs button.active{color:#0d6efd;border-bottom-color:#0d6efd;font-weight:600}
-        .sig-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+        .sig-grid{display:grid;grid-template-columns:1fr;gap:12px}
+        #chain-body{overflow-x:auto}
+        #dash-pos{overflow-x:auto}
+        #dash-hist{overflow-x:auto}
         .sig-box{border-radius:8px;padding:12px}
         .sig-box.bull{background:#f0fff4;border:1px solid #c6f6d5}
         .sig-box.bear{background:#fff5f5;border:1px solid #fed7d7}
@@ -112,7 +115,7 @@
         .quant-card .title{font-size:11px;font-weight:700}
         .quant-card .desc{font-size:10px;color:#6c757d;line-height:1.2}
         .payoff-card{border:1px solid #0d6efd22}
-        @media(max-width:768px){.sig-grid{grid-template-columns:1fr}.row{flex-direction:column}.col{min-width:100%}}
+        @media(max-width:768px){.sig-grid{grid-template-columns:1fr}.row{flex-direction:column}.col{min-width:100%}.wrap{padding:8px}.card-body{padding:8px}th{padding:6px;font-size:11px;white-space:nowrap}td{padding:6px;font-size:12px;white-space:nowrap}.stat-card{padding:8px}.stat-card .value{font-size:18px}.chain-table td{padding:3px 5px;font-size:11px;white-space:nowrap}.chain-table th{padding:4px 5px;font-size:10px;white-space:nowrap}.nav button{padding:10px 10px;font-size:12px}.btn{font-size:11px}.card-header{font-size:13px;padding:10px}.sig-box{padding:8px}.score-badge{font-size:10px}}
     </style>
 </head>
 <body>
