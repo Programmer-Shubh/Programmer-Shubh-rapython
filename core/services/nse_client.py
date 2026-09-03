@@ -62,13 +62,38 @@ _UA_POOL = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
 ]
 
-# Cloud environment detection: NSE blocks cloud IPs; autodetect via warmup failure
-_CLOUD_ENV = not os.path.exists("/.dockerenv") and not os.path.isfile("/proc/1/cgroup")  # simplified: always True assumption for Render/AWS
+# Cloud environment detection: NSE blocks cloud IPs (Render/AWS/Heroku).
+# Detect properly: Render sets RENDER=true; docker leaves /.dockerenv / cgroup traces.
+def _detect_cloud() -> bool:
+    try:
+        if os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"):
+            return True
+        if os.path.exists("/.dockerenv"):
+            return True
+        try:
+            with open("/proc/1/cgroup") as f:
+                txt = f.read()
+                if "docker" in txt or "kubepods" in txt or "render" in txt:
+                    return True
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return False
+
+
+_CLOUD_ENV = _detect_cloud()
 
 
 def _is_cloud(self: Optional[object] = None) -> bool:
     """Return True if running on cloud where NSE IPs are blocked."""
-    # On Render/AWS/Heroku: NSE API will fail; return True to skip NSE calls
+    # On Render/AWS/Heroku: NSE API will fail; return True to skip NSE calls.
+    # On local/home IP: False -> real NSE chain + spot (exact NSE match).
+    return _CLOUD_ENV
+
+
+def is_cloud() -> bool:
+    """Public helper for routes: True on Render/cloud, False on local."""
     return _CLOUD_ENV
 
 

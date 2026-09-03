@@ -85,7 +85,26 @@ def get_chain(symbol: str, date: str, expiry: str):
 @router.get("/live/{symbol}")
 def get_live_chain(symbol: str):
     live = LiveMarketData()
-    # 1) DB chain first (always available after seed)
+    sym = symbol.upper()
+    # 0) Real NSE chain when NOT on cloud (local/home IP - exact NSE match).
+    # On Render/cloud NSE blocks the IP, so this is skipped (fast, no timeouts).
+    try:
+        from core.services.nse_client import is_cloud as _is_cloud, nse_fetch_option_chain_v3
+        if not _is_cloud():
+            nse = nse_fetch_option_chain_v3(sym, timeout=6)
+            if nse and nse.get("rows"):
+                _atm = nse.get("atm") or 0
+                _rows = []
+                for r in nse["rows"]:
+                    _rows.append({"strike": r["strike"], "distance": int(r["strike"] - _atm) if _atm else 0,
+                                  "ce_ltp": r.get("ce_ltp", 0), "ce_oi": r.get("ce_oi", 0), "ce_vol": r.get("ce_vol", 0), "ce_iv": r.get("ce_iv", 0),
+                                  "pe_ltp": r.get("pe_ltp", 0), "pe_oi": r.get("pe_oi", 0), "pe_vol": r.get("pe_vol", 0), "pe_iv": r.get("pe_iv", 0)})
+                return {"symbol": sym, "spot": nse.get("spot", 0), "atm": _atm, "rows": _rows,
+                        "source": "nse", "expiry": nse.get("expiry", ""), "pcr": nse.get("pcr"),
+                        "timestamp": nse.get("timestamp", "")}
+    except Exception:
+        pass
+    # 1) DB chain (always available after seed)
     bhav = BhavcopyModel()
     dates = bhav.get_dates(symbol)
     chain = None
@@ -93,7 +112,7 @@ def get_live_chain(symbol: str):
         expiries = bhav.get_expiries(symbol, dates[0])
         if expiries:
             chain = bhav.get_option_chain(symbol, dates[0], expiries[0])
-    # 2) Get spot price: DB → Google → synthetic
+    # 2) Get spot price: live (Yahoo-first on cloud) -> DB
     spot = live.get_spot_price(symbol)
     step = get_strike_step(symbol)
     atm = round(spot / step) * step if spot > 0 else 0
@@ -112,22 +131,25 @@ def get_live_chain(symbol: str):
     for s in all_strikes:
         rows.append({"strike": s, "distance": int(s - atm),
                      "ce_ltp": ce.get(s, {}).get("ltp", 0), "ce_oi": ce.get(s, {}).get("oi", 0), "ce_vol": ce.get(s, {}).get("volume", 0), "ce_iv": 0,
-                     "pe_ltp": pe.get(s, {}).get("close_price", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
+                     "pe_ltp": pe.get(s, {}).get("ltp", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
     if rows:
         return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "db"}
-    # 3) Fallback: synthetic Black-Scholes chain (cloud only, no NSE)
-    from utils.helpers import black_scholes, get_lot_size
-    import random
-    random.seed(int(time.time()))
-    synthetic_rows = []
-    for i in range(15):
-        strike = round(spot * 0.95 + i * step * 0.5) if spot > 0 else round(1000 + i * 50)
-        iv = max(0.15, random.random() * 0.30)
-        ce_price = black_scholes(spot, strike, 7/365, iv, "CE") if spot > 0 else 0
-        pe_price = black_scholes(spot, strike, 7/365, iv, "PE") if spot > 0 else 0
-        synthetic_rows.append({"strike": strike, "distance": int(strike - atm), "ce_ltp": ce_price, "ce_oi": 0, "ce_vol": 0, "pe_ltp": pe_price, "pe_oi": 0, "pe_vol": 0})
-    if synthetic_rows:
-        return {"symbol": symbol, "spot": spot, "atm": atm, "rows": synthetic_rows, "source": "synthetic", "note": "NSE blocked on Render - synthetic data"}
+    # 3) Fallback: ATM-centered model chain (same model_premium as order entry,
+    # so chain premium == trade entry; no random IVs). NSE itself is blocked on cloud.
+    from utils.helpers import model_premium
+    model_rows = []
+    if spot > 0 and atm > 0:
+        for i in range(-7, 8):
+            strike = atm + i * step
+            if strike <= 0:
+                continue
+            ce_price = model_premium(spot, strike, 7, "CE", symbol=sym)
+            pe_price = model_premium(spot, strike, 7, "PE", symbol=sym)
+            model_rows.append({"strike": strike, "distance": int(strike - atm),
+                               "ce_ltp": ce_price, "ce_oi": 0, "ce_vol": 0, "ce_iv": 0,
+                               "pe_ltp": pe_price, "pe_oi": 0, "pe_vol": 0, "pe_iv": 0})
+    if model_rows:
+        return {"symbol": symbol, "spot": spot, "atm": atm, "rows": model_rows, "source": "model", "note": "NSE blocked on cloud - model chain (same rate as order entry)"}
     return {"error": "No chain data available"}
 
 
