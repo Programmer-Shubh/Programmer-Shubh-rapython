@@ -362,17 +362,15 @@ class OptionScanner:
         return 0
 
     def _get_step(self, symbol: str) -> int:
-        steps = {'NIFTY': 50, 'BANKNIFTY': 100, 'FINNIFTY': 50, 'MIDCPNIFTY': 50,
-                 'HDFCBANK': 20, 'ICICIBANK': 20, 'ITC': 10, 'SBIN': 10,
-                 'RELIANCE': 20, 'TCS': 50, 'INFY': 20, 'LT': 50,
-                 'AXISBANK': 10, 'KOTAKBANK': 10, 'HINDUNILVR': 10, 'BHARTIARTL': 20,
-                 'M&M': 20, 'MARUTI': 200, 'BAJFINANCE': 200, 'WIPRO': 10,
-                 'ONGC': 10, 'SUNPHARMA': 20, 'ULTRACEMCO': 100, 'NTPC': 10,
-                 'POWERGRID': 10, 'TATAMOTORS': 10, 'TATASTEEL': 10, 'HCLTECH': 20,
-                 'JSWSTEEL': 10, 'COALINDIA': 10, 'DRREDDY': 20, 'CIPLA': 20,
-                 'ADANIENT': 20, 'SBILIFE': 10, 'BPCL': 10, 'GRASIM': 20,
-                 'TECHM': 20, 'DIVISLAB': 20, 'EICHERMOT': 20, 'BRITANNIA': 20}
-        return steps.get(symbol, 50)
+        # Single source of truth: utils.helpers.get_strike_step covers ALL symbols
+        # (HINDALCO/VEDL/INDUSINDBK/POWERGRID/SENSEX etc.). A duplicate table here
+        # suggested wrong-step strikes (e.g. VEDL 250 vs live ATM 270) that the
+        # order ATM-guard then rejected for every such symbol.
+        try:
+            from utils.helpers import get_strike_step
+            return int(get_strike_step(symbol))
+        except Exception:
+            return 50
 
     def _suggest_option(self, symbol: str, spot: float, option_type: str) -> dict:
         """
