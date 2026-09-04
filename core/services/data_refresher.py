@@ -97,22 +97,22 @@ def refresh_all(light: bool = False):
                 }}
     if light:
         return {sym: bool(chains.get(sym)) for sym in INDEX_SYMBOLS}, chain_ok
-    # Full refresh (background, after startup) - Stooq/Google free live batch + history seed
+    # Full refresh (background, after startup) - Yahoo live batch (subprocess 12s) + history seed
     try:
-        # Use batch free live (NSE/Stooq/Google, 400ms) for 8 stocks per cycle
+        # Use batch Yahoo live (reliable, 400ms) for 8 stocks per cycle
         batch_syms = EXTRA_SYMBOLS[:8]
         try:
             batch = live.get_live_spots_parallel(batch_syms, max_workers=8)
             for sym, spot_data in batch.items():
                 if spot_data and spot_data.get("spot"):
-                    src = spot_data.get("source", "stooq")
+                    src = spot_data.get("source", "yahoo")
                     _LIVE_CACHE[sym] = {"ts": time.time(), "data": {
                         "spot": spot_data["spot"], "formatted": f"INR {spot_data['spot']:,.2f}",
                         "change": spot_data.get("change", 0), "high": spot_data.get("high", spot_data["spot"]), "low": spot_data.get("low", spot_data["spot"]), "source": src,
                     }}
         except Exception:
             pass
-        # indices also via free live (NSE/Stooq/Google)
+        # indices also via Yahoo
         try:
             ibatch = live.get_live_spots_parallel(INDEX_SYMBOLS, max_workers=4)
             for sym, spot_data in ibatch.items():

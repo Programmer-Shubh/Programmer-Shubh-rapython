@@ -3,6 +3,31 @@ import datetime
 import requests
 import re
 
+# Yahoo Finance symbols (works from cloud - Yahoo does NOT block Render/AWS)
+_YAHOO_MAP = {
+    "NIFTY": "^NSEI",
+    "BANKNIFTY": "^NSEBANK",
+    "FINNIFTY": "^CNXFIN",
+    "MIDCPNIFTY": "^NSEMDCP50",
+    "SENSEX": "^BSESN",
+    "RELIANCE": "RELIANCE.NS",
+    "HDFCBANK": "HDFCBANK.NS",
+    "TCS": "TCS.NS",
+    "INFY": "INFY.NS",
+    "ICICIBANK": "ICICIBANK.NS",
+    "ITC": "ITC.NS",
+    "SBIN": "SBIN.NS",
+    "AXISBANK": "AXISBANK.NS",
+    "KOTAKBANK": "KOTAKBANK.NS",
+    "LT": "LT.NS",
+    "BAJFINANCE": "BAJFINANCE.NS",
+    "INDUSINDBK": "INDUSINDBK.NS",
+    "VEDL": "VEDL.NS",
+    "SBILIFE": "SBILIFE.NS",
+    # NOTE: BANKEX (BSE Bankex) has no Yahoo/Stooq quote - left out on purpose
+    # so rows honestly show the last DB date instead of a fake live price.
+}
+
 # NSE symbols suitable for direct NSE fetch (nse_client) - primary source.
 # NOTE: BANKEX (BSE Bankex) has no Stooq quote - left out on purpose
 # so rows honestly show the last DB date instead of a fake live price.
@@ -34,6 +59,51 @@ def _db_prev_close(symbol: str) -> float:
     except Exception:
         pass
     return 0
+
+
+def fetch_yahoo_spot(symbol: str) -> float:
+    """Yahoo Finance v8 chart API - PRIMARY cloud source (works on Render)."""
+    try:
+        ysym = _YAHOO_MAP.get(symbol.upper(), f"{symbol}.NS" if "." not in symbol and not symbol.startswith("^") else symbol)
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=1d&range=1d"
+        r = requests.get(url, headers=_UA, timeout=8)
+        if r.status_code == 200:
+            j = r.json()
+            res = (j.get("chart", {}).get("result") or [{}])[0]
+            meta = res.get("meta", {})
+            px = float(meta.get("regularMarketPrice") or 0)
+            if px > 0:
+                return px
+    except Exception:
+        pass
+    return 0
+
+
+def fetch_yahoo_quote(symbol: str) -> dict:
+    """Yahoo quote with change%/high/low - for dashboard cards."""
+    try:
+        ysym = _YAHOO_MAP.get(symbol.upper(), f"{symbol}.NS" if "." not in symbol and not symbol.startswith("^") else symbol)
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=1d&range=5d"
+        r = requests.get(url, headers=_UA, timeout=8)
+        if r.status_code == 200:
+            j = r.json()
+            res = (j.get("chart", {}).get("result") or [{}])[0]
+            meta = res.get("meta", {})
+            px = float(meta.get("regularMarketPrice") or 0)
+            if px <= 0:
+                return {}
+            prev = float(meta.get("previousClose") or meta.get("chartPreviousClose") or 0)
+            chg = round((px - prev) / prev * 100, 2) if prev > 0 else 0.0
+            return {
+                "spot": px,
+                "change": chg,
+                "high": float(meta.get("regularMarketDayHigh") or px),
+                "low": float(meta.get("regularMarketDayLow") or px),
+                "source": "yahoo",
+            }
+    except Exception:
+        pass
+    return {}
 
 
 def fetch_stooq_spot(symbol: str) -> float:
@@ -81,8 +151,12 @@ def fetch_google_spot(symbol: str) -> float:
 
 
 def fetch_cloud_spot(symbol: str) -> dict:
-    """Cloud-friendly live spot, all free, no key: NSE direct -> Stooq -> Google.
-    Change% vs DB prev close. Returns {spot,change,high,low,source} or {}."""
+    """Live spot, Yahoo first (as before): Yahoo -> NSE direct -> Stooq -> Google.
+    Change% from Yahoo quote, else vs DB prev close. Returns {spot,change,high,low,source} or {}."""
+    # 1) Yahoo (primary, as before)
+    q = fetch_yahoo_quote(symbol)
+    if q and q.get("spot"):
+        return q
     spot, source = 0, ""
     # 1) NSE direct (free, most accurate; blocked from some cloud IPs)
     try:
