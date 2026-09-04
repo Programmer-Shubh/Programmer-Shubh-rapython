@@ -37,6 +37,36 @@ class TradeModel:
             [user_id],
         )
 
+    def close_max_hold_trades(self, user_id=1, max_days: int = 30) -> int:
+        """One-month max holding: auto-close paper trades open longer than max_days.
+        Exit at current premium so history/P&L stays correct."""
+        import datetime as _dt
+        try:
+            cutoff = (_dt.datetime.now() - _dt.timedelta(days=max_days)).strftime("%Y-%m-%d")
+            old = self.db.fetch_all(
+                "SELECT id FROM paper_trades WHERE user_id=? AND status='open' AND entry_date<>'' AND entry_date<?",
+                [user_id, cutoff],
+            )
+        except Exception:
+            return 0
+        n = 0
+        for r in old:
+            try:
+                t = self.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [r["id"]])
+                if not t:
+                    continue
+                cur = self.get_option_premium(
+                    t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
+                    iv=t.get("entry_iv"),
+                )
+                if not cur or cur <= 0:
+                    cur = t["entry_price"]
+                self.close_trade(r["id"], float(cur), self._ist_today(), exit_status="max_hold_30d")
+                n += 1
+            except Exception:
+                continue
+        return n
+
     def get_closed_trades(self, user_id=1) -> list:
         return self.db.fetch_all(
             "SELECT * FROM paper_trades WHERE user_id=? AND status='closed' ORDER BY exit_date DESC",

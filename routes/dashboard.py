@@ -126,6 +126,10 @@ def get_option_chain(symbol: str):
 @router.get("/portfolio")
 def get_portfolio():
     trade_model = TradeModel()
+    try:
+        trade_model.close_max_hold_trades()
+    except Exception:
+        pass
     positions = trade_model.get_open_positions_with_pnl()
     total_pnl = sum(p["unrealized_pnl"] for p in positions)
     return {

@@ -42,6 +42,11 @@ class TradeModeRequest(BaseModel):
 @router.get("/open")
 def get_open_trades():
     trade_model = TradeModel()
+    # One-month max holding: close trades open >30 days before listing
+    try:
+        trade_model.close_max_hold_trades()
+    except Exception:
+        pass
     positions = trade_model.get_open_positions_with_pnl(auto_exit=False)
     total_pnl = sum(p["unrealized_pnl"] for p in positions)
     return {
