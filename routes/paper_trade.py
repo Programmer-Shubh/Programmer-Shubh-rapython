@@ -70,6 +70,7 @@ def get_open_trades():
                 "tp": t["trade"]["target"],
                 "trade_mode": t["trade"].get("trade_mode", "paper"),
                 "entry_date": t["trade"].get("entry_date", ""),
+                "expiry_date": t["trade"].get("expiry_date", ""),
             }
             for t in positions
         ],
@@ -221,6 +222,8 @@ def get_history():
                 "quantity": t.get("quantity", 1),
                 "total_qty": t.get("quantity", 1) * (get_lot_size(t["symbol"]) if t.get("lot_size",50)==50 and get_lot_size(t["symbol"])!=50 else t.get("lot_size", 50)),
                 "transaction_type": t.get("transaction_type",""),
+                "expiry_date": t.get("expiry_date", ""),
+                "exit_status": t.get("exit_status", ""),
                 "calc": f"({t.get('exit_price',0):.2f}-{t['entry_price']:.2f})×{t.get('lot_size',50)}" if t.get("transaction_type")=="BUY" else f"({t['entry_price']:.2f}-{t.get('exit_price',0):.2f})×{t.get('lot_size',50)}",
                 "analysis": f"{t.get('transaction_type','')} {t['option_type']} {'profit' if ((t.get('exit_price',0)-t['entry_price'])>0 if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0))>0) else 'loss'}: ₹{t['entry_price']:.2f}→₹{t.get('exit_price',0):.2f} × Lot {t.get('lot_size',50)} = Gross ₹{((t.get('exit_price',0)-t['entry_price']) if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0)))*t.get('quantity',1)*t.get('lot_size',50):,.2f} - Costs = Net {format_currency(t['pnl'])}",
             }

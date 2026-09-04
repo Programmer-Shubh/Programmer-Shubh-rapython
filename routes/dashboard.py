@@ -182,6 +182,7 @@ def get_trade_history():
                 "transaction_type": t["transaction_type"],
                 "entry": t["entry_price"],
                 "exit": t.get("exit_price", 0),
+                "expiry_date": t.get("expiry_date", ""),
                 "pnl": t["pnl"],
                 "pnl_formatted": format_currency(t["pnl"]),
                 "status": t.get("exit_status", "closed"),
