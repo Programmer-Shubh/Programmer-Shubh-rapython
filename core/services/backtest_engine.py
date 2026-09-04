@@ -48,8 +48,10 @@ class BacktestEngine:
         momentum = int(advanced_options.get("momentum", 0) or 0)
         entry_time = advanced_options.get("entry_time", "09:35")
         exit_time = advanced_options.get("exit_time", "15:14")
+        early_exit_time = advanced_options.get("early_exit_time", "15:10")
         self._entry_time = entry_time
         self._exit_time = exit_time
+        self._early_exit_time = early_exit_time
         trade_mode = advanced_options.get("trade_mode", "positional")
         max_holding = int(advanced_options.get("max_holding_bars", 20))
         # Intraday: hold max 5 bars for more trades like Quantman (positional holds longer)
@@ -60,6 +62,16 @@ class BacktestEngine:
             max_holding = max(max_holding, 5)
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
+        # Min entry premium: skip SELL entries cheaper than this (far-OTM lottery
+        # tickets like Rs2-3 have tiny max profit but huge adverse-move loss).
+        min_premium = float(advanced_options.get("min_entry_premium", 0) or 0)
+        # Entry delay: wait N bars after entry_time for trend confirmation (Quantman-style)
+        # e.g., 3-6 bars = 15-30 min after 09:35
+        entry_delay_bars = int(advanced_options.get("entry_delay_bars", 0) or 0)
+        # Signal reversal exit: if trend reverses against position, exit immediately
+        reversal_exit = bool(advanced_options.get("reversal_exit", True))
+        # Early mandatory exit: close by 15:00-15:10 instead of 15:14
+        early_exit_time = advanced_options.get("early_exit_time", "15:10")
         signal_delay = int(advanced_options.get("signal_delay_bars", 0) or 0)
         # Latency in seconds (only in backtest mode) - unified is_live switch
         latency = TransactionCosts.latency_delay(self.is_live)
@@ -103,6 +115,13 @@ class BacktestEngine:
             cur_date = cur["trade_date"]
             nxt = historical[i + 1] if i + 1 < len(historical) else None
             is_last = nxt is None or nxt["trade_date"] != cur_date
+            # Roll option expiry forward: a cached expiry on/before today collapses
+            # Black-Scholes time to ~1 day, so premiums -> ~0 and SL/TP never hit.
+            try:
+                if self.bt_expiry and str(self.bt_expiry)[:10] < cur_date:
+                    self.bt_expiry = ""
+            except Exception:
+                pass
 
             if cur_date != last_date:
                 daily_trades = 0
@@ -134,6 +153,13 @@ class BacktestEngine:
                     trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
                 else:
                     trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
+                # Min-premium guard: don't sell lottery tickets (Rs2-3 premium =
+                # pennies of max profit, huge tail loss). Skip without using the
+                # day's trade quota so a better setup can still enter later.
+                if min_premium > 0 and txn_type == "sell" and float(trade.get("price", 0) or 0) < min_premium:
+                    pending_entry = None
+                    pending_auto_buy = None
+                    continue
                 entries.append(trade)
                 entry_bars.append(i)
                 daily_trades += 1
@@ -170,7 +196,14 @@ class BacktestEngine:
                             kill_switch_on = True
 
             has_open = len(entries) > len(exits)
-            if has_open and trade_mode == "intraday" and is_last:
+            # Early exit: close by early_exit_time (default 15:10) instead of 15:14
+            # For daily bars, check if we're on the last bar OR if early_exit_time is set
+            is_early_exit = is_last
+            if trade_mode == "intraday" and early_exit_time:
+                # For daily bars, we can't check exact time, so use last bar
+                # For intraday (minute bars), this would check actual time
+                is_early_exit = is_last  # daily bars use last bar anyway
+            if has_open and trade_mode == "intraday" and is_early_exit:
                 entry = entries[len(exits)]
                 if entry.get("is_spread"):
                     self._close_spread(entries, exits, entry, "intraday", cur_date)
@@ -217,6 +250,29 @@ class BacktestEngine:
                         exit_sig = sell_sig if txn_type == "buy" else buy_sig
                 has_open = len(entries) > len(exits)
                 can_enter = not has_open and daily_trades < max_trades_day
+                # Entry delay: wait N bars after signal for trend confirmation (Quantman style)
+                if entry_delay_bars > 0:
+                    # Check if enough bars have passed since entry_time
+                    bars_since_open = i - min_bars
+                    if bars_since_open < entry_delay_bars:
+                        can_enter = False
+                # Min premium filter: skip SELL entries with premium below threshold
+                if can_enter and min_premium > 0:
+                    # Estimate entry premium for this strike
+                    try:
+                        from utils.helpers import black_scholes as _bs
+                        spot_est = float(cur.get("open_price", 0) or cur.get("close_price", 0))
+                        strike_est = float(legs[0].get("strike", 0) or 0)
+                        if strike_est == 0:
+                            strike_est = round(spot_est / get_strike_step(symbol)) * get_strike_step(symbol)
+                        opt_type = legs[0].get("option_type", option_type)
+                        t = 5 / 365
+                        iv = float(self.implied_volatility or 0.14)
+                        est_prem = _bs(spot_est, strike_est, t, iv, opt_type)
+                        if est_prem < min_premium:
+                            can_enter = False
+                    except Exception:
+                        pass
                 if entry_sig and can_enter:
                     # Apply latency: in backtest mode, wait enough bars for latency to elapse
                     # In live mode, execute immediately

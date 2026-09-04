@@ -117,6 +117,12 @@ class HistoricalReplayEngine:
             cur_date = cur["trade_date"]
             nxt = self.historical_data[i + 1] if i + 1 < len(self.historical_data) else None
             is_last = nxt is None or nxt["trade_date"] != cur_date
+            # Roll option expiry forward (same as backtest engine)
+            try:
+                if self.bt_engine.bt_expiry and str(self.bt_engine.bt_expiry)[:10] < cur_date:
+                    self.bt_engine.bt_expiry = ""
+            except Exception:
+                pass
             
             # New day reset
             if cur_date != self.last_date:
@@ -152,9 +158,19 @@ class HistoricalReplayEngine:
                     trade = self.bt_engine._enter_spread(cur_date, spot, self.symbol, self.legs, 
                                                          strike_sel, delta_target, otm_dist)
                 else:
-                    trade = self.bt_engine._enter_single(cur_date, spot, self.symbol, self.legs[0], 
+                    trade = self.bt_engine._enter_single(cur_date, spot, self.symbol, self.legs[0],
                                                          strike_sel, delta_target, otm_dist)
-                
+
+                # Min-premium guard (same as backtest engine): skip lottery-ticket sells
+                try:
+                    _min_prem = float(self.advanced_options.get("min_entry_premium", 0) or 0)
+                except Exception:
+                    _min_prem = 0
+                if _min_prem > 0 and txn_type == "sell" and float(trade.get("price", 0) or 0) < _min_prem:
+                    self.pending_entry = None
+                    self.pending_auto_buy = None
+                    continue
+
                 trade["entry_bar_idx"] = i
                 trade["entry_time"] = entry_time
                 self.trades.append(trade)
