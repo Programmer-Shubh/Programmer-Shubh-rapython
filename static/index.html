@@ -84,6 +84,8 @@
         #pg-dashboard .stat-card{padding:8px}
         #pg-dashboard .stat-card .value{font-size:18px}
         #pg-dashboard .stat-card .label{font-size:12px}
+        #mkt-cards{flex-wrap:nowrap}
+        #mkt-cards .col{min-width:0;flex:1 1 0}
         #mkt-cards .stat-card{padding:4px}
         #mkt-cards .stat-card .value{font-size:15px}
         #mkt-cards .stat-card .label{font-size:10px}
@@ -157,7 +159,7 @@
         .quant-card .title{font-size:11px;font-weight:700}
         .quant-card .desc{font-size:10px;color:#6c757d;line-height:1.2}
         .payoff-card{border:1px solid #0d6efd22}
-        @media(max-width:768px){.sig-grid{grid-template-columns:1fr}#fno-top5{grid-template-columns:1fr}.sig-grid table th:last-child,.sig-grid table td:last-child{position:sticky;right:0;background:#fff;box-shadow:-2px 0 4px rgba(0,0,0,.1);z-index:1}.sig-grid table th:last-child{background:#f8f9fa}.row{flex-direction:column}.col{min-width:100%}.wrap{padding:8px}.card-body{padding:8px}th{padding:6px;font-size:11px;white-space:nowrap}td{padding:6px;font-size:12px;white-space:nowrap}.stat-card{padding:8px}.stat-card .value{font-size:18px}.chain-table td{padding:3px 5px;font-size:11px;white-space:nowrap}.chain-table th{padding:4px 5px;font-size:10px;white-space:nowrap}.nav button{padding:10px 10px;font-size:12px}.btn{font-size:11px}.card-header{font-size:13px;padding:10px}.sig-box{padding:8px}.score-badge{font-size:10px}}
+        @media(max-width:768px){.sig-grid{grid-template-columns:1fr}#fno-top5{grid-template-columns:1fr}.sig-grid table th:last-child,.sig-grid table td:last-child{position:sticky;right:0;background:#fff;box-shadow:-2px 0 4px rgba(0,0,0,.1);z-index:1}.sig-grid table th:last-child{background:#f8f9fa}.row{flex-direction:column}#mkt-cards{flex-direction:row;flex-wrap:wrap}#mkt-cards .col{min-width:calc(25% - 8px);flex:1 1 calc(25% - 8px)}.col{min-width:100%}.wrap{padding:8px}.card-body{padding:8px}th{padding:6px;font-size:11px;white-space:nowrap}td{padding:6px;font-size:12px;white-space:nowrap}.stat-card{padding:8px}.stat-card .value{font-size:18px}.chain-table td{padding:3px 5px;font-size:11px;white-space:nowrap}.chain-table th{padding:4px 5px;font-size:10px;white-space:nowrap}.nav button{padding:10px 10px;font-size:12px}.btn{font-size:11px}.card-header{font-size:13px;padding:10px}.sig-box{padding:8px}.score-badge{font-size:10px}}
     </style>
 </head>
 <body>
