@@ -362,9 +362,25 @@ class TradeModel:
         )
 
     def update_management(self, trade_id: int, stop_loss: float, target: float, auto_action: str) -> int:
+        # Only update fields actually sent (None = untouched) so editing SL
+        # doesn't erase Target and vice versa.
+        sets, vals = [], []
+        if stop_loss is not None:
+            sets.append("stop_loss=?")
+            vals.append(stop_loss)
+        if target is not None:
+            sets.append("target=?")
+            vals.append(target)
+        if auto_action:
+            sets.append("auto_action=?")
+            vals.append(auto_action)
+        if not sets:
+            return 0
+        sets.append("updated_at=datetime('now')")
+        vals.append(trade_id)
         return self.db.execute(
-            "UPDATE paper_trades SET stop_loss=?, target=?, auto_action=?, updated_at=datetime('now') WHERE id=?",
-            [stop_loss, target, auto_action, trade_id],
+            f"UPDATE paper_trades SET {', '.join(sets)} WHERE id=?",
+            vals,
         )
 
     def get_stats(self, user_id=1) -> dict:
