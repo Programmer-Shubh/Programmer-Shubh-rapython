@@ -594,14 +594,14 @@
             bull.forEach(s=>{
                 const opt=s.option_suggestion||{}; const chg=s.change_pct>=0?`+${s.change_pct}%`: `${s.change_pct}%`;
                 const btns = stratBtns({symbol:s.symbol, direction:'bullish', signal_type:'BUY CE', option_suggestion:opt});
-                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span><span class="badge badge-buy">${chg}</span></div><div class="meta">Spot ₹${(s.spot||0).toLocaleString()} | Prev ₹${(s.prev_close||0).toLocaleString()} | ${s.signal_type} ${opt.strike||''}</div><div style="margin-top:6px">${btns}</div></div>`;
+                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol}</span><span style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${btns}<span class="badge badge-buy">${chg}</span></span></div><div class="meta">Spot ₹${(s.spot||0).toLocaleString()} | Prev ₹${(s.prev_close||0).toLocaleString()} | ${s.signal_type} ${opt.strike||''}</div></div>`;
             });
             h+=`</div><div class="sig-box bear"><h5 class="price-down">Top 5 Bearish Today (Future & Option)</h5>`;
             if(!bear.length) h+='<p class="text-muted small">No data</p>';
             bear.forEach(s=>{
                 const opt=s.option_suggestion||{}; const chg=`${s.change_pct}%`;
                 const btns = stratBtns({symbol:s.symbol, direction:'bearish', signal_type:'BUY PE', option_suggestion:opt});
-                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between"><span class="name">${s.symbol}</span><span class="badge badge-sell">${chg}</span></div><div class="meta">Spot ₹${(s.spot||0).toLocaleString()} | Prev ₹${(s.prev_close||0).toLocaleString()} | ${s.signal_type} ${opt.strike||''}</div><div style="margin-top:6px">${btns}</div></div>`;
+                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol}</span><span style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${btns}<span class="badge badge-sell">${chg}</span></span></div><div class="meta">Spot ₹${(s.spot||0).toLocaleString()} | Prev ₹${(s.prev_close||0).toLocaleString()} | ${s.signal_type} ${opt.strike||''}</div></div>`;
             });
             h+='</div>';
             document.getElementById('fno-top5').innerHTML=h;
