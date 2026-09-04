@@ -376,7 +376,7 @@ class OptionScanner:
         """
         Suggest option strike close to ATM.
         Always returns strike within 5% of spot to prevent deep OTM/ITM strikes.
-        Uses LIVE spot (Yahoo-first) + shared model_premium (IV 25%, floor 1.5) -
+        Uses LIVE spot (NSE/Stooq/Google free) + shared model_premium (IV 25%, floor 1.5) -
         the SAME inputs as order entry, so scanner-shown premium == trade entry
         for every symbol (no more scanner Rs 13 -> entry Rs 1.50 mismatch).
         """
@@ -460,7 +460,7 @@ class OptionScanner:
         return {'strike': strike, 'premium': premium, 'expiry': expiry}
 
     def _row_live_spot(self, symbol: str, fallback: float):
-        """Live spot for scanner ROWS (Yahoo-first, 300s cache). Returns
+        """Live spot for scanner ROWS (NSE/Stooq/Google free, 300s cache). Returns
         (spot, date_str, live_bool). Rows must show the same live spot the
         suggestion strike/premium were built on - never a stale DB close next
         to a live strike (the mixed-row bug)."""
@@ -677,7 +677,7 @@ class OptionScanner:
         fno_symbols = FNO_SYMBOLS
         movers = []
         # Live realtime via LIVE_CACHE only (instant, no per-request network).
-        # Background refresh (data_refresher + Yahoo via subprocess) fills _LIVE_CACHE every 45s.
+        # Background refresh (data_refresher + free Stooq/Google) fills _LIVE_CACHE every 45s.
         # Per-request parallel caused 13s hang -> frontend timeout "Failed to load F&O Top 5".
         live_map = {}
         try:

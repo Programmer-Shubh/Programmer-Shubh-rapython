@@ -146,7 +146,7 @@ def black_scholes(spot: float, strike: float, time: float, iv: float, option_typ
 # Entry (order placement), Current (open positions), Scanner suggestion and
 # Backtest MUST use the same IV + floor, else every trade instantly shows a
 # fake profit/loss. NSE option chain is blocked from cloud IPs (Render), so on
-# cloud the model priced off LIVE Yahoo spot is the closest NSE match.
+# cloud the model priced off LIVE NSE/Stooq/Google free spot is the closest NSE match.
 # IVs are NSE-typical: indices ~13-16%, stocks ~30% (high-vol ~35%).
 OPTION_MODEL_IV = 0.25
 OPTION_MODEL_MIN = 1.5

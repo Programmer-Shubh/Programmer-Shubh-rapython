@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.get("/spot")
 def get_spots():
-    # Cloud-first live prices: Yahoo -> Stooq -> Google -> DB (NSE blocked on Render)
+    # Free live prices: NSE -> Stooq -> Google -> DB
     live = LiveMarketData()
     symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "RELIANCE", "HDFCBANK", "TCS", "INFY"]
     result = {}
@@ -30,7 +30,7 @@ def get_spots():
                 "change": round(float(d.get("change") or 0), 2),
                 "high": float(d.get("high") or 0),
                 "low": float(d.get("low") or 0),
-                "source": d.get("source", "yahoo"),
+                "source": d.get("source", "stooq"),
             }
         else:
             # DB stale close as last resort (instead of No Data)
@@ -57,12 +57,12 @@ def get_spots():
 
 
 def _free_latest_spot(symbol: str):
-    """Cloud-first: LiveMarketData (Yahoo->Stooq->Google), then DB stale close."""
+    """Free live: LiveMarketData (NSE->Stooq->Google), then DB stale close."""
     try:
         live = LiveMarketData()
         data = live.get_live_spot(symbol)
         if data and data.get("spot") and float(data["spot"]) > 0:
-            return float(data["spot"]), data.get("source", "yahoo")
+            return float(data["spot"]), data.get("source", "stooq")
     except Exception:
         pass
     db = Database.get_instance()

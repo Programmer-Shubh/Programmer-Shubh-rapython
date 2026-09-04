@@ -120,7 +120,7 @@ def get_live_chain(symbol: str):
         expiries = bhav.get_expiries(symbol, dates[0])
         if expiries:
             chain = bhav.get_option_chain(symbol, dates[0], expiries[0])
-    # 2) Get spot price: live (Yahoo-first on cloud) -> DB
+    # 2) Get spot price: live (Stooq/Google free on cloud) -> DB
     spot = live.get_spot_price(symbol)
     step = get_strike_step(symbol)
     atm = round(spot / step) * step if spot > 0 else 0
@@ -315,10 +315,11 @@ def place_trade(req: TradeRequest):
         if premium < 10:
             try:
                 spot_chk = 0
-                # Yahoo first (most reliable free)
+                # NSE/Stooq/Google free live spot
                 try:
-                    from core.services.free_data import fetch_yahoo_spot
-                    spot_chk = fetch_yahoo_spot(req.symbol)
+                    from core.services.free_data import fetch_cloud_spot
+                    _q = fetch_cloud_spot(req.symbol)
+                    spot_chk = float(_q.get("spot") or 0) if _q else 0
                 except Exception:
                     pass
                 if spot_chk <= 0:
