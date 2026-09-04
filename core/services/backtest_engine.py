@@ -156,7 +156,9 @@ class BacktestEngine:
                 pending_exit = None
 
             has_open = len(entries) > len(exits)
-            if has_open and not (trade_mode == "intraday" and is_last):
+            # SL/TP checked on EVERY bar first (daily bars: each bar is day-close,
+            # so skipping SL on is_last meant intraday SL never triggered).
+            if has_open:
                 entry = entries[len(exits)]
                 if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
                     hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
@@ -306,9 +308,10 @@ class BacktestEngine:
                     result["vwap"] = self.indicators.calculate_vwap(historical, params.get("period", 20), float(params.get("multiplier", 2.0)))
                 except Exception:
                     result["vwap"] = {}
-            elif iid == "heikin_ashi":
+            elif iid == "heikin_ashi" or iid == "heikin_bullish" or iid == "heikin_bearish":
                 try:
                     result["heikin"] = self.indicators.calculate_heikin_ashi(historical)
+                    result.setdefault("heikin_ids", set()).add(iid)
                 except Exception:
                     result["heikin"] = {}
             elif iid == "range_breakout":
@@ -433,7 +436,10 @@ class BacktestEngine:
                 return True
         if "heikin" in pre_calc:
             sig = pre_calc["heikin"].get("signal", [])
-            if modes.get("heikin_ashi","both") != "bearish" and effective_idx < len(sig) and sig[effective_idx] == 1:
+            ha_ids = pre_calc.get("heikin_ids", {"heikin_ashi"})
+            use_bull = ("heikin_bullish" in ha_ids) or ("heikin_ashi" in ha_ids)
+            blk = modes.get("heikin_bullish", modes.get("heikin_ashi", "both"))
+            if use_bull and blk != "bearish" and effective_idx < len(sig) and sig[effective_idx] == 1:
                 return True
         if "rangebo" in pre_calc:
             sig = pre_calc["rangebo"].get("signal", [])
@@ -519,7 +525,10 @@ class BacktestEngine:
                 sell = sell or True
         if "heikin" in pre_calc:
             sig = pre_calc["heikin"].get("signal", [])
-            if modes.get("heikin_ashi","both") != "bullish" and effective_idx < len(sig) and sig[effective_idx] == -1:
+            ha_ids = pre_calc.get("heikin_ids", {"heikin_ashi"})
+            use_bear = ("heikin_bearish" in ha_ids) or ("heikin_ashi" in ha_ids)
+            blk = modes.get("heikin_bearish", modes.get("heikin_ashi", "both"))
+            if use_bear and blk != "bullish" and effective_idx < len(sig) and sig[effective_idx] == -1:
                 sell = sell or True
         if "rangebo" in pre_calc:
             sig = pre_calc["rangebo"].get("signal", [])
@@ -940,12 +949,10 @@ class BacktestEngine:
         if entry.get("is_spread"):
             self._close_spread(entries, exits, entry, reason, exit_date)
             return
-        # same floor as entry — never Rs0.99
-        try:
-            spot_c = self._close_spot_for_date(exit_date) or float(entry.get("strike",0) or 0)
-            exit_prem = max(exit_prem, spot_c*0.015 if spot_c else 5.0, 5.0)
-        except Exception:
-            exit_prem = max(exit_prem, 5.0)
+        # Floor at option tick size only. Never floor to spot-based levels:
+        # SL/TP exits (e.g. 9.30 on a far-OTM option) must execute exactly,
+        # else a spot*1.5% floor (~42) silently destroys every stop-loss.
+        exit_prem = max(float(exit_prem or 0), 0.05)
         exit_costs = TransactionCosts.calculate(exit_prem * qty, txn_type == "buy", self.is_live)
         if txn_type == "buy":
             pnl = (exit_prem * qty - exit_costs["total"]) - entry["total_cost"]
@@ -1044,6 +1051,8 @@ class BacktestEngine:
                         "exit_price": exit.get("price", 0),
                         "pnl": pnl,
                         "pnl_formatted": f"₹{pnl:,.2f}",
+                        "exit_reason": exit.get("reason", ""),
+                        "reason": exit.get("reason", ""),
                         "is_spread": True,
                     })
                 else:
@@ -1064,6 +1073,8 @@ class BacktestEngine:
                         "exit_price": exit.get("price", 0),
                         "pnl": pnl,
                         "pnl_formatted": f"₹{pnl:,.2f}",
+                        "exit_reason": exit.get("reason", ""),
+                        "reason": exit.get("reason", ""),
                     })
             equity.append(capital)
         total_return = capital - self.initial_capital

@@ -186,9 +186,10 @@ class HistoricalReplayEngine:
                     self.kill_switch_on = True
                 self.pending_exit = None
             
-            # Check SL/TP
+            # Check SL/TP on every bar first (daily bars are all day-close;
+            # skipping SL on is_last meant intraday SL never triggered).
             has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
-            if has_open and not (trade_mode == "intraday" and is_last):
+            if has_open:
                 open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
                 entry = self.trades[open_trade_idx]
                 if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
