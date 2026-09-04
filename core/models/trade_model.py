@@ -37,6 +37,51 @@ class TradeModel:
             [user_id],
         )
 
+    def _infer_expiry(self, entry_date: str) -> str:
+        """Weekly expiry (next Thursday on/after entry) for trades missing expiry_date."""
+        import datetime as _dt
+        try:
+            d = _dt.datetime.strptime(str(entry_date or "")[:10], "%Y-%m-%d").date()
+        except Exception:
+            d = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
+        days_ahead = (3 - d.weekday()) % 7
+        return (d + _dt.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+    def close_expired_trades(self, user_id=1) -> int:
+        """Auto-exit open paper trades whose option expiry has passed.
+        Missing expiry_date is inferred (weekly Thursday) and stored back,
+        so trading history always shows full detail."""
+        today = self._ist_today()
+        try:
+            opens = self.db.fetch_all(
+                "SELECT * FROM paper_trades WHERE user_id=? AND status='open'", [user_id]
+            )
+        except Exception:
+            return 0
+        n = 0
+        for t in opens:
+            try:
+                exp = str(t.get("expiry_date") or "")
+                if len(exp) < 10:
+                    exp = self._infer_expiry(t.get("entry_date") or today)
+                    try:
+                        self.db.execute("UPDATE paper_trades SET expiry_date=? WHERE id=?", [exp, t["id"]])
+                    except Exception:
+                        pass
+                if exp[:10] >= today:
+                    continue
+                cur = self.get_option_premium(
+                    t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
+                    iv=t.get("entry_iv"),
+                )
+                if not cur or cur <= 0:
+                    cur = t["entry_price"]
+                self.close_trade(t["id"], float(cur), today, exit_status="expiry")
+                n += 1
+            except Exception:
+                continue
+        return n
+
     def close_max_hold_trades(self, user_id=1, max_days: int = 30) -> int:
         """One-month max holding: auto-close paper trades open longer than max_days.
         Exit at current premium so history/P&L stays correct."""

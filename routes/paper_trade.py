@@ -42,9 +42,10 @@ class TradeModeRequest(BaseModel):
 @router.get("/open")
 def get_open_trades():
     trade_model = TradeModel()
-    # One-month max holding: close trades open >30 days before listing
+    # One-month max holding + expiry auto-exit before listing
     try:
         trade_model.close_max_hold_trades()
+        trade_model.close_expired_trades()
     except Exception:
         pass
     positions = trade_model.get_open_positions_with_pnl(auto_exit=False)
