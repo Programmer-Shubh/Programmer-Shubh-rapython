@@ -306,6 +306,16 @@ class BacktestEngine:
                     result["vwap"] = self.indicators.calculate_vwap(historical, params.get("period", 20), float(params.get("multiplier", 2.0)))
                 except Exception:
                     result["vwap"] = {}
+            elif iid == "heikin_ashi":
+                try:
+                    result["heikin"] = self.indicators.calculate_heikin_ashi(historical)
+                except Exception:
+                    result["heikin"] = {}
+            elif iid == "range_breakout":
+                try:
+                    result["rangebo"] = self.indicators.calculate_range_breakout(historical, int(params.get("period", 20) or 20))
+                except Exception:
+                    result["rangebo"] = {}
         return result
 
     def _get_indicator_value(self, indicator, i, close, historical, pre_calc):
@@ -421,6 +431,14 @@ class BacktestEngine:
             sig = pre_calc["oi"].get("signal", [])
             if modes.get("open_interest","both") != "bearish" and effective_idx < len(sig) and sig[effective_idx] == 1:
                 return True
+        if "heikin" in pre_calc:
+            sig = pre_calc["heikin"].get("signal", [])
+            if modes.get("heikin_ashi","both") != "bearish" and effective_idx < len(sig) and sig[effective_idx] == 1:
+                return True
+        if "rangebo" in pre_calc:
+            sig = pre_calc["rangebo"].get("signal", [])
+            if modes.get("range_breakout","both") != "bearish" and effective_idx < len(sig) and sig[effective_idx] == 1:
+                return True
         return False
 
     def _get_sell_signal(self, i, pre_calc, historical, exit_conditions):
@@ -498,6 +516,14 @@ class BacktestEngine:
         if "oi" in pre_calc:
             sig = pre_calc["oi"].get("signal", [])
             if modes.get("open_interest","both") != "bullish" and effective_idx < len(sig) and sig[effective_idx] == -1:
+                sell = sell or True
+        if "heikin" in pre_calc:
+            sig = pre_calc["heikin"].get("signal", [])
+            if modes.get("heikin_ashi","both") != "bullish" and effective_idx < len(sig) and sig[effective_idx] == -1:
+                sell = sell or True
+        if "rangebo" in pre_calc:
+            sig = pre_calc["rangebo"].get("signal", [])
+            if modes.get("range_breakout","both") != "bullish" and effective_idx < len(sig) and sig[effective_idx] == -1:
                 sell = sell or True
         if not pre_calc:
             sell = True

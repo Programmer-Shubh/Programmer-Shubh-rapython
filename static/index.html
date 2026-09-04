@@ -376,26 +376,15 @@
                 </div>
             </div>
             <div class="card mt-3">
-                <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-cpu"></i> AI Indicators</strong><small class="text-muted">Select indicators to use in backtest</small></div>
+                <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-cpu"></i> Indicators</strong><small class="text-muted">Signal auto from Position (Buy CE/Sell PE=Bullish) — only set inputs</small></div>
                 <div class="card-body p-2">
-                    <div class="row g-2">
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-rsi" checked> RSI <small class="text-muted">(14)</small></label><div class="d-flex gap-1 mt-1"><input type="number" class="form-control form-control-sm" id="ind-rsi-p" value="14" min="5" max="50" style="width:60px"><select class="form-select form-select-sm" id="ind-rsi-mode" style="width:70px"><option value="both" selected>Both</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option></select></div></div>
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-ema"> EMA <small class="text-muted">(50)</small></label><div class="d-flex gap-1 mt-1"><input type="number" class="form-control form-control-sm" id="ind-ema-p" value="50" min="5" max="200" style="width:60px"><select class="form-select form-select-sm" id="ind-ema-mode" style="width:70px"><option value="both" selected>Both</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option></select></div></div>
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-macd"> MACD</label><select class="form-select form-select-sm mt-1" id="ind-macd-mode" style="width:80px"><option value="both" selected>Both</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option></select></div>
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-supertrend" checked> SuperTrend <small class="text-muted">(10,3) Bullish/Bearish</small></label><div class="d-flex gap-1 mt-1"><input type="number" class="form-control form-control-sm" id="ind-st-p" value="10" style="width:60px"><input type="number" class="form-control form-control-sm" id="ind-st-m" value="3" step="0.5" style="width:60px"><select class="form-select form-select-sm" id="ind-st-mode" style="width:70px"><option value="both" selected>Both</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option></select></div><small class="text-muted" style="font-size:10px">Close&gt;ST Bullish / Close&lt;ST Bearish</small></div>
+                    <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
+                        <div style="min-width:180px;flex:1"><label class="form-label small">Search Indicator</label><input type="text" class="form-control form-control-sm" id="q-ind-search" placeholder="Type to search 90+ indicators..." oninput="renderQuantOptions()"></div>
+                        <div><label class="form-label small">Indicator</label><select class="form-select form-select-sm" id="q-ind-select" style="min-width:200px"></select></div>
+                        <div><button class="btn btn-sm btn-primary" onclick="addQuantIndicator()">+ Add Indicator</button></div>
                     </div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-kama"> KAMA <small class="text-muted badge bg-primary">AI</small></label><div class="d-flex gap-1 mt-1"><input type="number" class="form-control form-control-sm" id="ind-kama-fast" value="10" style="width:60px" title="fast"><input type="number" class="form-control form-control-sm" id="ind-kama-slow" value="30" style="width:60px" title="slow"></div></div>
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-hmm"> HMM Regime <small class="text-muted badge bg-primary">AI</small></label><input type="number" class="form-control form-control-sm mt-1" id="ind-hmm-n" value="3" min="2" max="5" style="width:60px" title="n_components"></div>
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-dbb"> Dynamic Bollinger <small class="text-muted badge bg-primary">AI</small></label><input type="number" class="form-control form-control-sm mt-1" id="ind-dbb-p" value="20" style="width:60px"></div>
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-mlrsi"> ML-RSI <small class="text-muted badge bg-primary">AI</small></label><input type="number" class="form-control form-control-sm mt-1" id="ind-mlrsi-p" value="14" style="width:60px"></div>
-                    </div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-mlsig"> ML Signal Filter <small class="text-muted badge bg-primary">AI</small></label></div>
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-neural"> Neural Network <small class="text-muted badge bg-warning">NEW</small></label><input type="number" class="form-control form-control-sm mt-1" id="ind-neural-p" value="14" style="width:60px"><select class="form-select form-select-sm mt-1" id="ind-neural-mode" style="width:80px"><option value="both" selected>Both</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option></select></div>
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-volind"> Volume <small class="text-muted badge bg-warning">NEW</small></label><input type="number" class="form-control form-control-sm mt-1" id="ind-volind-p" value="20" style="width:60px"><select class="form-select form-select-sm mt-1" id="ind-volind-mode" style="width:80px"><option value="both" selected>Both</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option></select></div>
-                        <div class="col-md-3"><label class="form-check"><input type="checkbox" class="form-check-input" id="ind-oi"> Open Interest <small class="text-muted badge bg-warning">NEW</small></label><input type="number" class="form-control form-control-sm mt-1" id="ind-oi-p" value="20" style="width:60px"><select class="form-select form-select-sm mt-1" id="ind-oi-mode" style="width:80px"><option value="both" selected>Both</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option></select></div>
-                    </div>
+                    <div style="overflow-x:auto"><table class="table table-sm mb-0" id="q-ind-table"><thead><tr><th>Indicator</th><th>Params</th><th>Candle Interval</th><th>Field</th><th>Signal</th><th></th></tr></thead><tbody></tbody></table></div>
+                    <small class="text-muted">Like quantman.trade: SuperTrend(10,3), RSI(14), EMA, MACD, Bollinger, VWAP, Volume, OI — candle 1m to 1h, Equity/Future field.</small>
                 </div>
             </div>
             <div class="row mt-3 align-items-end">
@@ -766,22 +755,39 @@
     async function updateSL(id,v){await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:parseFloat(v)})});}
     async function runSim(){alert('Simulation: Checking all open trades for SL/TP...');await loadTrades();}
 
+    // Quantman-style indicator builder: Add -> params -> candle interval -> field
+    const QUANT_IND_DEFS=[
+        {id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',def:10},{key:'multiplier',label:'Multiplier',def:3}]},
+        {id:'rsi',name:'RSI',params:[{key:'period',label:'Period',def:14}]},
+        {id:'ema',name:'EMA',params:[{key:'period',label:'Period',def:50}]},
+        {id:'macd',name:'MACD',params:[{key:'fast',label:'Fast',def:12},{key:'slow',label:'Slow',def:26},{key:'signal',label:'Signal',def:9}]},
+        {id:'dynamic_bollinger',name:'Bollinger Bands',params:[{key:'period',label:'Period',def:20}]},
+        {id:'vwap',name:'VWAP',params:[{key:'period',label:'Period',def:20},{key:'multiplier',label:'Multiplier',def:2}]},
+        {id:'kama',name:'KAMA',params:[{key:'fast_period',label:'Fast',def:10},{key:'slow_period',label:'Slow',def:30}]},
+        {id:'hmm_regime',name:'HMM Regime',params:[{key:'n_components',label:'States',def:3}]},
+        {id:'volume_indicator',name:'Volume SMA',params:[{key:'period',label:'Period',def:20}]},
+        {id:'open_interest',name:'Open Interest',params:[{key:'period',label:'Period',def:20}]},
+        {id:'ml_rsi',name:'ML-RSI',params:[{key:'period',label:'Period',def:14}]},
+        {id:'heikin_ashi',name:'Heikin-Ashi Very Bullish/Bearish',params:[]},
+        {id:'range_breakout',name:'Range Breakout',params:[{key:'period',label:'Period',def:20}]},
+        {id:'ml_signal_filter',name:'ML Signal Filter',params:[]},
+        {id:'neural_network',name:'Neural Network',params:[{key:'period',label:'Period',def:14}]},
+    ];
+    const QUANT_CANDLES=[['1','1 minute'],['3','3 minutes'],['5','5 minutes'],['15','15 minutes'],['30','30 minutes'],['45','45 minutes'],['60','1 hour']];
+    let quantIndicators=[
+        {id:'rsi',name:'RSI',params:[{key:'period',label:'Period',val:14}],candle:'5',field:'equity',mode:'both'},
+        {id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',val:10},{key:'multiplier',label:'Multiplier',val:3}],candle:'5',field:'equity',mode:'both'},
+    ];
+    function renderQuantOptions(){const q=(document.getElementById('q-ind-search').value||'').toLowerCase();const sel=document.getElementById('q-ind-select');sel.innerHTML='';QUANT_IND_DEFS.filter(d=>d.name.toLowerCase().includes(q)).forEach(d=>{sel.innerHTML+=`<option value="${d.id}">${d.name}</option>`;});}
+    function addQuantIndicator(){const id=document.getElementById('q-ind-select').value;const def=QUANT_IND_DEFS.find(d=>d.id===id);if(!def)return;quantIndicators.push({id:def.id,name:def.name,params:def.params.map(p=>({key:p.key,label:p.label,val:p.def})),candle:'5',field:'equity',mode:'both'});renderQuantTable();}
+    function removeQuantIndicator(i){quantIndicators.splice(i,1);renderQuantTable();}
+    function renderQuantTable(){const autoDir=autoMode();const autoBadge=autoDir==='bullish'?'<span class="badge bg-success">Auto: Bullish</span>':'<span class="badge bg-danger">Auto: Bearish</span>';const tb=document.querySelector('#q-ind-table tbody');if(!tb)return;tb.innerHTML=quantIndicators.map((q,i)=>{const pHtml=(q.params||[]).map((p,pi)=>`<label class="small text-muted me-1">${p.label}<input type="number" class="form-control form-control-sm d-inline-block ms-1" style="width:60px" value="${p.val}" step="any" onchange="quantIndicators[${i}].params[${pi}].val=this.value"></label>`).join(' ');const cOpts=QUANT_CANDLES.map(c=>`<option value="${c[0]}" ${q.candle===c[0]?'selected':''}>${c[1]}</option>`).join('');return `<tr><td class="fw-bold small">${q.name}</td><td>${pHtml||'<span class="text-muted small">auto</span>'}</td><td><select class="form-select form-select-sm" onchange="quantIndicators[${i}].candle=this.value">${cOpts}</select></td><td><select class="form-select form-select-sm" onchange="quantIndicators[${i}].field=this.value"><option value="equity" ${q.field==='equity'?'selected':''}>Equity</option><option value="future" ${q.field==='future'?'selected':''}>Future</option></select></td><td>${autoBadge}</td><td><button class="btn btn-sm btn-danger" onclick="removeQuantIndicator(${i})"><i class="bi bi-x"></i></button></td></tr>`;}).join('')||'<tr><td colspan="6" class="text-muted small">No indicators — Add one above (backtest uses default RSI+SuperTrend).</td></tr>';}
+    // Auto direction from Position: Buy CE / Sell PE = Bullish, Sell CE / Buy PE = Bearish (quantman style)
+    function autoMode(){try{let txn='',opt='';if(typeof stratLegs!=='undefined'&&stratLegs.length){txn=(stratLegs[0].transaction||'').toLowerCase();opt=(stratLegs[0].option_type||'').toUpperCase();}else{txn=(document.getElementById('s-position').value||'').toLowerCase();opt=(document.getElementById('s-opt').value||'').toUpperCase();}if((txn==='buy'&&opt==='CE')||(txn==='sell'&&opt==='PE'))return 'bullish';return 'bearish';}catch(e){return 'both';}}
+    setTimeout(()=>{try{renderQuantOptions();renderQuantTable();const sp=document.getElementById('s-position'),so=document.getElementById('s-opt');if(sp)sp.addEventListener('change',renderQuantTable);if(so)so.addEventListener('change',renderQuantTable);}catch(e){}},500);
     function collectIndicators(){
-        const ind=[];
-        const addMode=(p, id)=>{const m=document.getElementById(id)?.value||'both'; p.mode=m; return p;};
-        if(document.getElementById('ind-rsi')?.checked) ind.push({id:'rsi',params:addMode({period:parseInt(document.getElementById('ind-rsi-p').value)||14}, 'ind-rsi-mode')});
-        if(document.getElementById('ind-ema')?.checked) ind.push({id:'ema',params:addMode({period:parseInt(document.getElementById('ind-ema-p').value)||50}, 'ind-ema-mode')});
-        if(document.getElementById('ind-macd')?.checked) ind.push({id:'macd',params:addMode({fast:12,slow:26,signal:9}, 'ind-macd-mode')});
-        if(document.getElementById('ind-supertrend')?.checked) ind.push({id:'supertrend',params:addMode({period:parseInt(document.getElementById('ind-st-p').value)||10,multiplier:parseFloat(document.getElementById('ind-st-m').value)||3}, 'ind-st-mode')});
-        if(document.getElementById('ind-kama')?.checked) ind.push({id:'kama',params:{fast_period:parseInt(document.getElementById('ind-kama-fast').value)||10,slow_period:parseInt(document.getElementById('ind-kama-slow').value)||30}});
-        if(document.getElementById('ind-hmm')?.checked) ind.push({id:'hmm_regime',params:{n_components:parseInt(document.getElementById('ind-hmm-n').value)||3}});
-        if(document.getElementById('ind-dbb')?.checked) ind.push({id:'dynamic_bollinger',params:{period:parseInt(document.getElementById('ind-dbb-p').value)||20,lookforward:5}});
-        if(document.getElementById('ind-mlrsi')?.checked) ind.push({id:'ml_rsi',params:{period:parseInt(document.getElementById('ind-mlrsi-p').value)||14}});
-        if(document.getElementById('ind-mlsig')?.checked) ind.push({id:'ml_signal_filter',params:{fast_ema:9,slow_ema:21,rsi_period:14,ml_weight:0.3}});
-        if(document.getElementById('ind-neural')?.checked) ind.push({id:'neural_network',params:addMode({period:parseInt(document.getElementById('ind-neural-p').value)||14}, 'ind-neural-mode')});
-        if(document.getElementById('ind-volind')?.checked) ind.push({id:'volume_indicator',params:addMode({period:parseInt(document.getElementById('ind-volind-p').value)||20}, 'ind-volind-mode')});
-        if(document.getElementById('ind-oi')?.checked) ind.push({id:'open_interest',params:addMode({period:parseInt(document.getElementById('ind-oi-p').value)||20}, 'ind-oi-mode')});
-        return ind;
+        const autoDir=autoMode();
+        return quantIndicators.map(q=>{const p={};(q.params||[]).forEach(pr=>{const v=parseFloat(pr.val);p[pr.key]=isNaN(v)?0:v;});p.mode=autoDir;p.candle=q.candle||'5';p.field=q.field||'equity';return {id:q.id,params:p};});
     }
     async function runBacktest(){
         const btn=document.getElementById('s-run');const orig=btn.innerHTML;
@@ -923,6 +929,7 @@
         card.style.display='block';
         tbody.innerHTML=stratLegs.map((l,i)=>`<tr><td>${i+1}</td><td><span class="badge ${l.transaction==='buy'?'badge-buy':'badge-sell'}">${l.transaction.toUpperCase()}</span></td><td>${l.option_type}</td><td>${l.strike_selection}${l.strike_selection==='delta'?'('+l.delta_target+')':''}${l.otm_distance?'+'+l.otm_distance:''}</td><td>${l.lots}</td><td>${l.expiry}</td><td><button class="btn btn-sm btn-danger" onclick="removeLeg(${i})"><i class="bi bi-x"></i></button></td></tr>`).join('');
         updatePayoff();
+        try{if(typeof renderQuantTable==='function')renderQuantTable();}catch(e){}
     }
     function addLeg(){
         const lots=parseInt(document.getElementById('s-lots').value)||1;
@@ -1012,8 +1019,8 @@
         document.getElementById('s-reentry-tp').value='RE ASAP';
         document.getElementById('s-trail').value='Lock';
         clearLegs();
-        // reset AI to quant default: RSI+KAMA+HMM
-        document.querySelectorAll('#ind-rsi,#ind-kama,#ind-hmm').forEach(c=>c.checked=true);
+        // reset to quant default: RSI + SuperTrend
+        try{quantIndicators=[{id:'rsi',name:'RSI',params:[{key:'period',label:'Period',val:14}],candle:'5',field:'equity',mode:'both'},{id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',val:10},{key:'multiplier',label:'Multiplier',val:3}],candle:'5',field:'equity',mode:'both'}];renderQuantTable();}catch(e){}
     }
 
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3">No strategies yet. Create your first strategy!</p>';return;}let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const statusCls=s.status==='active'?'active':s.status==='draft'?'draft':'paused';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span class="badge badge-${statusCls}">${s.status}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px"><button class="btn btn-sm btn-success" onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})">Edit</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}

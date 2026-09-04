@@ -446,3 +446,55 @@ class IndicatorEngine:
             else:
                 sig[i] = 0
         return {"sma": sma, "signal": sig, "oi": ois}
+
+    def calculate_heikin_ashi(self, data: List[Dict]) -> Dict:
+        """Heikin-Ashi candles + quantman-style trend signal.
+        Very Bullish (+1): green HA candle with (almost) no lower wick.
+        Very Bearish (-1): red HA candle with (almost) no upper wick.
+        Else 0 (indecision/doji)."""
+        n = len(data)
+        ha_open, ha_close, ha_high, ha_low, sig = [], [], [], [], []
+        prev_o = prev_c = None
+        for d in data:
+            o = float(d.get("open_price", 0) or 0)
+            h = float(d.get("high_price", 0) or 0)
+            l = float(d.get("low_price", 0) or 0)
+            c = float(d.get("close_price", 0) or 0)
+            hc = (o + h + l + c) / 4.0
+            ho = (o + c) / 2.0 if prev_o is None else (prev_o + prev_c) / 2.0
+            hh = max(h, ho, hc)
+            hl = min(l, ho, hc)
+            ha_open.append(ho); ha_close.append(hc); ha_high.append(hh); ha_low.append(hl)
+            rng = max(hh - hl, 1e-9)
+            if hc > ho and (ho - hl) / rng <= 0.10:
+                sig.append(1)   # very bullish: no lower wick
+            elif hc < ho and (hh - ho) / rng <= 0.10:
+                sig.append(-1)  # very bearish: no upper wick
+            else:
+                sig.append(0)
+            prev_o, prev_c = ho, hc
+        return {"open": ha_open, "close": ha_close, "high": ha_high, "low": ha_low, "signal": sig}
+
+    def calculate_range_breakout(self, data: List[Dict], period: int = 20) -> Dict:
+        """Donchian-style range breakout (quantman Range Breakout indicator).
+        Upper = highest high of last `period` bars (excluding current),
+        Lower = lowest low. Breakout signal: +1 close>upper, -1 close<lower."""
+        n = len(data)
+        highs = [float(d.get("high_price", 0) or 0) for d in data]
+        lows = [float(d.get("low_price", 0) or 0) for d in data]
+        closes = [float(d.get("close_price", 0) or 0) for d in data]
+        upper = [None] * n
+        lower = [None] * n
+        sig = [0] * n
+        for i in range(n):
+            if i < period:
+                continue
+            uh = max(highs[i - period:i])
+            ll = min(lows[i - period:i])
+            upper[i] = uh
+            lower[i] = ll
+            if closes[i] > uh:
+                sig[i] = 1
+            elif closes[i] < ll:
+                sig[i] = -1
+        return {"upper": upper, "lower": lower, "signal": sig}
