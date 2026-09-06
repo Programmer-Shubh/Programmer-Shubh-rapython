@@ -13,6 +13,13 @@ os.environ.setdefault("DB_PATH", os.path.join(os.path.dirname(__file__), "data",
 async def _start_background_refresh():
     from core.services.data_refresher import run_refresh_loop
     asyncio.get_running_loop().create_task(run_refresh_loop())
+    try:
+        import os as _os
+        if _os.environ.get("SELF_URL"):
+            from routes.keepalive import self_ping_loop
+            asyncio.get_running_loop().create_task(self_ping_loop())
+    except Exception:
+        pass
 
 
 @asynccontextmanager
@@ -44,7 +51,7 @@ app.add_middleware(
 db = Database.get_instance()
 db.init_schema()
 
-from routes import dashboard, option_chain, paper_trade, strategy_builder, scanner, broker, webhook, websocket, email_alerts, strategies
+from routes import dashboard, option_chain, paper_trade, strategy_builder, scanner, broker, webhook, websocket, email_alerts, strategies, custom_code, keepalive
 
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(option_chain.router, prefix="/api/chain", tags=["Option Chain"])
@@ -56,6 +63,8 @@ app.include_router(webhook.router, prefix="/api/webhook", tags=["Webhook"])
 app.include_router(websocket.router, prefix="/api/ws", tags=["Live WebSocket"])
 app.include_router(email_alerts.router, prefix="/api/email-alerts", tags=["Email Alerts"])
 app.include_router(strategies.router, prefix="/api/strategies", tags=["Strategies"])
+app.include_router(custom_code.router, prefix="/api/custom-code", tags=["Custom Code"])
+app.include_router(keepalive.router, prefix="/api/keepalive", tags=["Keep-Alive"])
 
 
 @app.get("/")

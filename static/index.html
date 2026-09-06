@@ -187,6 +187,7 @@
         <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Builder</button>
+        <button onclick="go('custom',this)"><i class="bi bi-code-slash"></i> Python Lab</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
         <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
         <button onclick="go('robot',this)"><i class="bi bi-robot"></i> Call/Put Robot</button>
@@ -404,6 +405,44 @@
             </div>
             </div><!-- end custom-form -->
         </div>
+        <!-- PYTHON LAB (Custom Code Backtest) -->
+        <div id="pg-custom" class="pg hidden">
+            <div class="card mb-2" style="border-left:4px solid #6f42c1">
+                <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                    <div class="d-flex gap-2 align-items-center">
+                        <h4 class="fw-bold mb-0"><i class="bi bi-code-slash"></i> Python Strategy Lab</h4><span class="badge" style="background:#6f42c1">Sandboxed</span><small class="text-muted ms-2">Paste custom Python code, backtest on historical data</small>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="pyLoadTemplate()"><i class="bi bi-file-earmark-code"></i> Load Template</button>
+                        <button class="btn btn-sm text-white" style="background:#6f42c1" id="py-run" onclick="pyRunBacktest()"><i class="bi bi-play-fill"></i> Run Backtest</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card mb-2"><div class="card-body p-2">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-2"><label class="form-label small">Symbol</label><input type="text" class="form-control form-control-sm" id="py-sym" value="NIFTY"></div>
+                    <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" class="form-control form-control-sm" id="py-start" value="2026-08-01"></div>
+                    <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" class="form-control form-control-sm" id="py-end" value="2026-08-20"></div>
+                    <div class="col-md-2"><label class="form-label small">Capital (Rs)</label><input type="number" class="form-control form-control-sm" id="py-cap" value="100000"></div>
+                    <div class="col-md-4"><small class="text-muted">Data input: pandas DataFrame <code>data</code> with columns <code>date, open, high, low, close, volume</code>. Allowed libs: <code>pandas, numpy, backtrader</code> (+math/statistics/datetime). Network, files &amp; system calls are blocked; 30s time limit.</small></div>
+                </div>
+            </div></div>
+            <div class="card mb-2"><div class="card-header py-1"><strong class="small">Strategy Code</strong> <small class="text-muted">- define <code>run(data)</code> returning <code>{'trades': [...]}</code>, or a backtrader Strategy named <code>CustomStrategy</code></small></div>
+                <div class="card-body p-1"><textarea id="py-code" spellcheck="false" style="width:100%;min-height:340px;font-family:Consolas,Menlo,monospace;font-size:12.5px;background:#1e1e1e;color:#d4d4d4;border:0;padding:10px;white-space:pre" placeholder="Paste your Python strategy here, or click Load Template..."></textarea></div>
+            </div>
+            <div id="py-results" class="hidden">
+                <div class="row mt-2" id="py-metrics"></div>
+                <div class="card mt-2"><div class="card-body p-2"><div id="py-eq" style="height:200px"></div></div></div>
+                <div class="card mt-2"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="py-tl" style="overflow-x:auto"></div></div>
+                <div class="card mt-2"><div class="card-header py-1"><strong class="small">Script Output / Errors</strong></div><div class="card-body p-2"><pre id="py-logs" class="small mb-0" style="white-space:pre-wrap;max-height:220px;overflow:auto"></pre></div></div>
+            </div>
+            <div class="card mt-2"><div class="card-header py-1"><strong class="small"><i class="bi bi-alarm"></i> Keep-Alive (cron-job.org) - stop Render free tier from sleeping</strong></div>
+                <div class="card-body p-2 small">
+                    <div>Ping URL: <code>https://ratrade.onrender.com/api/keepalive/ping</code> <button class="btn btn-sm btn-outline-primary ms-2" onclick="kaTest()">Test Ping</button> <span id="ka-status" class="ms-2 text-muted"></span></div>
+                    <ol class="mb-0 mt-1 text-muted"><li>Create free account at <a href="https://cron-job.org" target="_blank">cron-job.org</a></li><li>New cronjob titled <strong>RaTrade keep-alive</strong></li><li>Address = ping URL above, every <strong>5 minutes</strong></li><li>Save + Enable. Site stays awake while pings arrive.</li></ol>
+                </div>
+            </div>
+        </div>
         <!-- BROKERS -->
         <div id="pg-brokers" class="pg hidden">
             <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -593,7 +632,7 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy')loadStrategySymbols();if(id==='webhook')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy')loadStrategySymbols();if(id==='custom')pyLabInit();if(id==='webhook')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -1381,6 +1420,40 @@
     }
 
     function closeAccountModal(){document.getElementById('broker-account-modal').classList.add('hidden');}
+
+    // ===== Python Strategy Lab (sandboxed custom-code backtest) =====
+    async function pyLabInit(){try{const t=await A('/api/custom-code/template');if(t&&t.template&&!document.getElementById('py-code').value)document.getElementById('py-code').value=t.template;}catch(e){}}
+    async function pyLoadTemplate(){try{const t=await A('/api/custom-code/template');if(t&&t.template){document.getElementById('py-code').value=t.template;}}catch(e){alert('Template load failed');}}
+    async function pyRunBacktest(){
+        const btn=document.getElementById('py-run');const orig=btn.innerHTML;btn.innerHTML='<span class="spinner"></span> Running...';
+        const body={code:document.getElementById('py-code').value,symbol:document.getElementById('py-sym').value||'NIFTY',start_date:document.getElementById('py-start').value,end_date:document.getElementById('py-end').value,initial_capital:parseFloat(document.getElementById('py-cap').value)||100000};
+        if(!body.code.trim()){btn.innerHTML=orig;alert('Paste your Python strategy code first (or Load Template)');return;}
+        if(!body.start_date||!body.end_date){btn.innerHTML=orig;alert('Select start and end date');return;}
+        document.getElementById('py-results').classList.remove('hidden');
+        document.getElementById('py-metrics').innerHTML='<p class="text-muted p-2">Running in secure sandbox (up to 30s)...</p>';
+        document.getElementById('py-tl').innerHTML='';document.getElementById('py-logs').textContent='';
+        try{
+            const r=await P('/api/custom-code/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            btn.innerHTML=orig;
+            if(!r||r.error){document.getElementById('py-metrics').innerHTML='<div class="alert alert-danger py-2 small mb-2"><strong>Blocked / Error:</strong> '+((r&&r.error)||'No response')+'</div>';return;}
+            const m=r.metrics;
+            const cls=m.net_pnl>=0?'price-up':'price-down';
+            document.getElementById('py-metrics').innerHTML=`<div class="col"><div class="card stat-card-sm"><div class="label">Net PnL</div><div class="value ${cls}">${F(m.net_pnl)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Trades</div><div class="value">${m.total_trades}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}%</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Profit Factor</div><div class="value">${m.profit_factor}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Drawdown</div><div class="value price-down">${m.max_drawdown}%</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Sharpe</div><div class="value">${m.sharpe_ratio}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Final Capital</div><div class="value">${F(m.final_capital)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Bars</div><div class="value">${r.bars||'-'}</div></div></div>`;
+            if(r.equity_curve&&r.equity_curve.length)Plotly.newPlot('py-eq',[{y:r.equity_curve,type:'scatter',line:{color:'#6f42c1',width:2}}],{title:'Equity Curve - '+(r.symbol||''),paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});
+            const tl=r.trades||r.trade_list||[];
+            if(tl.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Entry Date</th><th>Exit Date</th><th>Side</th><th>Qty</th><th>Entry Price</th><th>Exit Price</th><th>P/L</th></tr></thead><tbody>';tl.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.entry_date||'-'}</td><td>${t.exit_date||'-'}</td><td>${t.side||'long'}</td><td>${t.qty||1}</td><td>${t.entry_price!=null?'Rs'+t.entry_price:'-'}</td><td>${t.exit_price!=null?'Rs'+t.exit_price:'-'}</td><td class="${C(t.pnl)}">${F(t.pnl)}</td></tr>`;});h+='</tbody></table>';document.getElementById('py-tl').innerHTML=h;}
+            else document.getElementById('py-tl').innerHTML='<p class="text-muted p-2 mb-0">No trades generated by the script.</p>';
+            document.getElementById('py-logs').textContent=r.logs||'(no script output)';
+        }catch(e){btn.innerHTML=orig;document.getElementById('py-metrics').innerHTML='<p class="text-danger p-2">Network error: '+(e.message||e)+'</p>';}
+    }
+    async function kaTest(){const s=document.getElementById('ka-status');s.textContent='pinging...';try{const r=await A('/api/keepalive/ping');s.textContent=(r&&r.status==='ok')?('OK - uptime '+Math.round(r.uptime_sec||0)+'s'):'Failed';}catch(e){try{const r2=await A(location.origin+'/api/keepalive/ping');s.textContent=(r2&&r2.status==='ok')?'OK (same origin)':'Failed';}catch(e2){s.textContent='Failed: '+e.message;}}}
 
     const BROKER_FIELD_LABELS={
         shoonya:{uid:'User ID',pwd:'Password',vc:'Vendor Code',apikey:'API Key',secret_code:'Secret Code',secret:'TOTP Secret (2FA)',actid:'Account ID'},
