@@ -22,20 +22,33 @@ class OptionScanner:
         self.indicators = IndicatorEngine()
         self.db = Database.get_instance()
 
-    def scan(self, symbols=None) -> dict:
+    # Dashboard ST+MACD lists show ONLY high-conviction 80/100 trades:
+    # 80 = breakout/breakdown(30) + MACD crossover(30) + volume/EMA confirm(20).
+    # Weak one-indicator scores (30-70) stay visible on the single-symbol
+    # endpoint but never enter the top-5 dashboard lists.
+    MIN_SCORE = 80
+
+    def scan(self, symbols=None, min_score: int = 80) -> dict:
         if symbols is None:
             symbols = FNO_SYMBOLS
+        try:
+            min_score = int(min_score)
+        except Exception:
+            min_score = 80
         bullish = []
         bearish = []
         for sym in symbols:
             result = self._analyze_symbol(sym)
+            if result.get('score', 0) < min_score:
+                continue
             if result['type'] == 'BUY':
                 bullish.append(result)
             elif result['type'] == 'SELL':
                 bearish.append(result)
         bullish.sort(key=lambda x: x['score'], reverse=True)
         bearish.sort(key=lambda x: x['score'], reverse=True)
-        return {'bullish': bullish[:5], 'bearish': bearish[:5], 'total_scanned': len(symbols)}
+        return {'bullish': bullish[:5], 'bearish': bearish[:5], 'total_scanned': len(symbols),
+                'min_score': min_score}
 
     def scan_vwap(self, symbols=None) -> dict:
         if symbols is None:

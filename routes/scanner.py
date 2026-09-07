@@ -77,10 +77,10 @@ def breakout_scanner(symbol: str):
 
 
 @router.get("/scan-all")
-def scan_all():
+def scan_all(min_score: int = 80):
     try:
         scanner = OptionScanner()
-        st_result = scanner.scan()
+        st_result = scanner.scan(min_score=min_score)
         vwap_result = scanner.scan_vwap()
         return {"st_macd": st_result, "vwap": vwap_result}
     except Exception as e:
