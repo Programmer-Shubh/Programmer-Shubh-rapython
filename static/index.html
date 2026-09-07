@@ -414,6 +414,7 @@
                     </div>
                     <div class="d-flex gap-2 align-items-center">
                         <button class="btn btn-sm btn-outline-secondary" onclick="pyLoadTemplate()"><i class="bi bi-file-earmark-code"></i> Load Template</button>
+                        <button class="btn btn-sm btn-outline-success" onclick="pyLoadPremium()"><i class="bi bi-currency-rupee"></i> Premium Sample</button>
                         <button class="btn btn-sm text-white" style="background:#6f42c1" id="py-run" onclick="pyRunBacktest()"><i class="bi bi-play-fill"></i> Run Backtest</button>
                     </div>
                 </div>
@@ -1422,8 +1423,114 @@
     function closeAccountModal(){document.getElementById('broker-account-modal').classList.add('hidden');}
 
     // ===== Python Strategy Lab (sandboxed custom-code backtest) =====
-    async function pyLabInit(){try{const t=await A('/api/custom-code/template');if(t&&t.template&&!document.getElementById('py-code').value)document.getElementById('py-code').value=t.template;}catch(e){}}
-    async function pyLoadTemplate(){try{const t=await A('/api/custom-code/template');if(t&&t.template){document.getElementById('py-code').value=t.template;}}catch(e){alert('Template load failed');}}
+    const PY_FALLBACK_TEMPLATE = `"""SMA crossover example (pandas mode).
+data columns: date, open, high, low, close, volume (oldest -> newest).
+Define run(data) returning {'trades': [...]}.
+"""
+import pandas as pd
+
+
+def run(data: pd.DataFrame):
+    fast = data["close"].rolling(10).mean()
+    slow = data["close"].rolling(30).mean()
+    trades = []
+    ot = None
+    for i in range(30, len(data)):
+        row = data.iloc[i]
+        if ot is None:
+            if fast.iloc[i] > slow.iloc[i] and fast.iloc[i-1] <= slow.iloc[i-1]:
+                ot = {"entry_date": str(row["date"]), "entry_price": float(row["close"])}
+        elif fast.iloc[i] < slow.iloc[i] and fast.iloc[i-1] >= slow.iloc[i-1]:
+            ot.update({"exit_date": str(row["date"]), "exit_price": float(row["close"]), "qty": 1})
+            trades.append(ot)
+            ot = None
+    if ot is not None:
+        last = data.iloc[-1]
+        ot.update({"exit_date": str(last["date"]), "exit_price": float(last["close"]), "qty": 1})
+        trades.append(ot)
+    return {"trades": trades}`;
+    async function pyFetchTemplate(){
+        let lastErr='template endpoint unreachable';
+        for(let a=0;a<3;a++){
+            try{const t=await A('/api/custom-code/template');if(t&&t.template)return t.template;lastErr='empty response';}
+            catch(e){lastErr=e.message||'network error';await new Promise(r=>setTimeout(r,700*(a+1)));}
+        }
+        throw new Error(lastErr);
+    }
+    async function pyLabInit(){try{const ed=document.getElementById('py-code');if(ed&&!ed.value){try{ed.value=await pyFetchTemplate();}catch(e){ed.value=PY_FALLBACK_TEMPLATE;}}}catch(e){}}
+    async function pyLoadTemplate(){const ed=document.getElementById('py-code');if(confirm('Editor me jo code hai wo replace ho jayega. Continue?')===false)return;try{ed.value=await pyFetchTemplate();}catch(e){ed.value=PY_FALLBACK_TEMPLATE;alert('Server template nahi mila ('+e.message+') - offline sample load kiya.');}}
+    const PY_PREMIUM_CODE = `"""Option-premium CE SELL (pandas mode, live chain nahi chahiye).
+Premium Black-Scholes se spot OHLC par estimate hota hai.
+Bearish filter: close < 20-day SMA. SL/TP rupaye me (premium points me convert).
+"""
+import pandas as pd
+import math
+
+LOT_SIZE = 75
+SL_RUPEES = 1500.0
+TP_RUPEES = 1000.0
+IV = 0.13
+DTE = 7
+OTM_PCT = 0.005
+MAX_HOLD = 5
+
+
+def _ncdf(x):
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def ce_premium(spot, strike, dte_days):
+    t = max(dte_days, 1) / 365.0
+    if spot <= 0 or strike <= 0:
+        return 0.0
+    s = math.sqrt(t)
+    d1 = (math.log(spot / strike) + (0.065 + 0.5 * IV * IV) * t) / (IV * s)
+    d2 = d1 - IV * s
+    return max(0.0, spot * _ncdf(d1) - strike * math.exp(-0.065 * t) * _ncdf(d2))
+
+
+def run(data):
+    sl_pts = SL_RUPEES / LOT_SIZE
+    tp_pts = TP_RUPEES / LOT_SIZE
+    sma = data["close"].rolling(20).mean()
+    trades = []
+    ot = None
+    for i in range(20, len(data)):
+        row = data.iloc[i]
+        if ot is None:
+            if float(row["close"]) < sma.iloc[i]:
+                spot = float(row["open"])
+                strike = round(spot * (1 + OTM_PCT) / 50.0) * 50.0
+                entry = ce_premium(spot, strike, DTE)
+                if entry < 5:
+                    continue
+                ot = {"idx": i, "strike": strike,
+                      "entry_date": str(row["date"]), "entry_price": entry,
+                      "sl": entry + sl_pts, "tp": max(1.0, entry - tp_pts)}
+        else:
+            rem = max(DTE - (i - ot["idx"]), 1)
+            prem_high = ce_premium(float(row["high"]), ot["strike"], rem)
+            prem_low = ce_premium(float(row["low"]), ot["strike"], rem)
+            exit_px = None
+            if prem_high >= ot["sl"]:
+                exit_px = ot["sl"]
+            elif prem_low <= ot["tp"]:
+                exit_px = ot["tp"]
+            elif i - ot["idx"] >= MAX_HOLD:
+                exit_px = ce_premium(float(row["close"]), ot["strike"], rem)
+            if exit_px is not None:
+                trades.append({"entry_date": ot["entry_date"], "exit_date": str(row["date"]),
+                               "entry_price": ot["entry_price"], "exit_price": exit_px,
+                               "qty": LOT_SIZE})
+                ot = None
+    if ot is not None:
+        last = data.iloc[-1]
+        exit_px = ce_premium(float(last["close"]), ot["strike"], 1)
+        trades.append({"entry_date": ot["entry_date"], "exit_date": str(last["date"]),
+                       "entry_price": ot["entry_price"], "exit_price": exit_px,
+                       "qty": LOT_SIZE})
+    return {"trades": trades}`;
+    function pyLoadPremium(){if(confirm('Editor me jo code hai wo replace ho jayega. Continue?')===false)return;document.getElementById('py-code').value=PY_PREMIUM_CODE;document.getElementById('py-code').scrollIntoView({block:'center'});}
     async function pyRunBacktest(){
         const btn=document.getElementById('py-run');const orig=btn.innerHTML;btn.innerHTML='<span class="spinner"></span> Running...';
         const body={code:document.getElementById('py-code').value,symbol:document.getElementById('py-sym').value||'NIFTY',start_date:document.getElementById('py-start').value,end_date:document.getElementById('py-end').value,initial_capital:parseFloat(document.getElementById('py-cap').value)||100000};
