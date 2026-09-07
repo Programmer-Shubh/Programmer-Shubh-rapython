@@ -80,6 +80,7 @@ class Database:
                     pnl_percent REAL DEFAULT 0,
                     status TEXT DEFAULT 'open',
                     trade_mode TEXT DEFAULT 'paper',
+                    trade_type TEXT DEFAULT 'intraday',
                     exit_status TEXT DEFAULT 'manual',
                     entry_iv REAL DEFAULT NULL,
                     created_at TEXT DEFAULT (datetime('now')),
@@ -112,6 +113,7 @@ class Database:
                     name TEXT,
                     strategy_id INTEGER,
                     mode TEXT DEFAULT 'paper',
+                    trade_type TEXT DEFAULT 'intraday',
                     status TEXT DEFAULT 'stopped',
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now'))
@@ -150,6 +152,15 @@ class Database:
             cols = {r[1] for r in self.fetch_all("PRAGMA table_info(paper_trades)")}
             if "entry_iv" not in cols:
                 self.execute("ALTER TABLE paper_trades ADD COLUMN entry_iv REAL DEFAULT NULL")
+            if "trade_type" not in cols:
+                self.execute("ALTER TABLE paper_trades ADD COLUMN trade_type TEXT DEFAULT 'intraday'")
+        except Exception:
+            pass
+        # trade_type on auto_trades (intraday/positional for robot runs)
+        try:
+            cols = {r[1] for r in self.fetch_all("PRAGMA table_info(auto_trades)")}
+            if "trade_type" not in cols:
+                self.execute("ALTER TABLE auto_trades ADD COLUMN trade_type TEXT DEFAULT 'intraday'")
         except Exception:
             pass
 

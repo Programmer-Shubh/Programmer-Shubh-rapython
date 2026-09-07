@@ -21,6 +21,7 @@ class TradeRequest(BaseModel):
     quantity: int = 1
     stop_loss: float = 500.0
     take_profit: float = 1000.0
+    trade_type: str = "intraday"
 
 
 @router.get("/dates/{symbol}")
@@ -357,5 +358,6 @@ def place_trade(req: TradeRequest):
         "total_cost": costs["total"],
         "entry_date": req.date,
         "entry_iv": _model_iv(req.symbol),
+        "trade_type": req.trade_type,
     })
     return {"trade_id": trade_id, "entry_price": round(adj_premium, 2), "costs": costs}

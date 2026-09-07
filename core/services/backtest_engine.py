@@ -52,7 +52,9 @@ class BacktestEngine:
         self._entry_time = entry_time
         self._exit_time = exit_time
         self._early_exit_time = early_exit_time
-        trade_mode = advanced_options.get("trade_mode", "positional")
+        trade_mode = str(advanced_options.get("trade_mode", advanced_options.get("trade_type", "positional")) or "positional").lower()
+        if trade_mode not in ("intraday", "positional", "btst"):
+            trade_mode = "positional"
         max_holding = int(advanced_options.get("max_holding_bars", 20))
         # Intraday: hold max 5 bars for more trades like Quantman (positional holds longer)
         if trade_mode == "intraday":
@@ -84,7 +86,7 @@ class BacktestEngine:
         strike_sel = advanced_options.get("strike_selection", "otm")
         delta_target = advanced_options.get("delta_target")
         otm_dist = int(advanced_options.get("otm_distance", 2))
-        trade_mode = advanced_options.get("trade_mode", "positional")
+        # trade_mode set above (intraday/positional/btst); reused here
 
         closes = [h["close_price"] for h in historical]
         highs = [h["high_price"] for h in historical]
@@ -117,9 +119,16 @@ class BacktestEngine:
             is_last = nxt is None or nxt["trade_date"] != cur_date
             # Roll option expiry forward: a cached expiry on/before today collapses
             # Black-Scholes time to ~1 day, so premiums -> ~0 and SL/TP never hit.
+            # Positional holds are NOT rolled while a position is open into expiry:
+            # it is squared off on expiry day instead (see expiry block below).
+            exp_date = str(self.bt_expiry)[:10] if self.bt_expiry else ""
             try:
-                if self.bt_expiry and str(self.bt_expiry)[:10] < cur_date:
-                    self.bt_expiry = ""
+                if exp_date and exp_date < cur_date:
+                    if trade_mode != "intraday" and len(entries) > len(exits):
+                        pass  # held into expiry: square-off block handles it
+                    else:
+                        self.bt_expiry = ""
+                        exp_date = ""
             except Exception:
                 pass
 
@@ -214,6 +223,24 @@ class BacktestEngine:
                 daily_pnl += exits[-1]["pnl"]
                 if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
                     kill_switch_on = True
+
+            # Expiry-day square-off for positional carries (NO roll-over):
+            # if the open position is held on/after its contract expiry,
+            # exit at the day's close instead of shifting to the next expiry.
+            has_open = len(entries) > len(exits)
+            if has_open and trade_mode != "intraday" and exp_date and cur_date >= exp_date and is_last:
+                entry = entries[len(exits)]
+                if entry.get("is_spread"):
+                    self._close_spread(entries, exits, entry, "expiry_squareoff", cur_date)
+                else:
+                    exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                    self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff", cur_date, qty, txn_type)
+                daily_pnl += exits[-1]["pnl"]
+                if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
+                    kill_switch_on = True
+                self.bt_expiry = ""
+                exp_date = ""
 
             if nxt is not None:
                 bars_held = 0

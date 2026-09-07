@@ -20,6 +20,7 @@ class PlaceTradeRequest(BaseModel):
     stop_loss: float = 1500.0
     take_profit: float = 3000.0
     date: str = ""
+    trade_type: str = "intraday"
 
 
 class CloseTradeRequest(BaseModel):
@@ -42,10 +43,13 @@ class TradeModeRequest(BaseModel):
 @router.get("/open")
 def get_open_trades():
     trade_model = TradeModel()
-    # One-month max holding + expiry auto-exit before listing
+    # Auto-exits before listing: overnight gap SL/TP, expiry square-off,
+    # 30-day max hold, then 15:10 intraday-only square-off (positional carries)
     try:
+        trade_model.check_overnight_gap()
         trade_model.close_max_hold_trades()
         trade_model.close_expired_trades()
+        trade_model.close_intraday_trades()
     except Exception:
         pass
     positions = trade_model.get_open_positions_with_pnl(auto_exit=False)
@@ -69,6 +73,7 @@ def get_open_trades():
                 "sl": t["trade"]["stop_loss"],
                 "tp": t["trade"]["target"],
                 "trade_mode": t["trade"].get("trade_mode", "paper"),
+                "trade_type": t["trade"].get("trade_type", "intraday"),
                 "entry_date": t["trade"].get("entry_date", ""),
                 "expiry_date": t["trade"].get("expiry_date", ""),
             }
@@ -136,6 +141,7 @@ def place_trade(req: PlaceTradeRequest):
         "target": req.take_profit,
         "total_cost": costs["total"],
         "entry_date": req.date,
+        "trade_type": req.trade_type,
     })
     return {"trade_id": tid, "entry_price": round(adj_premium, 2), "costs": costs}
 

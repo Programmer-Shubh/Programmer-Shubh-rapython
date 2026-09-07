@@ -13,12 +13,19 @@ class TradeModel:
             self.db.execute("ALTER TABLE paper_trades ADD COLUMN entry_iv REAL DEFAULT NULL")
         except Exception:
             pass
+        try:
+            self.db.execute("ALTER TABLE paper_trades ADD COLUMN trade_type TEXT DEFAULT 'intraday'")
+        except Exception:
+            pass
+        tt = str(data.get("trade_type", "intraday") or "intraday").lower()
+        if tt not in ("intraday", "positional"):
+            tt = "intraday"
         return self.db.execute(
             """INSERT INTO paper_trades
                (user_id, strategy_id, symbol, option_type, strike_price, expiry_date,
                 transaction_type, quantity, lot_size, entry_price, stop_loss, target,
-                auto_action, total_cost, entry_date, trade_mode, entry_iv, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', datetime('now'), datetime('now'))""",
+                auto_action, total_cost, entry_date, trade_mode, trade_type, entry_iv, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', datetime('now'), datetime('now'))""",
             [
                 data.get("user_id", 1), data.get("strategy_id"), data["symbol"],
                 data["option_type"], data["strike_price"], data.get("expiry_date", ""),
@@ -26,7 +33,7 @@ class TradeModel:
                 data.get("lot_size", get_lot_size(data["symbol"])),
                 data["entry_price"], data.get("stop_loss", 1500), data.get("target", 1000),
                 data.get("auto_action", "OFF"), data.get("total_cost", 0),
-                data.get("entry_date", ""), data.get("trade_mode", "paper"),
+                data.get("entry_date", ""), data.get("trade_mode", "paper"), tt,
                 data.get("entry_iv"),
             ],
         )
@@ -47,10 +54,113 @@ class TradeModel:
         days_ahead = (3 - d.weekday()) % 7
         return (d + _dt.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
+    def _trade_type(self, t: dict) -> str:
+        tt = str((t or {}).get("trade_type") or "intraday").lower()
+        return tt if tt in ("intraday", "positional") else "intraday"
+
+    def _ist_now(self):
+        import datetime as _dt
+        return _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
+
+    def _sl_tp_levels(self, t: dict, entry: float, qty: int, lot: int):
+        """Same rupee-to-premium conversion as the live auto-exit block."""
+        def _to_level(level, is_sl):
+            if level is None or float(level) <= 0:
+                return 0
+            level = float(level)
+            if 0 < level < entry * 5 or level < 50:
+                return level
+            per_share = level / max(qty * lot, 1)
+            if t.get("transaction_type") == "BUY":
+                return entry - per_share if is_sl else entry + per_share
+            return entry + per_share if is_sl else entry - per_share
+        try:
+            sl_level = _to_level(t.get("stop_loss", 0), True)
+            tp_level = _to_level(t.get("target", 0), False)
+        except Exception:
+            sl_level, tp_level = 0, 0
+        return sl_level, tp_level
+
+    def close_intraday_trades(self, user_id=1) -> int:
+        """15:10 IST forced square-off for INTRADAY trades only.
+        Positional trades (trade_type='positional') carry overnight."""
+        try:
+            now = self._ist_now()
+            if now.time() < __import__("datetime").time(15, 10):
+                return 0
+            today = now.strftime("%Y-%m-%d")
+            opens = self.db.fetch_all(
+                "SELECT * FROM paper_trades WHERE user_id=? AND status='open'"
+                " AND COALESCE(trade_type,'intraday')='intraday'", [user_id]
+            )
+        except Exception:
+            return 0
+        n = 0
+        for t in opens:
+            try:
+                cur = self.get_option_premium(
+                    t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
+                    iv=t.get("entry_iv"),
+                )
+                if not cur or cur <= 0:
+                    cur = t["entry_price"]
+                self.close_trade(t["id"], float(cur), today, exit_status="intraday_auto")
+                n += 1
+            except Exception:
+                continue
+        return n
+
+    def check_overnight_gap(self, user_id=1) -> list:
+        """Morning gap check: positions carried overnight (entry_date < today)
+        are evaluated at the first available premium. If the open itself
+        crossed SL/TP (gap-up/gap-down), exit immediately at that price
+        with slippage-aware exit (close_trade applies exit costs)."""
+        today = self._ist_today()
+        try:
+            opens = self.db.fetch_all(
+                "SELECT * FROM paper_trades WHERE user_id=? AND status='open'"
+                " AND entry_date<>'' AND entry_date<?", [user_id, today]
+            )
+        except Exception:
+            return []
+        hit = []
+        for t in opens:
+            try:
+                entry = float(t.get("entry_price") or 0)
+                qty = int(t.get("quantity") or 1)
+                lot = int(t.get("lot_size") or 50)
+                if entry <= 0:
+                    continue
+                cur = self.get_option_premium(
+                    t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
+                    iv=t.get("entry_iv"),
+                )
+                if not cur or cur <= 0:
+                    continue
+                sl_level, tp_level = self._sl_tp_levels(t, entry, qty, lot)
+                reason = None
+                if t.get("transaction_type") == "BUY":
+                    if sl_level > 0 and cur <= sl_level:
+                        reason = "auto_gap_stoploss"
+                    elif tp_level > 0 and cur >= tp_level:
+                        reason = "auto_gap_target"
+                else:
+                    if sl_level > 0 and cur >= sl_level:
+                        reason = "auto_gap_stoploss"
+                    elif tp_level > 0 and cur <= tp_level:
+                        reason = "auto_gap_target"
+                if reason:
+                    self.close_trade(t["id"], float(cur), today, exit_status=reason)
+                    hit.append({"id": t["id"], "reason": reason, "exit_price": round(float(cur), 2)})
+            except Exception:
+                continue
+        return hit
+
     def close_expired_trades(self, user_id=1) -> int:
-        """Auto-exit open paper trades whose option expiry has passed.
-        Missing expiry_date is inferred (weekly Thursday) and stored back,
-        so trading history always shows full detail."""
+        """Expiry-day square-off (no roll-over): an option position carried
+        INTO its expiry day is closed that day; already-past expiries close too.
+        Same-day entries are left alone (intraday EOD exit handles them).
+        Positional trades without a known expiry are NEVER guessed-closed."""
         today = self._ist_today()
         try:
             opens = self.db.fetch_all(
@@ -63,13 +173,18 @@ class TradeModel:
             try:
                 exp = str(t.get("expiry_date") or "")
                 if len(exp) < 10:
+                    if self._trade_type(t) == "positional":
+                        continue  # never guess expiry for positional carries
                     exp = self._infer_expiry(t.get("entry_date") or today)
                     try:
                         self.db.execute("UPDATE paper_trades SET expiry_date=? WHERE id=?", [exp, t["id"]])
                     except Exception:
                         pass
-                if exp[:10] >= today:
+                exp_d = exp[:10]
+                if exp_d > today:
                     continue
+                if exp_d == today and str(t.get("entry_date") or "")[:10] >= today:
+                    continue  # entered today: EOD/intraday exit owns it
                 cur = self.get_option_premium(
                     t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
                     iv=t.get("entry_iv"),

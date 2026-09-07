@@ -98,7 +98,9 @@ class HistoricalReplayEngine:
         strike_sel = self.advanced_options.get("strike_selection", "otm")
         delta_target = self.advanced_options.get("delta_target")
         otm_dist = int(self.advanced_options.get("otm_distance", 2))
-        trade_mode = self.advanced_options.get("trade_mode", "positional")
+        trade_mode = str(self.advanced_options.get("trade_mode", self.advanced_options.get("trade_type", "positional")) or "positional").lower()
+        if trade_mode not in ("intraday", "positional", "btst"):
+            trade_mode = "positional"
         max_holding = int(self.advanced_options.get("max_holding_bars", 20))
         max_trades_day = int(self.risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(self.risk_management.get("daily_loss_limit", 0) or 0)
@@ -117,10 +119,18 @@ class HistoricalReplayEngine:
             cur_date = cur["trade_date"]
             nxt = self.historical_data[i + 1] if i + 1 < len(self.historical_data) else None
             is_last = nxt is None or nxt["trade_date"] != cur_date
-            # Roll option expiry forward (same as backtest engine)
+            # Roll option expiry forward (same as backtest engine).
+            # Positional holds are NOT rolled while open into expiry:
+            # squared off on expiry day instead (block below).
+            _rexp = str(self.bt_engine.bt_expiry)[:10] if self.bt_engine.bt_expiry else ""
             try:
-                if self.bt_engine.bt_expiry and str(self.bt_engine.bt_expiry)[:10] < cur_date:
-                    self.bt_engine.bt_expiry = ""
+                if _rexp and _rexp < cur_date:
+                    _ropen = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
+                    if trade_mode != "intraday" and _ropen:
+                        pass
+                    else:
+                        self.bt_engine.bt_expiry = ""
+                        _rexp = ""
             except Exception:
                 pass
             
@@ -215,13 +225,37 @@ class HistoricalReplayEngine:
                         exit_prem = _TC.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", False)
                         self.bt_engine._close_position(self.trades, [], entry, exit_prem, 
                             hit["reason"], cur_date, qty, txn_type)
-                        if self.trades[open_trade_idx].get("exit_date") is None:
-                            self.trades[open_trade_idx]["exit_date"] = cur_date
-                            self.trades[open_trade_idx]["exit_price"] = exit_prem
-                            self.trades[open_trade_idx]["exit_time"] = exit_time
-                        self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
-                        if daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit:
-                            self.kill_switch_on = True
+                if self.trades[open_trade_idx].get("exit_date") is None:
+                    self.trades[open_trade_idx]["exit_date"] = cur_date
+                    self.trades[open_trade_idx]["exit_price"] = exit_prem
+                    self.trades[open_trade_idx]["exit_time"] = exit_time
+                self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
+                if daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit:
+                    self.kill_switch_on = True
+            
+            # Expiry-day square-off for positional carries (NO roll-over)
+            has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
+            if has_open and trade_mode != "intraday" and _rexp and cur_date >= _rexp and is_last:
+                open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
+                entry = self.trades[open_trade_idx]
+                if entry.get("is_spread"):
+                    self.bt_engine._close_spread(self.trades, [], entry, "expiry_squareoff", cur_date)
+                else:
+                    exit_prem = self.bt_engine._close_premium(cur_date, float(cur["close_price"]),
+                        float(entry["strike"]), option_type)
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem,
+                        "SELL" if txn_type == "buy" else "BUY", False)
+                    self.bt_engine._close_position(self.trades, [], entry, exit_prem,
+                        "expiry_squareoff", cur_date, qty, txn_type)
+                if self.trades[open_trade_idx].get("exit_date") is None:
+                    self.trades[open_trade_idx]["exit_date"] = cur_date
+                    self.trades[open_trade_idx]["exit_price"] = exit_prem
+                    self.trades[open_trade_idx]["exit_time"] = exit_time
+                self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
+                if daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit:
+                    self.kill_switch_on = True
+                self.bt_engine.bt_expiry = ""
+                _rexp = ""
             
             # Intraday forced exit
             has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])

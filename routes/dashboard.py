@@ -127,8 +127,10 @@ def get_option_chain(symbol: str):
 def get_portfolio():
     trade_model = TradeModel()
     try:
+        trade_model.check_overnight_gap()
         trade_model.close_max_hold_trades()
         trade_model.close_expired_trades()
+        trade_model.close_intraday_trades()
     except Exception:
         pass
     positions = trade_model.get_open_positions_with_pnl()
@@ -152,6 +154,7 @@ def get_portfolio():
                 "tp": t["trade"]["target"],
                 "status": t["trade"]["status"],
                 "trade_mode": t["trade"].get("trade_mode", "paper"),
+                "trade_type": t["trade"].get("trade_type", "intraday"),
                 "qty": t["trade"].get("quantity", 1),
                 "lot_size": t["trade"].get("lot_size", 50),
                 "entry_date": t["trade"].get("entry_date", ""),
