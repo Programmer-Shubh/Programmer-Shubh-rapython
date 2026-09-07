@@ -163,6 +163,14 @@ class Database:
                 self.execute("ALTER TABLE auto_trades ADD COLUMN trade_type TEXT DEFAULT 'intraday'")
         except Exception:
             pass
+        # Unique key on market data so re-seed REPLACE works (COALESCE: NULLs
+        # are distinct in plain UNIQUE indexes, so use expression index)
+        try:
+            self.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_bhav_unique
+                ON bhavcopy_data(symbol, trade_date, COALESCE(expiry_date,''),
+                COALESCE(strike_price,0), COALESCE(option_type,''))""")
+        except Exception:
+            pass
 
     def fetch_one(self, query, params=None):
         with self._conn() as conn:

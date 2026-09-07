@@ -585,8 +585,20 @@
                                 <label><input type="checkbox" id="r-ind-ema"> EMA(50)</label>
                                 <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(10,3) Bullish/Bearish</label>
                                 <label><input type="checkbox" id="r-ind-macd"> MACD</label>
+                                <label title="BUY CALL: close>VWAP + green candle + EMAfast>EMAslow + RSI>Buy(rising) + Vol breakout. BUY PUT: mirror."><input type="checkbox" id="r-ind-conf" checked> <strong>Robot Confluence (VWAP+EMA+RSI+Vol)</strong></label>
                             </div>
                         </div>
+                    </div>
+                    <div class="row g-2 mt-1" id="r-conf-settings">
+                        <div class="col-6 col-md-1"><label class="form-label small">EMA Fast</label><input type="number" id="r-cf-ef" class="form-control form-control-sm" value="9" min="2"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">EMA Slow</label><input type="number" id="r-cf-es" class="form-control form-control-sm" value="21" min="3"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">RSI Pd</label><input type="number" id="r-cf-rsi" class="form-control form-control-sm" value="14" min="2"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">RSI Buy&gt;</label><input type="number" id="r-cf-rb" class="form-control form-control-sm" value="60" min="50" max="90"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">RSI Sell&lt;</label><input type="number" id="r-cf-rs" class="form-control form-control-sm" value="40" min="10" max="50"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">Vol Pd</label><input type="number" id="r-cf-vp" class="form-control form-control-sm" value="20" min="2"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">Vol x</label><input type="number" id="r-cf-vm" class="form-control form-control-sm" value="1.2" min="1" step="0.1"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">VWAP Pd</label><input type="number" id="r-cf-wp" class="form-control form-control-sm" value="20" min="2"></div>
+                        <div class="col-12"><small class="text-muted">BUY CALL = close&gt;VWAP + green candle + EMAfast&gt;EMAslow + RSI&gt;Buy(rising) + Vol&gt;Vol-x avg &nbsp;|&nbsp; BUY PUT = mirror. Ek-ek setting badal ke backtest karo.</small></div>
                     </div>
                 </div>
             </div>
@@ -1135,12 +1147,7 @@
         const mtd=parseInt(document.getElementById('r-mtd').value)||1;
         const s=document.getElementById('r-start').value; const e=document.getElementById('r-end').value;
         if(!s||!e){alert('Select start and end date'); return;}
-        const indicators=[];
-        if(document.getElementById('r-ind-rsi')?.checked) indicators.push({id:'rsi',params:{period:14}});
-        if(document.getElementById('r-ind-ema')?.checked) indicators.push({id:'ema',params:{period:50}});
-        if(document.getElementById('r-ind-supertrend')?.checked) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
-        if(document.getElementById('r-ind-macd')?.checked) indicators.push({id:'macd',params:{fast:12,slow:26,signal:9}});
-        if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
+        const indicators=robotCollectIndicators();
         const entryTime=document.getElementById('r-entry').value||'09:35';
         const exitTime=document.getElementById('r-exit').value||'15:14';
         const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal}, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
@@ -1213,6 +1220,16 @@
             else document.getElementById('robot-status').innerHTML='<p class="text-success">Robot started! Trade #'+(r.trade_id||'')+' '+sym+' '+order+' @ ₹'+(r.entry_price||'')+' (Strike '+strikeVal+') SL ₹'+sl+' Target ₹'+tp+' — check Trading Center</p>';
         }catch(e){document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+e.message+'</p>'; console.error(e);}
     }
+    function robotCollectIndicators(){
+        const indicators=[];
+        if(document.getElementById('r-ind-rsi')?.checked) indicators.push({id:'rsi',params:{period:14}});
+        if(document.getElementById('r-ind-ema')?.checked) indicators.push({id:'ema',params:{period:50}});
+        if(document.getElementById('r-ind-supertrend')?.checked) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
+        if(document.getElementById('r-ind-macd')?.checked) indicators.push({id:'macd',params:{fast:12,slow:26,signal:9}});
+        if(document.getElementById('r-ind-conf')?.checked) indicators.push({id:'robot_confluence',params:{ema_fast:parseInt(document.getElementById('r-cf-ef')?.value)||9,ema_slow:parseInt(document.getElementById('r-cf-es')?.value)||21,rsi_period:parseInt(document.getElementById('r-cf-rsi')?.value)||14,rsi_buy:parseFloat(document.getElementById('r-cf-rb')?.value)||60,rsi_sell:parseFloat(document.getElementById('r-cf-rs')?.value)||40,vol_period:parseInt(document.getElementById('r-cf-vp')?.value)||20,vol_mult:parseFloat(document.getElementById('r-cf-vm')?.value)||1.2,vwap_period:parseInt(document.getElementById('r-cf-wp')?.value)||20}});
+        if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
+        return indicators;
+    }
     async function robotSave(){
         const sym=document.getElementById('r-sym').value;
         const order=document.getElementById('r-order').value;
@@ -1223,7 +1240,7 @@
         let legs=[];
         if(order==='AUTO'){ legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType.toLowerCase()}]; }
         else { const p=order.split('-'); legs=[{option_type:p[0], transaction:p[1].toLowerCase(), lots:lots, strike_selection:strikeType.toLowerCase()}]; }
-        const body={name:sym+'_Robot_'+order, symbol:sym, strategy_type:'intraday', entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, lots:lots, stop_loss:sl, take_profit:tp, start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, legs:legs, auto_signal:order==='AUTO'};
+        const body={name:sym+'_Robot_'+order, symbol:sym, strategy_type:'intraday', entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, lots:lots, stop_loss:sl, take_profit:tp, start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, legs:legs, auto_signal:order==='AUTO', indicators:robotCollectIndicators()};
         try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ alert('Robot saved! ID: '+r.id); loadRobotSaved(); } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
     }
      function _parseJsonField(v, fallback){ if(!v) return fallback; if(typeof v==='string'){ try{return JSON.parse(v);}catch(e){return fallback;} } return v; }

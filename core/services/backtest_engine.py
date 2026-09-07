@@ -402,7 +402,73 @@ class BacktestEngine:
                     result["rangebo"] = self.indicators.calculate_range_breakout(historical, int(params.get("period", 20) or 20))
                 except Exception:
                     result["rangebo"] = {}
+            elif iid == "robot_confluence":
+                # Call/Put Robot confluence: VWAP + EMA-fast/slow + RSI + Volume
+                # breakout combined with AND logic (params all tunable from UI).
+                try:
+                    result["robot_conf"] = self._calc_robot_confluence(historical, closes, params)
+                except Exception:
+                    result["robot_conf"] = {"buy": [], "sell": []}
         return result
+
+    def _calc_robot_confluence(self, historical, closes, params):
+        """BUY CALL = close>VWAP + green candle + EMAfast>EMAslow (not flat)
+        + RSI>rsi_buy and rising + volume>vol_mult*avg.
+        BUY PUT = mirror. Returns {'buy':[...], 'sell':[...]} bool lists."""
+        ef = max(2, int(params.get("ema_fast", 9) or 9))
+        es = max(3, int(params.get("ema_slow", 21) or 21))
+        rp = max(2, int(params.get("rsi_period", 14) or 14))
+        rbuy = float(params.get("rsi_buy", 60) or 60)
+        rsell = float(params.get("rsi_sell", 40) or 40)
+        vp = max(2, int(params.get("vol_period", 20) or 20))
+        vm = float(params.get("vol_mult", 1.2) or 1.2)
+        wp = max(2, int(params.get("vwap_period", 20) or 20))
+        req_candle = int(params.get("require_candle", 1) or 0)
+        ema_f = self.indicators.calculate_ema(closes, ef) or []
+        ema_s = self.indicators.calculate_ema(closes, es) or []
+        rsi = self.indicators.calculate_rsi(closes, rp) or []
+        try:
+            vw = self.indicators.calculate_vwap(historical, wp, 2.0).get("vwap", [])
+        except Exception:
+            vw = []
+        vols = [float(h.get("volume", 0) or 0) for h in historical]
+        n = len(closes)
+        buy = [False] * n
+        sell = [False] * n
+        start = max(ef, es, rp, vp, wp) + 1
+        for i in range(max(start, 1), n):
+            try:
+                h = historical[i]
+                o = float(h.get("open_price", 0) or 0)
+                c = float(h.get("close_price", 0) or 0)
+                if c <= 0:
+                    continue
+                green = c > o
+                red = c < o
+                efv = ema_f[i] if i < len(ema_f) else None
+                esv = ema_s[i] if i < len(ema_s) else None
+                rsi_v = rsi[i] if i < len(rsi) else None
+                rsi_p = rsi[i - 1] if i - 1 >= 0 and i - 1 < len(rsi) else None
+                vwap_v = vw[i] if i < len(vw) else None
+                if efv is None or esv is None or rsi_v is None or vwap_v is None:
+                    continue
+                # Clear trend, not flat: EMA separation > 0.05% of close
+                sep = abs(efv - esv) / c
+                trend_up = efv > esv and sep > 0.0005
+                trend_dn = efv < esv and sep > 0.0005
+                vavg = sum(vols[max(0, i - vp):i]) / max(min(vp, i), 1)
+                vol_ok = vavg > 0 and vols[i] > vm * vavg
+                if ((not req_candle or green) and trend_up
+                        and rsi_v > rbuy and rsi_p is not None and rsi_v >= rsi_p
+                        and c > vwap_v and vol_ok):
+                    buy[i] = True
+                if ((not req_candle or red) and trend_dn
+                        and rsi_v < rsell and rsi_p is not None and rsi_v <= rsi_p
+                        and c < vwap_v and vol_ok):
+                    sell[i] = True
+            except Exception:
+                continue
+        return {"buy": buy, "sell": sell}
 
     def _get_indicator_value(self, indicator, i, close, historical, pre_calc):
         val = close
@@ -528,6 +594,11 @@ class BacktestEngine:
             sig = pre_calc["rangebo"].get("signal", [])
             if modes.get("range_breakout","both") != "bearish" and effective_idx < len(sig) and sig[effective_idx] == 1:
                 return True
+        if "robot_conf" in pre_calc:
+            rc = pre_calc["robot_conf"]
+            bl = rc.get("buy", [])
+            if modes.get("robot_confluence","both") != "bearish" and effective_idx < len(bl) and bl[effective_idx]:
+                return True
         return False
 
     def _get_sell_signal(self, i, pre_calc, historical, exit_conditions):
@@ -616,6 +687,11 @@ class BacktestEngine:
         if "rangebo" in pre_calc:
             sig = pre_calc["rangebo"].get("signal", [])
             if modes.get("range_breakout","both") != "bullish" and effective_idx < len(sig) and sig[effective_idx] == -1:
+                sell = sell or True
+        if "robot_conf" in pre_calc:
+            rc = pre_calc["robot_conf"]
+            sl2 = rc.get("sell", [])
+            if modes.get("robot_confluence","both") != "bullish" and effective_idx < len(sl2) and sl2[effective_idx]:
                 sell = sell or True
         if not pre_calc:
             sell = True

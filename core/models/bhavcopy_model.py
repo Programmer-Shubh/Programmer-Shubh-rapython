@@ -66,8 +66,29 @@ class BhavcopyModel:
     def import_data(self, records: list) -> int:
         if not records:
             return 0
+        # Dedupe: same (symbol,date,expiry,strike,option) must not duplicate on
+        # re-seed (table has no UNIQUE constraint, so INSERT OR REPLACE never
+        # replaces). Last record wins, old rows for those keys are removed first.
+        deduped = {}
+        for r in records:
+            key = (r.get("symbol"), r.get("trade_date"), r.get("expiry_date"),
+                   r.get("strike_price"), r.get("option_type"))
+            deduped[key] = r
+        rows = list(deduped.values())
+        try:
+            self.db.executemany(
+                """DELETE FROM bhavcopy_data WHERE symbol=? AND trade_date=?
+                   AND COALESCE(expiry_date,'')=COALESCE(?,'')
+                   AND COALESCE(strike_price,0)=COALESCE(?,0)
+                   AND COALESCE(option_type,'')=COALESCE(?,'')""",
+                [(r.get("symbol"), r.get("trade_date"), r.get("expiry_date"),
+                  r.get("strike_price"), r.get("option_type"))
+                 for r in rows],
+            )
+        except Exception:
+            pass
         self.db.executemany(
-            """INSERT OR REPLACE INTO bhavcopy_data
+            """INSERT INTO bhavcopy_data
                (symbol, trade_date, expiry_date, strike_price, option_type,
                 open_price, high_price, low_price, close_price, volume, oi)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -79,7 +100,7 @@ class BhavcopyModel:
                     r.get("low_price", 0), r.get("close_price", 0),
                     r.get("volume", 0), r.get("oi", 0),
                 )
-                for r in records
+                for r in rows
             ],
         )
-        return len(records)
+        return len(rows)
