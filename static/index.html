@@ -605,11 +605,11 @@
                     </div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
-                            <div class="d-flex gap-3 flex-wrap" style="font-size:12px">
-                                <label><input type="checkbox" id="r-ind-rsi" checked> RSI(14)</label>
-                                <label><input type="checkbox" id="r-ind-ema"> EMA(50)</label>
-                                <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(10,3) Bullish/Bearish</label>
-                                <label><input type="checkbox" id="r-ind-macd"> MACD</label>
+                            <div class="d-flex gap-3 flex-wrap align-items-end" style="font-size:12px">
+                                <label><input type="checkbox" id="r-ind-rsi" checked> RSI(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:44px;font-size:11px">)</label>
+                                <label><input type="checkbox" id="r-ind-ema"> EMA(<input type="number" id="r-p-ema" value="50" min="2" max="200" style="width:48px;font-size:11px">)</label>
+                                <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(<input type="number" id="r-p-st" value="10" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-stm" value="3" min="1" max="10" step="0.5" style="width:44px;font-size:11px">) Bullish/Bearish</label>
+                                <label><input type="checkbox" id="r-ind-macd"> MACD(<input type="number" id="r-p-mf" value="12" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-ms" value="26" min="2" max="60" style="width:44px;font-size:11px">,<input type="number" id="r-p-mg" value="9" min="2" max="30" style="width:44px;font-size:11px">)</label>
                                 <label title="BUY CALL: close>VWAP + green candle + EMAfast>EMAslow + RSI>Buy(rising) + Vol breakout. BUY PUT: mirror."><input type="checkbox" id="r-ind-conf" checked> <strong>Robot Confluence (VWAP+EMA+RSI+Vol)</strong></label>
                             </div>
                         </div>
@@ -1254,10 +1254,10 @@
     }
     function robotCollectIndicators(){
         const indicators=[];
-        if(document.getElementById('r-ind-rsi')?.checked) indicators.push({id:'rsi',params:{period:14}});
-        if(document.getElementById('r-ind-ema')?.checked) indicators.push({id:'ema',params:{period:50}});
-        if(document.getElementById('r-ind-supertrend')?.checked) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
-        if(document.getElementById('r-ind-macd')?.checked) indicators.push({id:'macd',params:{fast:12,slow:26,signal:9}});
+        if(document.getElementById('r-ind-rsi')?.checked) indicators.push({id:'rsi',params:{period:parseInt(document.getElementById('r-p-rsi')?.value)||14}});
+        if(document.getElementById('r-ind-ema')?.checked) indicators.push({id:'ema',params:{period:parseInt(document.getElementById('r-p-ema')?.value)||50}});
+        if(document.getElementById('r-ind-supertrend')?.checked) indicators.push({id:'supertrend',params:{period:parseInt(document.getElementById('r-p-st')?.value)||10,multiplier:parseFloat(document.getElementById('r-p-stm')?.value)||3}});
+        if(document.getElementById('r-ind-macd')?.checked) indicators.push({id:'macd',params:{fast:parseInt(document.getElementById('r-p-mf')?.value)||12,slow:parseInt(document.getElementById('r-p-ms')?.value)||26,signal:parseInt(document.getElementById('r-p-mg')?.value)||9}});
         if(document.getElementById('r-ind-conf')?.checked) indicators.push({id:'robot_confluence',params:{ema_fast:parseInt(document.getElementById('r-cf-ef')?.value)||9,ema_slow:parseInt(document.getElementById('r-cf-es')?.value)||21,rsi_period:parseInt(document.getElementById('r-cf-rsi')?.value)||14,rsi_buy:parseFloat(document.getElementById('r-cf-rb')?.value)||60,rsi_sell:parseFloat(document.getElementById('r-cf-rs')?.value)||40,vol_period:parseInt(document.getElementById('r-cf-vp')?.value)||20,vol_mult:parseFloat(document.getElementById('r-cf-vm')?.value)||1.2,vwap_period:parseInt(document.getElementById('r-cf-wp')?.value)||20}});
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         return indicators;
