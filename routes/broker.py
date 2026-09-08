@@ -48,6 +48,83 @@ class LiveOrderRequest(BaseModel):
     stop_loss: float = 1500.0
     take_profit: float = 3000.0
     broker: str = ""
+    dry_run: bool = False
+
+
+class LiveToggleRequest(BaseModel):
+    enabled: bool = False
+
+
+def _live_enabled() -> bool:
+    try:
+        db = Database.get_instance()
+        row = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key='live_trading_enabled'")
+        return (row.get("setting_value") if row else "0") == "1"
+    except Exception:
+        return False
+
+
+def _real_token(broker: str) -> bool:
+    """A 'real' token excludes the app's simulated SIM-/ANG- tokens."""
+    tok = (_get_config(broker) or {}).get("access_token", "")
+    return bool(tok) and not str(tok).startswith(("SIM-", "ANG-"))
+
+
+def _resolve_expiry(symbol: str, hint: str) -> str:
+    """Return YYYY-MM-DD expiry: YYYY-MM-DD hint as-is; Weekly -> next Thursday;
+    Monthly (or stocks) -> last Thursday of month."""
+    import datetime as _dt
+    import calendar as _cal
+    hint = str(hint or "").strip()
+    try:
+        return _dt.datetime.strptime(hint[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
+    weekly_idx = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+    if hint.lower().startswith("week") or symbol.upper() in weekly_idx:
+        d = today + _dt.timedelta(days=1)
+        while d.weekday() != 3:
+            d += _dt.timedelta(days=1)
+        return d.strftime("%Y-%m-%d")
+    last = _dt.date(today.year, today.month, _cal.monthrange(today.year, today.month)[1])
+    while last.weekday() != 3:
+        last -= _dt.timedelta(days=1)
+    if last < today:
+        m = today.month + 1 if today.month < 12 else 1
+        y = today.year if today.month < 12 else today.year + 1
+        last = _dt.date(y, m, _cal.monthrange(y, m)[1])
+        while last.weekday() != 3:
+            last -= _dt.timedelta(days=1)
+    return last.strftime("%Y-%m-%d")
+
+
+def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str) -> str:
+    """Fyers F&O format NSE:UNDERLYINGYYMONSTRIKECE/PE e.g. NSE:NIFTY26FEB24800CE."""
+    import datetime as _dt
+    d = _dt.datetime.strptime(expiry_ymd[:10], "%Y-%m-%d")
+    mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][d.month - 1]
+    return f"NSE:{symbol.upper()}{d.strftime('%y')}{mon}{int(float(strike))}{option_type.upper()}"
+
+
+@router.get("/live-status")
+def live_status():
+    real = [b for b in ("fyers", "dhan") if _real_token(b)]
+    return {"enabled": _live_enabled(), "real_brokers": real,
+            "note": "Enable only if you understand real-money risk. Dhan live needs securityId mapping (Fyers supported)."}
+
+
+@router.post("/live-toggle")
+def live_toggle(req: LiveToggleRequest):
+    db = Database.get_instance()
+    row = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key='live_trading_enabled'")
+    if row:
+        db.execute("UPDATE settings SET setting_value=?, updated_at=datetime('now') WHERE setting_key='live_trading_enabled'",
+                   ["1" if req.enabled else "0"])
+    else:
+        db.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('live_trading_enabled', ?)",
+                   ["1" if req.enabled else "0"])
+    return {"enabled": bool(req.enabled)}
 
 
 def _get_config(broker: str) -> dict:
@@ -351,21 +428,15 @@ async def view_account(req: ConnectRequest):
 
 
 @router.post("/place-live")
-def place_live_order(req: LiveOrderRequest):
-    """Live order entry. No broker in this app executes real orders, so:
-    - if a broker with access_token is connected, the order is recorded with
-      trade_mode='live' (tracked alongside paper trades everywhere);
-    - otherwise a clear error is returned (frontend shows it, no fake success).
+async def place_live_order(req: LiveOrderRequest):
+    """REAL live order execution (real money). Safety chain:
+    1. dry_run=true -> only previews the exact broker payload, sends nothing.
+    2. Global kill-switch: live_trading_enabled must be ON (Brokers tab).
+    3. Broker must hold a REAL token (simulated SIM-/ANG- tokens rejected).
+    4. Fyers supported (symbol auto-built). Dhan needs securityId mapping.
+    Quantity sent to broker = lots x lot_size (never raw lots).
+    Fills are tracked trade_mode='live' with broker_order_id stored.
     """
-    connected = [b for b in BROKER_DEFAULTS if _get_config(b).get("access_token")]
-    if req.broker:
-        if req.broker not in BROKER_DEFAULTS:
-            return {"error": f"Unknown broker '{req.broker}'"}
-        if not _get_config(req.broker).get("access_token"):
-            return {"error": f"{req.broker} not connected. Connect broker first (Brokers tab)."}
-        connected = [req.broker]
-    if not connected:
-        return {"error": "No broker connected. Connect a broker first (Brokers tab) - order NOT placed."}
     try:
         from core.models.trade_model import TradeModel
         from core.services.transaction_costs import TransactionCosts
@@ -374,6 +445,15 @@ def place_live_order(req: LiveOrderRequest):
         symbol = (req.symbol or "").upper()
         if not symbol:
             return {"error": "Symbol required"}
+        lots = max(1, int(req.quantity or 1))
+        lot = get_lot_size(symbol)
+        broker_qty = lots * lot
+        txn = str(req.transaction_type or "BUY").upper()
+        if txn not in ("BUY", "SELL"):
+            txn = "BUY"
+        opt = str(req.option_type or "CE").upper()
+        if opt not in ("CE", "PE"):
+            opt = "CE"
         strike = float(req.strike or 0)
         if strike <= 0:
             spot = LiveMarketData().get_spot_price(symbol)
@@ -381,35 +461,69 @@ def place_live_order(req: LiveOrderRequest):
             strike = round((spot or 0) / step) * step if spot and step else 0
             if strike <= 0:
                 return {"error": "Strike required (spot unavailable for ATM calc)"}
+        exp_ymd = _resolve_expiry(symbol, req.expiry or "weekly")
+        # Broker choice
+        want = (req.broker or "").lower()
+        if want and want not in BROKER_DEFAULTS:
+            return {"error": f"Unknown broker '{req.broker}'"}
+        if want in ("shoonya", "angel"):
+            return {"error": f"{want} uses a simulated token in this app - live execution not supported. Use Fyers."}
+        if want == "dhan":
+            return {"error": "Dhan live needs securityId mapping (instrument master) - not yet wired. Use Fyers."}
+        broker = want or next((b for b in ("fyers", "dhan") if _real_token(b)), "")
+        if broker == "dhan":
+            return {"error": "Dhan live needs securityId mapping (instrument master) - not yet wired. Use Fyers."}
+        if not broker:
+            return {"error": "No broker with a REAL token connected. Connect Fyers (OAuth) first - order NOT placed."}
+        if broker != "fyers":
+            return {"error": f"Live execution supports Fyers only right now (got {broker})."}
+        fy_sym = _fyers_symbol(symbol, exp_ymd, strike, opt)
+        preview = {"broker": "fyers", "symbol": fy_sym, "underlying": symbol,
+                   "strike": strike, "expiry": exp_ymd, "side": txn,
+                   "lots": lots, "lot_size": lot, "quantity": broker_qty,
+                   "order_type": "MARKET", "product": "INTRADAY"}
+        if req.dry_run:
+            return {"success": True, "dry_run": True, "preview": preview,
+                    "note": "Preview only - nothing sent to broker."}
+        if not _live_enabled():
+            return {"error": "LIVE trading is OFF (safety switch). Enable it in Brokers tab first - order NOT placed.",
+                    "preview": preview}
+        cfg = _get_config("fyers")
+        from core.services.broker_fyers import FyersV3
+        fy = FyersV3(app_id=cfg.get("app_id", ""), secret_key=cfg.get("secret", ""),
+                     redirect_uri=cfg.get("redirect_uri", ""),
+                     access_token=cfg.get("access_token", ""),
+                     refresh_token=cfg.get("refresh_token", ""))
+        res = await fy.place_order(fy_sym, txn, broker_qty, order_type="MARKET")
+        if not res.get("success"):
+            return {"error": f"Fyers rejected order: {res.get('error') or res.get('data')}",
+                    "preview": preview, "broker_response": res.get("data", {})}
+        order_id = str((res.get("data") or {}).get("order_id", ""))
+        # Track the live fill locally (entry at premium estimate)
         premium = None
         try:
-            tm0 = TradeModel()
-            premium = tm0.get_option_premium(symbol, req.option_type, strike, req.expiry or "")
+            premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
         except Exception:
             premium = None
         if not premium or premium <= 0:
             spot = LiveMarketData().get_spot_price(symbol)
-            premium = model_premium(spot or strike, strike, 7, req.option_type, symbol=symbol) if spot else 50.0
-        txn = str(req.transaction_type or "BUY").upper()
-        if txn not in ("BUY", "SELL"):
-            txn = "BUY"
+            premium = model_premium(spot or strike, strike, 7, opt, symbol=symbol) if spot else 50.0
         adj = TransactionCosts.apply_fill_slippage(float(premium), txn, is_live=True)
-        lot = get_lot_size(symbol)
-        costs = TransactionCosts.calculate(adj * int(req.quantity or 1) * lot, txn == "SELL", is_live=True)
+        costs = TransactionCosts.calculate(adj * lots * lot, txn == "SELL", is_live=True)
         import datetime as _dt
         tm = TradeModel()
         tid = tm.insert_trade({
-            "symbol": symbol, "option_type": req.option_type, "strike_price": strike,
-            "expiry_date": req.expiry or "", "transaction_type": txn,
-            "quantity": int(req.quantity or 1), "lot_size": lot, "entry_price": adj,
+            "symbol": symbol, "option_type": opt, "strike_price": strike,
+            "expiry_date": exp_ymd, "transaction_type": txn,
+            "quantity": lots, "lot_size": lot, "entry_price": adj,
             "stop_loss": float(req.stop_loss or 0), "target": float(req.take_profit or 0),
             "total_cost": costs["total"],
             "entry_date": _dt.datetime.now().strftime("%Y-%m-%d"),
-            "trade_mode": "live",
+            "trade_mode": "live", "broker_order_id": order_id,
         })
-        return {"success": True, "trade_id": tid, "entry_price": round(adj, 2),
-                "broker": connected[0], "mode": "live",
-                "note": "Tracked as LIVE trade. Connect real broker API for exchange execution."}
+        return {"success": True, "trade_id": tid, "broker_order_id": order_id,
+                "broker": "fyers", "broker_symbol": fy_sym, "quantity": broker_qty,
+                "entry_price": round(adj, 2), "mode": "live"}
     except Exception as e:
         import traceback
         traceback.print_exc()

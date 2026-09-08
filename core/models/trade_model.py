@@ -17,6 +17,10 @@ class TradeModel:
             self.db.execute("ALTER TABLE paper_trades ADD COLUMN trade_type TEXT DEFAULT 'intraday'")
         except Exception:
             pass
+        try:
+            self.db.execute("ALTER TABLE paper_trades ADD COLUMN broker_order_id TEXT DEFAULT ''")
+        except Exception:
+            pass
         tt = str(data.get("trade_type", "intraday") or "intraday").lower()
         if tt not in ("intraday", "positional"):
             tt = "intraday"
@@ -24,8 +28,8 @@ class TradeModel:
             """INSERT INTO paper_trades
                (user_id, strategy_id, symbol, option_type, strike_price, expiry_date,
                 transaction_type, quantity, lot_size, entry_price, stop_loss, target,
-                auto_action, total_cost, entry_date, trade_mode, trade_type, entry_iv, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', datetime('now'), datetime('now'))""",
+                auto_action, total_cost, entry_date, trade_mode, trade_type, broker_order_id, entry_iv, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', datetime('now'), datetime('now'))""",
             [
                 data.get("user_id", 1), data.get("strategy_id"), data["symbol"],
                 data["option_type"], data["strike_price"], data.get("expiry_date", ""),
@@ -34,6 +38,7 @@ class TradeModel:
                 data["entry_price"], data.get("stop_loss", 1500), data.get("target", 1000),
                 data.get("auto_action", "OFF"), data.get("total_cost", 0),
                 data.get("entry_date", ""), data.get("trade_mode", "paper"), tt,
+                data.get("broker_order_id", ""),
                 data.get("entry_iv"),
             ],
         )

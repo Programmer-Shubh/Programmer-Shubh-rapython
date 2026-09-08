@@ -81,6 +81,7 @@ class Database:
                     status TEXT DEFAULT 'open',
                     trade_mode TEXT DEFAULT 'paper',
                     trade_type TEXT DEFAULT 'intraday',
+                    broker_order_id TEXT DEFAULT '',
                     exit_status TEXT DEFAULT 'manual',
                     entry_iv REAL DEFAULT NULL,
                     created_at TEXT DEFAULT (datetime('now')),
@@ -154,6 +155,12 @@ class Database:
                 self.execute("ALTER TABLE paper_trades ADD COLUMN entry_iv REAL DEFAULT NULL")
             if "trade_type" not in cols:
                 self.execute("ALTER TABLE paper_trades ADD COLUMN trade_type TEXT DEFAULT 'intraday'")
+        except Exception:
+            pass
+        try:
+            cols = {r[1] for r in self.fetch_all("PRAGMA table_info(paper_trades)")}
+            if "broker_order_id" not in cols:
+                self.execute("ALTER TABLE paper_trades ADD COLUMN broker_order_id TEXT DEFAULT ''")
         except Exception:
             pass
         # trade_type on auto_trades (intraday/positional for robot runs)
