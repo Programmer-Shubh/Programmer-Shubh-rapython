@@ -4,10 +4,16 @@ import os, json, time as _time
 _NSE_LOTS_CACHE = None
 _NSE_LOTS_CACHE_TS = 0
 _NSE_LOTS_TTL = 24*3600
+_NSE_LOTS_FAIL_TS = 0
+_NSE_LOTS_FAIL_TTL = 600
 
 def _load_nse_lots():
-    global _NSE_LOTS_CACHE, _NSE_LOTS_CACHE_TS
+    global _NSE_LOTS_CACHE, _NSE_LOTS_CACHE_TS, _NSE_LOTS_FAIL_TS
     if _NSE_LOTS_CACHE and _time.time() - _NSE_LOTS_CACHE_TS < _NSE_LOTS_TTL:
+        return _NSE_LOTS_CACHE
+    # Negative cache: a failed fetch must not retry on every tick (each retry
+    # costs seconds of NSE timeouts inside hot loops like the backtest engine)
+    if _time.time() - _NSE_LOTS_FAIL_TS < _NSE_LOTS_FAIL_TTL:
         return _NSE_LOTS_CACHE
     # Try daily file cache
     for p in [os.path.join(os.path.dirname(__file__), "..", "data", "nse_lots.json"), os.path.join("data","nse_lots.json")]:
@@ -52,7 +58,8 @@ def _load_nse_lots():
                         return lots
             except Exception: continue
     except Exception: pass
-    return None
+    _NSE_LOTS_FAIL_TS = _time.time()
+    return _NSE_LOTS_CACHE
 
 def get_lot_size(symbol: str) -> int:
     lots = {
@@ -74,6 +81,12 @@ def get_lot_size(symbol: str) -> int:
     # Correct exchange lots override (Aug 2026)
     _override={"FINNIFTY":60,"ADANIENT":309,"NIFTY":75}
     if symbol.upper() in _override: return _override[symbol.upper()]
+    # Hardcoded map FIRST (instant): network fetch only for unknown symbols.
+    # The old order called _load_nse_lots() (seconds of NSE timeouts) on every
+    # get_lot_size() even for symbols already in the map below.
+    _hit = lots.get(symbol.upper())
+    if _hit:
+        return _hit
     try:
         live=_load_nse_lots()
         if live and symbol.upper() in live:

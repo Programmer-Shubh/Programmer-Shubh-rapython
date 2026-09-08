@@ -43,22 +43,51 @@ def _generate_synthetic_fallback(symbol: str, start_date: str, end_date: str) ->
         s = s - datetime.timedelta(days=90)
 
     # Anchor synthetic to live spot so payoff/ATM matches (₹24175 not ₹19800)
+    # Hard ~1.5s TOTAL budget, shared worker + 60s spot cache: spot lookups
+    # must never stall the backtest response (Yahoo hangs ~3s, no timeout).
     live_spot = None
     try:
-        from core.services.nse_client import nse_fetch_spot
-        d = nse_fetch_spot(symbol, timeout=3)
-        if d and d.get("spot"):
-            live_spot = float(d["spot"])
+        import concurrent.futures as _cf
+        import time as _st2
+        if not hasattr(_generate_synthetic_fallback, "_spot_cache"):
+            _generate_synthetic_fallback._spot_cache = {}
+            _generate_synthetic_fallback._spot_ex = _cf.ThreadPoolExecutor(max_workers=2)
+        _sc = _generate_synthetic_fallback._spot_cache
+        _hit = _sc.get(symbol.upper())
+        if _hit and _st2.time() - _hit[0] < 60:
+            live_spot = _hit[1]
+        else:
+            def _lookup_spot():
+                try:
+                    from core.services.nse_client import nse_fetch_spot
+                    d = nse_fetch_spot(symbol, timeout=2)
+                    if d and d.get("spot"):
+                        return float(d["spot"])
+                except Exception:
+                    pass
+                try:
+                    from core.services.live_market_data import LiveMarketData
+                    ld = LiveMarketData().get_live_spot(symbol)
+                    if ld and ld.get("spot"):
+                        return float(ld["spot"])
+                except Exception:
+                    pass
+                return None
+
+            try:
+                fut = _generate_synthetic_fallback._spot_ex.submit(_lookup_spot)
+                try:
+                    live_spot = fut.result(timeout=1.5)
+                except Exception:
+                    live_spot = None
+            except Exception:
+                live_spot = None
+            try:
+                _sc[symbol.upper()] = (_st2.time(), live_spot)
+            except Exception:
+                pass
     except Exception:
         pass
-    if not live_spot:
-        try:
-            from core.services.live_market_data import LiveMarketData
-            ld = LiveMarketData().get_live_spot(symbol)
-            if ld and ld.get("spot"):
-                live_spot = float(ld["spot"])
-        except Exception:
-            pass
     if live_spot and live_spot > 0:
         price = live_spot * 0.97  # start 3% below live so trend builds into live level
     else:
@@ -330,6 +359,8 @@ def _fetch_and_store_nselib(symbol, start_date, end_date):
 
 @router.post("/run")
 def run_backtest(req: BacktestRequest):
+    import time as _t0m
+    _t0 = _t0m.time()
     try:
         symbol = (req.symbol or "NIFTY").upper()
         start_date = req.start_date or "2026-08-01"
@@ -443,6 +474,7 @@ def run_backtest(req: BacktestRequest):
         "success": True,
         "engine": result.get("engine", "engine"),
         "symbol": req.symbol,
+        "took_ms": int((__import__("time").time() - _t0) * 1000),
         "metrics": {
             "initial_capital": m["initial_capital"],
             "final_capital": m["final_capital"],

@@ -75,15 +75,18 @@ def _fetch_nselib_historical(symbol: str, start_date: str, end_date: str) -> Lis
 def _fetch_jugaad_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """jugaad-data: NSE bhavcopy archives via jugaad_data.nse.bhavcopy_save (free, open-source)."""
     try:
-        import tempfile, csv, pathlib
+        import tempfile, csv, pathlib, time as _t
         from jugaad_data.nse import bhavcopy_save
         import datetime as _dt
+        _deadline = _t.time() + 8  # hard budget: one day-download must not stall backtest
         sd = _dt.datetime.strptime(start_date, "%Y-%m-%d").date()
         ed = _dt.datetime.strptime(end_date, "%Y-%m-%d").date()
         tmpdir = tempfile.mkdtemp(prefix="jugaad_")
         out = []
         cur = sd
         while cur <= ed:
+            if _t.time() > _deadline or len(out) >= 60:
+                break
             if cur.weekday() < 5:
                 try:
                     p = bhavcopy_save(cur, tmpdir)
@@ -310,11 +313,14 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
 def _fetch_nse_archives_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """Direct NSE archives CSV (nseindia.com/content/historical) - free, no key, replaces yfinance."""
     try:
-        import csv, io
+        import csv, io, time as _t
         sd=datetime.datetime.strptime(start_date,"%Y-%m-%d"); ed=datetime.datetime.strptime(end_date,"%Y-%m-%d")
+        _deadline = _t.time() + 8  # hard budget
         out=[]
         cur=sd
         while cur <= ed:
+            if _t.time() > _deadline or len(out) >= 120:
+                break
             if cur.weekday() < 5:
                 try:
                     url=f"https://www.nseindia.com/api/historical/equities?symbol={symbol.upper()}&series=[\"EQ\"]&from={cur.strftime('%d-%m-%Y')}&to={cur.strftime('%d-%m-%Y')}"
