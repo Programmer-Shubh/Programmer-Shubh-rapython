@@ -303,7 +303,7 @@
                     <div class="col-md-2"><label class="form-label small">Total Lot</label><input type="number" class="form-control form-control-sm" id="s-lots" value="1" min="1"></div>
                     <div class="col-md-2"><label class="form-label small">Position</label><select class="form-select form-select-sm" id="s-position"><option>Buy</option><option selected>Sell</option></select></div>
                     <div class="col-md-2"><label class="form-label small">Option Type</label><select class="form-select form-select-sm" id="s-opt"><option>CE</option><option selected>PE</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">Strike Type</label><select class="form-select form-select-sm" id="s-strike-type"><option>ATM</option><option selected>OTM</option><option>ITM</option><option>Delta</option></select><input type="number" class="form-control form-control-sm mt-1 d-none" id="s-delta" value="0.3" step="0.05" min="0.1" max="0.9" placeholder="Delta 0.3"></div>
+                    <div class="col-md-2"><label class="form-label small">Strike Type</label><select class="form-select form-select-sm" id="s-strike-type"><option>ATM</option><option selected>OTM</option><option>ITM</option><option>Delta</option></select><div class="d-flex gap-1 mt-1"><input type="number" class="form-control form-control-sm" id="s-otm" value="2" min="1" max="6" title="OTM Distance 1-6"><input type="number" class="form-control form-control-sm d-none" id="s-delta" value="0.3" step="0.05" min="0.1" max="0.9" placeholder="Delta 0.3"></div></div>
                     <div class="col-md-2"><label class="form-label small">Expiry</label><select class="form-select form-select-sm" id="s-expiry"><option>Weekly</option><option selected>Monthly</option></select><input type="number" class="form-control form-control-sm mt-1" id="s-dte" value="7" min="1" max="60" title="DTE"></div>
                     <div class="col-md-2 d-flex align-items-end"><button class="btn btn-sm btn-success w-100" onclick="addLeg()">Add Leg</button></div>
                 </div>
@@ -581,6 +581,7 @@
                         <div class="col-md-2"><label class="form-label small">Symbol</label><select id="r-sym" class="form-select form-select-sm"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option><option>RELIANCE</option><option>HDFCBANK</option><option>ICICIBANK</option><option>TCS</option><option>INFY</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY">Call Buy</option><option value="CE-SELL">Call Sell</option><option value="PE-BUY">Put Buy</option><option value="PE-SELL">Put Sell</option><option value="AUTO" selected>AUTO (Signal Based)</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
+                        <div class="col-md-1"><label class="form-label small">OTM Dist</label><input type="number" id="r-otm" class="form-control form-control-sm" value="1" min="1" max="6" title="OTM Distance 1-6"></div>
                         <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="r-lots" class="form-control form-control-sm" value="1" min="1"></div>
                         <div class="col-md-1"><label class="form-label small">Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
@@ -887,7 +888,8 @@
             const strikeType=document.getElementById('s-strike-type').value.toLowerCase();
             const dteVal=parseInt(document.getElementById('s-dte').value)||7;
             const deltaVal=parseFloat(document.getElementById('s-delta').value)||0.3;
-            legs=[{option_type:optType,lots:lots,transaction:position.toLowerCase(),stop_loss:sl,take_profit:tp,strike_selection:strikeType,otm_distance:2,expiry:document.getElementById('s-expiry').value.toLowerCase(),dte:dteVal,delta_target: strikeType==='delta'?deltaVal:null}];
+            const otmVal=Math.min(6,Math.max(1,parseInt(document.getElementById('s-otm').value)||2));
+            legs=[{option_type:optType,lots:lots,transaction:position.toLowerCase(),stop_loss:sl,take_profit:tp,strike_selection:strikeType,otm_distance:otmVal,expiry:document.getElementById('s-expiry').value.toLowerCase(),dte:dteVal,delta_target: strikeType==='delta'?deltaVal:null}];
         }
         // Quant wiring: entry/exit times, momentum, expiry, trailing
         const stratType=document.getElementById('s-strat-type').value.toLowerCase();
@@ -1019,7 +1021,8 @@
         const delta=parseFloat(document.getElementById('s-delta').value)||0.3;
         // expiry offset: weekly=0, monthly=2 weeks extra
         const offset = expiry==='weekly'?0:0;
-        stratLegs.push({option_type:opt, transaction:pos, strike_selection:strikeSel, otm_distance:2, lots:lots, expiry:expiry, offset:offset, delta_target: strikeSel==='delta'?delta:null, dte:dte});
+        const sOtm=Math.min(6,Math.max(1,parseInt(document.getElementById('s-otm').value)||2));
+        stratLegs.push({option_type:opt, transaction:pos, strike_selection:strikeSel, otm_distance:(strikeSel==='otm'||strikeSel==='itm')?sOtm:0, lots:lots, expiry:expiry, offset:offset, delta_target: strikeSel==='delta'?delta:null, dte:dte});
         renderLegs();
     }
     function removeLeg(i){stratLegs.splice(i,1);renderLegs();}
@@ -1158,14 +1161,16 @@
         let autoSignal=false, legs, opt, txn;
         const strikeType=document.getElementById('r-strike').value.toLowerCase();
         const lots=parseInt(document.getElementById('r-lots').value)||1;
+        const rOtm=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
+        const rOtmDist=(strikeType==='otm'||strikeType==='itm')?rOtm:0;
         if(order==='AUTO'){
             autoSignal=true;
-            legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
+            legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType, otm_distance:rOtmDist, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
             opt='AUTO'; txn='auto';
         } else {
             const parts=order.split('-');
             opt=parts[0]; txn=parts[1].toLowerCase();
-            legs=[{option_type:opt, transaction:txn, lots:lots, strike_selection:strikeType, otm_distance: strikeType==='otm'?1:0, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
+            legs=[{option_type:opt, transaction:txn, lots:lots, strike_selection:strikeType, otm_distance:rOtmDist, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
         }
         const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||3000;
@@ -1237,7 +1242,7 @@
         let strikeVal=0;
         try{
             const live=await A('/api/chain/live/'+sym);
-            if(live && live.spot && live.atm){ strikeVal=live.atm; if(document.getElementById('r-strike').value==='OTM') strikeVal = optR==='CE' ? strikeVal + (sym==='BANKNIFTY'?100:50) : strikeVal - (sym==='BANKNIFTY'?100:50); }
+            if(live && live.spot && live.atm){ strikeVal=live.atm; const _ro=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1)); const _rst=document.getElementById('r-strike').value; const _step=(sym==='BANKNIFTY'?100:50); if(_rst==='OTM') strikeVal = optR==='CE' ? strikeVal + _step*_ro : strikeVal - _step*_ro; else if(_rst==='ITM') strikeVal = optR==='CE' ? strikeVal - _step*_ro : strikeVal + _step*_ro; }
         }catch(e){ strikeVal=0; }
         document.getElementById('robot-status').innerHTML='<p class="text-success"><span class="spinner"></span> Starting '+sym+' '+order+' '+strikeType+' '+expiry+' SL ₹'+sl+' Target ₹'+tp+' (Strike '+(strikeVal||'ATM')+')...</p>';
         try{
@@ -1270,8 +1275,10 @@
         const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||3000;
         let legs=[];
-        if(order==='AUTO'){ legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType.toLowerCase()}]; }
-        else { const p=order.split('-'); legs=[{option_type:p[0], transaction:p[1].toLowerCase(), lots:lots, strike_selection:strikeType.toLowerCase()}]; }
+        const rOtmSave=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
+        const rOtmDist=((strikeType.toLowerCase()==='otm'||strikeType.toLowerCase()==='itm'))?rOtmSave:0;
+        if(order==='AUTO'){ legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType.toLowerCase(), otm_distance:rOtmDist}]; }
+        else { const p=order.split('-'); legs=[{option_type:p[0], transaction:p[1].toLowerCase(), lots:lots, strike_selection:strikeType.toLowerCase(), otm_distance:rOtmDist}]; }
         const body={name:sym+'_Robot_'+order, symbol:sym, strategy_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase(), entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, lots:lots, stop_loss:sl, take_profit:tp, start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, legs:legs, auto_signal:order==='AUTO', indicators:robotCollectIndicators()};
         try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ alert('Robot saved! ID: '+r.id); loadRobotSaved(); } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
     }
