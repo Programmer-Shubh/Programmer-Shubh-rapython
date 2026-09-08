@@ -142,7 +142,7 @@ def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str)
 def live_status():
     real = [b for b in ("fyers", "dhan") if _real_token(b)]
     return {"enabled": _live_enabled(), "real_brokers": real,
-            "note": "Fyers + Dhan live supported. Dry-run first to verify broker symbol/securityId."}
+            "note": "Fyers/Dhan/Angel/Shoonya live supported. Dry-run first to verify broker symbol/token."}
 
 
 @router.post("/live-toggle")
@@ -277,26 +277,40 @@ async def connect_broker(req: ConnectRequest):
         return {"success": False, "error": "Dhan needs Access Token. Paste it in Setup."}
 
     if req.broker == "shoonya":
-        # Simulated one-click login: generate synthetic token after config has required fields
-        if config.get("uid") and config.get("pwd") and config.get("apikey"):
-            config["access_token"] = "SIM-" + config["uid"][:6].upper() + "-T" + str(len(config.get("vc",""))).zfill(2)
-            config["refresh_token"] = "SIM-RT-" + config["uid"][:6].upper()
+        # REAL Noren QuickAuth login (TOTP auto-generated from stored secret).
+        # No simulated tokens: success stores the real session token.
+        try:
+            from core.services.broker_shoonya_live import ShoonyaLive
+            sh = ShoonyaLive(uid=config.get("uid", ""), password=config.get("pwd", ""),
+                             totp_secret=config.get("secret", "") or config.get("secret_code", ""),
+                             vendor_code=config.get("vc", ""), api_key=config.get("apikey", ""))
+            result = await sh.login()
+        except Exception as e:
+            return {"success": False, "error": f"Shoonya login crashed: {str(e)[:150]}"}
+        if result.get("success"):
+            config["access_token"] = sh.susertoken
+            config["actid"] = sh.actid
+            config.pop("refresh_token", None)
             _save_config("shoonya", config)
-            return {"success": True, "message": "Shoonya connected! One-click login simulated. Token generated."}
-        return {"success": False, "error": "Shoonya config incomplete. Fill uid/pwd/apikey/vc in Setup."}
+            return {"success": True, "message": "Shoonya connected! Real session token."}
+        return {"success": False, "error": f"Shoonya login failed: {result.get('error')}. Check uid/password/TOTP-secret/vendor-code/api-key."}
 
     if req.broker == "angel":
-        # Simulated Angel TOTP auto-login
-        if config.get("client_code") and config.get("api_key") and config.get("totp_secret"):
-            # Validate TOTP format (6 digits)
-            import re
-            if re.match(r'^\d{6}$', str(config.get("totp_secret",""))):
-                config["access_token"] = "ANG-" + config["client_code"][:6].upper() + "-TOTP"
-                config["refresh_token"] = "ANG-RT-" + config["client_code"][:6].upper()
-                _save_config("angel", config)
-                return {"success": True, "message": "Angel One connected! TOTP auto-login simulated. Token generated."}
-            return {"success": False, "error": "Angel: TOTP secret should be 6-digit code."}
-        return {"success": False, "error": "Angel config incomplete. Fill client_code/api_key/totp_secret in Setup."}
+        # REAL SmartAPI loginByPassword (TOTP auto-generated from stored secret).
+        try:
+            from core.services.broker_angel_live import AngelLive
+            an = AngelLive(api_key=config.get("api_key", ""), client_code=config.get("client_code", ""),
+                           password=config.get("password", ""), totp_secret=config.get("totp_secret", ""))
+            result = await an.login()
+        except Exception as e:
+            return {"success": False, "error": f"Angel login crashed: {str(e)[:150]}"}
+        if result.get("success"):
+            config["access_token"] = an.jwt
+            config["refresh_token"] = an.refresh_token
+            config["feed_token"] = an.feed_token
+            _save_config("angel", config)
+            return {"success": True, "message": "Angel One connected! Real JWT session."}
+        return {"success": False, "error": f"Angel login failed: {result.get('error')}. Check api-key/client-code/password/TOTP-secret."}
 
     return {"success": True, "message": f"{req.broker} connected (demo mode)"}
 
@@ -497,20 +511,21 @@ async def place_live_order(req: LiveOrderRequest):
         want = (req.broker or "").lower()
         if want and want not in BROKER_DEFAULTS:
             return {"error": f"Unknown broker '{req.broker}'"}
-        if want in ("shoonya", "angel"):
-            return {"error": f"{want} uses a simulated token in this app - live execution not supported. Use Fyers or Dhan."}
-        broker = want or next((b for b in ("fyers", "dhan") if _real_token(b)), "")
+        # (Simulated SIM-/ANG- tokens are rejected by _real_token below.)
+        if want and not _real_token(want):
+            return {"error": f"{want} has no REAL session (old simulated token?). Hit Connect in Brokers tab to login for real - order NOT placed."}
+        broker = want or next((b for b in ("fyers", "dhan", "angel", "shoonya") if _real_token(b)), "")
         if not broker:
-            return {"error": "No broker with a REAL token connected. Connect Fyers or Dhan first - order NOT placed."}
-        if broker not in ("fyers", "dhan"):
-            return {"error": f"Live execution supports Fyers/Dhan only right now (got {broker})."}
+            return {"error": "No broker with a REAL token connected. Connect Fyers, Dhan, Angel or Shoonya first - order NOT placed."}
+        if broker not in ("fyers", "dhan", "angel", "shoonya"):
+            return {"error": f"Live execution supports Fyers/Dhan/Angel/Shoonya (got {broker})."}
         if broker == "fyers":
             fy_sym = _fyers_symbol(symbol, exp_ymd, strike, opt)
             preview = {"broker": "fyers", "symbol": fy_sym, "underlying": symbol,
                        "strike": strike, "expiry": exp_ymd, "side": txn,
                        "lots": lots, "lot_size": lot, "quantity": broker_qty,
                        "order_type": "MARKET", "product": "INTRADAY"}
-        else:
+        elif broker == "dhan":
             try:
                 from core.services.broker_dhan_live import DhanLive
                 _dl0 = DhanLive(client_id=(_get_config("dhan") or {}).get("client_id", ""),
@@ -532,6 +547,49 @@ async def place_live_order(req: LiveOrderRequest):
                        "source": _res0.get("source", "")}
             broker_qty = lots * _dlot
             lot = _dlot
+        elif broker == "angel":
+            try:
+                from core.services.broker_angel_live import AngelLive
+                _ac0 = _get_config("angel") or {}
+                _an0 = AngelLive(api_key=_ac0.get("api_key", ""), client_code=_ac0.get("client_code", ""),
+                                 password=_ac0.get("password", ""), totp_secret=_ac0.get("totp_secret", ""))
+                _an0.jwt = _ac0.get("access_token", "")
+                _resA = await _an0.resolve_fo(symbol, exp_ymd, strike, opt)
+            except Exception as e:
+                return {"error": f"Angel resolution crashed: {str(e)[:150]}"}
+            if not _resA.get("symboltoken"):
+                return {"error": f"Angel: {_resA.get('error', 'symboltoken not resolved')} - order NOT placed."}
+            _tt = str(req.trade_type or "intraday").lower()
+            preview = {"broker": "angel", "symbol": _resA["tradingsymbol"],
+                       "symboltoken": _resA["symboltoken"], "underlying": symbol,
+                       "strike": strike, "expiry": exp_ymd, "side": txn,
+                       "lots": lots, "lot_size": lot, "quantity": broker_qty,
+                       "order_type": "MARKET",
+                       "product": "MARGIN" if _tt == "positional" else "INTRADAY"}
+        elif broker == "shoonya":
+            try:
+                from core.services.broker_shoonya_live import ShoonyaLive
+                _sc0 = _get_config("shoonya") or {}
+                _sh0 = ShoonyaLive(uid=_sc0.get("uid", ""), password=_sc0.get("pwd", ""),
+                                   totp_secret=_sc0.get("secret", "") or _sc0.get("secret_code", ""),
+                                   vendor_code=_sc0.get("vc", ""), api_key=_sc0.get("apikey", ""))
+                _sh0.susertoken = _sc0.get("access_token", "")
+                _sh0.actid = _sc0.get("actid", _sc0.get("uid", ""))
+                _resS = await _sh0.resolve_fo(symbol, exp_ymd, strike, opt)
+            except Exception as e:
+                return {"error": f"Shoonya resolution crashed: {str(e)[:150]}"}
+            if not _resS.get("tsym"):
+                return {"error": f"Shoonya: {_resS.get('error', 'contract not resolved')} - order NOT placed."}
+            _slot = int(_resS.get("lot_size") or 0) or lot
+            _tt = str(req.trade_type or "intraday").lower()
+            preview = {"broker": "shoonya", "symbol": _resS["tsym"],
+                       "token": _resS.get("token", ""), "underlying": symbol,
+                       "strike": strike, "expiry": exp_ymd, "side": txn,
+                       "lots": lots, "lot_size": _slot, "quantity": lots * _slot,
+                       "order_type": "MKT",
+                       "product": "M" if _tt == "positional" else "I"}
+            broker_qty = lots * _slot
+            lot = _slot
         if req.dry_run:
             return {"success": True, "dry_run": True, "preview": preview,
                     "note": "Preview only - nothing sent to broker."}
@@ -553,7 +611,7 @@ async def place_live_order(req: LiveOrderRequest):
                         "preview": preview, "broker_response": res.get("data", {})}
             order_id = str((res.get("data") or {}).get("order_id", ""))
             broker_ref = fy_sym
-        else:
+        elif broker == "dhan":
             from core.services.broker_dhan_live import DhanLive
             dl = DhanLive(client_id=(_get_config("dhan") or {}).get("client_id", ""),
                           access_token=(_get_config("dhan") or {}).get("access_token", ""))
@@ -564,6 +622,34 @@ async def place_live_order(req: LiveOrderRequest):
                         "preview": preview, "broker_response": res.get("data", {})}
             order_id = str((res.get("data") or {}).get("order_id", ""))
             broker_ref = preview["security_id"]
+        elif broker == "angel":
+            _ac = _get_config("angel") or {}
+            from core.services.broker_angel_live import AngelLive
+            an = AngelLive(api_key=_ac.get("api_key", ""), client_code=_ac.get("client_code", ""),
+                           password=_ac.get("password", ""), totp_secret=_ac.get("totp_secret", ""))
+            an.jwt = _ac.get("access_token", "")
+            res = await an.place_order(preview["symbol"], preview["symboltoken"], txn,
+                                       broker_qty, product=preview.get("product", "INTRADAY"))
+            if not res.get("success"):
+                return {"error": f"Angel rejected order: {res.get('error')}",
+                        "preview": preview, "broker_response": res.get("data", {})}
+            order_id = str((res.get("data") or {}).get("order_id", ""))
+            broker_ref = preview["symbol"]
+        elif broker == "shoonya":
+            _sc = _get_config("shoonya") or {}
+            from core.services.broker_shoonya_live import ShoonyaLive
+            sh = ShoonyaLive(uid=_sc.get("uid", ""), password=_sc.get("pwd", ""),
+                             totp_secret=_sc.get("secret", "") or _sc.get("secret_code", ""),
+                             vendor_code=_sc.get("vc", ""), api_key=_sc.get("apikey", ""))
+            sh.susertoken = _sc.get("access_token", "")
+            sh.actid = _sc.get("actid", _sc.get("uid", ""))
+            res = await sh.place_order(preview["symbol"], txn, broker_qty,
+                                       product=preview.get("product", "I"))
+            if not res.get("success"):
+                return {"error": f"Shoonya rejected order: {res.get('error')}",
+                        "preview": preview, "broker_response": res.get("data", {})}
+            order_id = str((res.get("data") or {}).get("order_id", ""))
+            broker_ref = preview["symbol"]
         # Track the live fill locally (entry at premium estimate)
         premium = None
         try:
