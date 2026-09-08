@@ -74,8 +74,14 @@ class IndicatorEngine:
         for i in range(period, n):
             basic_upper = hl2[i] + multiplier * atr[i]
             basic_lower = hl2[i] - multiplier * atr[i]
-            upper[i] = max(basic_upper, upper[i - 1]) if data[i - 1]["close_price"] <= upper[i - 1] else basic_upper
-            lower[i] = min(basic_lower, lower[i - 1]) if data[i - 1]["close_price"] >= lower[i - 1] else basic_lower
+            if i == period:
+                # Seed bands with first basic values: starting from 0.0 makes
+                # min(basic, 0) stick at 0 forever (SuperTrend always 0 = always bullish)
+                upper[i] = basic_upper
+                lower[i] = basic_lower
+            else:
+                upper[i] = max(basic_upper, upper[i - 1]) if data[i - 1]["close_price"] <= upper[i - 1] else basic_upper
+                lower[i] = min(basic_lower, lower[i - 1]) if data[i - 1]["close_price"] >= lower[i - 1] else basic_lower
             if in_uptrend[i - 1]:
                 in_uptrend[i] = data[i]["close_price"] > lower[i]
             else:

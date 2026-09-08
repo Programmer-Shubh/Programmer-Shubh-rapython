@@ -51,7 +51,7 @@ app.add_middleware(
 db = Database.get_instance()
 db.init_schema()
 
-from routes import dashboard, option_chain, paper_trade, strategy_builder, scanner, broker, webhook, websocket, email_alerts, strategies, custom_code, keepalive
+from routes import dashboard, option_chain, paper_trade, strategy_builder, scanner, broker, webhook, websocket, email_alerts, strategies, custom_code, keepalive, tvchart, tvchart
 
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(option_chain.router, prefix="/api/chain", tags=["Option Chain"])
@@ -65,6 +65,8 @@ app.include_router(email_alerts.router, prefix="/api/email-alerts", tags=["Email
 app.include_router(strategies.router, prefix="/api/strategies", tags=["Strategies"])
 app.include_router(custom_code.router, prefix="/api/custom-code", tags=["Custom Code"])
 app.include_router(keepalive.router, prefix="/api/keepalive", tags=["Keep-Alive"])
+app.include_router(tvchart.router, prefix="/api/tvchart", tags=["TV Chart"])
+app.include_router(tvchart.router, prefix="/api/tvchart", tags=["TV Chart"])
 
 
 @app.get("/")

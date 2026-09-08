@@ -7,6 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
@@ -188,6 +189,7 @@
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Builder</button>
         <button onclick="go('custom',this)"><i class="bi bi-code-slash"></i> Python Lab</button>
+        <button onclick="go('tvchart',this)"><i class="bi bi-candlestick"></i> TV Chart</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
         <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
         <button onclick="go('robot',this)"><i class="bi bi-robot"></i> Call/Put Robot</button>
@@ -444,6 +446,30 @@
                 </div>
             </div>
         </div>
+        <!-- TV CHART (TradingView Lightweight Charts + trade markers) -->
+        <div id="pg-tvchart" class="pg hidden">
+            <div class="card mb-2" style="border-left:4px solid #2962ff">
+                <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                    <div class="d-flex gap-2 align-items-center">
+                        <h4 class="fw-bold mb-0"><i class="bi bi-candlestick"></i> TradingView Chart</h4><span class="badge" style="background:#2962ff">Live markers</span><small class="text-muted ms-2">Buy/Sell arrows from paper + live orders</small>
+                    </div>
+                    <button class="btn btn-sm text-white" style="background:#2962ff" id="tv-load" onclick="tvLoad()"><i class="bi bi-arrow-clockwise"></i> Load Chart</button>
+                </div>
+            </div>
+            <div class="card mb-2"><div class="card-body p-2">
+                <div class="row g-2 align-items-end">
+                    <div class="col-6 col-md-2"><label class="form-label small">Symbol</label><input type="text" class="form-control form-control-sm" id="tv-sym" value="NIFTY"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">Start</label><input type="date" class="form-control form-control-sm" id="tv-start" value="2026-08-01"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">End</label><input type="date" class="form-control form-control-sm" id="tv-end" value="2026-09-08"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">Mode</label><select id="tv-mode" class="form-select form-select-sm"><option value="all" selected>Paper+Live</option><option value="paper">Paper only</option><option value="live">Live only</option></select></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">ST Pd</label><input type="number" id="tv-stp" class="form-control form-control-sm" value="10" min="2"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">ST Mult</label><input type="number" id="tv-stm" class="form-control form-control-sm" value="3" step="0.5" min="1"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">EMA F/S</label><div class="d-flex gap-1"><input type="number" id="tv-ef" class="form-control form-control-sm" value="9" min="2"><input type="number" id="tv-es" class="form-control form-control-sm" value="21" min="3"></div></div>
+                    <div class="col-6 col-md-2 d-flex gap-2 align-items-center"><label class="small"><input type="checkbox" id="tv-marks" checked> Markers</label><label class="small"><input type="checkbox" id="tv-auto" checked> Auto-refresh 60s</label></div>
+                </div>
+            </div></div>
+            <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:520px"></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
+        </div>
         <!-- BROKERS -->
         <div id="pg-brokers" class="pg hidden">
             <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -645,7 +671,7 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy')loadStrategySymbols();if(id==='custom')pyLabInit();if(id==='webhook')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy')loadStrategySymbols();if(id==='custom')pyLabInit();if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -1576,6 +1602,34 @@ def run(data):
             else document.getElementById('py-tl').innerHTML='<p class="text-muted p-2 mb-0">No trades generated by the script.</p>';
             document.getElementById('py-logs').textContent=r.logs||'(no script output)';
         }catch(e){btn.innerHTML=orig;document.getElementById('py-metrics').innerHTML='<p class="text-danger p-2">Network error: '+(e.message||e)+'</p>';}
+    }
+    let _tvChart=null,_tvCandle=null,_tvST=null,_tvEF=null,_tvES=null,_tvTimer=null;
+    async function tvLoad(){
+        const btn=document.getElementById('tv-load');const orig=btn.innerHTML;btn.innerHTML='<span class="spinner"></span> Loading...';
+        try{
+            if(typeof LightweightCharts==='undefined')throw new Error('TradingView library CDN load nahi hui - net check karo');
+            const sym=(document.getElementById('tv-sym').value||'NIFTY').toUpperCase();
+            const s=document.getElementById('tv-start').value, e=document.getElementById('tv-end').value;
+            if(!s||!e){btn.innerHTML=orig;alert('Start/End date select karo');return;}
+            const q=new URLSearchParams({symbol:sym,start_date:s,end_date:e,mode:document.getElementById('tv-mode').value,st_period:document.getElementById('tv-stp').value||10,st_mult:document.getElementById('tv-stm').value||3,ema_fast:document.getElementById('tv-ef').value||9,ema_slow:document.getElementById('tv-es').value||21});
+            const r=await A('/api/tvchart/data?'+q.toString());
+            btn.innerHTML=orig;
+            if(!r||r.error||!r.candles){document.getElementById('tv-info').textContent='Error: '+((r&&r.error)||'no data');return;}
+            const el=document.getElementById('tv-chart');el.innerHTML='';
+            _tvChart=LightweightCharts.createChart(el,{width:el.clientWidth||800,height:520,layout:{background:{color:'#fff'},textColor:'#212529'},grid:{vertLines:{color:'#eee'},horzLines:{color:'#eee'}},timeScale:{timeVisible:false}});
+            _tvCandle=_tvChart.addCandlestickSeries({upColor:'#198754',downColor:'#dc3545',wickUpColor:'#198754',wickDownColor:'#dc3545'});
+            _tvCandle.setData(r.candles);
+            _tvST=_tvChart.addLineSeries({color:'#ff9800',lineWidth:2,title:'SuperTrend'});_tvST.setData(r.series.supertrend||[]);
+            _tvEF=_tvChart.addLineSeries({color:'#2962ff',lineWidth:1,title:'EMAfast'});_tvEF.setData(r.series.ema_fast||[]);
+            _tvES=_tvChart.addLineSeries({color:'#6f42c1',lineWidth:1,title:'EMAslow'});_tvES.setData(r.series.ema_slow||[]);
+            const marks=(document.getElementById('tv-marks').checked)?(r.markers||[]):[];
+            try{_tvCandle.setMarkers(marks);}catch(me){}
+            _tvChart.timeScale().fitContent();
+            document.getElementById('tv-info').textContent=sym+' | '+r.candles.length+' candles | '+marks.length+' trade markers (paper+live entries/exits) | ST('+r.params.st_period+','+r.params.st_mult+') EMA('+r.params.ema_fast+'/'+r.params.ema_slow+')';
+            if(_tvTimer)clearInterval(_tvTimer);
+            if(document.getElementById('tv-auto').checked)_tvTimer=setInterval(()=>{if(!document.getElementById('pg-tvchart').classList.contains('hidden'))tvLoad();},60000);
+            window.addEventListener('resize',()=>{try{_tvChart.applyOptions({width:el.clientWidth});}catch(e){}});
+        }catch(err){btn.innerHTML=orig;document.getElementById('tv-info').textContent='Error: '+err.message;}
     }
     async function kaTest(){const s=document.getElementById('ka-status');s.textContent='pinging...';try{const r=await A('/api/keepalive/ping');s.textContent=(r&&r.status==='ok')?('OK - uptime '+Math.round(r.uptime_sec||0)+'s'):'Failed';}catch(e){try{const r2=await A(location.origin+'/api/keepalive/ping');s.textContent=(r2&&r2.status==='ok')?'OK (same origin)':'Failed';}catch(e2){s.textContent='Failed: '+e.message;}}}
 
