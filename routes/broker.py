@@ -38,6 +38,18 @@ class AuthRequest(BaseModel):
     code: str = ""
 
 
+class LiveOrderRequest(BaseModel):
+    symbol: str
+    option_type: str = "CE"
+    transaction_type: str = "BUY"
+    quantity: int = 1
+    strike: float = 0
+    expiry: str = ""
+    stop_loss: float = 1500.0
+    take_profit: float = 3000.0
+    broker: str = ""
+
+
 def _get_config(broker: str) -> dict:
     db = Database.get_instance()
     row = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key=?", [f"broker_{broker}"])
@@ -336,3 +348,69 @@ async def view_account(req: ConnectRequest):
         "holdings": [],
         "orders": [],
     }
+
+
+@router.post("/place-live")
+def place_live_order(req: LiveOrderRequest):
+    """Live order entry. No broker in this app executes real orders, so:
+    - if a broker with access_token is connected, the order is recorded with
+      trade_mode='live' (tracked alongside paper trades everywhere);
+    - otherwise a clear error is returned (frontend shows it, no fake success).
+    """
+    connected = [b for b in BROKER_DEFAULTS if _get_config(b).get("access_token")]
+    if req.broker:
+        if req.broker not in BROKER_DEFAULTS:
+            return {"error": f"Unknown broker '{req.broker}'"}
+        if not _get_config(req.broker).get("access_token"):
+            return {"error": f"{req.broker} not connected. Connect broker first (Brokers tab)."}
+        connected = [req.broker]
+    if not connected:
+        return {"error": "No broker connected. Connect a broker first (Brokers tab) - order NOT placed."}
+    try:
+        from core.models.trade_model import TradeModel
+        from core.services.transaction_costs import TransactionCosts
+        from utils.helpers import get_lot_size, get_strike_step, model_premium
+        from core.services.live_market_data import LiveMarketData
+        symbol = (req.symbol or "").upper()
+        if not symbol:
+            return {"error": "Symbol required"}
+        strike = float(req.strike or 0)
+        if strike <= 0:
+            spot = LiveMarketData().get_spot_price(symbol)
+            step = get_strike_step(symbol)
+            strike = round((spot or 0) / step) * step if spot and step else 0
+            if strike <= 0:
+                return {"error": "Strike required (spot unavailable for ATM calc)"}
+        premium = None
+        try:
+            tm0 = TradeModel()
+            premium = tm0.get_option_premium(symbol, req.option_type, strike, req.expiry or "")
+        except Exception:
+            premium = None
+        if not premium or premium <= 0:
+            spot = LiveMarketData().get_spot_price(symbol)
+            premium = model_premium(spot or strike, strike, 7, req.option_type, symbol=symbol) if spot else 50.0
+        txn = str(req.transaction_type or "BUY").upper()
+        if txn not in ("BUY", "SELL"):
+            txn = "BUY"
+        adj = TransactionCosts.apply_fill_slippage(float(premium), txn, is_live=True)
+        lot = get_lot_size(symbol)
+        costs = TransactionCosts.calculate(adj * int(req.quantity or 1) * lot, txn == "SELL", is_live=True)
+        import datetime as _dt
+        tm = TradeModel()
+        tid = tm.insert_trade({
+            "symbol": symbol, "option_type": req.option_type, "strike_price": strike,
+            "expiry_date": req.expiry or "", "transaction_type": txn,
+            "quantity": int(req.quantity or 1), "lot_size": lot, "entry_price": adj,
+            "stop_loss": float(req.stop_loss or 0), "target": float(req.take_profit or 0),
+            "total_cost": costs["total"],
+            "entry_date": _dt.datetime.now().strftime("%Y-%m-%d"),
+            "trade_mode": "live",
+        })
+        return {"success": True, "trade_id": tid, "entry_price": round(adj, 2),
+                "broker": connected[0], "mode": "live",
+                "note": "Tracked as LIVE trade. Connect real broker API for exchange execution."}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Live order failed: {str(e)}"}

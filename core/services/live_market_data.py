@@ -103,6 +103,30 @@ class LiveMarketData:
             return _CHAIN_CACHE[sym]["data"]
         return None
 
+    def get_live_spots_parallel(self, symbols, max_workers: int = 8):
+        """Batch live spots (missing method that data_refresher calls).
+        Returns {sym: {spot, formatted, change, high, low, source}}."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        result = {}
+        try:
+            workers = max(1, min(int(max_workers or 8), len(symbols) or 1))
+        except Exception:
+            workers = 4
+        try:
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                futures = {ex.submit(self.get_live_spot, sym): sym for sym in (symbols or [])}
+                for fut in as_completed(futures, timeout=30):
+                    sym = futures[fut]
+                    try:
+                        data = fut.result() if not fut.exception() else None
+                    except Exception:
+                        data = None
+                    if data and data.get("spot"):
+                        result[sym] = data
+        except Exception:
+            pass
+        return result
+
     def get_live_chains_parallel(self, symbols):
         now = time.time()
         result = {}
