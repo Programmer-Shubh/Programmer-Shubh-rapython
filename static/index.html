@@ -11,7 +11,21 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
-        body{background:#f0f2f5;color:#212529;font-family:'Segoe UI',system-ui,sans-serif;font-size:15px}
+        body{background:#f0f2f5;color:#212529;font-family:'Segoe UI',system-ui,sans-serif;font-size:15.5px}
+        h4{font-size:19px}
+        .topbar span{color:rgba(255,255,255,0.9);font-size:15px}
+        .trust-bar{font-size:14px}
+        .trust-bar .badge{font-size:12px}
+        .nav button{font-size:15px}
+        .card-header{font-size:16px}
+        .btn{font-size:15px}
+        .btn-sm{font-size:14px}
+        .form-control,.form-select{font-size:14.5px}
+        .form-label{font-size:13.5px}
+        .badge{font-size:12px}
+        .tabs button{font-size:14px}
+        th{font-size:14px}
+        td{font-size:14.5px}
         .topbar{background:linear-gradient(135deg,#0d6efd 0%,#6610f2 50%,#0dcaf0 100%);padding:8px 24px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 4px 12px rgba(13,110,253,0.3)}
         .topbar h1{color:#fff;font-size:18px;font-weight:800;letter-spacing:-0.5px;text-shadow:0 1px 2px rgba(0,0,0,0.2)}
         .topbar h1 small{font-weight:400;font-size:10px;background:rgba(255,255,255,0.2);padding:2px 6px;border-radius:10px;margin-left:8px;vertical-align:middle}
@@ -171,36 +185,35 @@
         .quant-card .desc{font-size:10px;color:#6c757d;line-height:1.2}
         .payoff-card{border:1px solid #0d6efd22}
         @media(max-width:768px){.sig-grid{grid-template-columns:1fr}#fno-top5{grid-template-columns:1fr}.sig-grid table th:last-child,.sig-grid table td:last-child{position:sticky;right:0;background:#fff;box-shadow:-2px 0 4px rgba(0,0,0,.1);z-index:1}.sig-grid table th:last-child{background:#f8f9fa}.row{flex-direction:column}#mkt-cards{flex-direction:row;flex-wrap:wrap}#mkt-cards .col{min-width:calc(25% - 8px);flex:1 1 calc(25% - 8px)}.col{min-width:100%}.wrap{padding:8px}.card-body{padding:8px}th{padding:6px;font-size:11px;white-space:nowrap}td{padding:6px;font-size:12px;white-space:nowrap}.stat-card{padding:8px}.stat-card .value{font-size:18px}.chain-table td{padding:3px 5px;font-size:11px;white-space:nowrap}.chain-table th{padding:4px 5px;font-size:10px;white-space:nowrap}.nav button{padding:10px 10px;font-size:12px}.btn{font-size:11px}.card-header{font-size:13px;padding:10px}.sig-box{padding:8px}.score-badge{font-size:10px}}
-        /* Large-text override: +2px across the whole site */
-        body{font-size:17px}
-        .nav button{font-size:15px}
-        .card-header{font-size:16px}
-        .form-label{font-size:14px}
-        .form-control,.form-select{font-size:14px}
-        th{font-size:14px}
-        td{font-size:16px}
-        .btn{font-size:14px}
-        .btn-sm{font-size:13px}
-        .badge{font-size:12px}
-        .stat-card .label{font-size:14px}
-        .stat-card .value{font-size:24px}
-        .stat-card-sm .label{font-size:13px}
-        .stat-card-sm .value{font-size:19px}
-        .tabs button{font-size:14px}
-        .topbar span{font-size:14px}
-        .trust-bar{font-size:13px}
-        .small,small{font-size:15px}
-        .text-muted{font-size:inherit}
-        .quant-card .title{font-size:13px}
-        .quant-card .desc{font-size:12px}
-        .section-title{font-size:14px}
-        #scan-st table td,#scan-vwap table td{font-size:14px}
-        #scan-st table th,#scan-vwap table th{font-size:13px}
-        #fno-top5 .sig-box h5{font-size:13px}
-        #fno-top5 .sig-item .name{font-size:14px}
-        .sig-item{font-size:14px}
-        .chain-table td{font-size:15px}
-        .chain-table th{font-size:13px}
+        /* Large-text override: +4px across the whole site */
+        body{font-size:19px}
+        .nav button{font-size:17px}
+        .card-header{font-size:18px}
+        .form-label{font-size:15px}
+        .form-control,.form-select{font-size:15px}
+        th{font-size:15px}
+        td{font-size:17px}
+        .btn{font-size:15px}
+        .btn-sm{font-size:14px}
+        .badge{font-size:13px}
+        .stat-card .label{font-size:15px}
+        .stat-card .value{font-size:26px}
+        .stat-card-sm .label{font-size:14px}
+        .stat-card-sm .value{font-size:21px}
+        .tabs button{font-size:15px}
+        .topbar span{font-size:15px}
+        .trust-bar{font-size:14px}
+        .small,small{font-size:16px}
+        .quant-card .title{font-size:14px}
+        .quant-card .desc{font-size:13px}
+        .section-title{font-size:15px}
+        #scan-st table td,#scan-vwap table td{font-size:15px}
+        #scan-st table th,#scan-vwap table th{font-size:14px}
+        #fno-top5 .sig-box h5{font-size:14px}
+        #fno-top5 .sig-item .name{font-size:15px}
+        .sig-item{font-size:15px}
+        .chain-table td{font-size:16px}
+        .chain-table th{font-size:14px}
         @media(max-width:768px){th{font-size:13px}td{font-size:14px}.stat-card .value{font-size:20px}.chain-table td{font-size:13px}.chain-table th{font-size:12px}.nav button{font-size:13px}.btn{font-size:13px}.card-header{font-size:15px}}
     </style>
 </head>
@@ -235,7 +248,11 @@
                 <div class="card-body p-0"><div id="fno-top5" class="sig-grid" style="padding:12px"></div></div>
             </div>
             <div class="card">
-                <div class="card-header">Top 5 Opportunities <small class="text-muted">(70+ score only)</small> <button class="btn btn-sm btn-primary" onclick="loadOpps()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
+                <div class="card-header">Top 5 Opportunities <small class="text-muted">(70+ score only)</small>
+                    <span class="ms-2"><label class="badge bg-success" style="font-size:13px"><input type="radio" name="dash-mode" value="paper" checked onchange="setDashMode('paper')"> Paper</label>
+                    <label class="badge bg-outline-danger border" style="font-size:13px"><input type="radio" name="dash-mode" value="live" onchange="setDashMode('live')"> Live</label></span>
+                    <span class="ms-2 small text-muted">Order banate time default <strong>Paper</strong> tik hai</span>
+                    <button class="btn btn-sm btn-primary ms-2" onclick="loadOpps()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
                 <div class="card-body p-0"><div id="opp-table" style="overflow-x:auto"></div></div>
             </div>
             <div class="card">
@@ -757,7 +774,21 @@
     function sigTbl(list,dir){if(!list.length)return '<p class="text-muted small">No signals</p>';let h='<div style="overflow-x:auto"><table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Spot</th><th>Strike</th><th>Expiry</th><th>Premium</th><th>Reasons</th><th>Action</th></tr>';list.forEach(s=>{h+=sigRow(s,dir);});h+='</table></div>';return h;}
     function renderSig(cid,buy,sell,title){document.getElementById(cid).innerHTML=`<div class="sig-box bull"><h5 class="price-up">${title} - Bullish (Buy CE) (${buy.length})</h5>${sigTbl(buy,'buy')}</div><div class="sig-box bear"><h5 class="price-down">${title} - Bearish (Buy PE) (${sell.length})</h5>${sigTbl(sell,'sell')}</div>`;}
     function stratBtnsForTrade(t){const opt=t.option_type||'CE';const bull=(opt==='CE');return bull?`<button class="btn btn-sm btn-buy" onclick="quickStrat('${t.symbol}','BUY','CE',${t.strike},'')">Buy Call</button> <button class="btn btn-sm btn-sell" onclick="quickStrat('${t.symbol}','SELL','PE',${t.strike},'')">Sell Put</button>`:`<button class="btn btn-sm btn-sell" onclick="quickStrat('${t.symbol}','BUY','PE',${t.strike},'')">Buy Put</button> <button class="btn btn-sm btn-buy" onclick="quickStrat('${t.symbol}','SELL','CE',${t.strike},'')">Sell Call</button>`;}
-    function quickStrat(sym,action,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','3000');P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
+    let _dashMode='paper';
+    function setDashMode(m){_dashMode=(m==='live')?'live':'paper';document.querySelectorAll('input[name="dash-mode"]').forEach(r=>r.checked=(r.value===_dashMode));}
+    function quickStrat(sym,action,type,strike,expiry){const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','3000');
+        const mode=_dashMode;
+        if(!confirm('Order Mode: '+mode.toUpperCase()+'\n'+action+' '+type+' '+sym+' '+strike+' x'+lots+' lots\nSL ₹'+sl+' TP ₹'+tp+'\n\nConfirm?'))return;
+        if(mode==='live'){
+            P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry||'',date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),dry_run:true})}).then(pv=>{
+                if(pv.error){alert('Live blocked: '+pv.error);return;}
+                const p=pv.preview||{};
+                if(!confirm('REAL MONEY preview\nBroker: '+p.broker+'\nSymbol: '+(p.symbol||p.security_id||p.tsym)+'\nSide: '+p.side+' Qty: '+p.quantity+'\n\nSend to exchange?'))return;
+                P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry||'',date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),dry_run:false})}).then(r=>{if(r.error)alert('Live error: '+r.error);else{alert('LIVE order sent! Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id);loadDashPositions();}});
+            });
+            return;
+        }
+        P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}});}
     let _lastDashPosHTML = null;
     async function loadDashPositions(){
         try{
