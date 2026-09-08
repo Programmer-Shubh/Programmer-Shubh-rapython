@@ -587,8 +587,9 @@
                         <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
                     </div>
                     <div class="row g-2 mt-2">
+                        <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
-                        <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:14"></div>
+                        <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:05"><small class="text-muted" id="r-exit-note">Intraday square-off</small></div>
                         <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
@@ -1173,8 +1174,9 @@
         if(!s||!e){alert('Select start and end date'); return;}
         const indicators=robotCollectIndicators();
         const entryTime=document.getElementById('r-entry').value||'09:35';
-        const exitTime=document.getElementById('r-exit').value||'15:14';
-        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:'intraday', entry_time:entryTime, exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal}, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
+        const exitTime=document.getElementById('r-exit').value||'15:05';
+        const rType=(document.getElementById('r-type')?.value||'intraday').toLowerCase();
+        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:rType, entry_time:entryTime, exit_time:exitTime, early_exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal}, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
         document.getElementById('robot-results').classList.remove('hidden');
         document.getElementById('robot-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Running backtest...</p>';
         try{
@@ -1186,7 +1188,7 @@
             document.getElementById('robot-metrics').innerHTML=`<div class="row g-2"><div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value">${r.symbol||sym}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlC}">${F(m.net_pnl||pnl)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Trades</div><div class="value">${m.total_trades}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}%</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Avg P/L</div><div class="value ${pnlC}">${F(m.avg_profit_per_trade||0)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max DD</div><div class="value price-down">${m.max_drawdown}%</div></div></div>${r.took_ms!=null?'<div class="col"><div class="card stat-card-sm"><div class="label">Time</div><div class="value">'+(r.took_ms/1000).toFixed(1)+'s</div></div></div>':''}</div>`;
             if(r.equity_curve&&r.equity_curve.length) Plotly.newPlot('robot-eq',[{y:r.equity_curve,type:'scatter',line:{color:'#0d6efd',width:2}}],{title:'Equity Curve - '+sym+' '+order,margin:{t:30,b:30,l:50,r:20}});
             if(r.monthly_pnl&&Object.keys(r.monthly_pnl).length) Plotly.newPlot('robot-mo',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',margin:{t:30,b:30,l:50,r:20}}); else Plotly.newPlot('robot-mo',[{x:['No data'],y:[0],type:'bar'}],{title:'Monthly P&L'});
-            if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Entry Date</th><th>Symbol</th><th>B/S</th><th>Strike</th><th>Qty</th><th>Entry Price</th><th>Exit Date</th><th>Exit Price</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.symbol||sym}</td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>${t.exit_date} ${t.exit_time||'15:14'}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
+            if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Entry Date</th><th>Symbol</th><th>B/S</th><th>Strike</th><th>Qty</th><th>Entry Price</th><th>Exit Date</th><th>Exit Price</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.symbol||sym}</td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>${t.exit_date} ${t.exit_time||'15:05'}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
         }catch(e){document.getElementById('robot-metrics').innerHTML='<p class="text-danger p-3">Error: '+e.message+'</p>';}
     }
     function isMarketOpenIST(){
@@ -1239,10 +1241,16 @@
         }catch(e){ strikeVal=0; }
         document.getElementById('robot-status').innerHTML='<p class="text-success"><span class="spinner"></span> Starting '+sym+' '+order+' '+strikeType+' '+expiry+' SL ₹'+sl+' Target ₹'+tp+' (Strike '+(strikeVal||'ATM')+')...</p>';
         try{
-            const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym, option_type:optR, strike:strikeVal, expiry:expiry, date:new Date().toISOString().split('T')[0], transaction_type:txnR, quantity:lots, stop_loss:sl, take_profit:tp })});
+            const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym, option_type:optR, strike:strikeVal, expiry:expiry, date:new Date().toISOString().split('T')[0], transaction_type:txnR, quantity:lots, stop_loss:sl, take_profit:tp, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()})});
             if(r.error) document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+r.error+'</p>';
             else document.getElementById('robot-status').innerHTML='<p class="text-success">Robot started! Trade #'+(r.trade_id||'')+' '+sym+' '+order+' @ ₹'+(r.entry_price||'')+' (Strike '+strikeVal+') SL ₹'+sl+' Target ₹'+tp+' — check Trading Center</p>';
         }catch(e){document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+e.message+'</p>'; console.error(e);}
+    }
+    function robotTypeChange(){
+        const t=document.getElementById('r-type').value;
+        const ex=document.getElementById('r-exit');
+        if(t==='intraday'){ex.disabled=false;ex.value='15:05';document.getElementById('r-exit-note').textContent='Intraday square-off';}
+        else{ex.disabled=true;document.getElementById('r-exit-note').textContent='Positional: overnight carry, no EOD exit';}
     }
     function robotCollectIndicators(){
         const indicators=[];
@@ -1264,7 +1272,7 @@
         let legs=[];
         if(order==='AUTO'){ legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType.toLowerCase()}]; }
         else { const p=order.split('-'); legs=[{option_type:p[0], transaction:p[1].toLowerCase(), lots:lots, strike_selection:strikeType.toLowerCase()}]; }
-        const body={name:sym+'_Robot_'+order, symbol:sym, strategy_type:'intraday', entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, lots:lots, stop_loss:sl, take_profit:tp, start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, legs:legs, auto_signal:order==='AUTO', indicators:robotCollectIndicators()};
+        const body={name:sym+'_Robot_'+order, symbol:sym, strategy_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase(), entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, lots:lots, stop_loss:sl, take_profit:tp, start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, legs:legs, auto_signal:order==='AUTO', indicators:robotCollectIndicators()};
         try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ alert('Robot saved! ID: '+r.id); loadRobotSaved(); } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
     }
      function _parseJsonField(v, fallback){ if(!v) return fallback; if(typeof v==='string'){ try{return JSON.parse(v);}catch(e){return fallback;} } return v; }
@@ -1308,7 +1316,7 @@
         const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||3000;
         const expiry=document.getElementById('r-expiry').value;
-        const base={symbol:sym, option_type:optR, transaction_type:txnR, quantity:lots, strike:0, expiry:expiry, stop_loss:sl, take_profit:tp};
+        const base={symbol:sym, option_type:optR, transaction_type:txnR, quantity:lots, strike:0, expiry:expiry, stop_loss:sl, take_profit:tp, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()};
         try{
             // Step 1: dry-run preview - exact broker payload, sends nothing
             const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:true})});
