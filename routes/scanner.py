@@ -87,6 +87,16 @@ def scan_all(min_score: int = 80):
         return {"st_macd": {"bullish": [], "bearish": [], "total_scanned": 0, "error": str(e)[:200]}, "vwap": {"long": [], "short": [], "total_scanned": 0}}
 
 
+@router.get("/scan-combined")
+def scan_combined(min_score: int = 80):
+    """ONE merged scanner: SuperTrend+MACD AND VWAP+RSI+EMA, only min_score+ trades."""
+    try:
+        scanner = OptionScanner()
+        return scanner.scan_combined(min_score=min_score)
+    except Exception as e:
+        return {"bullish": [], "bearish": [], "total_scanned": 0, "error": str(e)[:200]}
+
+
 @router.get("/fno-top5")
 def fno_top5():
     k="fno"; now=_t.time()

@@ -65,7 +65,48 @@ class OptionScanner:
         short_signals.sort(key=lambda x: x['score'], reverse=True)
         return {'long': long_signals[:5], 'short': short_signals[:5], 'total_scanned': len(symbols)}
 
-    def get_top_opportunities(self, symbols=None, top_n: int = 5) -> list:
+    def scan_combined(self, symbols=None, min_score: int = 80) -> dict:
+        """ONE merged dashboard scanner: SuperTrend+MACD AND VWAP+RSI+EMA,
+        only 80/100 trades. Bullish = ST-BUY + VWAP-LONG, Bearish = ST-SELL + VWAP-SHORT."""
+        if symbols is None:
+            symbols = FNO_SYMBOLS
+        try:
+            min_score = int(min_score)
+        except Exception:
+            min_score = 80
+        st = self.scan(symbols=list(symbols), min_score=min_score)
+        vw = self.scan_vwap(symbols=list(symbols))
+        bullish = list(st.get("bullish", []))
+        bearish = list(st.get("bearish", []))
+        for s in vw.get("long", []):
+            if s.get("score", 0) >= min_score:
+                s = dict(s)
+                s["signal_type"] = "BUY CE"
+                s["direction"] = "bullish"
+                bullish.append(s)
+        for s in vw.get("short", []):
+            if s.get("score", 0) >= min_score:
+                s = dict(s)
+                s["signal_type"] = "BUY PE"
+                s["direction"] = "bearish"
+                bearish.append(s)
+        # Dedupe by symbol, keep highest score
+        def _dedupe(items):
+            best = {}
+            for x in items:
+                k = x.get("symbol", "")
+                if k not in best or x.get("score", 0) > best[k].get("score", 0):
+                    best[k] = x
+            return sorted(best.values(), key=lambda x: x.get("score", 0), reverse=True)[:5]
+        return {"bullish": _dedupe(bullish), "bearish": _dedupe(bearish),
+                "total_scanned": st.get("total_scanned", len(symbols)),
+                "min_score": min_score}
+
+    def get_top_opportunities(self, symbols=None, top_n: int = 5, min_score: int = 70) -> list:
+        try:
+            min_score = int(min_score)
+        except Exception:
+            min_score = 70
         if symbols is None:
             symbols = FNO_SYMBOLS
         # Mix indices + stocks equally - shuffle ordered to avoid indices always winning
@@ -99,26 +140,9 @@ class OptionScanner:
             s['direction'] = 'bearish'
             all_signals.append(s)
 
-        # Ensure we return a full list (up to top_n). If fewer than top_n
-        # signals scored >=50, lower the bar so the dashboard stays populated.
-        if len(all_signals) < top_n:
-            for sym in ordered:
-                if sym in seen:
-                    continue
-                result = self._analyze_vwap_symbol(sym)
-                if result and result['type'] != 'NONE':
-                    seen.add(sym)
-                    result['signal_type'] = 'BUY CE' if result['type'] == 'LONG' else 'BUY PE'
-                    result['direction'] = 'bullish' if result['type'] == 'LONG' else 'bearish'
-                    all_signals.append(result)
-                elif result and result.get('price'):
-                    # AI-enhanced fallback using available indicators
-                    fb = self._ai_fallback_signal(result)
-                    if fb:
-                        seen.add(sym)
-                        all_signals.append(fb)
-                if len(all_signals) >= top_n:
-                    break
+        # Dashboard rule: ONLY 70/100 trades. No bar-lowering fallback, no weak
+        # AI-fallback fillers - an empty list is honest, weak signals are not.
+        all_signals = [s for s in all_signals if s.get('score', 0) >= min_score]
 
         all_signals.sort(key=lambda x: x['score'], reverse=True)
         top = all_signals[:top_n]
