@@ -49,6 +49,7 @@ class LiveOrderRequest(BaseModel):
     take_profit: float = 3000.0
     broker: str = ""
     dry_run: bool = False
+    trade_type: str = "intraday"
 
 
 class LiveToggleRequest(BaseModel):
@@ -71,8 +72,10 @@ def _real_token(broker: str) -> bool:
 
 
 def _resolve_expiry(symbol: str, hint: str) -> str:
-    """Return YYYY-MM-DD expiry: YYYY-MM-DD hint as-is; Weekly -> next Thursday;
-    Monthly (or stocks) -> last Thursday of month."""
+    """Return YYYY-MM-DD expiry: YYYY-MM-DD hint as-is; Weekly -> next expiry
+    weekday (Tue for NSE F&O, Thu for SENSEX); Monthly (or stocks) -> last such
+    weekday of month. (NSE moved expiries: NIFTY Tue, BANKNIFTY/FINNIFTY monthly
+    last-Tue - verified against Dhan scrip master Sep 2026.)"""
     import datetime as _dt
     import calendar as _cal
     hint = str(hint or "").strip()
@@ -81,37 +84,65 @@ def _resolve_expiry(symbol: str, hint: str) -> str:
     except Exception:
         pass
     today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
+    wd = 3 if symbol.upper() == "SENSEX" else 1  # Thu vs Tue
     weekly_idx = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
-    if hint.lower().startswith("week") or symbol.upper() in weekly_idx:
+    hl = hint.lower()
+    if hl.startswith("month"):
+        pass  # monthly calc below
+    elif hl.startswith("week") or symbol.upper() in weekly_idx:
         d = today + _dt.timedelta(days=1)
-        while d.weekday() != 3:
+        while d.weekday() != wd:
             d += _dt.timedelta(days=1)
         return d.strftime("%Y-%m-%d")
     last = _dt.date(today.year, today.month, _cal.monthrange(today.year, today.month)[1])
-    while last.weekday() != 3:
+    while last.weekday() != wd:
         last -= _dt.timedelta(days=1)
     if last < today:
         m = today.month + 1 if today.month < 12 else 1
         y = today.year if today.month < 12 else today.year + 1
         last = _dt.date(y, m, _cal.monthrange(y, m)[1])
-        while last.weekday() != 3:
+        while last.weekday() != wd:
             last -= _dt.timedelta(days=1)
     return last.strftime("%Y-%m-%d")
 
 
-def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str) -> str:
-    """Fyers F&O format NSE:UNDERLYINGYYMONSTRIKECE/PE e.g. NSE:NIFTY26FEB24800CE."""
+def _expiry_is_explicit(hint: str) -> bool:
     import datetime as _dt
-    d = _dt.datetime.strptime(expiry_ymd[:10], "%Y-%m-%d")
-    mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][d.month - 1]
-    return f"NSE:{symbol.upper()}{d.strftime('%y')}{mon}{int(float(strike))}{option_type.upper()}"
+    try:
+        _dt.datetime.strptime(str(hint or "")[:10], "%Y-%m-%d")
+        return True
+    except Exception:
+        return False
+
+
+def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str) -> str:
+    """Fyers F&O symbols (verified against official skill docs + community):
+    monthly: NSE:NIFTY26JAN25500CE  ({YY}{MMM})
+    weekly:  NSE:NIFTY2611325500CE  ({YY}{M}{dd}, M = 1-9/O/N/D single-char code).
+    Monthly <=> expiry is the month's last Thursday, else weekly."""
+    import datetime as _dt
+    import calendar as _cal
+    d = _dt.datetime.strptime(expiry_ymd[:10], "%Y-%m-%d").date()
+    wd = 3 if symbol.upper() == "SENSEX" else 1  # monthly weekday: Thu vs Tue
+    last = _dt.date(d.year, d.month, _cal.monthrange(d.year, d.month)[1])
+    while last.weekday() != wd:
+        last -= _dt.timedelta(days=1)
+    yy = d.strftime("%y")
+    if d == last:
+        mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][d.month - 1]
+        code = f"{yy}{mon}"
+    else:
+        mcode = {1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6",
+                 7: "7", 8: "8", 9: "9", 10: "O", 11: "N", 12: "D"}[d.month]
+        code = f"{yy}{mcode}{d.day:02d}"
+    return f"NSE:{symbol.upper()}{code}{int(float(strike))}{option_type.upper()}"
 
 
 @router.get("/live-status")
 def live_status():
     real = [b for b in ("fyers", "dhan") if _real_token(b)]
     return {"enabled": _live_enabled(), "real_brokers": real,
-            "note": "Enable only if you understand real-money risk. Dhan live needs securityId mapping (Fyers supported)."}
+            "note": "Fyers + Dhan live supported. Dry-run first to verify broker symbol/securityId."}
 
 
 @router.post("/live-toggle")
@@ -467,38 +498,72 @@ async def place_live_order(req: LiveOrderRequest):
         if want and want not in BROKER_DEFAULTS:
             return {"error": f"Unknown broker '{req.broker}'"}
         if want in ("shoonya", "angel"):
-            return {"error": f"{want} uses a simulated token in this app - live execution not supported. Use Fyers."}
-        if want == "dhan":
-            return {"error": "Dhan live needs securityId mapping (instrument master) - not yet wired. Use Fyers."}
+            return {"error": f"{want} uses a simulated token in this app - live execution not supported. Use Fyers or Dhan."}
         broker = want or next((b for b in ("fyers", "dhan") if _real_token(b)), "")
-        if broker == "dhan":
-            return {"error": "Dhan live needs securityId mapping (instrument master) - not yet wired. Use Fyers."}
         if not broker:
-            return {"error": "No broker with a REAL token connected. Connect Fyers (OAuth) first - order NOT placed."}
-        if broker != "fyers":
-            return {"error": f"Live execution supports Fyers only right now (got {broker})."}
-        fy_sym = _fyers_symbol(symbol, exp_ymd, strike, opt)
-        preview = {"broker": "fyers", "symbol": fy_sym, "underlying": symbol,
-                   "strike": strike, "expiry": exp_ymd, "side": txn,
-                   "lots": lots, "lot_size": lot, "quantity": broker_qty,
-                   "order_type": "MARKET", "product": "INTRADAY"}
+            return {"error": "No broker with a REAL token connected. Connect Fyers or Dhan first - order NOT placed."}
+        if broker not in ("fyers", "dhan"):
+            return {"error": f"Live execution supports Fyers/Dhan only right now (got {broker})."}
+        if broker == "fyers":
+            fy_sym = _fyers_symbol(symbol, exp_ymd, strike, opt)
+            preview = {"broker": "fyers", "symbol": fy_sym, "underlying": symbol,
+                       "strike": strike, "expiry": exp_ymd, "side": txn,
+                       "lots": lots, "lot_size": lot, "quantity": broker_qty,
+                       "order_type": "MARKET", "product": "INTRADAY"}
+        else:
+            try:
+                from core.services.broker_dhan_live import DhanLive
+                _dl0 = DhanLive(client_id=(_get_config("dhan") or {}).get("client_id", ""),
+                                access_token=(_get_config("dhan") or {}).get("access_token", ""))
+                _res0 = await _dl0.resolve_fo(symbol, exp_ymd, strike, opt,
+                                              exact=_expiry_is_explicit(req.expiry))
+            except Exception as e:
+                return {"error": f"Dhan resolution crashed: {str(e)[:150]}"}
+            if not _res0.get("security_id"):
+                return {"error": f"Dhan: {_res0.get('error', 'securityId not resolved')} - order NOT placed."}
+            _dlot = int(_res0.get("lot_size") or 0) or lot
+            _tt = str(req.trade_type or "intraday").lower()
+            preview = {"broker": "dhan", "security_id": _res0["security_id"],
+                       "resolved_symbol": _res0.get("symbol", ""), "underlying": symbol,
+                       "strike": strike, "expiry": exp_ymd, "side": txn,
+                       "lots": lots, "lot_size": _dlot, "quantity": lots * _dlot,
+                       "order_type": "MARKET",
+                       "product": "MARGIN" if _tt == "positional" else "INTRADAY",
+                       "source": _res0.get("source", "")}
+            broker_qty = lots * _dlot
+            lot = _dlot
         if req.dry_run:
             return {"success": True, "dry_run": True, "preview": preview,
                     "note": "Preview only - nothing sent to broker."}
         if not _live_enabled():
             return {"error": "LIVE trading is OFF (safety switch). Enable it in Brokers tab first - order NOT placed.",
                     "preview": preview}
-        cfg = _get_config("fyers")
-        from core.services.broker_fyers import FyersV3
-        fy = FyersV3(app_id=cfg.get("app_id", ""), secret_key=cfg.get("secret", ""),
-                     redirect_uri=cfg.get("redirect_uri", ""),
-                     access_token=cfg.get("access_token", ""),
-                     refresh_token=cfg.get("refresh_token", ""))
-        res = await fy.place_order(fy_sym, txn, broker_qty, order_type="MARKET")
-        if not res.get("success"):
-            return {"error": f"Fyers rejected order: {res.get('error') or res.get('data')}",
-                    "preview": preview, "broker_response": res.get("data", {})}
-        order_id = str((res.get("data") or {}).get("order_id", ""))
+        order_id = ""
+        broker_ref = ""
+        if broker == "fyers":
+            cfg = _get_config("fyers")
+            from core.services.broker_fyers import FyersV3
+            fy = FyersV3(app_id=cfg.get("app_id", ""), secret_key=cfg.get("secret", ""),
+                         redirect_uri=cfg.get("redirect_uri", ""),
+                         access_token=cfg.get("access_token", ""),
+                         refresh_token=cfg.get("refresh_token", ""))
+            res = await fy.place_order(fy_sym, txn, broker_qty, order_type="MARKET")
+            if not res.get("success"):
+                return {"error": f"Fyers rejected order: {res.get('error') or res.get('data')}",
+                        "preview": preview, "broker_response": res.get("data", {})}
+            order_id = str((res.get("data") or {}).get("order_id", ""))
+            broker_ref = fy_sym
+        else:
+            from core.services.broker_dhan_live import DhanLive
+            dl = DhanLive(client_id=(_get_config("dhan") or {}).get("client_id", ""),
+                          access_token=(_get_config("dhan") or {}).get("access_token", ""))
+            res = await dl.place_order(preview["security_id"], txn, broker_qty,
+                                       order_type="MARKET", product=preview.get("product", "INTRADAY"))
+            if not res.get("success"):
+                return {"error": f"Dhan rejected order: {res.get('error')}",
+                        "preview": preview, "broker_response": res.get("data", {})}
+            order_id = str((res.get("data") or {}).get("order_id", ""))
+            broker_ref = preview["security_id"]
         # Track the live fill locally (entry at premium estimate)
         premium = None
         try:
@@ -522,7 +587,7 @@ async def place_live_order(req: LiveOrderRequest):
             "trade_mode": "live", "broker_order_id": order_id,
         })
         return {"success": True, "trade_id": tid, "broker_order_id": order_id,
-                "broker": "fyers", "broker_symbol": fy_sym, "quantity": broker_qty,
+                "broker": broker, "broker_symbol": broker_ref, "quantity": broker_qty,
                 "entry_price": round(adj, 2), "mode": "live"}
     except Exception as e:
         import traceback
