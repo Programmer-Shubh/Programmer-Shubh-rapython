@@ -671,7 +671,7 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy')loadStrategySymbols();if(id==='custom')pyLabInit();if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy')loadStrategySymbols();if(id==='robot')loadRobotSaved();if(id==='custom')pyLabInit();if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -979,7 +979,7 @@
             legs.push({option_type:legOpt,position:legPos,strike_type:legStrike,lots, transaction: legPos.toLowerCase(), strike_selection: legStrike.toLowerCase()});
         }
         const body={
-            name:idx+'_'+stratType,
+            name:(document.getElementById('s-name').value||'').trim()||(idx+'_'+stratType),
             symbol:idx,
             strategy_type:stratType,
             entry_time:entryTime,
@@ -1106,8 +1106,31 @@
 
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3">No strategies yet. Create your first strategy!</p>';return;}let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const statusCls=s.status==='active'?'active':s.status==='draft'?'draft':'paused';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span class="badge badge-${statusCls}">${s.status}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px"><button class="btn btn-sm btn-success" onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})">Edit</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
 
-    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];const leg=legs[0]||{};const opt=leg.option_type||'CE';const txn=leg.transaction||'buy';const lots=leg.lots||1;const sl=leg.stop_loss||1500;const
-           tp=leg.take_profit||3000;alert(`Paper Trade from "${s.name}"\nSymbol: ${s.symbol}\nOption: ${opt}\nTransaction: ${txn}\nLots: ${lots}\nSL: ₹${sl}\nTP: ₹${tp}\n\nGo to Option Chain to place trade.`);}catch(e){alert('Error: '+e.message);}}
+    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];if(!legs.length){alert('No legs in this strategy');return;}
+        let live=null;try{live=await A('/api/chain/live/'+s.symbol);}catch(e){}
+        const atm=live&&live.atm?live.atm:0;
+        if(!atm){alert('Live ATM unavailable - open Option Chain once, then retry');return;}
+        const rm=_parseJsonField(s.risk_management,{});const sl=rm.daily_stop_loss||1500,tp=rm.daily_take_profit||3000;
+        let autoDir=null;
+        if(legs.some(l=>String(l.option_type||'').toUpperCase()==='AUTO')){try{const sig=await A('/api/scanner/st-macd/'+s.symbol);autoDir=(sig&&sig.type==='SELL')?'PE':'CE';}catch(e){autoDir='CE';}}
+        const step=(s.symbol==='BANKNIFTY'?100:50);
+        const today=new Date().toISOString().split('T')[0];
+        const placed=[];
+        for(const leg of legs){
+            let opt=String(leg.option_type||'CE').toUpperCase();if(opt==='AUTO')opt=autoDir||'CE';
+            let txn=String(leg.transaction||'buy').toUpperCase();if(txn==='AUTO')txn='BUY';
+            const sel=String(leg.strike_selection||'atm').toLowerCase();
+            const dist=parseInt(leg.otm_distance)||0;
+            let strike=atm;
+            if(sel==='otm')strike=atm+(opt==='CE'?dist*step:-dist*step);
+            else if(sel==='itm')strike=atm+(opt==='CE'?-dist*step:dist*step);
+            const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s.symbol,option_type:opt,strike:strike,expiry:today,date:today,transaction_type:txn,quantity:leg.lots||1,stop_loss:sl,take_profit:tp})});
+            if(r.error){alert('Error: '+r.error);return;}
+            placed.push('Trade #'+r.trade_id+' '+txn+' '+opt+' '+strike+' @ Rs'+r.entry_price);
+        }
+        alert('Paper trade lag gaya!\n'+placed.join('\n')+'\n\nOpen Positions me dikhega.');
+        loadTrades();try{loadDashPositions();}catch(e){}
+    }catch(e){alert('Error: '+e.message);}}
     async function atFromStrat(id,status){const newStatus=status==='active'?'paused':'active';await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:newStatus})});loadStrats();loadTrades();}
     async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);document.getElementById('s-name').value=s.name||'';document.getElementById('s-sym').value=s.symbol||'BANKNIFTY';document.getElementById('s-start').value=s.start_date||'';document.getElementById('s-end').value=s.end_date||'';document.getElementById('s-tf').value=s.timeframe||'daily';}catch(e){alert('Error');}}
     async function delStrat(id){if(!confirm('Delete this strategy?'))return;await A('/api/strategies/'+id,{method:'DELETE'});loadStrats();}
