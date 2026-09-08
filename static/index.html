@@ -599,6 +599,7 @@
                     <div class="row g-2 mt-2">
                         <div class="col-md-12 d-flex gap-2 flex-wrap">
                             <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
+                            <input type="text" id="r-name" class="form-control form-control-sm" style="width:200px" placeholder="Robot name (optional)">
                             <button class="btn btn-sm btn-outline-success" onclick="robotPaperTrade()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
                             <button class="btn btn-sm btn-outline-danger" onclick="robotLiveTrade()"><i class="bi bi-lightning"></i> Live Trade</button>
                             <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
@@ -1133,7 +1134,7 @@
     }catch(e){alert('Error: '+e.message);}}
     async function atFromStrat(id,status){const newStatus=status==='active'?'paused':'active';await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:newStatus})});loadStrats();loadTrades();}
     async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);document.getElementById('s-name').value=s.name||'';document.getElementById('s-sym').value=s.symbol||'BANKNIFTY';document.getElementById('s-start').value=s.start_date||'';document.getElementById('s-end').value=s.end_date||'';document.getElementById('s-tf').value=s.timeframe||'daily';}catch(e){alert('Error');}}
-    async function delStrat(id){if(!confirm('Delete this strategy?'))return;await A('/api/strategies/'+id,{method:'DELETE'});loadStrats();}
+    async function delStrat(id){if(!confirm('Delete this strategy?'))return;try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadStrats();}catch(e){alert('Error: '+e.message);}}
 
 
     async function loadAlerts(){
@@ -1302,7 +1303,7 @@
         const rOtmDist=((strikeType.toLowerCase()==='otm'||strikeType.toLowerCase()==='itm'))?rOtmSave:0;
         if(order==='AUTO'){ legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType.toLowerCase(), otm_distance:rOtmDist}]; }
         else { const p=order.split('-'); legs=[{option_type:p[0], transaction:p[1].toLowerCase(), lots:lots, strike_selection:strikeType.toLowerCase(), otm_distance:rOtmDist}]; }
-        const body={name:sym+'_Robot_'+order, symbol:sym, strategy_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase(), entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, lots:lots, stop_loss:sl, take_profit:tp, start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, legs:legs, auto_signal:order==='AUTO', indicators:robotCollectIndicators()};
+        const body={name:((document.getElementById('r-name')?.value||'').trim()||(sym+'_Robot_'+order)), symbol:sym, strategy_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase(), entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, lots:lots, stop_loss:sl, take_profit:tp, start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, legs:legs, auto_signal:order==='AUTO', indicators:robotCollectIndicators()};
         try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ alert('Robot saved! ID: '+r.id); loadRobotSaved(); } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
     }
      function _parseJsonField(v, fallback){ if(!v) return fallback; if(typeof v==='string'){ try{return JSON.parse(v);}catch(e){return fallback;} } return v; }
@@ -1336,7 +1337,7 @@
             alert('Robot ID '+id+' loaded to form');
         }catch(e){ alert('Error: '+e.message); }
     }
-    async function delRobotSaved(id){ if(!confirm('Delete this saved robot?')) return; await A('/api/strategies/'+id,{method:'DELETE'}); loadRobotSaved(); }
+    async function delRobotSaved(id){ if(!confirm('Delete this saved robot?')) return; try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadRobotSaved();}catch(e){alert('Error: '+e.message);} }
     async function robotPaperTrade(){ await robotStart(); document.getElementById('robot-status').innerHTML+='<br><small class="text-muted">Mode: Paper Trade (default)</small>'; }
     async function robotLiveTrade(){
         const sym=document.getElementById('r-sym').value;
