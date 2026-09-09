@@ -215,6 +215,19 @@
         .chain-table td{font-size:16px}
         .chain-table th{font-size:14px}
         @media(max-width:768px){th{font-size:13px}td{font-size:14px}.stat-card .value{font-size:20px}.chain-table td{font-size:13px}.chain-table th{font-size:12px}.nav button{font-size:13px}.btn{font-size:13px}.card-header{font-size:15px}}
+        /* Strategy Lab redesign */
+        .slab-hero{background:linear-gradient(135deg,#0d6efd 0%,#6610f2 100%);border:0;border-radius:14px;color:#fff}
+        .slab-hero h4{color:#fff}
+        .slab-hero .text-muted{color:rgba(255,255,255,.8)!important}
+        .slab-hero .input-group-text{background:rgba(255,255,255,.15);color:#fff;border-color:transparent}
+        .slab-num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#0d6efd,#6610f2);color:#fff;font-size:14px;font-weight:800;margin-right:8px;vertical-align:middle}
+        .slab-card{border-radius:14px;box-shadow:0 2px 10px rgba(13,110,253,.08);border:1px solid #e3ecf7}
+        .slab-card>.card-header{background:linear-gradient(90deg,#f0f7ff,#fff);border-radius:14px 14px 0 0;font-size:16px}
+        .slab-sec{background:#f6f9ff;border:1px dashed #b3d4ff;border-radius:10px;padding:10px;margin-bottom:10px}
+        .slab-sec-title{font-size:15px;font-weight:800;color:#0d47a1;margin-bottom:8px}
+        .slab-cta{font-size:16px;padding:9px 22px;border-radius:10px;font-weight:800;box-shadow:0 3px 10px rgba(25,135,84,.35)}
+        .slab .step{font-size:13px;padding:10px 4px;font-weight:700}
+        .slab .step.active{background:linear-gradient(135deg,#0d6efd,#6610f2);border-color:transparent}
     </style>
 </head>
 <body>
@@ -303,10 +316,10 @@
         </div>
         <!-- STRATEGY BUILDER — Quantman.trade style -->
         <div id="pg-strategy" class="pg hidden">
-            <div class="card mb-2" style="border-left:4px solid #0d6efd">
-                <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
+            <div class="card mb-2 slab-hero">
+                <div class="card-body p-3 d-flex flex-wrap gap-2 align-items-center justify-content-between">
                     <div class="d-flex gap-2 align-items-center">
-                        <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Lab</h4><span class="badge bg-primary">Quantman Style</span><small class="text-muted ms-2">Create Backtest / Live Algo — like quantman.trade/runs/new</small>
+                        <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Lab</h4><span class="badge bg-light text-primary">Backtest + Robot</span><small class="ms-2">Setup → Backtest → Paper/Live, sab ek jagah</small>
                     </div>
                     <div class="d-flex gap-2 align-items-center">
                         <div class="input-group input-group-sm" style="width:260px"><span class="input-group-text">Run Name</span><input type="text" class="form-control" id="s-name" placeholder="Nifty Breakout Strategy"></div>
@@ -315,9 +328,10 @@
                     </div>
                 </div>
             </div>
-<div class="card mb-3">
-                <div class="card-header"><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbol + Order + SL/Target + Backtest + Robot (single form)</small></div>
+<div class="card mb-3 slab-card">
+                <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Order + Risk + Period, single form</small></div>
                 <div class="card-body">
+                    <div class="slab-sec"><div class="slab-sec-title">Order</div>
                     <div class="row g-2">
                         <div class="col-md-2"><label class="form-label small">Symbol</label><select id="r-sym" class="form-select form-select-sm"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option><option>RELIANCE</option><option>HDFCBANK</option><option>ICICIBANK</option><option>TCS</option><option>INFY</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY">Call Buy</option><option value="CE-SELL">Call Sell</option><option value="PE-BUY">Put Buy</option><option value="PE-SELL">Put Sell</option><option value="AUTO" selected>AUTO (Signal Based)</option></select></div>
@@ -328,6 +342,8 @@
                         <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
                         <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
                     </div>
+                    </div>
+                    <div class="slab-sec"><div class="slab-sec-title">Schedule & Risk</div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
@@ -335,8 +351,10 @@
                         <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
-                        <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button class="btn btn-sm btn-success flex-fill" id="r-run" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
+                        <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button class="btn btn-success flex-fill slab-cta" id="r-run" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
                     </div>
+                    </div>
+                    <div class="slab-sec"><div class="slab-sec-title">Run & Robot</div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-12 d-flex gap-2 flex-wrap">
                             <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
@@ -348,6 +366,8 @@
                             <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
                         </div>
                     </div>
+                    </div>
+                    <div class="slab-sec"><div class="slab-sec-title">Indicators — signal</div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
                             <div class="d-flex gap-3 flex-wrap align-items-end" style="font-size:12px">
@@ -370,10 +390,11 @@
                         <div class="col-6 col-md-1"><label class="form-label small">VWAP Pd</label><input type="number" id="r-cf-wp" class="form-control form-control-sm" value="20" min="2"></div>
                         <div class="col-12"><small class="text-muted">BUY CALL = close&gt;VWAP + green candle + EMAfast&gt;EMAslow + RSI&gt;Buy(rising) + Vol&gt;Vol-x avg &nbsp;|&nbsp; BUY PUT = mirror. Ek-ek setting badal ke backtest karo.</small></div>
                     </div>
+                    </div>
                 </div>
             </div>
             
-            <div class="step-indicator mb-2"><div class="step active">1 Instrument</div><div class="step">2 Legs & Strike</div><div class="step">3 Risk & Re-entry</div><div class="step">4 Indicators</div><div class="step">5 Backtest</div></div>
+            <div class="step-indicator mb-2 slab"><div class="step active">1 Setup</div><div class="step">2 Legs</div><div class="step">3 Indicators</div><div class="step">4 Backtest</div><div class="step">5 Robot</div></div>
             <div class="card mb-2" style="display:none"><div class="card-body p-2">
             <div class="d-flex gap-1 mb-2 flex-wrap" id="q-instruments"></div>
             </div></div>
@@ -401,7 +422,7 @@
                 </div>
             </div>
             <div class="mt-3">
-                <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Leg Builder</button>
+                <span class="slab-num">2</span><button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Leg Builder (multi-leg, optional)</button>
             </div>
             <div class="collapse show mt-2" id="legBuilder">
                 <div class="row g-2 align-items-end">
@@ -514,8 +535,6 @@
                 <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Robots</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
                 <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved robots yet — click Save Robot.</p></div>
             </div>
-        </div>
-    </div>
 
         <!-- BROKERS -->
         <div id="pg-brokers" class="pg hidden">
