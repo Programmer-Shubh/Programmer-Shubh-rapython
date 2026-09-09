@@ -315,26 +315,84 @@
                     </div>
                 </div>
             </div>
+<div class="card mb-3">
+                <div class="card-header"><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbol + Order + SL/Target + Backtest + Robot (single form)</small></div>
+                <div class="card-body">
+                    <div class="row g-2">
+                        <div class="col-md-2"><label class="form-label small">Symbol</label><select id="r-sym" class="form-select form-select-sm"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option><option>RELIANCE</option><option>HDFCBANK</option><option>ICICIBANK</option><option>TCS</option><option>INFY</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY">Call Buy</option><option value="CE-SELL">Call Sell</option><option value="PE-BUY">Put Buy</option><option value="PE-SELL">Put Sell</option><option value="AUTO" selected>AUTO (Signal Based)</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
+                        <div class="col-md-1"><label class="form-label small">OTM Dist</label><input type="number" id="r-otm" class="form-control form-control-sm" value="1" min="1" max="6" title="OTM Distance 1-6"></div>
+                        <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="r-lots" class="form-control form-control-sm" value="1" min="1"></div>
+                        <div class="col-md-1"><label class="form-label small">Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
+                        <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
+                        <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:05"><small class="text-muted" id="r-exit-note">Intraday square-off</small></div>
+                        <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
+                        <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
+                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
+                        <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button class="btn btn-sm btn-success flex-fill" id="r-run" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
+                            <input type="text" id="r-name" class="form-control form-control-sm" style="width:200px" placeholder="Robot name (optional)">
+                            <button class="btn btn-sm btn-outline-success" onclick="robotPaperTrade()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="robotLiveTrade()"><i class="bi bi-lightning"></i> Live Trade</button>
+                            <button class="btn btn-sm btn-outline-dark" onclick="runBacktestMonteCarlo()" title="Monte Carlo"><i class="bi bi-shuffle"></i> MC</button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="downloadReportPDF()" title="PDF Report"><i class="bi bi-file-earmark-pdf"></i> PDF</button>
+                            <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
+                            <div class="d-flex gap-3 flex-wrap align-items-end" style="font-size:12px">
+                                <label><input type="checkbox" id="r-ind-rsi" checked> RSI(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:44px;font-size:11px">)</label>
+                                <label><input type="checkbox" id="r-ind-ema"> EMA(<input type="number" id="r-p-ema" value="50" min="2" max="200" style="width:48px;font-size:11px">)</label>
+                                <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(<input type="number" id="r-p-st" value="10" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-stm" value="3" min="1" max="10" step="0.5" style="width:44px;font-size:11px">) Bullish/Bearish</label>
+                                <label><input type="checkbox" id="r-ind-macd"> MACD(<input type="number" id="r-p-mf" value="12" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-ms" value="26" min="2" max="60" style="width:44px;font-size:11px">,<input type="number" id="r-p-mg" value="9" min="2" max="30" style="width:44px;font-size:11px">)</label>
+                                <label title="BUY CALL: close>VWAP + green candle + EMAfast>EMAslow + RSI>Buy(rising) + Vol breakout. BUY PUT: mirror."><input type="checkbox" id="r-ind-conf" checked> <strong>Robot Confluence (VWAP+EMA+RSI+Vol)</strong></label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-1" id="r-conf-settings">
+                        <div class="col-6 col-md-1"><label class="form-label small">EMA Fast</label><input type="number" id="r-cf-ef" class="form-control form-control-sm" value="9" min="2"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">EMA Slow</label><input type="number" id="r-cf-es" class="form-control form-control-sm" value="21" min="3"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">RSI Pd</label><input type="number" id="r-cf-rsi" class="form-control form-control-sm" value="14" min="2"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">RSI Buy&gt;</label><input type="number" id="r-cf-rb" class="form-control form-control-sm" value="65" min="50" max="90"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">RSI Sell&lt;</label><input type="number" id="r-cf-rs" class="form-control form-control-sm" value="35" min="10" max="50"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">Vol Pd</label><input type="number" id="r-cf-vp" class="form-control form-control-sm" value="20" min="2"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">Vol x</label><input type="number" id="r-cf-vm" class="form-control form-control-sm" value="1.5" min="1" step="0.1"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">VWAP Pd</label><input type="number" id="r-cf-wp" class="form-control form-control-sm" value="20" min="2"></div>
+                        <div class="col-12"><small class="text-muted">BUY CALL = close&gt;VWAP + green candle + EMAfast&gt;EMAslow + RSI&gt;Buy(rising) + Vol&gt;Vol-x avg &nbsp;|&nbsp; BUY PUT = mirror. Ek-ek setting badal ke backtest karo.</small></div>
+                    </div>
+                </div>
+            </div>
+            
             <div class="step-indicator mb-2"><div class="step active">1 Instrument</div><div class="step">2 Legs & Strike</div><div class="step">3 Risk & Re-entry</div><div class="step">4 Indicators</div><div class="step">5 Backtest</div></div>
-            <div class="card mb-2"><div class="card-body p-2">
+            <div class="card mb-2" style="display:none"><div class="card-body p-2">
             <div class="d-flex gap-1 mb-2 flex-wrap" id="q-instruments"></div>
             </div></div>
             <div id="custom-form">
-                <div class="col-md-4"><label class="form-label">Instrument Settings <span class="badge bg-info">Quantman: NIFTY/BANKNIFTY lot auto</span></label>
+                <div class="col-md-4" style="display:none"><label class="form-label">Instrument Settings <span class="badge bg-info">Quantman: NIFTY/BANKNIFTY lot auto</span></label>
                     <div class="row g-1">
                         <div class="col"><label class="form-label small">Symbol (All F&O)</label><select class="form-select form-select-sm" id="s-index"><option>Loading...</option></select></div>
                         <div class="col"><label class="form-label small">Select Underlying</label><select class="form-select form-select-sm" id="s-underlying"><option selected>Index</option><option>Stock</option><option>Underlying</option></select></div>
                         <div class="col"><label class="form-label small">Underlying from</label><select class="form-select form-select-sm" id="s-underlying-src"><option selected>Cash</option><option>Futures</option><option>Spot</option></select></div>
                     </div>
                 </div>
-                <div class="col-md-4"><label class="form-label">Entry settings</label>
+                <div class="col-md-4" style="display:none"><label class="form-label">Entry settings</label>
                     <div class="row g-1">
                         <div class="col"><label class="form-label small">Strategy Type</label><select class="form-select form-select-sm" id="s-strat-type"><option selected>Intraday</option><option>BTST</option><option>Positional</option></select></div>
                         <div class="col"><label class="form-label small">Entry Time</label><input type="time" class="form-control form-control-sm" id="s-entry-time" value="09:35"></div>
                         <div class="col"><label class="form-label small">Exit Time</label><input type="time" class="form-control form-control-sm" id="s-exit-time" value="15:14"></div>
                     </div>
                 </div>
-                <div class="col-md-2"><label class="form-label">No re-entry after</label>
+                <div class="col-md-2" style="display:none"><label class="form-label">No re-entry after</label>
                     <input type="time" class="form-control form-control-sm" id="s-no-reentry" value="09:35">
                 </div>
                 <div class="col-md-2"><label class="form-label">Overall Momentum</label>
@@ -401,7 +459,7 @@
             <div class="mt-2">
                 <button class="btn btn-sm btn-warning" type="button" data-bs-toggle="collapse" data-bs-target="#overallSettings"><i class="bi bi-caret-down"></i> Overall strategy settings</button>
             </div>
-            <div class="collapse show mt-2" id="overallSettings">
+            <div class="collapse mt-2" id="overallSettings">
                 <div class="row g-2">
                     <div class="col-md-3"><label class="form-label small">Overall Stop Loss</label><input type="number" class="form-control form-control-sm" id="s-sl" value="1500" min="0" step="50"></div>
                     <div class="col-md-3"><label class="form-label small">Overall Target</label><input type="number" class="form-control form-control-sm" id="s-tp" value="3000" min="0" step="50"></div>
@@ -421,7 +479,7 @@
                     <div class="col-md-3 d-flex align-items-end"><small class="text-muted" style="font-size:10px">Slippage 0.5% realistic | Drawdown Days + Badge as per Quantman Mar 2025 update</small></div>
                 </div>
             </div>
-            <div class="card mt-3">
+            <div class="card mt-3" style="display:none">
                 <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-cpu"></i> Indicators</strong><small class="text-muted">Signal auto from Position (Buy CE/Sell PE=Bullish) — only set inputs</small></div>
                 <div class="card-body p-2">
                     <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
@@ -433,7 +491,7 @@
                     <small class="text-muted">Like quantman.trade: SuperTrend(10,3), RSI(14), EMA, MACD, Bollinger, VWAP, Volume, OI — candle 1m to 1h, Equity/Future field.</small>
                 </div>
             </div>
-            <div class="row mt-3 align-items-end">
+            <div class="row mt-3 align-items-end" style="display:none">
                 <div class="col-md-3"><label class="form-label"><i class="bi bi-calendar3"></i> Backtest Period <span class="badge bg-primary">Quantman: min 60 bars</span></label><div class="d-flex gap-1"><input type="date" class="form-control form-control-sm" id="s-start" value="2026-07-02"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-20"></div><div class="d-flex gap-1 mt-1"><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1M')">1M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('3M')">3M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('6M')">6M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1Y')">1Y</button></div></div>
                 <div class="col-md-3 d-flex gap-2">
                     <button class="btn btn-success flex-fill" id="s-run" onclick="runBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button>
@@ -448,136 +506,7 @@
                 <div class="card mt-2" id="bt-charts"><div class="card-body p-2"><div id="eq-chart" style="height:200px"></div><div id="mo-chart" style="height:200px;margin-top:8px"></div></div></div>
                 <div class="card mt-2" id="bt-trades"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="bt-tl"></div></div>
             </div>
-            </div><!-- end custom-form -->
-        </div>
-        <!-- PYTHON LAB (Custom Code Backtest) -->
-        <div id="pg-custom" class="pg hidden">
-            <div class="card mb-2" style="border-left:4px solid #6f42c1">
-                <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
-                    <div class="d-flex gap-2 align-items-center">
-                        <h4 class="fw-bold mb-0"><i class="bi bi-code-slash"></i> Python Strategy Lab</h4><span class="badge" style="background:#6f42c1">Sandboxed</span><small class="text-muted ms-2">Paste custom Python code, backtest on historical data</small>
-                    </div>
-                    <div class="d-flex gap-2 align-items-center">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="pyLoadTemplate()"><i class="bi bi-file-earmark-code"></i> Load Template</button>
-                        <button class="btn btn-sm btn-outline-success" onclick="pyLoadPremium()"><i class="bi bi-currency-rupee"></i> Premium Sample</button>
-                        <button class="btn btn-sm text-white" style="background:#6f42c1" id="py-run" onclick="pyRunBacktest()"><i class="bi bi-play-fill"></i> Run Backtest</button>
-                    </div>
-                </div>
-            </div>
-            <div class="card mb-2"><div class="card-body p-2">
-                <div class="row g-2 align-items-end">
-                    <div class="col-md-2"><label class="form-label small">Symbol</label><input type="text" class="form-control form-control-sm" id="py-sym" value="NIFTY"></div>
-                    <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" class="form-control form-control-sm" id="py-start" value="2026-08-01"></div>
-                    <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" class="form-control form-control-sm" id="py-end" value="2026-08-20"></div>
-                    <div class="col-md-2"><label class="form-label small">Capital (Rs)</label><input type="number" class="form-control form-control-sm" id="py-cap" value="100000"></div>
-                    <div class="col-md-4"><small class="text-muted">Data input: pandas DataFrame <code>data</code> with columns <code>date, open, high, low, close, volume</code>. Allowed libs: <code>pandas, numpy, backtrader</code> (+math/statistics/datetime). Network, files &amp; system calls are blocked; 30s time limit.</small></div>
-                </div>
-            </div></div>
-            <div class="card mb-2"><div class="card-header py-1"><strong class="small">Strategy Code</strong> <small class="text-muted">- define <code>run(data)</code> returning <code>{'trades': [...]}</code>, or a backtrader Strategy named <code>CustomStrategy</code></small></div>
-                <div class="card-body p-1"><textarea id="py-code" spellcheck="false" style="width:100%;min-height:340px;font-family:Consolas,Menlo,monospace;font-size:12.5px;background:#1e1e1e;color:#d4d4d4;border:0;padding:10px;white-space:pre" placeholder="Paste your Python strategy here, or click Load Template..."></textarea></div>
-            </div>
-            <div id="py-results" class="hidden">
-                <div class="row mt-2" id="py-metrics"></div>
-                <div class="card mt-2"><div class="card-body p-2"><div id="py-eq" style="height:200px"></div></div></div>
-                <div class="card mt-2"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="py-tl" style="overflow-x:auto"></div></div>
-                <div class="card mt-2"><div class="card-header py-1"><strong class="small">Script Output / Errors</strong></div><div class="card-body p-2"><pre id="py-logs" class="small mb-0" style="white-space:pre-wrap;max-height:220px;overflow:auto"></pre></div></div>
-            </div>
-            <div class="card mt-2"><div class="card-header py-1"><strong class="small"><i class="bi bi-alarm"></i> Keep-Alive (cron-job.org) - stop Render free tier from sleeping</strong></div>
-                <div class="card-body p-2 small">
-                    <div>Ping URL: <code>https://ratrade.onrender.com/api/keepalive/ping</code> <button class="btn btn-sm btn-outline-primary ms-2" onclick="kaTest()">Test Ping</button> <span id="ka-status" class="ms-2 text-muted"></span></div>
-                    <ol class="mb-0 mt-1 text-muted"><li>Create free account at <a href="https://cron-job.org" target="_blank">cron-job.org</a></li><li>New cronjob titled <strong>RaTrade keep-alive</strong></li><li>Address = ping URL above, every <strong>5 minutes</strong></li><li>Save + Enable. Site stays awake while pings arrive.</li></ol>
-                </div>
-            </div>
-        </div>
-        <!-- TV CHART (TradingView Lightweight Charts + trade markers) -->
-        <div id="pg-tvchart" class="pg hidden">
-            <div class="card mb-2" style="border-left:4px solid #2962ff">
-                <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
-                    <div class="d-flex gap-2 align-items-center">
-                        <h4 class="fw-bold mb-0"><i class="bi bi-candlestick"></i> TradingView Chart</h4><span class="badge" style="background:#2962ff">Live markers</span><small class="text-muted ms-2">Buy/Sell arrows from paper + live orders</small>
-                    </div>
-                    <button class="btn btn-sm text-white" style="background:#2962ff" id="tv-load" onclick="tvLoad()"><i class="bi bi-arrow-clockwise"></i> Load Chart</button>
-                </div>
-            </div>
-            <div class="card mb-2"><div class="card-body p-2">
-                <div class="row g-2 align-items-end">
-                    <div class="col-6 col-md-2"><label class="form-label small">Symbol</label><input type="text" class="form-control form-control-sm" id="tv-sym" value="NIFTY"></div>
-                    <div class="col-6 col-md-1"><label class="form-label small">Start</label><input type="date" class="form-control form-control-sm" id="tv-start" value="2026-08-01"></div>
-                    <div class="col-6 col-md-1"><label class="form-label small">End</label><input type="date" class="form-control form-control-sm" id="tv-end" value="2026-09-08"></div>
-                    <div class="col-6 col-md-1"><label class="form-label small">Mode</label><select id="tv-mode" class="form-select form-select-sm"><option value="all" selected>Paper+Live</option><option value="paper">Paper only</option><option value="live">Live only</option></select></div>
-                    <div class="col-6 col-md-1"><label class="form-label small">ST Pd</label><input type="number" id="tv-stp" class="form-control form-control-sm" value="10" min="2"></div>
-                    <div class="col-6 col-md-1"><label class="form-label small">ST Mult</label><input type="number" id="tv-stm" class="form-control form-control-sm" value="3" step="0.5" min="1"></div>
-                    <div class="col-6 col-md-1"><label class="form-label small">EMA F/S</label><div class="d-flex gap-1"><input type="number" id="tv-ef" class="form-control form-control-sm" value="9" min="2"><input type="number" id="tv-es" class="form-control form-control-sm" value="21" min="3"></div></div>
-                    <div class="col-6 col-md-2 d-flex gap-2 align-items-center"><label class="small"><input type="checkbox" id="tv-marks" checked> Markers</label><label class="small"><input type="checkbox" id="tv-auto" checked> Auto-refresh 60s</label></div>
-                </div>
-            </div></div>
-            <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:520px"></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
-        </div>
-        <!-- MERGED: Call/Put Robot (moved from pg-robot) -->
-<!-- CALL/PUT ROBOT - Simple Buy/Sell with SL/TP -->
-        <div id="pg-robot-merged">
-            <h4 class="fw-bold mb-3 mt-4"><i class="bi bi-robot"></i> Call / Put Buy Sell Robot <small class="text-muted">(same page)</small></h4>
-            <div class="card mb-3">
-                <div class="card-header"><i class="bi bi-gear"></i> Robot Settings <small class="text-muted">Symbol + Order + SL/Target + Backtest</small></div>
-                <div class="card-body">
-                    <div class="row g-2">
-                        <div class="col-md-2"><label class="form-label small">Symbol</label><select id="r-sym" class="form-select form-select-sm"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option><option>RELIANCE</option><option>HDFCBANK</option><option>ICICIBANK</option><option>TCS</option><option>INFY</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY">Call Buy</option><option value="CE-SELL">Call Sell</option><option value="PE-BUY">Put Buy</option><option value="PE-SELL">Put Sell</option><option value="AUTO" selected>AUTO (Signal Based)</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
-                        <div class="col-md-1"><label class="form-label small">OTM Dist</label><input type="number" id="r-otm" class="form-control form-control-sm" value="1" min="1" max="6" title="OTM Distance 1-6"></div>
-                        <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="r-lots" class="form-control form-control-sm" value="1" min="1"></div>
-                        <div class="col-md-1"><label class="form-label small">Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
-                        <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
-                    </div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
-                        <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:05"><small class="text-muted" id="r-exit-note">Intraday square-off</small></div>
-                        <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
-                        <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
-                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
-                        <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button class="btn btn-sm btn-success flex-fill" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
-                    </div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-12 d-flex gap-2 flex-wrap">
-                            <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
-                            <input type="text" id="r-name" class="form-control form-control-sm" style="width:200px" placeholder="Robot name (optional)">
-                            <button class="btn btn-sm btn-outline-success" onclick="robotPaperTrade()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="robotLiveTrade()"><i class="bi bi-lightning"></i> Live Trade</button>
-                            <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
-                        </div>
-                    </div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
-                            <div class="d-flex gap-3 flex-wrap align-items-end" style="font-size:12px">
-                                <label><input type="checkbox" id="r-ind-rsi" checked> RSI(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:44px;font-size:11px">)</label>
-                                <label><input type="checkbox" id="r-ind-ema"> EMA(<input type="number" id="r-p-ema" value="50" min="2" max="200" style="width:48px;font-size:11px">)</label>
-                                <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(<input type="number" id="r-p-st" value="10" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-stm" value="3" min="1" max="10" step="0.5" style="width:44px;font-size:11px">) Bullish/Bearish</label>
-                                <label><input type="checkbox" id="r-ind-macd"> MACD(<input type="number" id="r-p-mf" value="12" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-ms" value="26" min="2" max="60" style="width:44px;font-size:11px">,<input type="number" id="r-p-mg" value="9" min="2" max="30" style="width:44px;font-size:11px">)</label>
-                                <label title="BUY CALL: close>VWAP + green candle + EMAfast>EMAslow + RSI>Buy(rising) + Vol breakout. BUY PUT: mirror."><input type="checkbox" id="r-ind-conf" checked> <strong>Robot Confluence (VWAP+EMA+RSI+Vol)</strong></label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row g-2 mt-1" id="r-conf-settings">
-                        <div class="col-6 col-md-1"><label class="form-label small">EMA Fast</label><input type="number" id="r-cf-ef" class="form-control form-control-sm" value="9" min="2"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">EMA Slow</label><input type="number" id="r-cf-es" class="form-control form-control-sm" value="21" min="3"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">RSI Pd</label><input type="number" id="r-cf-rsi" class="form-control form-control-sm" value="14" min="2"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">RSI Buy&gt;</label><input type="number" id="r-cf-rb" class="form-control form-control-sm" value="65" min="50" max="90"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">RSI Sell&lt;</label><input type="number" id="r-cf-rs" class="form-control form-control-sm" value="35" min="10" max="50"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">Vol Pd</label><input type="number" id="r-cf-vp" class="form-control form-control-sm" value="20" min="2"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">Vol x</label><input type="number" id="r-cf-vm" class="form-control form-control-sm" value="1.5" min="1" step="0.1"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">VWAP Pd</label><input type="number" id="r-cf-wp" class="form-control form-control-sm" value="20" min="2"></div>
-                        <div class="col-12"><small class="text-muted">BUY CALL = close&gt;VWAP + green candle + EMAfast&gt;EMAslow + RSI&gt;Buy(rising) + Vol&gt;Vol-x avg &nbsp;|&nbsp; BUY PUT = mirror. Ek-ek setting badal ke backtest karo.</small></div>
-                    </div>
-                </div>
-            </div>
-            <div id="robot-results" class="hidden">
-                <div class="row mt-2" id="robot-metrics"></div>
-                <div class="card mt-2" id="robot-charts"><div class="card-body p-2"><div id="robot-eq" style="height:200px"></div><div id="robot-mo" style="height:200px;margin-top:8px"></div></div></div>
-                <div class="card mt-2" id="robot-trades"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="robot-tl"></div></div>
-            </div>
-            <div class="card mt-3">
+<div class="card mt-3">
                 <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-info-circle"></i> Live Robot Status</span><button class="btn btn-sm btn-outline-secondary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect Brokers</button></div>
                 <div class="card-body" id="robot-status"><p class="text-muted small">Robot stopped. Select symbol + order + SL/Target then Start Robot for paper trading. Market hours: Mon-Fri 9:15-15:30 IST — Paper trades can queue outside hours.</p></div>
             </div>
@@ -693,7 +622,75 @@
                 </div>
             </div>
         </div>
-            <div id="pg-chain" class="pg hidden">
+        
+            </div><!-- end custom-form -->
+        </div>
+        <!-- PYTHON LAB (Custom Code Backtest) -->
+        <div id="pg-custom" class="pg hidden">
+            <div class="card mb-2" style="border-left:4px solid #6f42c1">
+                <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                    <div class="d-flex gap-2 align-items-center">
+                        <h4 class="fw-bold mb-0"><i class="bi bi-code-slash"></i> Python Strategy Lab</h4><span class="badge" style="background:#6f42c1">Sandboxed</span><small class="text-muted ms-2">Paste custom Python code, backtest on historical data</small>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="pyLoadTemplate()"><i class="bi bi-file-earmark-code"></i> Load Template</button>
+                        <button class="btn btn-sm btn-outline-success" onclick="pyLoadPremium()"><i class="bi bi-currency-rupee"></i> Premium Sample</button>
+                        <button class="btn btn-sm text-white" style="background:#6f42c1" id="py-run" onclick="pyRunBacktest()"><i class="bi bi-play-fill"></i> Run Backtest</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card mb-2"><div class="card-body p-2">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-2"><label class="form-label small">Symbol</label><input type="text" class="form-control form-control-sm" id="py-sym" value="NIFTY"></div>
+                    <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" class="form-control form-control-sm" id="py-start" value="2026-08-01"></div>
+                    <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" class="form-control form-control-sm" id="py-end" value="2026-08-20"></div>
+                    <div class="col-md-2"><label class="form-label small">Capital (Rs)</label><input type="number" class="form-control form-control-sm" id="py-cap" value="100000"></div>
+                    <div class="col-md-4"><small class="text-muted">Data input: pandas DataFrame <code>data</code> with columns <code>date, open, high, low, close, volume</code>. Allowed libs: <code>pandas, numpy, backtrader</code> (+math/statistics/datetime). Network, files &amp; system calls are blocked; 30s time limit.</small></div>
+                </div>
+            </div></div>
+            <div class="card mb-2"><div class="card-header py-1"><strong class="small">Strategy Code</strong> <small class="text-muted">- define <code>run(data)</code> returning <code>{'trades': [...]}</code>, or a backtrader Strategy named <code>CustomStrategy</code></small></div>
+                <div class="card-body p-1"><textarea id="py-code" spellcheck="false" style="width:100%;min-height:340px;font-family:Consolas,Menlo,monospace;font-size:12.5px;background:#1e1e1e;color:#d4d4d4;border:0;padding:10px;white-space:pre" placeholder="Paste your Python strategy here, or click Load Template..."></textarea></div>
+            </div>
+            <div id="py-results" class="hidden">
+                <div class="row mt-2" id="py-metrics"></div>
+                <div class="card mt-2"><div class="card-body p-2"><div id="py-eq" style="height:200px"></div></div></div>
+                <div class="card mt-2"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="py-tl" style="overflow-x:auto"></div></div>
+                <div class="card mt-2"><div class="card-header py-1"><strong class="small">Script Output / Errors</strong></div><div class="card-body p-2"><pre id="py-logs" class="small mb-0" style="white-space:pre-wrap;max-height:220px;overflow:auto"></pre></div></div>
+            </div>
+            <div class="card mt-2"><div class="card-header py-1"><strong class="small"><i class="bi bi-alarm"></i> Keep-Alive (cron-job.org) - stop Render free tier from sleeping</strong></div>
+                <div class="card-body p-2 small">
+                    <div>Ping URL: <code>https://ratrade.onrender.com/api/keepalive/ping</code> <button class="btn btn-sm btn-outline-primary ms-2" onclick="kaTest()">Test Ping</button> <span id="ka-status" class="ms-2 text-muted"></span></div>
+                    <ol class="mb-0 mt-1 text-muted"><li>Create free account at <a href="https://cron-job.org" target="_blank">cron-job.org</a></li><li>New cronjob titled <strong>RaTrade keep-alive</strong></li><li>Address = ping URL above, every <strong>5 minutes</strong></li><li>Save + Enable. Site stays awake while pings arrive.</li></ol>
+                </div>
+            </div>
+        </div>
+        <!-- TV CHART (TradingView Lightweight Charts + trade markers) -->
+        <div id="pg-tvchart" class="pg hidden">
+            <div class="card mb-2" style="border-left:4px solid #2962ff">
+                <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                    <div class="d-flex gap-2 align-items-center">
+                        <h4 class="fw-bold mb-0"><i class="bi bi-candlestick"></i> TradingView Chart</h4><span class="badge" style="background:#2962ff">Live markers</span><small class="text-muted ms-2">Buy/Sell arrows from paper + live orders</small>
+                    </div>
+                    <button class="btn btn-sm text-white" style="background:#2962ff" id="tv-load" onclick="tvLoad()"><i class="bi bi-arrow-clockwise"></i> Load Chart</button>
+                </div>
+            </div>
+            <div class="card mb-2"><div class="card-body p-2">
+                <div class="row g-2 align-items-end">
+                    <div class="col-6 col-md-2"><label class="form-label small">Symbol</label><input type="text" class="form-control form-control-sm" id="tv-sym" value="NIFTY"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">Start</label><input type="date" class="form-control form-control-sm" id="tv-start" value="2026-08-01"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">End</label><input type="date" class="form-control form-control-sm" id="tv-end" value="2026-09-08"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">Mode</label><select id="tv-mode" class="form-select form-select-sm"><option value="all" selected>Paper+Live</option><option value="paper">Paper only</option><option value="live">Live only</option></select></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">ST Pd</label><input type="number" id="tv-stp" class="form-control form-control-sm" value="10" min="2"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">ST Mult</label><input type="number" id="tv-stm" class="form-control form-control-sm" value="3" step="0.5" min="1"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">EMA F/S</label><div class="d-flex gap-1"><input type="number" id="tv-ef" class="form-control form-control-sm" value="9" min="2"><input type="number" id="tv-es" class="form-control form-control-sm" value="21" min="3"></div></div>
+                    <div class="col-6 col-md-2 d-flex gap-2 align-items-center"><label class="small"><input type="checkbox" id="tv-marks" checked> Markers</label><label class="small"><input type="checkbox" id="tv-auto" checked> Auto-refresh 60s</label></div>
+                </div>
+            </div></div>
+            <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:520px"></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
+        </div>
+        <!-- MERGED: Call/Put Robot (moved from pg-robot) -->
+<!-- CALL/PUT ROBOT - Simple Buy/Sell with SL/TP -->
+    <div id="pg-chain" class="pg hidden">
         <h4 class="fw-bold mb-3"><i class="bi bi-graph-up-arrow"></i> Option Chain</h4>
         <div class="card mb-3 chain-controls">
             <div class="card-body">
@@ -950,36 +947,40 @@ let _lastOpenTrdHTML = null;
         const autoDir=autoMode();
         return quantIndicators.map(q=>{const p={};(q.params||[]).forEach(pr=>{const v=parseFloat(pr.val);p[pr.key]=isNaN(v)?0:v;});p.mode=autoDir;p.candle=q.candle||'5';p.field=q.field||'equity';return {id:q.id,params:p};});
     }
-    async function runBacktest(){
-        const btn=document.getElementById('s-run');const orig=btn.innerHTML;
-        btn.innerHTML='<span class="spinner"></span> Running...';
-        const idx=document.getElementById('s-index').value;
-        const startDate=document.getElementById('s-start').value;
-        const endDate=document.getElementById('s-end').value;
-        if(!startDate||!endDate){btn.innerHTML=orig;alert('Select start and end date');return;}
-        const lots=parseInt(document.getElementById('s-lots').value)||1;
-        const sl=parseFloat(document.getElementById('s-sl').value)||1500;
-        const tp=parseFloat(document.getElementById('s-tp').value)||3000;
-        const mtd=parseInt(document.getElementById('s-mtd').value)||5;
-        const indicators=collectIndicators();
-        // Use stratLegs if built via Leg Builder, else fallback to single leg from form
-        let legs = stratLegs.length ? JSON.parse(JSON.stringify(stratLegs)) : [];
+    function _unifiedBody(){
+        // SINGLE source of truth: Trade Setup form (r-*) + multi-leg override + advanced extras
+        const sym=document.getElementById('r-sym').value;
+        const s=document.getElementById('r-start').value, e=document.getElementById('r-end').value;
+        if(!s||!e){alert('Select start and end date');return null;}
+        const lots=parseInt(document.getElementById('r-lots').value)||1;
+        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
+        const tp=parseFloat(document.getElementById('r-tp').value)||3000;
+        const mtd=parseInt(document.getElementById('r-mtd').value)||5;
+        const indicators=robotCollectIndicators().concat(collectIndicators());
+        let legs=(typeof stratLegs!=='undefined'&&stratLegs.length)?JSON.parse(JSON.stringify(stratLegs)):[];
         if(!legs.length){
-            const position=document.getElementById('s-position').value;
-            const optType=document.getElementById('s-opt').value;
-            const strikeType=document.getElementById('s-strike-type').value.toLowerCase();
-            const dteVal=parseInt(document.getElementById('s-dte').value)||7;
-            const deltaVal=parseFloat(document.getElementById('s-delta').value)||0.3;
-            const otmVal=Math.min(6,Math.max(1,parseInt(document.getElementById('s-otm').value)||2));
-            legs=[{option_type:optType,lots:lots,transaction:position.toLowerCase(),stop_loss:sl,take_profit:tp,strike_selection:strikeType,otm_distance:otmVal,expiry:document.getElementById('s-expiry').value.toLowerCase(),dte:dteVal,delta_target: strikeType==='delta'?deltaVal:null}];
+            const order=document.getElementById('r-order').value;
+            const strikeType=document.getElementById('r-strike').value.toLowerCase();
+            const rOtm=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
+            const rOtmDist=(strikeType==='otm'||strikeType==='itm')?rOtm:0;
+            const rExp=document.getElementById('r-expiry').value.toLowerCase();
+            if(order==='AUTO'){legs=[{option_type:'AUTO',transaction:'auto',lots:lots,strike_selection:strikeType,otm_distance:rOtmDist,expiry:rExp}];}
+            else{const pp=order.split('-');legs=[{option_type:pp[0],transaction:pp[1].toLowerCase(),lots:lots,strike_selection:strikeType,otm_distance:rOtmDist,expiry:rExp}];}
         }
-        // Quant wiring: entry/exit times, momentum, expiry, trailing
-        const stratType=document.getElementById('s-strat-type').value.toLowerCase();
-        const entryTime=document.getElementById('s-entry-time').value;
-        const exitTime=document.getElementById('s-exit-time').value;
+        const rType=(document.getElementById('r-type')?.value||'intraday').toLowerCase();
+        const entryTime=document.getElementById('r-entry').value||'09:35';
+        const exitTime=document.getElementById('r-exit').value||'15:05';
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50;
-        const body={symbol:idx,start_date:startDate,end_date:endDate,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+        return {symbol:sym,start_date:s,end_date:e,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+    }
+    async function runBacktest(){
+        const btn=document.getElementById('s-run');const orig=btn.innerHTML;
+        const rbtn=document.getElementById('r-run');const rorig=rbtn?rbtn.innerHTML:'';
+        btn.innerHTML='<span class="spinner"></span> Running...';
+        if(rbtn)rbtn.innerHTML='<span class="spinner"></span> Running...';
+        const body=_unifiedBody();
+        if(!body){btn.innerHTML=orig;if(rbtn)rbtn.innerHTML=rorig;return;}
         // Quantman-style auto-retry 3x with backoff for 429/Cloudflare (same as quickStrat)
         let r=null; let lastErr='';
         for(let a=0;a<3;a++){
@@ -992,13 +993,13 @@ let _lastOpenTrdHTML = null;
                 lastErr=e.message||'';
                 const is429 = lastErr.includes('429') || lastErr.includes('Just a moment') || lastErr.includes('Enable JavaScript') || lastErr.includes('Cloudflare') || lastErr.includes('<!DOCTYPE');
                 if(is429 && a<2){ await new Promise(res=>setTimeout(res, 900*(a+1))); continue; }
-                if(a===2){ btn.innerHTML=orig; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+lastErr.slice(0,300)+' <button class=\"btn btn-sm btn-primary\" onclick=\"runBacktest()\">Retry</button></p>'; return; }
+                if(a===2){ btn.innerHTML=orig;if(rbtn)rbtn.innerHTML=rorig; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+lastErr.slice(0,300)+' <button class=\"btn btn-sm btn-primary\" onclick=\"runBacktest()\">Retry</button></p>'; return; }
                 await new Promise(res=>setTimeout(res, 800));
             }
         }
         try{
             if(!r) throw new Error(lastErr||'No response');
-            btn.innerHTML=orig;
+            btn.innerHTML=orig;if(rbtn)rbtn.innerHTML=rorig;
             if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');return;}
             const m=r.metrics||r; window._lastBacktestMetrics=m;
             document.getElementById('bt-results').classList.remove('hidden');
@@ -1040,25 +1041,26 @@ let _lastOpenTrdHTML = null;
                 h+='</tbody></table>';
                 document.getElementById('bt-tl').innerHTML=h;
             }
-        }catch(e){btn.innerHTML=orig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+'</p>';}
+        }catch(e){btn.innerHTML=orig;if(typeof rbtn!=='undefined'&&rbtn)rbtn.innerHTML=rorig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+'</p>';}
     }
     async function saveStrat(){
-        const idx=document.getElementById('s-index').value;
-        const stratType=document.getElementById('s-strat-type').value;
-        const entryTime=document.getElementById('s-entry-time').value;
-        const exitTime=document.getElementById('s-exit-time').value;
-        const lots=parseInt(document.getElementById('s-lots').value);
-        const sl=parseFloat(document.getElementById('s-sl').value);
-        const tp=parseFloat(document.getElementById('s-tp').value);
-        const momentum=parseInt(document.getElementById('s-momentum').value);
-        const startDate=document.getElementById('s-start').value;
-        const endDate=document.getElementById('s-end').value;
+        const idx=document.getElementById('r-sym').value;
+        const stratType=(document.getElementById('r-type')?.value||'intraday');
+        const entryTime=document.getElementById('r-entry').value;
+        const exitTime=document.getElementById('r-exit').value;
+        const lots=parseInt(document.getElementById('r-lots').value)||1;
+        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
+        const tp=parseFloat(document.getElementById('r-tp').value)||3000;
+        const momentum=parseInt(document.getElementById('s-momentum').value)||0;
+        const startDate=document.getElementById('r-start').value;
+        const endDate=document.getElementById('r-end').value;
         let legs = stratLegs.length ? JSON.parse(JSON.stringify(stratLegs)) : [];
         if(!legs.length){
-            const legOpt=document.getElementById('s-opt').value;
-            const legPos=document.getElementById('s-position').value;
-            const legStrike=document.getElementById('s-strike-type').value;
-            legs.push({option_type:legOpt,position:legPos,strike_type:legStrike,lots, transaction: legPos.toLowerCase(), strike_selection: legStrike.toLowerCase()});
+            const rOrder=document.getElementById('r-order').value;
+            const legStrike=document.getElementById('r-strike').value;
+            const rOtm=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
+            if(rOrder==='AUTO'){legs.push({option_type:'AUTO',transaction:'auto',lots:lots,strike_selection:legStrike.toLowerCase(),otm_distance:rOtm});}
+            else{const pp=rOrder.split('-');legs.push({option_type:pp[0],position:pp[1],strike_type:legStrike,lots, transaction: pp[1].toLowerCase(), strike_selection: legStrike.toLowerCase(),otm_distance:rOtm});}
         }
         const body={
             name:(document.getElementById('s-name').value||'').trim()||(idx+'_'+stratType),
@@ -1260,48 +1262,8 @@ let _lastOpenTrdHTML = null;
     (function(){document.getElementById('alert-url').value=location.origin+'/api/webhook/email';})();
     // Robot: auto-fill dates
     (function(){const e=new Date(); const fmt=d=>d.toISOString().split('T')[0]; try{if(document.getElementById('r-start')){document.getElementById('r-start').value='2026-08-02'; document.getElementById('r-end').value=fmt(e);}}catch(e){}})();
-    async function robotBacktest(){
-        const sym=document.getElementById('r-sym').value;
-        const order=document.getElementById('r-order').value;
-        let autoSignal=false, legs, opt, txn;
-        const strikeType=document.getElementById('r-strike').value.toLowerCase();
-        const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const rOtm=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
-        const rOtmDist=(strikeType==='otm'||strikeType==='itm')?rOtm:0;
-        if(order==='AUTO'){
-            autoSignal=true;
-            legs=[{option_type:'AUTO', transaction:'auto', lots:lots, strike_selection:strikeType, otm_distance:rOtmDist, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
-            opt='AUTO'; txn='auto';
-        } else {
-            const parts=order.split('-');
-            opt=parts[0]; txn=parts[1].toLowerCase();
-            legs=[{option_type:opt, transaction:txn, lots:lots, strike_selection:strikeType, otm_distance:rOtmDist, expiry:document.getElementById('r-expiry').value.toLowerCase()}];
-        }
-        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
-        const tp=parseFloat(document.getElementById('r-tp').value)||3000;
-        const mtd=parseInt(document.getElementById('r-mtd').value)||1;
-        const s=document.getElementById('r-start').value; const e=document.getElementById('r-end').value;
-        if(!s||!e){alert('Select start and end date'); return;}
-        const indicators=robotCollectIndicators();
-        const entryTime=document.getElementById('r-entry').value||'09:35';
-        const exitTime=document.getElementById('r-exit').value||'15:05';
-        const rType=(document.getElementById('r-type')?.value||'intraday').toLowerCase();
-        const body={symbol:sym, start_date:s, end_date:e, indicators:indicators, entry_conditions:[], exit_conditions:[], legs:legs, advanced:{trade_mode:rType, entry_time:entryTime, exit_time:exitTime, early_exit_time:exitTime, strike_selection:strikeType, max_holding_bars:20, auto_signal:autoSignal}, risk:{max_trades_per_day:mtd, daily_stop_loss:sl, daily_take_profit:tp}};
-        document.getElementById('robot-results').classList.remove('hidden');
-        document.getElementById('robot-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Running backtest...</p>';
-        try{
-            const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-            if(r.error){document.getElementById('robot-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>'; return;}
-            const m=r.metrics||r;
-            const pnl=(m.final_capital||0)-(m.initial_capital||1000000);
-            const pnlC=pnl>=0?'price-up':'price-down';
-            document.getElementById('robot-metrics').innerHTML=`<div class="row g-2"><div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value">${r.symbol||sym}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlC}">${F(m.net_pnl||pnl)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Trades</div><div class="value">${m.total_trades}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}%</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Avg P/L</div><div class="value ${pnlC}">${F(m.avg_profit_per_trade||0)}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max DD</div><div class="value price-down">${m.max_drawdown}%</div></div></div>${r.took_ms!=null?'<div class="col"><div class="card stat-card-sm"><div class="label">Time</div><div class="value">'+(r.took_ms/1000).toFixed(1)+'s</div></div></div>':''}</div>`;
-            if(r.equity_curve&&r.equity_curve.length) Plotly.newPlot('robot-eq',[{y:r.equity_curve,type:'scatter',line:{color:'#0d6efd',width:2}}],{title:'Equity Curve - '+sym+' '+order,margin:{t:30,b:30,l:50,r:20}});
-            if(r.monthly_pnl&&Object.keys(r.monthly_pnl).length) Plotly.newPlot('robot-mo',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',margin:{t:30,b:30,l:50,r:20}}); else Plotly.newPlot('robot-mo',[{x:['No data'],y:[0],type:'bar'}],{title:'Monthly P&L'});
-            if(r.trade_list&&r.trade_list.length){let h='<table class="bt-table"><thead><tr><th>#</th><th>Entry Date</th><th>Symbol</th><th>B/S</th><th>Strike</th><th>Qty</th><th>Entry Price</th><th>Exit Date</th><th>Exit Price</th><th>P/L</th></tr></thead><tbody>'; r.trade_list.forEach((t,i)=>{h+=`<tr><td>${i+1}</td><td>${t.entry_date} ${t.entry_time||'09:35'}</td><td>${t.symbol||sym}</td><td>${t.position||txn.toUpperCase()}</td><td>${t.strike}</td><td>${t.quantity}</td><td>₹${(t.entry_price||0).toFixed(2)}</td><td>${t.exit_date} ${t.exit_time||'15:05'}</td><td>₹${(t.exit_price||0).toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted||'₹'+(t.pnl||0)}</td></tr>`}); h+='</tbody></table>'; document.getElementById('robot-tl').innerHTML=h; document.getElementById('robot-trades').classList.remove('hidden');}
-        }catch(e){document.getElementById('robot-metrics').innerHTML='<p class="text-danger p-3">Error: '+e.message+'</p>';}
-    }
-    function isMarketOpenIST(){
+    async function robotBacktest(){return runBacktest();}
+        function isMarketOpenIST(){
         const now=new Date();
         const istStr=now.toLocaleString('en-US',{timeZone:'Asia/Kolkata'});
         const ist=new Date(istStr);
@@ -1467,13 +1429,13 @@ let _lastOpenTrdHTML = null;
         }catch(e){alert('Error: '+e.message);}
     }
 
-    function setBT(p){const e=new Date(); const s=new Date(e); if(p==='1M') s.setMonth(e.getMonth()-1); else if(p==='3M') s.setMonth(e.getMonth()-3); else if(p==='6M') s.setMonth(e.getMonth()-6); else if(p==='1Y') s.setFullYear(e.getFullYear()-1); const fmt=d=>d.toISOString().split('T')[0]; document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}
+    function setBT(p){const e=new Date(); const s=new Date(e); if(p==='1M') s.setMonth(e.getMonth()-1); else if(p==='3M') s.setMonth(e.getMonth()-3); else if(p==='6M') s.setMonth(e.getMonth()-6); else if(p==='1Y') s.setFullYear(e.getFullYear()-1); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('r-start').value=fmt(s); document.getElementById('r-end').value=fmt(e);}catch(e2){} try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e3){}}
     function renderQInstruments(){const wrap=document.getElementById('q-instruments'); if(!wrap) return; const syms=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY']; const cur=document.getElementById('s-index')?.value||'NIFTY'; wrap.innerHTML=syms.map(s=>`<button class="btn btn-sm ${cur===s?'btn-primary':'btn-outline-primary'}" onclick="document.getElementById('s-index').value='${s}';renderQInstruments();if(stratLegs.length)updatePayoff();">${s}</button>`).join('')+' <small class="text-muted ms-2">Quick select — or use dropdown below (50 F&O)</small>';}
     async function runBacktestMonteCarlo(){const btn=document.getElementById('s-run'); const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Monte Carlo (2000 shuffles)...</p>'; try{const r=await P('/api/backtest/monte-carlo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); document.getElementById('bt-metrics').innerHTML='<div class="alert alert-info"><strong>Monte Carlo</strong> p5:'+r.p5+' p50:'+r.p50+' p95:'+r.p95+' prob_profit:'+(r.prob_profit||'-')+'</div>';}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
     async function downloadReportPDF(){const body=_collectBacktestBody(); if(!body) return; try{const r=await fetch('/api/backtest/report.pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='RaTrade_'+body.symbol+'_'+body.start_date+'.pdf'; a.click();}catch(e){alert(e.message);}}
-    function _collectBacktestBody(){const idx=document.getElementById('s-index').value; const sd=document.getElementById('s-start').value, ed=document.getElementById('s-end').value; if(!sd||!ed){alert('Select start and end date'); return null;} const lots=parseInt(document.getElementById('s-lots').value)||1; const            sl=parseFloat(document.getElementById('s-sl').value)||1500; const
-           tp=parseFloat(document.getElementById('s-tp').value)||3000; const mtd=parseInt(document.getElementById('s-mtd').value)||5; const indicators=collectIndicators(); let legs=stratLegs.length?JSON.parse(JSON.stringify(stratLegs)):[]; if(!legs.length){const position=document.getElementById('s-position').value; const optType=document.getElementById('s-opt').value; const strikeType=document.getElementById('s-strike-type').value.toLowerCase(); const dteVal=parseInt(document.getElementById('s-dte').value)||7; const deltaVal=parseFloat(document.getElementById('s-delta').value)||0.3; legs=[{option_type:optType,lots:lots,transaction:position.toLowerCase(),stop_loss:sl,take_profit:tp,strike_selection:strikeType,otm_distance:2,expiry:document.getElementById('s-expiry').value.toLowerCase(),dte:dteVal,delta_target: strikeType==='delta'?deltaVal:null}];} const stratType=document.getElementById('s-strat-type').value.toLowerCase(); const entryTime=document.getElementById('s-entry-time').value; const exitTime=document.getElementById('s-exit-time').value; const momentum=parseInt(document.getElementById('s-momentum').value)||0; const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50; return {symbol:idx,start_date:sd,end_date:ed,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars: momentum>0? Math.max(5,20-momentum) : 20,strike_selection:legs[0].strike_selection,otm_distance:2,trade_mode:stratType,implied_volatility:0.14 + momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};}
-    (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-2); s.setDate(2); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e){}})();
+    function _collectBacktestBody(){return _unifiedBody();}
+
+    (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-2); s.setDate(2); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('r-start').value=fmt(s); document.getElementById('r-end').value=fmt(e);}catch(e){}})();
     document.getElementById('s-index')?.addEventListener('change', renderQInstruments);
     setTimeout(renderQInstruments, 800);
     addCondition();
