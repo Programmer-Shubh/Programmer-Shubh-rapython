@@ -332,7 +332,7 @@
                 <div class="card-body">
                     <div class="slab-sec"><div class="slab-sec-title">Order</div>
                     <div class="row g-2">
-                        <div class="col-md-2"><label class="form-label small">Symbols (tap to select, max 5)</label><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><label><input type="checkbox" value="NIFTY" checked> NIFTY</label><label><input type="checkbox" value="BANKNIFTY"> BANKNIFTY</label><label><input type="checkbox" value="FINNIFTY"> FINNIFTY</label><label><input type="checkbox" value="MIDCPNIFTY"> MIDCPNIFTY</label><label><input type="checkbox" value="SENSEX"> SENSEX</label><label><input type="checkbox" value="BANKEX"> BANKEX</label><label><input type="checkbox" value="RELIANCE"> RELIANCE</label><label><input type="checkbox" value="HDFCBANK"> HDFCBANK</label><label><input type="checkbox" value="ICICIBANK"> ICICIBANK</label><label><input type="checkbox" value="TCS"> TCS</label><label><input type="checkbox" value="INFY"> INFY</label></div></div>
+                        <div class="col-md-2"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 5)</label><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><label><input type="checkbox" value="NIFTY" checked> NIFTY</label><label><input type="checkbox" value="BANKNIFTY"> BANKNIFTY</label><label><input type="checkbox" value="FINNIFTY"> FINNIFTY</label><label><input type="checkbox" value="MIDCPNIFTY"> MIDCPNIFTY</label><label><input type="checkbox" value="SENSEX"> SENSEX</label><label><input type="checkbox" value="BANKEX"> BANKEX</label><label><input type="checkbox" value="RELIANCE"> RELIANCE</label><label><input type="checkbox" value="HDFCBANK"> HDFCBANK</label><label><input type="checkbox" value="ICICIBANK"> ICICIBANK</label><label><input type="checkbox" value="TCS"> TCS</label><label><input type="checkbox" value="INFY"> INFY</label></div></div>
                         <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY">Call Buy</option><option value="CE-SELL">Call Sell</option><option value="PE-BUY">Put Buy</option><option value="PE-SELL">Put Sell</option><option value="AUTO" selected>AUTO (Signal Based)</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
                         <div class="col-md-1"><label class="form-label small">OTM Dist</label><input type="number" id="r-otm" class="form-control form-control-sm" value="1" min="1" max="6" title="OTM Distance 1-6"></div>
@@ -716,8 +716,11 @@
             const rbox=document.getElementById('r-syms');
             if(rbox){
                 const cur=[...rbox.querySelectorAll('input:checked')].map(o=>o.value);
-                const keep=cur.length?cur:['NIFTY'];
+                let keep=cur.length?cur:['NIFTY'];
+                try{const saved=JSON.parse(localStorage.getItem('rSyms')||'[]');if(saved.length)keep=saved.filter(x=>syms.includes(x));if(!keep.length)keep=['NIFTY'];}catch(e){}
                 rbox.innerHTML=syms.map(x=>`<label><input type="checkbox" value="${x}" ${keep.includes(x)?'checked':''}> ${x}</label>`).join('');
+                rbox.onchange=()=>{try{const v=[...rbox.querySelectorAll('input:checked')].map(o=>o.value);if(v.length>5){rbox.querySelectorAll('input:checked')[4].checked=false;}rSymsRefresh();updateRunSummary();}catch(e){}};
+                rSymsRefresh();
             }
             const psel=document.getElementById('py-sym');
             if(psel){
@@ -944,6 +947,8 @@ let _lastOpenTrdHTML = null;
         return quantIndicators.map(q=>{const p={};(q.params||[]).forEach(pr=>{const v=parseFloat(pr.val);p[pr.key]=isNaN(v)?0:v;});p.mode=autoDir;p.candle=q.candle||'5';p.field=q.field||'equity';return {id:q.id,params:p};});
     }
     function rSyms(){const b=document.getElementById('r-syms');if(b){const v=[...b.querySelectorAll('input:checked')].map(o=>o.value).filter(Boolean).slice(0,5);if(v.length)return v;}const s=document.getElementById('r-sym');if(s)return [...s.selectedOptions].map(o=>o.value).filter(Boolean).slice(0,5);return ['NIFTY'];}
+    function rSymsRefresh(){try{const c=document.getElementById('r-sym-count');if(c)c.textContent=rSyms().length;try{localStorage.setItem('rSyms',JSON.stringify(rSyms()));}catch(e){}}catch(e){}}
+    function rSymsRestore(){try{const saved=JSON.parse(localStorage.getItem('rSyms')||'[]');if(!saved.length)return false;const b=document.getElementById('r-syms');if(!b)return false;let hit=false;b.querySelectorAll('input').forEach(i=>{i.checked=saved.includes(i.value);if(i.checked)hit=true;});return hit;}catch(e){return false;}}
     function _unifiedBody(){
         // SINGLE source of truth: Trade Setup form (r-*) + multi-leg override + advanced extras
         const _syms=rSyms();
