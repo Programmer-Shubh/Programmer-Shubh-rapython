@@ -75,6 +75,7 @@ def get_open_trades():
                 "trade_mode": t["trade"].get("trade_mode", "paper"),
                 "trade_type": t["trade"].get("trade_type", "intraday"),
                 "entry_date": t["trade"].get("entry_date", ""),
+                "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
                 "expiry_date": t["trade"].get("expiry_date", ""),
             }
             for t in positions
@@ -216,7 +217,9 @@ def get_history():
                 "id": t["id"],
                 "date": t["entry_date"],
                 "entry_date": t["entry_date"],
+                "entry_time": TradeModel.ist_hhmm(t.get("created_at", "")),
                 "exit_date": t.get("exit_date", ""),
+                "exit_time": TradeModel.ist_hhmm(t.get("updated_at", "")),
                 "symbol": t["symbol"],
                 "option_type": t["option_type"],
                 "strike": t["strike_price"],

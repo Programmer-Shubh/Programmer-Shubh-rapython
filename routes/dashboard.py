@@ -158,6 +158,7 @@ def get_portfolio():
                 "qty": t["trade"].get("quantity", 1),
                 "lot_size": t["trade"].get("lot_size", 50),
                 "entry_date": t["trade"].get("entry_date", ""),
+                "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
                 "expiry_date": t["trade"].get("expiry_date", ""),
             }
             for t in positions
@@ -178,7 +179,9 @@ def get_trade_history():
             {
                 "id": t["id"],
                 "entry_date": t["entry_date"],
+                "entry_time": TradeModel.ist_hhmm(t.get("created_at", "")),
                 "exit_date": t.get("exit_date", ""),
+                "exit_time": TradeModel.ist_hhmm(t.get("updated_at", "")),
                 "symbol": t["symbol"],
                 "option_type": t["option_type"],
                 "strike": t["strike_price"],

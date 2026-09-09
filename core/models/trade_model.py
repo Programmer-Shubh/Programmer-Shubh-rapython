@@ -404,6 +404,19 @@ class TradeModel:
 
     # Cache for bad-tick filter: last premium per (symbol, option_type, strike)
     _last_premiums = {}
+    # Cache for bad-tick filter: last underlying spot per symbol (same units!)
+    _last_spots = {}
+
+    @staticmethod
+    def ist_hhmm(dt_str: str) -> str:
+        """'YYYY-MM-DD HH:MM:SS' (UTC, from datetime('now')) -> IST 'HH:MM'."""
+        try:
+            import datetime as _dt
+            d = _dt.datetime.strptime(str(dt_str or "")[:19], "%Y-%m-%d %H:%M:%S")
+            d = d + _dt.timedelta(hours=5, minutes=30)
+            return d.strftime("%H:%M")
+        except Exception:
+            return ""
 
     def get_option_premium(self, symbol, option_type, strike, expiry, iv=None) -> float:
         if strike is None or float(strike or 0) <= 0:
@@ -417,17 +430,24 @@ class TradeModel:
             live = _LMD().get_option_ltp(symbol, strike, option_type)
             if live and float(live) > 0:
                 val = float(live)
-                # Bad-tick filter: reject >60% jump in <1min if underlying not moved
+                # Bad-tick filter: reject >60% premium jump in <1min unless the
+                # UNDERLYING really moved. Compare spot-vs-spot (same units):
+                # the old code compared spot level (~24000) to premium (~130),
+                # which is always "huge", so the filter never fired.
                 last = self._last_premiums.get(cache_key)
                 if last and last > 5:
                     change = abs(val - last) / last
                     if change > 0.60:
-                        # Check underlying spot move to validate
                         try:
                             from core.services.live_market_data import LiveMarketData as _LM2
                             spot_live = _LM2().get_live_spot(symbol)
-                            # If spot live not available or change <5%, this is bad tick
-                            if not spot_live or abs(float(spot_live.get("spot", 0)) - last) / max(last, 1) < 0.05:
+                            spot_now = float((spot_live or {}).get("spot", 0) or 0)
+                            prev_spot = self._last_spots.get(symbol, 0)
+                            spot_moved = (prev_spot > 0 and spot_now > 0
+                                          and abs(spot_now - prev_spot) / prev_spot >= 0.05)
+                            if spot_now > 0:
+                                self._last_spots[symbol] = spot_now
+                            if not spot_moved:
                                 val = last  # reject bad tick, keep last
                             else:
                                 self._last_premiums[cache_key] = val
@@ -486,6 +506,11 @@ class TradeModel:
                 if sr and sr["close_price"]:
                     spot = float(sr["close_price"])
             if spot > 0:
+                # Remember spot for the bad-tick filter (step 1)
+                try:
+                    self._last_spots[symbol] = float(spot)
+                except Exception:
+                    pass
                 # Use expiry to compute DTE, else 7 days weekly
                 import datetime as _dt
                 dte = 7
