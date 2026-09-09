@@ -245,7 +245,6 @@
         <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Lab</button>
-        <button onclick="go('custom',this)"><i class="bi bi-code-slash"></i> Python Lab</button>
         <button onclick="go('tvchart',this)"><i class="bi bi-candlestick"></i> TV Chart</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
         <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
@@ -646,45 +645,6 @@
             </div><!-- end custom-form -->
         </div>
         <!-- PYTHON LAB (Custom Code Backtest) -->
-        <div id="pg-custom" class="pg hidden">
-            <div class="card mb-2" style="border-left:4px solid #6f42c1">
-                <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
-                    <div class="d-flex gap-2 align-items-center">
-                        <h4 class="fw-bold mb-0"><i class="bi bi-code-slash"></i> Python Strategy Lab</h4><span class="badge" style="background:#6f42c1">Sandboxed</span><small class="text-muted ms-2">Paste custom Python code, backtest on historical data</small>
-                    </div>
-                    <div class="d-flex gap-2 align-items-center">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="pyLoadTemplate()"><i class="bi bi-file-earmark-code"></i> Load Template</button>
-                        <button class="btn btn-sm btn-outline-success" onclick="pyLoadPremium()"><i class="bi bi-currency-rupee"></i> Premium Sample</button>
-                        <button class="btn btn-sm btn-outline-info" onclick="pyLoadConf()"><i class="bi bi-lightning-charge"></i> Confluence</button>
-                        <button class="btn btn-sm text-white" style="background:#6f42c1" id="py-run" onclick="pyRunBacktest()"><i class="bi bi-play-fill"></i> Run Backtest</button>
-                    </div>
-                </div>
-            </div>
-            <div class="card mb-2"><div class="card-body p-2">
-                <div class="row g-2 align-items-end">
-                    <div class="col-md-2"><label class="form-label small">Symbol (chain list)</label><select id="py-sym" class="form-select form-select-sm"><option selected>NIFTY</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" class="form-control form-control-sm" id="py-start" value="2026-08-01"></div>
-                    <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" class="form-control form-control-sm" id="py-end" value="2026-08-20"></div>
-                    <div class="col-md-2"><label class="form-label small">Capital (Rs)</label><input type="number" class="form-control form-control-sm" id="py-cap" value="100000"></div>
-                    <div class="col-md-4"><small class="text-muted">Data input: pandas DataFrame <code>data</code> with columns <code>date, open, high, low, close, volume</code>. Allowed libs: <code>pandas, numpy, backtrader</code> (+math/statistics/datetime). Network, files &amp; system calls are blocked; 30s time limit.</small></div>
-                </div>
-            </div></div>
-            <div class="card mb-2"><div class="card-header py-1"><strong class="small">Strategy Code</strong> <small class="text-muted">- define <code>run(data)</code> returning <code>{'trades': [...]}</code>, or a backtrader Strategy named <code>CustomStrategy</code></small></div>
-                <div class="card-body p-1"><textarea id="py-code" spellcheck="false" style="width:100%;min-height:340px;font-family:Consolas,Menlo,monospace;font-size:12.5px;background:#1e1e1e;color:#d4d4d4;border:0;padding:10px;white-space:pre" placeholder="Paste your Python strategy here, or click Load Template..."></textarea></div>
-            </div>
-            <div id="py-results" class="hidden">
-                <div class="row mt-2" id="py-metrics"></div>
-                <div class="card mt-2"><div class="card-body p-2"><div id="py-eq" style="height:200px"></div></div></div>
-                <div class="card mt-2"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="py-tl" style="overflow-x:auto"></div></div>
-                <div class="card mt-2"><div class="card-header py-1"><strong class="small">Script Output / Errors</strong></div><div class="card-body p-2"><pre id="py-logs" class="small mb-0" style="white-space:pre-wrap;max-height:220px;overflow:auto"></pre></div></div>
-            </div>
-            <div class="card mt-2"><div class="card-header py-1"><strong class="small"><i class="bi bi-alarm"></i> Keep-Alive (cron-job.org) - stop Render free tier from sleeping</strong></div>
-                <div class="card-body p-2 small">
-                    <div>Ping URL: <code>https://ratrade.onrender.com/api/keepalive/ping</code> <button class="btn btn-sm btn-outline-primary ms-2" onclick="kaTest()">Test Ping</button> <span id="ka-status" class="ms-2 text-muted"></span></div>
-                    <ol class="mb-0 mt-1 text-muted"><li>Create free account at <a href="https://cron-job.org" target="_blank">cron-job.org</a></li><li>New cronjob titled <strong>RaTrade keep-alive</strong></li><li>Address = ping URL above, every <strong>5 minutes</strong></li><li>Save + Enable. Site stays awake while pings arrive.</li></ol>
-                </div>
-            </div>
-        </div>
         <!-- TV CHART (TradingView Lightweight Charts + trade markers) -->
         <div id="pg-tvchart" class="pg hidden">
             <div class="card mb-2" style="border-left:4px solid #2962ff">
@@ -739,7 +699,7 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();}if(id==='custom')pyLabInit();if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
