@@ -123,6 +123,7 @@ router = APIRouter()
 
 class BacktestRequest(BaseModel):
     symbol: str = "NIFTY"
+    symbols: list = []
     start_date: str = "2026-08-01"
     end_date: str = "2026-08-20"
     indicators: list = []
@@ -174,6 +175,90 @@ def _normalize_legs(raw_legs: list, lots_fallback: int = 1) -> list:
             entry["expiry_date"] = leg.get("expiry_date")
         out.append(entry)
     return out
+
+
+def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict:
+    """Combine per-symbol trade lists into one portfolio-level metrics dict."""
+    trades = sorted(all_trades, key=lambda t: str(t.get("exit_date", "") or t.get("entry_date", "")))
+    pnls = []
+    for t in trades:
+        try:
+            pnls.append(float(t.get("pnl", 0) or 0))
+        except Exception:
+            pnls.append(0.0)
+    n = len(pnls)
+    wins = sum(1 for p in pnls if p > 0)
+    losses = n - wins
+    net = round(sum(pnls), 2)
+    gross_win = sum(p for p in pnls if p > 0)
+    gross_loss = abs(sum(p for p in pnls if p <= 0))
+    max_win = round(max(pnls), 2) if pnls else 0.0
+    max_loss = round(min(pnls), 2) if pnls else 0.0
+    # Streaks + drawdown on exit-date order
+    ws = ls = mws = mls = 0
+    peak = cap = 0.0
+    max_dd = 0.0
+    equity = []
+    monthly = {}
+    for p in pnls:
+        if p > 0:
+            ws += 1
+            ls = 0
+        else:
+            ls += 1
+            ws = 0
+        mws = max(mws, ws)
+        mls = max(mls, ls)
+        cap += p
+        peak = max(peak, cap)
+        if peak > 0:
+            max_dd = max(max_dd, (peak - cap) / peak * 100)
+        equity.append(round(cap, 2))
+    for t in trades:
+        try:
+            mk = str(t.get("exit_date", "") or t.get("entry_date", ""))[:7]
+            monthly[mk] = round(monthly.get(mk, 0) + float(t.get("pnl", 0) or 0), 2)
+        except Exception:
+            pass
+    sharpe = 0.0
+    if n > 1:
+        mean = sum(pnls) / n
+        var = sum((p - mean) ** 2 for p in pnls) / (n - 1)
+        if var > 0:
+            import math as _m
+            sharpe = round(mean / _m.sqrt(var) * _m.sqrt(252), 4)
+    base = 1000000.0
+    return {
+        "initial_capital": base,
+        "final_capital": round(base + net, 2),
+        "total_return": net,
+        "total_return_pct": round(net / base * 100, 4),
+        "win_rate": round(wins / n * 100, 2) if n else 0.0,
+        "loss_rate": round(losses / n * 100, 2) if n else 0.0,
+        "max_drawdown": round(max_dd, 2),
+        "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else 0.0,
+        "sharpe_ratio": sharpe,
+        "total_trades": n,
+        "winning_trades": wins,
+        "losing_trades": losses,
+        "avg_win": round(gross_win / wins, 2) if wins else 0.0,
+        "avg_loss": round(gross_loss / losses, 2) if losses else 0.0,
+        "avg_profit_per_trade": round(net / n, 2) if n else 0.0,
+        "net_pnl": net,
+        "max_win": max_win,
+        "max_loss": max_loss,
+        "max_dd_duration": 0,
+        "return_maxdd": 0,
+        "reward_risk": 0,
+        "expectancy": round(net / n, 2) if n else 0.0,
+        "max_win_streak": mws,
+        "max_loss_streak": mls,
+        "max_trades_in_dd": 0,
+        "total_brokerage": round(total_brokerage, 2),
+        "trade_list": trades,
+        "equity_curve": equity,
+        "monthly_pnl": monthly,
+    }
 
 
 def _fetch_google_finance(symbol, start_date, end_date):
@@ -435,45 +520,97 @@ def run_backtest(req: BacktestRequest):
         # Fast path: 300s cache — instant 2nd run like Quantman (same as 70962cf)
         import time as _bt_t
         if not hasattr(run_backtest, "_cache"): run_backtest._cache = {}
-        _ck = f"{symbol}_{start_date}_{end_date}"
-        _ce = run_backtest._cache.get(_ck)
-        if _ce and _bt_t.time() - _ce[0] < 300:
-            historical = _ce[1]
+        # Multi-symbol: same setup runs per symbol (max 5), results merged
+        _syms = []
+        try:
+            for _s in (req.symbols or []):
+                _s = str(_s or "").strip().upper()
+                if _s and _s not in _syms:
+                    _syms.append(_s)
+        except Exception:
+            pass
+        if not _syms:
+            _syms = [symbol]
+        _syms = _syms[:5]
+        _all_trades = []
+        _per_symbol = {}
+        _brokerage = 0.0
+        _first_m = None
+        _engine_name = "engine"
+        for _sym in _syms:
+            _ck = f"{_sym}_{start_date}_{end_date}"
+            _ce = run_backtest._cache.get(_ck)
+            if _ce and _bt_t.time() - _ce[0] < 300:
+                historical = _ce[1]
+            else:
+                from core.services.historical_fetcher import fetch_historical
+                historical = fetch_historical(_sym, start_date, end_date, allow_synthetic=True)
+                run_backtest._cache[_ck] = (_bt_t.time(), historical)
+                if len(run_backtest._cache) > 20:
+                    run_backtest._cache.pop(next(iter(run_backtest._cache)))
+            # If too few bars (<30), indicators won't warm up -> force longer synthetic
+            if not historical or len(historical) < 30:
+                synth = _generate_synthetic_fallback(_sym, start_date, end_date)
+                if synth and len(synth) >= 30:
+                    historical = synth
+                elif not historical:
+                    historical = synth
+            if not historical or len(historical) < 5:
+                _per_symbol[_sym] = {"error": f"No data for {_sym}", "total_trades": 0,
+                                     "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
+                continue
+            if len(historical) > 120:
+                historical = historical[-120:]
+            engine = BacktestEngine(is_live=False)
+            result = engine.run(
+                historical, _sym, start_date, end_date,
+                indicators, entry_conditions, exit_conditions,
+                legs, advanced_in, risk_in,
+                is_live=False,
+            )
+            if not result.get("success"):
+                _per_symbol[_sym] = {"error": result.get("error", "Backtest failed"), "total_trades": 0,
+                                     "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
+                continue
+            _sm = result["metrics"]
+            try:
+                _engine_name = result.get("engine", "engine")
+            except Exception:
+                pass
+            if _first_m is None:
+                _first_m = _sm
+            for _t in (_sm.get("trade_list") or []):
+                try:
+                    _t["symbol"] = _sym
+                except Exception:
+                    pass
+                _all_trades.append(_t)
+            try:
+                _brokerage += float(_sm.get("total_brokerage", 0) or 0)
+            except Exception:
+                pass
+            _per_symbol[_sym] = {"total_trades": _sm.get("total_trades", 0),
+                                 "winning_trades": _sm.get("winning_trades", 0),
+                                 "losing_trades": _sm.get("losing_trades", 0),
+                                 "win_rate": _sm.get("win_rate", 0),
+                                 "net_pnl": round(_sm.get("net_pnl", 0), 2)}
+        if not _all_trades:
+            errs = "; ".join(f"{k}: {v.get('error')}" for k, v in _per_symbol.items() if v.get("error"))
+            return {"error": errs or f"No data available for {symbol}. All free sources failed. Try importing bhavcopy data or check dates."}
+        if len(_syms) == 1 and _first_m is not None and not _per_symbol.get(_syms[0], {}).get("error"):
+            m = _first_m
         else:
-            from core.services.historical_fetcher import fetch_historical
-            historical = fetch_historical(symbol, start_date, end_date, allow_synthetic=True)
-            run_backtest._cache[_ck] = (_bt_t.time(), historical)
-            if len(run_backtest._cache) > 20:
-                run_backtest._cache.pop(next(iter(run_backtest._cache)))
-        # If too few bars (<30), indicators won't warm up -> force longer synthetic
-        if not historical or len(historical) < 30:
-            synth = _generate_synthetic_fallback(symbol, start_date, end_date)
-            if synth and len(synth) >= 30:
-                historical = synth
-            elif not historical:
-                historical = synth
-        if not historical or len(historical) < 5:
-            return {"error": f"No data available for {symbol}. All free sources failed. Try importing bhavcopy data or check dates."}
-        if len(historical) > 120:
-            historical = historical[-120:]
-        engine = BacktestEngine(is_live=False)
-        result = engine.run(
-            historical, symbol, start_date, end_date,
-            indicators, entry_conditions, exit_conditions,
-            legs, advanced_in, risk_in,
-            is_live=False,
-        )
-        if not result.get("success"):
-            return {"error": result.get("error", "Backtest failed")}
-        m = result["metrics"]
+            m = _merge_trade_metrics(_all_trades, _brokerage)
     except Exception as e:
         import traceback
         traceback.print_exc()
         return {"error": f"Internal error: {str(e)}"}
     return {
         "success": True,
-        "engine": result.get("engine", "engine"),
-        "symbol": req.symbol,
+        "engine": _engine_name,
+        "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
+        "symbols": _syms,
+        "per_symbol": _per_symbol,
         "took_ms": int((__import__("time").time() - _t0) * 1000),
         "metrics": {
             "initial_capital": m["initial_capital"],
