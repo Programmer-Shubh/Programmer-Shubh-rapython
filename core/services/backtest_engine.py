@@ -1120,7 +1120,7 @@ class BacktestEngine:
         exits.append({
             "date": exit_date, "strike": entry["strike"], "price": round(exit_prem, 2),
             "quantity": qty, "exit_costs": exit_costs, "reason": reason, "pnl": round(pnl, 2),
-            "time": "15:14",
+            "time": getattr(self, '_early_exit_time', None) or getattr(self, '_exit_time', '15:14'),
         })
 
     def _close_spread(self, entries, exits, entry, reason, exit_date):
