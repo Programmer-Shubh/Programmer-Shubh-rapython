@@ -333,7 +333,7 @@
                 <div class="card-body">
                     <div class="slab-sec"><div class="slab-sec-title">Order</div>
                     <div class="row g-2">
-                        <div class="col-md-2"><label class="form-label small">Symbol</label><select id="r-sym" class="form-select form-select-sm"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option><option>RELIANCE</option><option>HDFCBANK</option><option>ICICIBANK</option><option>TCS</option><option>INFY</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Symbol (multi: Ctrl+click)</label><select id="r-sym" class="form-select form-select-sm" multiple size="3"><option selected>NIFTY</option><option>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option><option>RELIANCE</option><option>HDFCBANK</option><option>ICICIBANK</option><option>TCS</option><option>INFY</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY">Call Buy</option><option value="CE-SELL">Call Sell</option><option value="PE-BUY">Put Buy</option><option value="PE-SELL">Put Sell</option><option value="AUTO" selected>AUTO (Signal Based)</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
                         <div class="col-md-1"><label class="form-label small">OTM Dist</label><input type="number" id="r-otm" class="form-control form-control-sm" value="1" min="1" max="6" title="OTM Distance 1-6"></div>
@@ -351,20 +351,7 @@
                         <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
-                        <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button class="btn btn-success flex-fill slab-cta" id="r-run" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
-                    </div>
-                    </div>
-                    <div class="slab-sec"><div class="slab-sec-title">Run & Robot</div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-12 d-flex gap-2 flex-wrap">
-                            <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
-                            <input type="text" id="r-name" class="form-control form-control-sm" style="width:200px" placeholder="Robot name (optional)">
-                            <button class="btn btn-sm btn-outline-success" onclick="robotPaperTrade()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="robotLiveTrade()"><i class="bi bi-lightning"></i> Live Trade</button>
-                            <button class="btn btn-sm btn-outline-dark" onclick="runBacktestMonteCarlo()" title="Monte Carlo"><i class="bi bi-shuffle"></i> MC</button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="downloadReportPDF()" title="PDF Report"><i class="bi bi-file-earmark-pdf"></i> PDF</button>
-                            <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
-                        </div>
+                        
                     </div>
                     </div>
                     <div class="slab-sec"><div class="slab-sec-title">Indicators — signal</div>
@@ -466,6 +453,28 @@
                             <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('calendar')"><div class="icon">📅</div><div class="title">Calendar Spread</div><div class="desc">Sell Weekly + Buy Monthly</div></div></div>
                         </div>
                     </div>
+                </div>
+                <div class="card mt-3 slab-card">
+                    <div class="card-header"><span class="slab-num">4</span><i class="bi bi-play-circle"></i> Run & Backtest <small class="text-muted">pehle legs/indicators set karo, phir chalao</small></div>
+                    <div class="card-body">
+                        <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
+                            <button class="btn btn-success slab-cta" id="r-run" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button>
+                            <button class="btn btn-sm btn-primary" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button>
+                        </div>
+<div class="slab-sec"><div class="slab-sec-title">Run & Robot</div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
+                            <input type="text" id="r-name" class="form-control form-control-sm" style="width:200px" placeholder="Robot name (optional)">
+                            <button class="btn btn-sm btn-outline-success" onclick="robotPaperTrade()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="robotLiveTrade()"><i class="bi bi-lightning"></i> Live Trade</button>
+                            <button class="btn btn-sm btn-outline-dark" onclick="runBacktestMonteCarlo()" title="Monte Carlo"><i class="bi bi-shuffle"></i> MC</button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="downloadReportPDF()" title="PDF Report"><i class="bi bi-file-earmark-pdf"></i> PDF</button>
+                            <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
+                        </div>
+                    </div>
+                    </div>
+                                        </div>
                 </div>
                 <!-- Quantman Payoff Diagram -->
                 <div class="card mt-3 payoff-card" id="payoffCard" style="display:none">
@@ -968,7 +977,9 @@ let _lastOpenTrdHTML = null;
     }
     function _unifiedBody(){
         // SINGLE source of truth: Trade Setup form (r-*) + multi-leg override + advanced extras
-        const sym=document.getElementById('r-sym').value;
+        const _sel=document.getElementById('r-sym');
+        const _syms=[..._sel.selectedOptions].map(o=>o.value).filter(Boolean).slice(0,5);
+        const sym=(_syms[0]||_sel.value||'NIFTY').toUpperCase();
         const s=document.getElementById('r-start').value, e=document.getElementById('r-end').value;
         if(!s||!e){alert('Select start and end date');return null;}
         const lots=parseInt(document.getElementById('r-lots').value)||1;
@@ -991,7 +1002,7 @@ let _lastOpenTrdHTML = null;
         const exitTime=document.getElementById('r-exit').value||'15:05';
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50;
-        return {symbol:sym,start_date:s,end_date:e,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
     }
     async function runBacktest(){
         const btn=document.getElementById('s-run');const orig=btn.innerHTML;
@@ -1025,7 +1036,13 @@ let _lastOpenTrdHTML = null;
             document.getElementById('bt-metrics').classList.remove('hidden');
             const pnl = m.final_capital - m.initial_capital;
             const pnlClass = pnl >= 0 ? 'price-up' : 'price-down';
-            document.getElementById('bt-metrics').innerHTML=`
+            let perSymH='';
+            if(r.symbols&&r.symbols.length>1&&r.per_symbol){
+                perSymH='<div class="card mb-2"><div class="card-body p-2"><table class="bt-table"><thead><tr><th>Symbol</th><th>Trades</th><th>Win %</th><th>Net P&L</th></tr></thead><tbody>';
+                r.symbols.forEach(sx=>{const pm=r.per_symbol[sx]||{};perSymH+=`<tr><td><strong>${sx}</strong></td><td>${pm.total_trades||0}</td><td>${pm.win_rate||0}%</td><td class="${C(pm.net_pnl||0)}">${F(pm.net_pnl||0)}</td></tr>`;});
+                perSymH+='</tbody></table></div></div>';
+            }
+            document.getElementById('bt-metrics').innerHTML=perSymH+`
 <div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> Quantman 4 Key Metrics:</strong><span>Win Prob: <strong>${m.win_rate}%</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${m.expectancy}</strong> ${m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>'}</span><span class="ms-auto badge bg-info">Slippage ${qSlip}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
 <div class="row g-2 mb-2">
 <div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
