@@ -145,18 +145,19 @@ class OptionScanner:
         all_signals = [s for s in all_signals if s.get('score', 0) >= min_score]
 
         all_signals.sort(key=lambda x: x['score'], reverse=True)
-        top = all_signals[:top_n]
-        # Ensure dashboard shows stocks too, not just indices - if top is all indices, mix in best stock
+        # Dashboard rule: stocks AND indices both visible. Split the list and
+        # take top indices + top stocks (3+2) instead of pure top-5, so high
+        # scoring indices can no longer push all stocks out.
         indices_set = {'NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'}
-        if top and all(s['symbol'] in indices_set for s in top):
-            # Find best stock signal outside top
-            stock_candidates = [s for s in all_signals[top_n:] if s['symbol'] not in indices_set]
-            if stock_candidates:
-                # Replace last 2 indices with top 2 stocks
-                stock_candidates.sort(key=lambda x: x['score'], reverse=True)
-                top = top[:max(0, top_n-2)] + stock_candidates[:2]
-                top.sort(key=lambda x: x['score'], reverse=True)
-        return top[:top_n]
+        idx_sigs = [s for s in all_signals if s['symbol'] in indices_set]
+        stk_sigs = [s for s in all_signals if s['symbol'] not in indices_set]
+        n_idx = min(3, len(idx_sigs))
+        n_stk = min(top_n - n_idx, len(stk_sigs))
+        if n_stk < top_n - n_idx:
+            n_idx = min(len(idx_sigs), top_n - n_stk)
+        top = (idx_sigs[:n_idx] + stk_sigs[:n_stk])[:top_n]
+        top.sort(key=lambda x: x['score'], reverse=True)
+        return top
 
     def _ai_fallback_signal(self, result: dict) -> dict:
         """AI-enhanced fallback using 5 advanced indicators when VWAP signals are insufficient.

@@ -659,13 +659,14 @@
                     <div class="d-flex gap-2 align-items-center">
                         <button class="btn btn-sm btn-outline-secondary" onclick="pyLoadTemplate()"><i class="bi bi-file-earmark-code"></i> Load Template</button>
                         <button class="btn btn-sm btn-outline-success" onclick="pyLoadPremium()"><i class="bi bi-currency-rupee"></i> Premium Sample</button>
+                        <button class="btn btn-sm btn-outline-info" onclick="pyLoadConf()"><i class="bi bi-lightning-charge"></i> Confluence</button>
                         <button class="btn btn-sm text-white" style="background:#6f42c1" id="py-run" onclick="pyRunBacktest()"><i class="bi bi-play-fill"></i> Run Backtest</button>
                     </div>
                 </div>
             </div>
             <div class="card mb-2"><div class="card-body p-2">
                 <div class="row g-2 align-items-end">
-                    <div class="col-md-2"><label class="form-label small">Symbol</label><input type="text" class="form-control form-control-sm" id="py-sym" value="NIFTY"></div>
+                    <div class="col-md-2"><label class="form-label small">Symbol (chain list)</label><select id="py-sym" class="form-select form-select-sm"><option selected>NIFTY</option></select></div>
                     <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" class="form-control form-control-sm" id="py-start" value="2026-08-01"></div>
                     <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" class="form-control form-control-sm" id="py-end" value="2026-08-20"></div>
                     <div class="col-md-2"><label class="form-label small">Capital (Rs)</label><input type="number" class="form-control form-control-sm" id="py-cap" value="100000"></div>
@@ -753,13 +754,18 @@
             const master=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','LT','AXISBANK','KOTAKBANK','HINDUNILVR','BHARTIARTL','MARUTI','M&M','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','TITAN','BAJAJFINSV','NESTLEIND','APOLLOHOSP','UPL','HEROMOTOCO'];
             let syms=[...new Set([...(s.symbols||[]), ...master])].sort();
             sel.innerHTML=syms.map(x=>`<option value="${x}" ${x===current?'selected':''}>${x}</option>`).join('');
-            // Same full chain list in Strategy Lab multi-symbol box (keep NIFTY default)
+            // Same full chain list in Python Lab + Strategy Lab multi-symbol box
             const rsel=document.getElementById('r-sym');
             if(rsel){
                 const cur=[...rsel.selectedOptions].map(o=>o.value);
                 const keep=cur.length?cur:['NIFTY'];
                 rsel.innerHTML=syms.map(x=>`<option value="${x}" ${keep.includes(x)?'selected':''}>${x}</option>`).join('');
                 rsel.size=Math.min(6,syms.length);
+            }
+            const psel=document.getElementById('py-sym');
+            if(psel){
+                const pcur=psel.value||'NIFTY';
+                psel.innerHTML=syms.map(x=>`<option value="${x}" ${x===pcur?'selected':''}>${x}</option>`).join('');
             }
         }catch(e){console.error('Failed to load symbols',e);}
     }
@@ -1719,6 +1725,97 @@ def run(data):
                        "entry_price": ot["entry_price"], "exit_price": exit_px,
                        "qty": LOT_SIZE})
     return {"trades": trades}`;
+    const PY_CONF_CODE = `"""Robot Confluence strategy (pandas mode) - VWAP + EMA + RSI + Volume.
+
+Same logic as Call/Put Robot's confluence indicator:
+  BUY  = close > VWAP + green candle + EMAfast > EMAslow + RSI > RSI_BUY (rising) + volume breakout
+  EXIT = mirror sell signal, SL %, TP % ya max hold - jo pehle ho.
+Settings upar badlo aur kisi bhi symbol pe backtest karo.
+"""
+import pandas as pd
+import numpy as np
+
+EMA_FAST = 9
+EMA_SLOW = 21
+RSI_PERIOD = 14
+RSI_BUY = 60.0
+RSI_SELL = 40.0
+VOL_PERIOD = 20
+VOL_MULT = 1.2
+VWAP_PERIOD = 20
+STOP_PCT = 4.0
+TARGET_PCT = 6.0
+MAX_HOLD = 10
+QTY = 1
+
+
+def _rsi(close, period):
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def _vwap(data, period):
+    tp = (data["high"] + data["low"] + data["close"]) / 3.0
+    pv = (tp * data["volume"]).rolling(period).sum()
+    vv = data["volume"].rolling(period).sum().replace(0, np.nan)
+    return pv / vv
+
+
+def run(data):
+    ema_f = data["close"].ewm(span=EMA_FAST, adjust=False).mean()
+    ema_s = data["close"].ewm(span=EMA_SLOW, adjust=False).mean()
+    rsi = _rsi(data["close"], RSI_PERIOD)
+    vwap = _vwap(data, VWAP_PERIOD)
+    vol_avg = data["volume"].rolling(VOL_PERIOD).mean()
+    start = max(EMA_SLOW, RSI_PERIOD, VOL_PERIOD, VWAP_PERIOD) + 1
+    trades = []
+    ot = None
+    for i in range(start, len(data)):
+        row = data.iloc[i]
+        o = float(row["open"])
+        c = float(row["close"])
+        buy = (c > vwap.iloc[i] and c > o
+               and ema_f.iloc[i] > ema_s.iloc[i]
+               and rsi.iloc[i] > RSI_BUY and rsi.iloc[i] >= rsi.iloc[i - 1]
+               and float(row["volume"]) > VOL_MULT * vol_avg.iloc[i])
+        sell = (c < vwap.iloc[i] and c < o
+                and ema_f.iloc[i] < ema_s.iloc[i]
+                and rsi.iloc[i] < RSI_SELL and rsi.iloc[i] <= rsi.iloc[i - 1]
+                and float(row["volume"]) > VOL_MULT * vol_avg.iloc[i])
+        if ot is None:
+            if buy:
+                ot = {"idx": i, "entry_date": str(row["date"]),
+                      "entry_price": c,
+                      "sl": c * (1.0 - STOP_PCT / 100.0),
+                      "tp": c * (1.0 + TARGET_PCT / 100.0)}
+        else:
+            exit_px = None
+            if float(row["low"]) <= ot["sl"]:
+                exit_px = ot["sl"]
+            elif float(row["high"]) >= ot["tp"]:
+                exit_px = ot["tp"]
+            elif sell or (i - ot["idx"]) >= MAX_HOLD:
+                exit_px = c
+            if exit_px is not None:
+                trades.append({"entry_date": ot["entry_date"],
+                               "exit_date": str(row["date"]),
+                               "entry_price": ot["entry_price"],
+                               "exit_price": float(exit_px), "qty": QTY})
+                ot = None
+    if ot is not None:
+        last = data.iloc[-1]
+        trades.append({"entry_date": ot["entry_date"],
+                       "exit_date": str(last["date"]),
+                       "entry_price": ot["entry_price"],
+                       "exit_price": float(last["close"]), "qty": QTY})
+    return {"trades": trades}
+`;
+    function pyLoadConf(){if(confirm('Editor me jo code hai wo replace ho jayega. Continue?')===false)return;document.getElementById('py-code').value=PY_CONF_CODE;document.getElementById('py-code').scrollIntoView({block:'center'});}
     function pyLoadPremium(){if(confirm('Editor me jo code hai wo replace ho jayega. Continue?')===false)return;document.getElementById('py-code').value=PY_PREMIUM_CODE;document.getElementById('py-code').scrollIntoView({block:'center'});}
     async function pyRunBacktest(){
         const btn=document.getElementById('py-run');const orig=btn.innerHTML;btn.innerHTML='<span class="spinner"></span> Running...';
