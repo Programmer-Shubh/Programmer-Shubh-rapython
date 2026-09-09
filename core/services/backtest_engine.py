@@ -418,10 +418,10 @@ class BacktestEngine:
         ef = max(2, int(params.get("ema_fast", 9) or 9))
         es = max(3, int(params.get("ema_slow", 21) or 21))
         rp = max(2, int(params.get("rsi_period", 14) or 14))
-        rbuy = float(params.get("rsi_buy", 60) or 60)
-        rsell = float(params.get("rsi_sell", 40) or 40)
+        rbuy = float(params.get("rsi_buy", 65) or 65)
+        rsell = float(params.get("rsi_sell", 35) or 35)
         vp = max(2, int(params.get("vol_period", 20) or 20))
-        vm = float(params.get("vol_mult", 1.2) or 1.2)
+        vm = float(params.get("vol_mult", 1.5) or 1.5)
         wp = max(2, int(params.get("vwap_period", 20) or 20))
         req_candle = int(params.get("require_candle", 1) or 0)
         ema_f = self.indicators.calculate_ema(closes, ef) or []

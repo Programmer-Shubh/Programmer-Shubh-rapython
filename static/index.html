@@ -231,12 +231,11 @@
         <button class="active" onclick="go('dashboard',this)"><i class="bi bi-speedometer2"></i> Dashboard</button>
         <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
-        <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Builder</button>
+        <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Lab</button>
         <button onclick="go('custom',this)"><i class="bi bi-code-slash"></i> Python Lab</button>
         <button onclick="go('tvchart',this)"><i class="bi bi-candlestick"></i> TV Chart</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
         <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
-        <button onclick="go('robot',this)"><i class="bi bi-robot"></i> Call/Put Robot</button>
     </div>
     <div class="wrap">
         <!-- DASHBOARD -->
@@ -307,7 +306,7 @@
             <div class="card mb-2" style="border-left:4px solid #0d6efd">
                 <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
                     <div class="d-flex gap-2 align-items-center">
-                        <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Builder</h4><span class="badge bg-primary">Quantman Style</span><small class="text-muted ms-2">Create Backtest / Live Algo — like quantman.trade/runs/new</small>
+                        <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Lab</h4><span class="badge bg-primary">Quantman Style</span><small class="text-muted ms-2">Create Backtest / Live Algo — like quantman.trade/runs/new</small>
                     </div>
                     <div class="d-flex gap-2 align-items-center">
                         <div class="input-group input-group-sm" style="width:260px"><span class="input-group-text">Run Name</span><input type="text" class="form-control" id="s-name" placeholder="Nifty Breakout Strategy"></div>
@@ -514,6 +513,81 @@
             </div></div>
             <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:520px"></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
         </div>
+        <!-- MERGED: Call/Put Robot (moved from pg-robot) -->
+<!-- CALL/PUT ROBOT - Simple Buy/Sell with SL/TP -->
+        <div id="pg-robot-merged">
+            <h4 class="fw-bold mb-3 mt-4"><i class="bi bi-robot"></i> Call / Put Buy Sell Robot <small class="text-muted">(same page)</small></h4>
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-gear"></i> Robot Settings <small class="text-muted">Symbol + Order + SL/Target + Backtest</small></div>
+                <div class="card-body">
+                    <div class="row g-2">
+                        <div class="col-md-2"><label class="form-label small">Symbol</label><select id="r-sym" class="form-select form-select-sm"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option><option>RELIANCE</option><option>HDFCBANK</option><option>ICICIBANK</option><option>TCS</option><option>INFY</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY">Call Buy</option><option value="CE-SELL">Call Sell</option><option value="PE-BUY">Put Buy</option><option value="PE-SELL">Put Sell</option><option value="AUTO" selected>AUTO (Signal Based)</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
+                        <div class="col-md-1"><label class="form-label small">OTM Dist</label><input type="number" id="r-otm" class="form-control form-control-sm" value="1" min="1" max="6" title="OTM Distance 1-6"></div>
+                        <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="r-lots" class="form-control form-control-sm" value="1" min="1"></div>
+                        <div class="col-md-1"><label class="form-label small">Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
+                        <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
+                        <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:05"><small class="text-muted" id="r-exit-note">Intraday square-off</small></div>
+                        <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
+                        <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
+                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
+                        <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button class="btn btn-sm btn-success flex-fill" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-12 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
+                            <input type="text" id="r-name" class="form-control form-control-sm" style="width:200px" placeholder="Robot name (optional)">
+                            <button class="btn btn-sm btn-outline-success" onclick="robotPaperTrade()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="robotLiveTrade()"><i class="bi bi-lightning"></i> Live Trade</button>
+                            <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
+                            <div class="d-flex gap-3 flex-wrap align-items-end" style="font-size:12px">
+                                <label><input type="checkbox" id="r-ind-rsi" checked> RSI(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:44px;font-size:11px">)</label>
+                                <label><input type="checkbox" id="r-ind-ema"> EMA(<input type="number" id="r-p-ema" value="50" min="2" max="200" style="width:48px;font-size:11px">)</label>
+                                <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(<input type="number" id="r-p-st" value="10" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-stm" value="3" min="1" max="10" step="0.5" style="width:44px;font-size:11px">) Bullish/Bearish</label>
+                                <label><input type="checkbox" id="r-ind-macd"> MACD(<input type="number" id="r-p-mf" value="12" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-ms" value="26" min="2" max="60" style="width:44px;font-size:11px">,<input type="number" id="r-p-mg" value="9" min="2" max="30" style="width:44px;font-size:11px">)</label>
+                                <label title="BUY CALL: close>VWAP + green candle + EMAfast>EMAslow + RSI>Buy(rising) + Vol breakout. BUY PUT: mirror."><input type="checkbox" id="r-ind-conf" checked> <strong>Robot Confluence (VWAP+EMA+RSI+Vol)</strong></label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-1" id="r-conf-settings">
+                        <div class="col-6 col-md-1"><label class="form-label small">EMA Fast</label><input type="number" id="r-cf-ef" class="form-control form-control-sm" value="9" min="2"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">EMA Slow</label><input type="number" id="r-cf-es" class="form-control form-control-sm" value="21" min="3"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">RSI Pd</label><input type="number" id="r-cf-rsi" class="form-control form-control-sm" value="14" min="2"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">RSI Buy&gt;</label><input type="number" id="r-cf-rb" class="form-control form-control-sm" value="65" min="50" max="90"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">RSI Sell&lt;</label><input type="number" id="r-cf-rs" class="form-control form-control-sm" value="35" min="10" max="50"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">Vol Pd</label><input type="number" id="r-cf-vp" class="form-control form-control-sm" value="20" min="2"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">Vol x</label><input type="number" id="r-cf-vm" class="form-control form-control-sm" value="1.5" min="1" step="0.1"></div>
+                        <div class="col-6 col-md-1"><label class="form-label small">VWAP Pd</label><input type="number" id="r-cf-wp" class="form-control form-control-sm" value="20" min="2"></div>
+                        <div class="col-12"><small class="text-muted">BUY CALL = close&gt;VWAP + green candle + EMAfast&gt;EMAslow + RSI&gt;Buy(rising) + Vol&gt;Vol-x avg &nbsp;|&nbsp; BUY PUT = mirror. Ek-ek setting badal ke backtest karo.</small></div>
+                    </div>
+                </div>
+            </div>
+            <div id="robot-results" class="hidden">
+                <div class="row mt-2" id="robot-metrics"></div>
+                <div class="card mt-2" id="robot-charts"><div class="card-body p-2"><div id="robot-eq" style="height:200px"></div><div id="robot-mo" style="height:200px;margin-top:8px"></div></div></div>
+                <div class="card mt-2" id="robot-trades"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="robot-tl"></div></div>
+            </div>
+            <div class="card mt-3">
+                <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-info-circle"></i> Live Robot Status</span><button class="btn btn-sm btn-outline-secondary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect Brokers</button></div>
+                <div class="card-body" id="robot-status"><p class="text-muted small">Robot stopped. Select symbol + order + SL/Target then Start Robot for paper trading. Market hours: Mon-Fri 9:15-15:30 IST — Paper trades can queue outside hours.</p></div>
+            </div>
+            <div class="card mt-3" id="robot-saved-card">
+                <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Robots</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
+                <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved robots yet — click Save Robot.</p></div>
+            </div>
+        </div>
+    </div>
+
         <!-- BROKERS -->
         <div id="pg-brokers" class="pg hidden">
             <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -619,80 +693,7 @@
                 </div>
             </div>
         </div>
-        <!-- CALL/PUT ROBOT - Simple Buy/Sell with SL/TP -->
-        <div id="pg-robot" class="pg hidden">
-            <h4 class="fw-bold mb-3"><i class="bi bi-robot"></i> Call / Put Buy Sell Robot</h4>
-            <div class="card mb-3">
-                <div class="card-header"><i class="bi bi-gear"></i> Robot Settings <small class="text-muted">Symbol + Order + SL/Target + Backtest</small></div>
-                <div class="card-body">
-                    <div class="row g-2">
-                        <div class="col-md-2"><label class="form-label small">Symbol</label><select id="r-sym" class="form-select form-select-sm"><option>NIFTY</option><option selected>BANKNIFTY</option><option>FINNIFTY</option><option>MIDCPNIFTY</option><option>SENSEX</option><option>BANKEX</option><option>RELIANCE</option><option>HDFCBANK</option><option>ICICIBANK</option><option>TCS</option><option>INFY</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY">Call Buy</option><option value="CE-SELL">Call Sell</option><option value="PE-BUY">Put Buy</option><option value="PE-SELL">Put Sell</option><option value="AUTO" selected>AUTO (Signal Based)</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option selected>ATM</option><option>OTM</option><option>ITM</option></select></div>
-                        <div class="col-md-1"><label class="form-label small">OTM Dist</label><input type="number" id="r-otm" class="form-control form-control-sm" value="1" min="1" max="6" title="OTM Distance 1-6"></div>
-                        <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="r-lots" class="form-control form-control-sm" value="1" min="1"></div>
-                        <div class="col-md-1"><label class="form-label small">Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
-                        <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
-                    </div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
-                        <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:05"><small class="text-muted" id="r-exit-note">Intraday square-off</small></div>
-                        <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
-                        <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
-                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
-                        <div class="col-md-2 d-flex align-items-end" style="gap:6px"><button class="btn btn-sm btn-success flex-fill" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button><button class="btn btn-sm btn-primary flex-fill" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button></div>
-                    </div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-12 d-flex gap-2 flex-wrap">
-                            <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
-                            <input type="text" id="r-name" class="form-control form-control-sm" style="width:200px" placeholder="Robot name (optional)">
-                            <button class="btn btn-sm btn-outline-success" onclick="robotPaperTrade()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="robotLiveTrade()"><i class="bi bi-lightning"></i> Live Trade</button>
-                            <span class="small text-muted ms-2">Auto (Signal) pe click karke bullish→Call Buy / bearish→Put Buy auto select + backtest ho jayega</span>
-                        </div>
-                    </div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
-                            <div class="d-flex gap-3 flex-wrap align-items-end" style="font-size:12px">
-                                <label><input type="checkbox" id="r-ind-rsi" checked> RSI(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:44px;font-size:11px">)</label>
-                                <label><input type="checkbox" id="r-ind-ema"> EMA(<input type="number" id="r-p-ema" value="50" min="2" max="200" style="width:48px;font-size:11px">)</label>
-                                <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(<input type="number" id="r-p-st" value="10" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-stm" value="3" min="1" max="10" step="0.5" style="width:44px;font-size:11px">) Bullish/Bearish</label>
-                                <label><input type="checkbox" id="r-ind-macd"> MACD(<input type="number" id="r-p-mf" value="12" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-ms" value="26" min="2" max="60" style="width:44px;font-size:11px">,<input type="number" id="r-p-mg" value="9" min="2" max="30" style="width:44px;font-size:11px">)</label>
-                                <label title="BUY CALL: close>VWAP + green candle + EMAfast>EMAslow + RSI>Buy(rising) + Vol breakout. BUY PUT: mirror."><input type="checkbox" id="r-ind-conf" checked> <strong>Robot Confluence (VWAP+EMA+RSI+Vol)</strong></label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row g-2 mt-1" id="r-conf-settings">
-                        <div class="col-6 col-md-1"><label class="form-label small">EMA Fast</label><input type="number" id="r-cf-ef" class="form-control form-control-sm" value="9" min="2"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">EMA Slow</label><input type="number" id="r-cf-es" class="form-control form-control-sm" value="21" min="3"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">RSI Pd</label><input type="number" id="r-cf-rsi" class="form-control form-control-sm" value="14" min="2"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">RSI Buy&gt;</label><input type="number" id="r-cf-rb" class="form-control form-control-sm" value="60" min="50" max="90"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">RSI Sell&lt;</label><input type="number" id="r-cf-rs" class="form-control form-control-sm" value="40" min="10" max="50"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">Vol Pd</label><input type="number" id="r-cf-vp" class="form-control form-control-sm" value="20" min="2"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">Vol x</label><input type="number" id="r-cf-vm" class="form-control form-control-sm" value="1.2" min="1" step="0.1"></div>
-                        <div class="col-6 col-md-1"><label class="form-label small">VWAP Pd</label><input type="number" id="r-cf-wp" class="form-control form-control-sm" value="20" min="2"></div>
-                        <div class="col-12"><small class="text-muted">BUY CALL = close&gt;VWAP + green candle + EMAfast&gt;EMAslow + RSI&gt;Buy(rising) + Vol&gt;Vol-x avg &nbsp;|&nbsp; BUY PUT = mirror. Ek-ek setting badal ke backtest karo.</small></div>
-                    </div>
-                </div>
-            </div>
-            <div id="robot-results" class="hidden">
-                <div class="row mt-2" id="robot-metrics"></div>
-                <div class="card mt-2" id="robot-charts"><div class="card-body p-2"><div id="robot-eq" style="height:200px"></div><div id="robot-mo" style="height:200px;margin-top:8px"></div></div></div>
-                <div class="card mt-2" id="robot-trades"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="robot-tl"></div></div>
-            </div>
-            <div class="card mt-3">
-                <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-info-circle"></i> Live Robot Status</span><button class="btn btn-sm btn-outline-secondary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect Brokers</button></div>
-                <div class="card-body" id="robot-status"><p class="text-muted small">Robot stopped. Select symbol + order + SL/Target then Start Robot for paper trading. Market hours: Mon-Fri 9:15-15:30 IST — Paper trades can queue outside hours.</p></div>
-            </div>
-            <div class="card mt-3" id="robot-saved-card">
-                <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Robots</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
-                <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved robots yet — click Save Robot.</p></div>
-            </div>
-        </div>
-    </div>
-    <div id="pg-chain" class="pg hidden">
+            <div id="pg-chain" class="pg hidden">
         <h4 class="fw-bold mb-3"><i class="bi bi-graph-up-arrow"></i> Option Chain</h4>
         <div class="card mb-3 chain-controls">
             <div class="card-body">
@@ -720,7 +721,7 @@
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy')loadStrategySymbols();if(id==='robot')loadRobotSaved();if(id==='custom')pyLabInit();if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();}if(id==='custom')pyLabInit();if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -1367,7 +1368,7 @@ let _lastOpenTrdHTML = null;
         if(document.getElementById('r-ind-ema')?.checked) indicators.push({id:'ema',params:{period:parseInt(document.getElementById('r-p-ema')?.value)||50}});
         if(document.getElementById('r-ind-supertrend')?.checked) indicators.push({id:'supertrend',params:{period:parseInt(document.getElementById('r-p-st')?.value)||10,multiplier:parseFloat(document.getElementById('r-p-stm')?.value)||3}});
         if(document.getElementById('r-ind-macd')?.checked) indicators.push({id:'macd',params:{fast:parseInt(document.getElementById('r-p-mf')?.value)||12,slow:parseInt(document.getElementById('r-p-ms')?.value)||26,signal:parseInt(document.getElementById('r-p-mg')?.value)||9}});
-        if(document.getElementById('r-ind-conf')?.checked) indicators.push({id:'robot_confluence',params:{ema_fast:parseInt(document.getElementById('r-cf-ef')?.value)||9,ema_slow:parseInt(document.getElementById('r-cf-es')?.value)||21,rsi_period:parseInt(document.getElementById('r-cf-rsi')?.value)||14,rsi_buy:parseFloat(document.getElementById('r-cf-rb')?.value)||60,rsi_sell:parseFloat(document.getElementById('r-cf-rs')?.value)||40,vol_period:parseInt(document.getElementById('r-cf-vp')?.value)||20,vol_mult:parseFloat(document.getElementById('r-cf-vm')?.value)||1.2,vwap_period:parseInt(document.getElementById('r-cf-wp')?.value)||20}});
+        if(document.getElementById('r-ind-conf')?.checked) indicators.push({id:'robot_confluence',params:{ema_fast:parseInt(document.getElementById('r-cf-ef')?.value)||9,ema_slow:parseInt(document.getElementById('r-cf-es')?.value)||21,rsi_period:parseInt(document.getElementById('r-cf-rsi')?.value)||14,rsi_buy:parseFloat(document.getElementById('r-cf-rb')?.value)||65,rsi_sell:parseFloat(document.getElementById('r-cf-rs')?.value)||35,vol_period:parseInt(document.getElementById('r-cf-vp')?.value)||20,vol_mult:parseFloat(document.getElementById('r-cf-vm')?.value)||1.5,vwap_period:parseInt(document.getElementById('r-cf-wp')?.value)||20}});
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         return indicators;
     }
