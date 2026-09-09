@@ -413,12 +413,8 @@
             </div>
             <div class="collapse show mt-2" id="legBuilder">
                 <div class="row g-2 align-items-end">
-                    <div class="col-md-2"><label class="form-label small">Total Lot</label><input type="number" class="form-control form-control-sm" id="s-lots" value="1" min="1"></div>
-                    <div class="col-md-2"><label class="form-label small">Position</label><select class="form-select form-select-sm" id="s-position"><option>Buy</option><option selected>Sell</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">Option Type</label><select class="form-select form-select-sm" id="s-opt"><option>CE</option><option selected>PE</option></select></div>
-                    <div class="col-md-2"><label class="form-label small">Strike Type</label><select class="form-select form-select-sm" id="s-strike-type"><option>ATM</option><option selected>OTM</option><option>ITM</option><option>Delta</option></select><div class="d-flex gap-1 mt-1"><input type="number" class="form-control form-control-sm" id="s-otm" value="2" min="1" max="6" title="OTM Distance 1-6"><input type="number" class="form-control form-control-sm d-none" id="s-delta" value="0.3" step="0.05" min="0.1" max="0.9" placeholder="Delta 0.3"></div></div>
-                    <div class="col-md-2"><label class="form-label small">Expiry</label><select class="form-select form-select-sm" id="s-expiry"><option>Weekly</option><option selected>Monthly</option></select><input type="number" class="form-control form-control-sm mt-1" id="s-dte" value="7" min="1" max="60" title="DTE"></div>
-                    <div class="col-md-2 d-flex align-items-end"><button class="btn btn-sm btn-success w-100" onclick="addLeg()">Add Leg</button></div>
+                    <div class="col-md-10"><small class="text-muted">Upar <strong>Trade Setup</strong> me Order/Strike/Lots/Expiry set karo, phir yahan <strong>Add current setup as Leg</strong> dabao — multi-leg spreads ke liye 2-4 legs jodo (jaise CE Sell + CE Buy). Single-leg backtest ke liye legs ki zaroorat nahi.</small></div>
+                    <div class="col-md-2 d-flex align-items-end"><button class="btn btn-sm btn-success w-100" onclick="addLeg()">+ Add Setup as Leg</button></div>
                 </div>
                 <div class="mt-2 d-flex gap-1 flex-wrap">
                     <span class="small text-muted me-1">Templates:</span>
@@ -977,7 +973,7 @@ let _lastOpenTrdHTML = null;
     function removeQuantIndicator(i){quantIndicators.splice(i,1);renderQuantTable();}
     function renderQuantTable(){const autoDir=autoMode();const autoBadge=autoDir==='bullish'?'<span class="badge bg-success">Auto: Bullish</span>':'<span class="badge bg-danger">Auto: Bearish</span>';const tb=document.querySelector('#q-ind-table tbody');if(!tb)return;tb.innerHTML=quantIndicators.map((q,i)=>{const pHtml=(q.params||[]).map((p,pi)=>`<label class="small text-muted me-1">${p.label}<input type="number" class="form-control form-control-sm d-inline-block ms-1" style="width:60px" value="${p.val}" step="any" onchange="quantIndicators[${i}].params[${pi}].val=this.value"></label>`).join(' ');const cOpts=QUANT_CANDLES.map(c=>`<option value="${c[0]}" ${q.candle===c[0]?'selected':''}>${c[1]}</option>`).join('');return `<tr><td class="fw-bold small">${q.name}</td><td>${pHtml||'<span class="text-muted small">auto</span>'}</td><td><select class="form-select form-select-sm" onchange="quantIndicators[${i}].candle=this.value">${cOpts}</select></td><td><select class="form-select form-select-sm" onchange="quantIndicators[${i}].field=this.value"><option value="equity" ${q.field==='equity'?'selected':''}>Equity</option><option value="future" ${q.field==='future'?'selected':''}>Future</option></select></td><td>${autoBadge}</td><td><button class="btn btn-sm btn-danger" onclick="removeQuantIndicator(${i})"><i class="bi bi-x"></i></button></td></tr>`;}).join('')||'<tr><td colspan="6" class="text-muted small">No indicators — Add one above (backtest uses default RSI+SuperTrend).</td></tr>';}
     // Auto direction from Position: Buy CE / Sell PE = Bullish, Sell CE / Buy PE = Bearish (quantman style)
-    function autoMode(){try{let txn='',opt='';if(typeof stratLegs!=='undefined'&&stratLegs.length){txn=(stratLegs[0].transaction||'').toLowerCase();opt=(stratLegs[0].option_type||'').toUpperCase();}else{txn=(document.getElementById('s-position').value||'').toLowerCase();opt=(document.getElementById('s-opt').value||'').toUpperCase();}if((txn==='buy'&&opt==='CE')||(txn==='sell'&&opt==='PE'))return 'bullish';return 'bearish';}catch(e){return 'both';}}
+    function autoMode(){try{let txn='',opt='';if(typeof stratLegs!=='undefined'&&stratLegs.length){txn=(stratLegs[0].transaction||'').toLowerCase();opt=(stratLegs[0].option_type||'').toUpperCase();}else{const ro=(document.getElementById('r-order')||{}).value||'';if(ro==='AUTO'){return 'both';}const pp=ro.split('-');opt=pp[0]||'';txn=(pp[1]||'').toLowerCase();}if((txn==='buy'&&opt==='CE')||(txn==='sell'&&opt==='PE'))return 'bullish';return 'bearish';}catch(e){return 'both';}}
     setTimeout(()=>{try{renderQuantOptions();renderQuantTable();const sp=document.getElementById('s-position'),so=document.getElementById('s-opt');if(sp)sp.addEventListener('change',renderQuantTable);if(so)so.addEventListener('change',renderQuantTable);}catch(e){}},500);
     function collectIndicators(){
         const autoDir=autoMode();
@@ -1051,7 +1047,7 @@ let _lastOpenTrdHTML = null;
                 perSymH+='</tbody></table></div></div>';
             }
             document.getElementById('bt-metrics').innerHTML=perSymH+`
-<div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> Quantman 4 Key Metrics:</strong><span>Win Prob: <strong>${m.win_rate}%</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${m.expectancy}</strong> ${m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>'}</span><span class="ms-auto badge bg-info">Slippage ${qSlip}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
+<div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> Quantman 4 Key Metrics:</strong><span>Win Prob: <strong>${m.win_rate}%</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${m.expectancy}</strong> ${m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>'}</span><span class="ms-auto badge bg-info">Slippage ${(parseFloat(document.getElementById('s-slippage')?.value)||0.50)}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
 <div class="row g-2 mb-2">
 <div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Run Name</div><div class="value fw-bold" style="font-size:13px">${document.getElementById('s-name').value||'-'}</div></div></div>
@@ -1140,24 +1136,22 @@ let _lastOpenTrdHTML = null;
         try{if(typeof renderQuantTable==='function')renderQuantTable();}catch(e){}
     }
     function addLeg(){
-        const lots=parseInt(document.getElementById('s-lots').value)||1;
-        const pos=document.getElementById('s-position').value.toLowerCase();
-        const opt=document.getElementById('s-opt').value;
-        const strikeSel=document.getElementById('s-strike-type').value.toLowerCase();
-        const expiry=document.getElementById('s-expiry').value.toLowerCase();
-        const dte=parseInt(document.getElementById('s-dte').value)||7;
-        const delta=parseFloat(document.getElementById('s-delta').value)||0.3;
-        // expiry offset: weekly=0, monthly=2 weeks extra
+        // Single source: Trade Setup (r-*) form. AUTO resolves at backtest time.
+        const lots=parseInt(document.getElementById('r-lots').value)||1;
+        const order=document.getElementById('r-order').value;
+        const strikeSel=document.getElementById('r-strike').value.toLowerCase();
+        const expiry=document.getElementById('r-expiry').value.toLowerCase();
         const offset = expiry==='weekly'?0:0;
-        const sOtm=Math.min(6,Math.max(1,parseInt(document.getElementById('s-otm').value)||2));
-        stratLegs.push({option_type:opt, transaction:pos, strike_selection:strikeSel, otm_distance:(strikeSel==='otm'||strikeSel==='itm')?sOtm:0, lots:lots, expiry:expiry, offset:offset, delta_target: strikeSel==='delta'?delta:null, dte:dte});
+        const sOtm=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
+        if(order==='AUTO'){stratLegs.push({option_type:'AUTO', transaction:'auto', strike_selection:strikeSel, otm_distance:(strikeSel==='otm'||strikeSel==='itm')?sOtm:0, lots:lots, expiry:expiry, offset:offset, dte:expiry==='weekly'?7:28});}
+        else{const pp=order.split('-');stratLegs.push({option_type:pp[0], transaction:pp[1].toLowerCase(), strike_selection:strikeSel, otm_distance:(strikeSel==='otm'||strikeSel==='itm')?sOtm:0, lots:lots, expiry:expiry, offset:offset, dte:expiry==='weekly'?7:28});}
         renderLegs();
     }
     function removeLeg(i){stratLegs.splice(i,1);renderLegs();}
     function clearLegs(){stratLegs=[];renderLegs();}
     function applyTemplate(t){
         clearLegs();
-        const lots=parseInt(document.getElementById('s-lots').value)||1;
+        const lots=parseInt(document.getElementById('r-lots').value)||1;
         if(t==='single'){ addLeg(); }
         else if(t==='longcall'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='longput'){ stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
@@ -1219,9 +1213,9 @@ let _lastOpenTrdHTML = null;
     document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); });
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
-        document.getElementById('s-lots').value=1;
-        document.getElementById('s-sl').value=1500;
-        document.getElementById('s-tp').value=3000;
+        document.getElementById('r-lots').value=1;
+        document.getElementById('r-sl').value=1500;
+        document.getElementById('r-tp').value=3000;
         document.getElementById('s-lock-profit').value=0;
         document.getElementById('s-lock-amount').value=1;
         document.getElementById('s-reentry-sl').value='RE ASAP';
