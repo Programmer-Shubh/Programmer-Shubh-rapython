@@ -757,6 +757,14 @@
             const master=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','LT','AXISBANK','KOTAKBANK','HINDUNILVR','BHARTIARTL','MARUTI','M&M','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','TITAN','BAJAJFINSV','NESTLEIND','APOLLOHOSP','UPL','HEROMOTOCO'];
             let syms=[...new Set([...(s.symbols||[]), ...master])].sort();
             sel.innerHTML=syms.map(x=>`<option value="${x}" ${x===current?'selected':''}>${x}</option>`).join('');
+            // Same full chain list in Strategy Lab multi-symbol box (keep NIFTY default)
+            const rsel=document.getElementById('r-sym');
+            if(rsel){
+                const cur=[...rsel.selectedOptions].map(o=>o.value);
+                const keep=cur.length?cur:['NIFTY'];
+                rsel.innerHTML=syms.map(x=>`<option value="${x}" ${keep.includes(x)?'selected':''}>${x}</option>`).join('');
+                rsel.size=Math.min(6,syms.length);
+            }
         }catch(e){console.error('Failed to load symbols',e);}
     }
     function stab(t,btn){document.getElementById('scan-st').classList.toggle('hidden',t!=='st');document.getElementById('scan-vwap').classList.toggle('hidden',t!=='vwap');btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
