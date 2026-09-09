@@ -89,6 +89,55 @@ class IndicatorEngine:
             supertrend[i] = lower[i] if in_uptrend[i] else upper[i]
         return supertrend
 
+    def calculate_utbot(self, data: List[Dict], keyvalue: float = 3.0, atrperiod: int = 10) -> Dict:
+        """UT Bot (Pine Script port): ATR trailing stop + position flips.
+        nLoss = keyvalue * ATR(atrperiod, Wilder RMA).
+        stop: trailing stop line; pos: 1 long, -1 short, 0 flat.
+        Buy = src crosses over stop, Sell = crosses under (engine derives)."""
+        n = len(data)
+        closes = [float(d.get("close_price", 0) or 0) for d in data]
+        highs = [float(d.get("high_price", 0) or 0) for d in data]
+        lows = [float(d.get("low_price", 0) or 0) for d in data]
+        try:
+            period = max(1, int(atrperiod))
+        except Exception:
+            period = 10
+        try:
+            kv = float(keyvalue)
+        except Exception:
+            kv = 3.0
+        # Wilder ATR (Pine atr() = RMA of TR)
+        atr = [0.0] * n
+        for i in range(1, n):
+            tr = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+            if i <= period:
+                atr[i] = (atr[i - 1] * (i - 1) + tr) / i if i > 0 else tr
+            else:
+                atr[i] = (atr[i - 1] * (period - 1) + tr) / period
+        stop = [0.0] * n
+        pos = [0] * n
+        for i in range(1, n):
+            src = closes[i]
+            prev_src = closes[i - 1]
+            prev_stop = stop[i - 1]  # nz(...,0)
+            prev_pos = pos[i - 1]
+            nloss = kv * atr[i]
+            if src > prev_stop and prev_src > prev_stop:
+                stop[i] = max(prev_stop, src - nloss)
+            elif src < prev_stop and prev_src < prev_stop:
+                stop[i] = min(prev_stop, src + nloss)
+            elif src > prev_stop:
+                stop[i] = src - nloss
+            else:
+                stop[i] = src + nloss
+            if prev_src < prev_stop and src > prev_stop:
+                pos[i] = 1
+            elif prev_src > prev_stop and src < prev_stop:
+                pos[i] = -1
+            else:
+                pos[i] = prev_pos
+        return {"stop": stop, "pos": pos}
+
     def calculate_predicted_ma(self, prices: List[float], lookback=20) -> Dict:
         pma = [None] * len(prices)
         trend_strength = [0.0] * len(prices)

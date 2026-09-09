@@ -322,14 +322,17 @@ class HistoricalReplayEngine:
                         self.pending_entry_signal = None
                         if auto_signal:
                             self.pending_auto_buy = buy_sig
-                    else:
-                        if self.pending_entry_signal is None:
-                            self.pending_entry_signal = i
-                            if auto_signal:
-                                self.pending_auto_buy = buy_sig
-                        elif i - self.pending_entry_signal >= max(1, latency):
-                            self.pending_entry = i
-                            self.pending_entry_signal = None
+                    elif self.pending_entry_signal is None:
+                        self.pending_entry_signal = i
+                        if auto_signal:
+                            self.pending_auto_buy = buy_sig
+                # Mature waiting signals independent of fresh signals (same as engine)
+                if self.pending_entry_signal is not None and not is_spread and not auto_signal:
+                    if i - self.pending_entry_signal > 3:
+                        self.pending_entry_signal = None
+                    elif can_enter and i - self.pending_entry_signal >= max(1, latency):
+                        self.pending_entry = i
+                        self.pending_entry_signal = None
                 
                 if has_open and self.pending_exit is None and (exit_sig or time_exit):
                     self.pending_exit = "condition" if exit_sig else "time"

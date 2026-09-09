@@ -309,26 +309,20 @@ class BacktestEngine:
                         pending_entry_signal = None
                         if auto_signal:
                             pending_auto_buy = buy_sig
-                    else:
-                        # Backtest mode: wait for latency bars
-                        if pending_entry_signal is None:
-                            pending_entry_signal = i
-                            if auto_signal:
-                                pending_auto_buy = buy_sig
-                        elif i - pending_entry_signal >= max(1, latency):
-                            pending_entry = i
-                            pending_entry_signal = None
-                else:
-                    if not is_spread and not auto_signal:
+                    elif pending_entry_signal is None:
+                        # Backtest mode: stamp the signal bar; maturation below executes it
+                        pending_entry_signal = i
+                        if auto_signal:
+                            pending_auto_buy = buy_sig
+                # Mature a waiting signal INDEPENDENT of fresh signals: single-bar
+                # crossover signals (MACD cross, UT Bot flips) must execute on the
+                # next bar even when that bar has no fresh signal. Stale waits
+                # (>3 bars, e.g. blocked by an open position) are dropped.
+                if pending_entry_signal is not None and not is_spread and not auto_signal:
+                    if i - pending_entry_signal > 3:
                         pending_entry_signal = None
-                    elif auto_signal and pending_entry_signal is not None and i - pending_entry_signal > 3:
-                        pending_entry_signal = None
-                        pending_auto_buy = None
-                    elif is_spread:
-                        # For spreads, keep pending signal if it was set periodic
-                        if pending_entry_signal is not None and i - pending_entry_signal > 3:
-                            pending_entry_signal = None
-                    else:
+                    elif can_enter and i - pending_entry_signal >= max(1, latency):
+                        pending_entry = i
                         pending_entry_signal = None
                 # SQUARE OFF ON EXPIRY DAY - automatic square-off to avoid delivery risk
                 if not self.is_live:
@@ -402,6 +396,13 @@ class BacktestEngine:
                     result["rangebo"] = self.indicators.calculate_range_breakout(historical, int(params.get("period", 20) or 20))
                 except Exception:
                     result["rangebo"] = {}
+            elif iid == "utbot":
+                try:
+                    result["utbot"] = self.indicators.calculate_utbot(
+                        historical, float(params.get("keyvalue", params.get("key_value", 3.0))),
+                        int(params.get("atrperiod", params.get("atr_period", 10))))
+                except Exception:
+                    result["utbot"] = {"stop": [], "pos": []}
             elif iid == "robot_confluence":
                 # Call/Put Robot confluence: VWAP + EMA-fast/slow + RSI + Volume
                 # breakout combined with AND logic (params all tunable from UI).
@@ -599,6 +600,11 @@ class BacktestEngine:
             bl = rc.get("buy", [])
             if modes.get("robot_confluence","both") != "bearish" and effective_idx < len(bl) and bl[effective_idx]:
                 return True
+        if "utbot" in pre_calc:
+            ub = pre_calc["utbot"]
+            pl = ub.get("pos", [])
+            if modes.get("utbot","both") != "bearish" and 0 < effective_idx < len(pl) and pl[effective_idx] == 1 and pl[effective_idx - 1] != 1:
+                return True
         return False
 
     def _get_sell_signal(self, i, pre_calc, historical, exit_conditions):
@@ -692,6 +698,11 @@ class BacktestEngine:
             rc = pre_calc["robot_conf"]
             sl2 = rc.get("sell", [])
             if modes.get("robot_confluence","both") != "bullish" and effective_idx < len(sl2) and sl2[effective_idx]:
+                sell = sell or True
+        if "utbot" in pre_calc:
+            ub = pre_calc["utbot"]
+            pl = ub.get("pos", [])
+            if modes.get("utbot","both") != "bullish" and 0 < effective_idx < len(pl) and pl[effective_idx] == -1 and pl[effective_idx - 1] != -1:
                 sell = sell or True
         if not pre_calc:
             sell = True

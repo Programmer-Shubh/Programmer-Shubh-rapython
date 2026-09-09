@@ -362,6 +362,7 @@
                                 <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(<input type="number" id="r-p-st" value="10" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-stm" value="3" min="1" max="10" step="0.5" style="width:44px;font-size:11px">) Bullish/Bearish</label>
                                 <label><input type="checkbox" id="r-ind-macd"> MACD(<input type="number" id="r-p-mf" value="12" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-ms" value="26" min="2" max="60" style="width:44px;font-size:11px">,<input type="number" id="r-p-mg" value="9" min="2" max="30" style="width:44px;font-size:11px">)</label>
                                 <label title="BUY CALL: close>VWAP + green candle + EMAfast>EMAslow + RSI>Buy(rising) + Vol breakout. BUY PUT: mirror."><input type="checkbox" id="r-ind-conf" checked> <strong>Robot Confluence (VWAP+EMA+RSI+Vol)</strong></label>
+                                <label title="UT Bot (TradingView): ATR trailing-stop flip. Buy = close crosses above stop, Sell = below."><input type="checkbox" id="r-ind-utbot"> <strong>UT Bot</strong>(Key<input type="number" id="r-p-utk" value="3" min="1" max="10" step="0.5" style="width:44px;font-size:11px">,ATR<input type="number" id="r-p-utp" value="10" min="2" max="30" style="width:44px;font-size:11px">)</label>
                             </div>
                         </div>
                     </div>
@@ -909,6 +910,7 @@ let _lastOpenTrdHTML = null;
     // Quantman-style indicator builder: Add -> params -> candle interval -> field
     const QUANT_IND_DEFS=[
         {id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',def:10},{key:'multiplier',label:'Multiplier',def:3}]},
+        {id:'utbot',name:'UT Bot',params:[{key:'keyvalue',label:'Key Value',def:3},{key:'atrperiod',label:'ATR Period',def:10}]},
         {id:'rsi',name:'RSI',params:[{key:'period',label:'Period',def:14}]},
         {id:'ema',name:'EMA',params:[{key:'period',label:'Period',def:50}]},
         {id:'macd',name:'MACD',params:[{key:'fast',label:'Fast',def:12},{key:'slow',label:'Slow',def:26},{key:'signal',label:'Signal',def:9}]},
@@ -1331,6 +1333,7 @@ let _lastOpenTrdHTML = null;
         if(document.getElementById('r-ind-supertrend')?.checked) indicators.push({id:'supertrend',params:{period:parseInt(document.getElementById('r-p-st')?.value)||10,multiplier:parseFloat(document.getElementById('r-p-stm')?.value)||3}});
         if(document.getElementById('r-ind-macd')?.checked) indicators.push({id:'macd',params:{fast:parseInt(document.getElementById('r-p-mf')?.value)||12,slow:parseInt(document.getElementById('r-p-ms')?.value)||26,signal:parseInt(document.getElementById('r-p-mg')?.value)||9}});
         if(document.getElementById('r-ind-conf')?.checked) indicators.push({id:'robot_confluence',params:{ema_fast:parseInt(document.getElementById('r-cf-ef')?.value)||9,ema_slow:parseInt(document.getElementById('r-cf-es')?.value)||21,rsi_period:parseInt(document.getElementById('r-cf-rsi')?.value)||14,rsi_buy:parseFloat(document.getElementById('r-cf-rb')?.value)||65,rsi_sell:parseFloat(document.getElementById('r-cf-rs')?.value)||35,vol_period:parseInt(document.getElementById('r-cf-vp')?.value)||20,vol_mult:parseFloat(document.getElementById('r-cf-vm')?.value)||1.5,vwap_period:parseInt(document.getElementById('r-cf-wp')?.value)||20}});
+        if(document.getElementById('r-ind-utbot')?.checked) indicators.push({id:'utbot',params:{keyvalue:parseFloat(document.getElementById('r-p-utk')?.value)||3,atrperiod:parseInt(document.getElementById('r-p-utp')?.value)||10}});
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         return indicators;
     }
