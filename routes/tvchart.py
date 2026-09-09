@@ -110,6 +110,7 @@ def chart_data(symbol: str = "NIFTY", start: str = "2026-08-01", end: str = "202
                     "position": "belowBar" if is_buy else "aboveBar",
                     "color": "#198754" if is_buy else "#dc3545",
                     "shape": "arrowUp" if is_buy else "arrowDown",
+                    "size": 2,
                     "text": f"{tag} {side} {opt} {strike} @ {ep:.2f}",
                 })
                 if str(t.get("status")) == "closed" and t.get("exit_date"):
@@ -123,6 +124,7 @@ def chart_data(symbol: str = "NIFTY", start: str = "2026-08-01", end: str = "202
                         "position": "aboveBar" if is_buy else "belowBar",
                         "color": "#0d6efd",
                         "shape": "circle",
+                        "size": 1,
                         "text": f"{tag} EXIT @ {float(xp or 0):.2f}{ptxt}",
                     })
                 elif str(t.get("status")) == "open":
@@ -131,6 +133,7 @@ def chart_data(symbol: str = "NIFTY", start: str = "2026-08-01", end: str = "202
                         "position": "belowBar" if is_buy else "aboveBar",
                         "color": "#ff9800",
                         "shape": "circle",
+                        "size": 1,
                         "text": f"{tag} OPEN {opt} {strike}",
                     })
             except Exception:
