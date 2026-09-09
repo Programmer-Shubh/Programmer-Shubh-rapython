@@ -576,10 +576,16 @@ class TradeModel:
         return self.db.execute("DELETE FROM paper_trades WHERE id=?", [trade_id])
 
     def set_trade_mode(self, trade_id: int, trade_mode: str) -> int:
-        return self.db.execute(
+        if trade_mode not in ("paper", "live"):
+            return -1
+        row = self.db.fetch_one("SELECT id FROM paper_trades WHERE id=?", [trade_id])
+        if not row:
+            return 0
+        self.db.execute(
             "UPDATE paper_trades SET trade_mode=?, updated_at=datetime('now') WHERE id=?",
             [trade_mode, trade_id],
         )
+        return 1
 
     def update_management(self, trade_id: int, stop_loss: float, target: float, auto_action: str) -> int:
         # Only update fields actually sent (None = untouched) so editing SL

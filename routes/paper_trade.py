@@ -171,7 +171,11 @@ def delete_trade(trade_id: int):
 @router.post("/mode")
 def set_trade_mode(req: TradeModeRequest):
     trade_model = TradeModel()
-    trade_model.set_trade_mode(req.trade_id, req.trade_mode)
+    n = trade_model.set_trade_mode(req.trade_id, req.trade_mode)
+    if n == -1:
+        return {"error": "Mode must be paper or live"}
+    if n == 0:
+        return {"error": f"Trade #{req.trade_id} not found"}
     return {"status": "mode_updated", "trade_id": req.trade_id, "trade_mode": req.trade_mode}
 
 
