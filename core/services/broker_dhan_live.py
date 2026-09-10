@@ -291,6 +291,10 @@ class DhanLive:
             matches = []
             near = []  # (expiry_date, row) candidates for fallback
             seen_exp = set()
+            best_strike_row = None
+            best_strike_dist = 1e9
+            best_overall_row = None
+            best_overall_score = 1e9
             lines = (ln.decode("utf-8", errors="replace") if isinstance(ln, (bytes, bytearray)) else ln
                      for ln in resp.iter_lines())
             reader = csv.DictReader(lines)
@@ -327,11 +331,46 @@ class DhanLive:
                             seen_exp.add(str(_ed))
                     except Exception:
                         pass
+                    # Track best overall for expiry+strike snap (e.g., 17 Sep 7740 -> 29 Sep 7700)
+                    try:
+                        if _ed is not None and _ed >= today:
+                            _otype_all = str(norm.get("otype","")).upper()
+                            _tail_all = norm.get("tsym","").replace(" ","").upper()
+                            _opt_ok_all = (_otype_all in ("CE","CALL") or _tail_all.endswith(("CE","CALL"))) if opt=="CE" else (_otype_all in ("PE","PUT") or _tail_all.endswith(("PE","PUT")))
+                            if _opt_ok_all:
+                                try:
+                                    _rstrike_all = float(str(norm.get("strike","") or "nan").replace(",",""))
+                                    _ed_days = (_ed - d).days if _ed >= d else (_ed - today).days + 10000
+                                    if _ed_days < 0:
+                                        _ed_days = 10000
+                                    _score = _ed_days * 1000 + abs(_rstrike_all - float(strike))
+                                    if _score < best_overall_score:
+                                        best_overall_score = _score
+                                        best_overall_row = norm
+                                except: pass
+                    except: pass
                     if self._master_match(norm, d, strike, opt):
                         matches.append(norm)
                         if len(matches) >= 5:
                             break
-                    elif not exact_only:
+                    else:
+                        # Nearest strike for same expiry/opt (7740 -> 7700)
+                        try:
+                            _ed2 = _dt.datetime.strptime(norm["exp"].strip()[:10], "%Y-%m-%d").date()
+                            if _ed2 == d:
+                                _otype2 = str(norm.get("otype","")).upper()
+                                _tail2 = norm.get("tsym","").replace(" ","").upper()
+                                _opt_ok2 = (_otype2 in ("CE","CALL") or _tail2.endswith(("CE","CALL"))) if opt=="CE" else (_otype2 in ("PE","PUT") or _tail2.endswith(("PE","PUT")))
+                                if _opt_ok2:
+                                    try:
+                                        _rstrike2 = float(str(norm.get("strike","") or "nan").replace(",",""))
+                                        _dist2 = abs(_rstrike2 - float(strike))
+                                        if _dist2 < best_strike_dist:
+                                            best_strike_dist = _dist2
+                                            best_strike_row = norm
+                                    except: pass
+                        except: pass
+                    if not exact_only:
                         try:
                             ed = _dt.datetime.strptime(norm["exp"].strip()[:10], "%Y-%m-%d").date()
                         except Exception:
@@ -354,6 +393,13 @@ class DhanLive:
             if not matches and near:
                 near.sort(key=lambda x: x[0])
                 matches = [near[0][1]]
+            snapped_strike = False
+            if not matches and best_strike_row is not None:
+                matches = [best_strike_row]
+                snapped_strike = True
+            if not matches and best_overall_row is not None:
+                matches = [best_overall_row]
+                snapped_strike = True
             if matches:
                 try:
                     with open(cache_path, "w") as f:
@@ -361,7 +407,10 @@ class DhanLive:
                 except Exception:
                     pass
                 m = matches[0]
-                src = "dhan-master" if self._master_match(m, d, strike, opt) else "dhan-master-nearest"
+                if 'snapped_strike' in locals() and snapped_strike:
+                    src = "dhan-master-strike-snapped"
+                else:
+                    src = "dhan-master" if self._master_match(m, d, strike, opt) else "dhan-master-nearest"
                 return {"security_id": m["sid"], "lot_size": m.get("lot", 0),
                         "source": src, "symbol": m.get("tsym", ""),
                         "expiry": str(m.get("exp", ""))[:10]}

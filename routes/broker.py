@@ -798,6 +798,22 @@ async def place_live_order(req: LiveOrderRequest):
                     preview["expiry_requested"] = _req_exp
                     preview["expiry_note"] = (f"Requested {_req_exp} does not exist — "
                                               f"snapped to live expiry {exp_ymd[:10]}")
+                # Strike snap note (e.g., 7740 -> 7700)
+                try:
+                    if "strike-snapped" in str(preview.get("source","")):
+                        _res_sym = str(preview.get("resolved_symbol") or preview.get("symbol") or "")
+                        _used = None
+                        for part in _res_sym.replace("PE","-PE").replace("CE","-CE").split("-"):
+                            try:
+                                _used = float(part.strip())
+                                if 100 <= _used <= 100000:
+                                    break
+                            except: continue
+                        if _used and abs(_used - float(strike)) > 0.01:
+                            preview["strike_requested"] = float(strike)
+                            preview["strike_used"] = _used
+                            preview["strike_note"] = f"Requested strike {int(float(strike))} not available — snapped to {int(_used)}"
+                except: pass
                 preview["margin"] = await _estimate_margin(
                     broker, _get_config(broker) or {}, preview, symbol, opt, strike)
             except Exception:
