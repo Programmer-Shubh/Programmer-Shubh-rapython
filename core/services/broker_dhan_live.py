@@ -107,18 +107,23 @@ class DhanLive:
     async def place_order(self, security_id: str, side: str, qty: int,
                           order_type: str = "MARKET", price: float = 0,
                           trigger_price: float = 0, product: str = "INTRADAY") -> dict:
+        # Dhan v2 docs: exchangeSegment NSE_FNO for F&O, quantity int, price 0 for MARKET
         payload = {
-            "dhanClientId": self.client_id,
+            "dhanClientId": str(self.client_id).strip(),
             "transactionType": str(side or "BUY").upper(),
-            "exchangeSegment": "NSE_FO",
-            "productType": product,
+            "exchangeSegment": "NSE_FNO",
+            "productType": str(product or "INTRADAY").upper(),
             "orderType": str(order_type or "MARKET").upper(),
             "validity": "DAY",
-            "securityId": str(security_id),
+            "securityId": str(security_id).strip(),
             "quantity": int(qty),
-            "price": float(price or 0),
-            "triggerPrice": float(trigger_price or 0),
+            "price": 0,
+            "triggerPrice": 0,
         }
+        # Only send non-zero price for LIMIT/SL orders
+        if str(order_type or "MARKET").upper() != "MARKET":
+            payload["price"] = float(price or 0)
+            payload["triggerPrice"] = float(trigger_price or 0)
         res = await self._request("POST", "/orders", data=payload)
         if res.get("success"):
             data = res.get("data") or {}
