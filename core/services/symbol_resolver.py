@@ -187,19 +187,21 @@ async def resolve_contract(broker: str, creds: dict, underlying: str,
             if explicit and guess in live_exps:
                 use_exp = guess
                 src = "fyers-validated"
-            elif not explicit:
+            else:
+                # Weekly/Monthly hint OR stale explicit date: snap to nearest
+                # live expiry (a dead contract can never trade; preview shows it)
                 snapped = _nearest_on_or_after(live_exps)
                 if snapped:
                     use_exp = snapped
-                    src = "fyers-validated"
+                    src = "fyers-validated" if not explicit else "fyers-snapped"
+                elif explicit:
+                    return {"ok": False,
+                            "error": f"Fyers: expiry {guess} not live for {underlying}. Valid: {', '.join(live_exps[:8])}",
+                            "available_expiries": live_exps}
                 else:
                     return {"ok": False,
                             "error": f"Fyers: no live expiry on/after today for {underlying}.",
                             "available_expiries": live_exps}
-            else:
-                return {"ok": False,
-                        "error": f"Fyers: expiry {guess} not live for {underlying}. Valid: {', '.join(live_exps[:8])}",
-                        "available_expiries": live_exps}
         elif explicit:
             src = "fyers-constructed-unvalidated"
         return {"ok": True,

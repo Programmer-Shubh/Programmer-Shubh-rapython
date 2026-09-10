@@ -793,6 +793,11 @@ async def place_live_order(req: LiveOrderRequest):
             lot = _slot
         if req.dry_run:
             try:
+                _req_exp = str(exp_hint or "")[:10]
+                if _req_exp and exp_ymd and _req_exp != exp_ymd[:10]:
+                    preview["expiry_requested"] = _req_exp
+                    preview["expiry_note"] = (f"Requested {_req_exp} does not exist — "
+                                              f"snapped to live expiry {exp_ymd[:10]}")
                 preview["margin"] = await _estimate_margin(
                     broker, _get_config(broker) or {}, preview, symbol, opt, strike)
             except Exception:

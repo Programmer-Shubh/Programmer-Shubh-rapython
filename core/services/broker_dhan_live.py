@@ -193,9 +193,12 @@ class DhanLive:
     # ---------- securityId resolution ----------
     async def resolve_fo(self, underlying: str, expiry_ymd: str,
                          strike: float, option_type: str, exact: bool = True) -> dict:
-        """Return {security_id, lot_size, source} or {error}.
-        exact=True: only the given expiry date matches. exact=False (Weekly/
-        Monthly hint): fall back to nearest live expiry on/after today."""
+        """Return {security_id, lot_size, source, expiry} or {error}.
+        A nonexistent contract can NEVER trade, so when the requested date
+        has no match (stale Thursday rule, holiday shift...), the resolver
+        snaps to the nearest live expiry on/after today and SAYS SO
+        (source ...-snapped, expiry = used date). The dry-run preview shows
+        requested vs used, so the user confirms with full knowledge."""
         underlying = (underlying or "").upper()
         opt = "CE" if str(option_type or "CE").upper().startswith("C") else "PE"
         err1 = ""
@@ -203,12 +206,13 @@ class DhanLive:
             try:
                 r = await self._resolve_via_optionchain(underlying, expiry_ymd, strike, opt)
                 if r.get("security_id"):
+                    r["expiry"] = expiry_ymd[:10]
                     return r
                 err1 = r.get("error", "")
             except Exception as e:
                 err1 = str(e)[:150]
         try:
-            r = await asyncio.to_thread(self._resolve_via_master, underlying, expiry_ymd, strike, opt, exact)
+            r = await asyncio.to_thread(self._resolve_via_master, underlying, expiry_ymd, strike, opt, False)
             if r.get("security_id"):
                 return r
             err2 = r.get("error", "")

@@ -770,8 +770,8 @@
         if(mode==='live'){
             P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry||'',date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),dry_run:true})}).then(pv=>{
                 if(pv.error){alert('Live blocked: '+pv.error);return;}
-                const p=pv.preview||{};const mg=p.margin||{};const mgTxt=mg.required!=null?('Margin req: Rs'+Number(mg.required).toLocaleString('en-IN')):(mg.note||'Margin: n/a');
-                if(!confirm('REAL MONEY preview\nBroker: '+p.broker+'\nSymbol: '+(p.symbol||p.security_id||p.tsym)+'\nSide: '+p.side+' Qty: '+p.quantity+'\n'+mgTxt+'\n\nSend to exchange?'))return;
+                const p=pv.preview||{};const mg=p.margin||{};const mgTxt=mg.required!=null?('Margin req: Rs'+Number(mg.required).toLocaleString('en-IN')):(mg.note||'Margin: n/a');const snapTxt=p.expiry_note?('\nNOTE: '+p.expiry_note):'';
+                if(!confirm('REAL MONEY preview\nBroker: '+p.broker+'\nSymbol: '+(p.symbol||p.security_id||p.tsym)+'\nSide: '+p.side+' Qty: '+p.quantity+'\n'+mgTxt+snapTxt+'\n\nSend to exchange?'))return;
                 P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry||'',date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),dry_run:false})}).then(r=>{if(r.error)alert('Live error: '+r.error);else{alert('LIVE order sent! Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id);loadDashPositions();}});
             });
             return;
@@ -1403,8 +1403,8 @@ let _lastOpenTrdHTML = null;
             // Step 1: dry-run preview - exact broker payload, sends nothing
             const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:true})});
             if(pv.error){alert('Live blocked: '+pv.error);return;}
-            const p=pv.preview||{};const mg=p.margin||{};const mgTxt=mg.required!=null?('Margin req: Rs'+Number(mg.required).toLocaleString('en-IN')):(mg.note||'Margin: n/a');
-            if(!confirm('REAL MONEY ORDER\nBroker: '+p.broker+'\nSymbol: '+p.symbol+'\nSide: '+p.side+'  Qty: '+p.quantity+' ('+p.lots+' lots x '+p.lot_size+')\nExpiry: '+p.expiry+'\n'+mgTxt+'\n\nConfirm to SEND to exchange?'))return;
+            const p=pv.preview||{};const mg=p.margin||{};const mgTxt=mg.required!=null?('Margin req: Rs'+Number(mg.required).toLocaleString('en-IN')):(mg.note||'Margin: n/a');const snapTxt=p.expiry_note?('\nNOTE: '+p.expiry_note):'';
+            if(!confirm('REAL MONEY ORDER\nBroker: '+p.broker+'\nSymbol: '+p.symbol+'\nSide: '+p.side+'  Qty: '+p.quantity+' ('+p.lots+' lots x '+p.lot_size+')\nExpiry: '+p.expiry+'\n'+mgTxt+snapTxt+'\n\nConfirm to SEND to exchange?'))return;
             const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:false})});
             if(r.error)alert('Live error: '+r.error);
             else{alert('LIVE order sent! Broker order #'+(r.broker_order_id||'')+' | Trade #'+r.trade_id+' @ Rs'+r.entry_price);loadDashPositions();loadTrades();}
