@@ -11,3 +11,4 @@ backtrader>=1.9.78.123
 pyotp>=2.9.0
 nselib>=2.5.1
 jugaad-data>=0.33.1
+dhanhq>=2.0.0
