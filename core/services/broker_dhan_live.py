@@ -44,8 +44,10 @@ def _data_dir() -> str:
 
 class DhanLive:
     def __init__(self, client_id: str, access_token: str):
-        self.client_id = client_id or ""
-        self.access_token = access_token or ""
+        # Strip: copy-paste se trailing space aana aam hai aur httpx
+        # "Illegal header value" deke fail karta hai (e.g. '1105343012 ')
+        self.client_id = str(client_id or "").strip()
+        self.access_token = str(access_token or "").strip()
 
     def _headers(self) -> dict:
         return {

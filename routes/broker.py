@@ -163,7 +163,9 @@ def _get_config(broker: str) -> dict:
     row = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key=?", [f"broker_{broker}"])
     if row and row.get("setting_value"):
         try:
-            return json.loads(row["setting_value"])
+            cfg = json.loads(row["setting_value"])
+            # Strip already-saved values too (old trailing-space entries)
+            return {k: (v.strip() if isinstance(v, str) else v) for k, v in cfg.items()} if isinstance(cfg, dict) else {}
         except Exception:
             return {}
     return {}
@@ -171,6 +173,10 @@ def _get_config(broker: str) -> dict:
 
 def _save_config(broker: str, config: dict):
     db = Database.get_instance()
+    try:
+        config = {k: (v.strip() if isinstance(v, str) else v) for k, v in (config or {}).items()}
+    except Exception:
+        pass
     existing = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key=?", [f"broker_{broker}"])
     if existing:
         db.execute("UPDATE settings SET setting_value=?, updated_at=datetime('now') WHERE setting_key=?", [json.dumps(config), f"broker_{broker}"])
