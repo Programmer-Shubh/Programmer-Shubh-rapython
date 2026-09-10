@@ -162,13 +162,17 @@ class DhanLive:
 
     async def validate(self) -> dict:
         """Read-only token check (holdings). Returns success or exact Dhan
-        error with fix guidance. Never places orders."""
+        error with fix guidance. Never places orders.
+        NOTE: DH-1111 'No holdings available' means the TOKEN IS VALID —
+        the account just holds nothing. Treat as success."""
         res = await self._request("GET", "/holdings")
         if res.get("success"):
             return {"success": True, "message": "Dhan token valid (holdings readable)."}
         err = str(res.get("error", ""))
         data = str(res.get("data", ""))
         blob = (err + " " + data)
+        if "DH-1111" in blob or "no holdings" in blob.lower():
+            return {"success": True, "message": "Dhan token valid (account has no holdings — normal for F&O-only accounts)."}
         hint = ""
         if "807" in blob:
             hint = "Token EXPIRED: Dhan dashboard se naya Access Token banao aur paste karo."
