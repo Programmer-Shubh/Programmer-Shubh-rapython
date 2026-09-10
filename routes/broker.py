@@ -570,6 +570,125 @@ async def view_account(req: ConnectRequest):
     }
 
 
+async def _estimate_margin(broker: str, cfg: dict, preview: dict,
+                           symbol: str, opt: str, strike: float) -> dict:
+    """Required margin preview per broker (dry-run only, never orders).
+    Dhan: official margin calculator. Fyers/Angel: best-effort official
+    endpoints. Shoonya: no public margin API -> unavailable note."""
+    def _num(x):
+        try:
+            return round(float(x), 2)
+        except Exception:
+            return None
+
+    def _pick_margin(obj):
+        if not isinstance(obj, dict):
+            return None
+        for k in ("totalMargin", "total_margin", "totalmargin", "marginRequired",
+                  "margin_required", "requiredMargin"):
+            v = _num(obj.get(k))
+            if v:
+                return v
+        span = _num(obj.get("spanMargin", obj.get("span_margin", 0))) or 0
+        expo = _num(obj.get("exposureMargin", obj.get("exposure_margin", 0))) or 0
+        if span or expo:
+            return round(span + expo, 2)
+        return None
+
+    # Premium estimate for price-sensitive calculators
+    px = 0.0
+    try:
+        from core.models.trade_model import TradeModel as _TM
+        px = float(_TM().get_option_premium(
+            symbol, opt, strike, preview.get("expiry", "")) or 0)
+    except Exception:
+        px = 0.0
+    if px <= 0:
+        try:
+            from core.services.live_market_data import LiveMarketData as _LM
+            from utils.helpers import model_premium as _mp
+            spot = _LM().get_spot_price(symbol)
+            px = float(_mp(spot or strike, strike, 7, opt, symbol=symbol)) if spot else 50.0
+        except Exception:
+            px = 50.0
+    qty = int(preview.get("quantity", 0) or 0)
+    side = str(preview.get("side", "BUY")).upper()
+
+    if broker == "dhan":
+        try:
+            from core.services.broker_dhan_live import DhanLive
+            dl = DhanLive(client_id=cfg.get("client_id", ""),
+                          access_token=cfg.get("access_token", ""))
+            res = await dl._request("POST", "/margincalculator", data={
+                "dhanClientId": dl.client_id,
+                "exchangeSegment": "NSE_FO",
+                "transactionType": side,
+                "quantity": qty,
+                "productType": preview.get("product", "INTRADAY"),
+                "securityId": str(preview.get("security_id", "")),
+                "price": px,
+            })
+            if res.get("success"):
+                m = _pick_margin(res.get("data") or {})
+                if m:
+                    return {"required": m, "note": "Dhan SPAN+exposure estimate"}
+            return {"required": None,
+                    "note": f"Dhan margin unavailable ({str(res.get('error', ''))[:100]})"}
+        except Exception as e:
+            return {"required": None, "note": f"Dhan margin error: {str(e)[:100]}"}
+
+    if broker == "fyers":
+        try:
+            from core.services.broker_fyers import FyersV3
+            c = cfg or {}
+            fy = FyersV3(app_id=c.get("app_id", ""), secret_key=c.get("secret", ""),
+                         redirect_uri=c.get("redirect_uri", ""),
+                         access_token=c.get("access_token", ""),
+                         refresh_token=c.get("refresh_token", ""))
+            res = await fy._request("POST", "/api/v3/margins", data={
+                "symbol": preview.get("symbol", ""), "qty": qty,
+                "type": 1, "side": 1 if side == "BUY" else -1,
+                "productType": "INTRADAY", "limitPrice": px, "stopPrice": 0,
+                "validity": "DAY", "disclosedQty": 0, "offlineOrder": False,
+            })
+            if res.get("success"):
+                m = _pick_margin(res.get("data") or {})
+                if m:
+                    return {"required": m, "note": "Fyers margin estimate"}
+            return {"required": None,
+                    "note": f"Fyers margin unavailable ({str(res.get('error', ''))[:100]})"}
+        except Exception as e:
+            return {"required": None, "note": f"Fyers margin error: {str(e)[:100]}"}
+
+    if broker == "angel":
+        try:
+            from core.services.broker_angel_live import AngelLive
+            c = cfg or {}
+            an = AngelLive(api_key=c.get("api_key", ""), client_code=c.get("client_code", ""),
+                           password=c.get("password", ""), totp_secret=c.get("totp_secret", ""))
+            an.jwt = c.get("access_token", "")
+            res = await an._post("/rest/secure/angelbroking/margin/v1/batch", {"positionList": [{
+                "exchange": "NFO", "symboltoken": str(preview.get("symboltoken", "")),
+                "tradingsymbol": preview.get("symbol", ""), "transactiontype": side,
+                "quantity": str(qty), "price": str(px),
+                "producttype": preview.get("product", "INTRADAY"),
+                "triggerprice": "0",
+            }]})
+            if res.get("success"):
+                data = res.get("data") or {}
+                rows = data if isinstance(data, list) else data.get("data") or []
+                row = rows[0] if rows else data
+                m = _pick_margin(row if isinstance(row, dict) else {})
+                if m:
+                    return {"required": m, "note": "Angel margin estimate"}
+            return {"required": None,
+                    "note": f"Angel margin unavailable ({str(res.get('error', ''))[:100]})"}
+        except Exception as e:
+            return {"required": None, "note": f"Angel margin error: {str(e)[:100]}"}
+
+    return {"required": None, "note": "Shoonya has no public margin API — check RMS/Span in app"}
+
+
 @router.post("/place-live")
 async def place_live_order(req: LiveOrderRequest):
     """REAL live order execution (real money). Safety chain:
@@ -604,7 +723,7 @@ async def place_live_order(req: LiveOrderRequest):
             strike = round((spot or 0) / step) * step if spot and step else 0
             if strike <= 0:
                 return {"error": "Strike required (spot unavailable for ATM calc)"}
-        exp_ymd = _resolve_expiry(symbol, req.expiry or "weekly")
+        exp_hint = req.expiry or "weekly"
         # Broker choice
         want = (req.broker or "").lower()
         if want and want not in BROKER_DEFAULTS:
@@ -617,78 +736,67 @@ async def place_live_order(req: LiveOrderRequest):
             return {"error": "No broker with a REAL token connected. Connect Fyers, Dhan, Angel or Shoonya first - order NOT placed."}
         if broker not in ("fyers", "dhan", "angel", "shoonya"):
             return {"error": f"Live execution supports Fyers/Dhan/Angel/Shoonya (got {broker})."}
+        # ---- Universal resolution: NEVER route an unvalidated expiry ----
+        try:
+            from core.services.symbol_resolver import resolve_contract
+        except Exception as e:
+            return {"error": f"Resolver missing: {str(e)[:120]}"}
+        try:
+            _res = await resolve_contract(broker, _get_config(broker) or {},
+                                          symbol, exp_hint, strike, opt)
+        except Exception as e:
+            return {"error": f"{broker} resolution crashed: {str(e)[:150]}"}
+        if not _res.get("ok"):
+            _msg = str(_res.get("error", "contract not resolved"))
+            _av = _res.get("available_expiries") or []
+            if _av:
+                _msg += f" Valid expiries: {', '.join(_av[:8])}"
+            return {"error": f"{broker}: {_msg} - order NOT placed."}
+        exp_ymd = _res.get("expiry_used", "")
+        _refs = _res.get("refs", {})
+        _tt = str(req.trade_type or "intraday").lower()
         if broker == "fyers":
-            fy_sym = _fyers_symbol(symbol, exp_ymd, strike, opt)
-            preview = {"broker": "fyers", "symbol": fy_sym, "underlying": symbol,
+            preview = {"broker": "fyers", "symbol": _refs.get("symbol", ""), "underlying": symbol,
                        "strike": strike, "expiry": exp_ymd, "side": txn,
                        "lots": lots, "lot_size": lot, "quantity": broker_qty,
-                       "order_type": "MARKET", "product": "INTRADAY"}
+                       "order_type": "MARKET", "product": "INTRADAY",
+                       "source": _res.get("source", "")}
         elif broker == "dhan":
-            try:
-                from core.services.broker_dhan_live import DhanLive
-                _dl0 = DhanLive(client_id=(_get_config("dhan") or {}).get("client_id", ""),
-                                access_token=(_get_config("dhan") or {}).get("access_token", ""))
-                _res0 = await _dl0.resolve_fo(symbol, exp_ymd, strike, opt,
-                                              exact=_expiry_is_explicit(req.expiry))
-            except Exception as e:
-                return {"error": f"Dhan resolution crashed: {str(e)[:150]}"}
-            if not _res0.get("security_id"):
-                return {"error": f"Dhan: {_res0.get('error', 'securityId not resolved')} - order NOT placed."}
-            _dlot = int(_res0.get("lot_size") or 0) or lot
-            _tt = str(req.trade_type or "intraday").lower()
-            preview = {"broker": "dhan", "security_id": _res0["security_id"],
-                       "resolved_symbol": _res0.get("symbol", ""), "underlying": symbol,
+            _dlot = int(_refs.get("lot_size") or 0) or lot
+            preview = {"broker": "dhan", "security_id": _refs.get("security_id", ""),
+                       "resolved_symbol": _refs.get("symbol", ""), "underlying": symbol,
                        "strike": strike, "expiry": exp_ymd, "side": txn,
                        "lots": lots, "lot_size": _dlot, "quantity": lots * _dlot,
                        "order_type": "MARKET",
                        "product": "MARGIN" if _tt == "positional" else "INTRADAY",
-                       "source": _res0.get("source", "")}
+                       "source": _res.get("source", "")}
             broker_qty = lots * _dlot
             lot = _dlot
         elif broker == "angel":
-            try:
-                from core.services.broker_angel_live import AngelLive
-                _ac0 = _get_config("angel") or {}
-                _an0 = AngelLive(api_key=_ac0.get("api_key", ""), client_code=_ac0.get("client_code", ""),
-                                 password=_ac0.get("password", ""), totp_secret=_ac0.get("totp_secret", ""))
-                _an0.jwt = _ac0.get("access_token", "")
-                _resA = await _an0.resolve_fo(symbol, exp_ymd, strike, opt)
-            except Exception as e:
-                return {"error": f"Angel resolution crashed: {str(e)[:150]}"}
-            if not _resA.get("symboltoken"):
-                return {"error": f"Angel: {_resA.get('error', 'symboltoken not resolved')} - order NOT placed."}
-            _tt = str(req.trade_type or "intraday").lower()
-            preview = {"broker": "angel", "symbol": _resA["tradingsymbol"],
-                       "symboltoken": _resA["symboltoken"], "underlying": symbol,
+            preview = {"broker": "angel", "symbol": _refs.get("tradingsymbol", ""),
+                       "symboltoken": _refs.get("symboltoken", ""), "underlying": symbol,
                        "strike": strike, "expiry": exp_ymd, "side": txn,
                        "lots": lots, "lot_size": lot, "quantity": broker_qty,
                        "order_type": "MARKET",
-                       "product": "MARGIN" if _tt == "positional" else "INTRADAY"}
+                       "product": "MARGIN" if _tt == "positional" else "INTRADAY",
+                       "source": _res.get("source", "")}
         elif broker == "shoonya":
-            try:
-                from core.services.broker_shoonya_live import ShoonyaLive
-                _sc0 = _get_config("shoonya") or {}
-                _sh0 = ShoonyaLive(uid=_sc0.get("uid", ""), password=_sc0.get("pwd", ""),
-                                   totp_secret=_sc0.get("secret", "") or _sc0.get("secret_code", ""),
-                                   vendor_code=_sc0.get("vc", ""), api_key=_sc0.get("apikey", ""))
-                _sh0.susertoken = _sc0.get("access_token", "")
-                _sh0.actid = _sc0.get("actid", _sc0.get("uid", ""))
-                _resS = await _sh0.resolve_fo(symbol, exp_ymd, strike, opt)
-            except Exception as e:
-                return {"error": f"Shoonya resolution crashed: {str(e)[:150]}"}
-            if not _resS.get("tsym"):
-                return {"error": f"Shoonya: {_resS.get('error', 'contract not resolved')} - order NOT placed."}
-            _slot = int(_resS.get("lot_size") or 0) or lot
-            _tt = str(req.trade_type or "intraday").lower()
-            preview = {"broker": "shoonya", "symbol": _resS["tsym"],
-                       "token": _resS.get("token", ""), "underlying": symbol,
+            _slot = int(_refs.get("lot_size") or 0) or lot
+            preview = {"broker": "shoonya", "symbol": _refs.get("tsym", ""),
+                       "token": _refs.get("token", ""), "underlying": symbol,
                        "strike": strike, "expiry": exp_ymd, "side": txn,
                        "lots": lots, "lot_size": _slot, "quantity": lots * _slot,
                        "order_type": "MKT",
-                       "product": "M" if _tt == "positional" else "I"}
+                       "product": "M" if _tt == "positional" else "I",
+                       "source": _res.get("source", "")}
             broker_qty = lots * _slot
             lot = _slot
         if req.dry_run:
+            try:
+                preview["margin"] = await _estimate_margin(
+                    broker, _get_config(broker) or {}, preview, symbol, opt, strike)
+            except Exception:
+                preview["margin"] = {"required": None, "note": "margin unavailable"}
             return {"success": True, "dry_run": True, "preview": preview,
                     "note": "Preview only - nothing sent to broker."}
         if not _live_enabled():
@@ -703,12 +811,12 @@ async def place_live_order(req: LiveOrderRequest):
                          redirect_uri=cfg.get("redirect_uri", ""),
                          access_token=cfg.get("access_token", ""),
                          refresh_token=cfg.get("refresh_token", ""))
-            res = await fy.place_order(fy_sym, txn, broker_qty, order_type="MARKET")
+            res = await fy.place_order(preview["symbol"], txn, broker_qty, order_type="MARKET")
             if not res.get("success"):
                 return {"error": f"Fyers rejected order: {res.get('error') or res.get('data')}",
                         "preview": preview, "broker_response": res.get("data", {})}
             order_id = str((res.get("data") or {}).get("order_id", ""))
-            broker_ref = fy_sym
+            broker_ref = preview["symbol"]
         elif broker == "dhan":
             from core.services.broker_dhan_live import DhanLive
             dl = DhanLive(client_id=(_get_config("dhan") or {}).get("client_id", ""),
