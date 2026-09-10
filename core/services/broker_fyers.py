@@ -16,8 +16,10 @@ class FyersV3Error(Exception):
 
 class FyersV3:
     BASE_URL = "https://api.fyers.in"
-    AUTH_URL = "https://api.fyers.in/api/v2/generate-authcode"
-    TOKEN_URL = "https://api.fyers.in/api/v2/token"
+    # OAuth 2.0 (v3, current): authcode -> validate-authcode (appIdHash).
+    AUTH_URL = "https://api.fyers.in/api/v3/generate-authcode"
+    TOKEN_URL = "https://api.fyers.in/api/v3/validate-authcode"
+    REFRESH_URL = "https://api.fyers.in/api/v3/validate-refresh-token"
     MAX_RETRIES = 3
 
     def __init__(
@@ -35,12 +37,16 @@ class FyersV3:
         self.refresh_token = refresh_token
         self._token_expiry: float = 0
 
+    def app_id_hash(self) -> str:
+        import hashlib
+        return hashlib.sha256(f"{self.app_id}:{self.secret_key}".encode()).hexdigest()
+
     def get_auth_url(self) -> str:
         params = {
             "client_id": self.app_id,
             "redirect_uri": self.redirect_uri,
             "response_type": "code",
-            "state": "state_value",
+            "state": "ratrade_login",
         }
         query = urllib.parse.urlencode(params)
         return f"{self.AUTH_URL}?{query}"
@@ -48,8 +54,7 @@ class FyersV3:
     async def generate_token(self, auth_code: str) -> dict:
         payload = {
             "grant_type": "authorization_code",
-            "appId": self.app_id,
-            "secretKey": self.secret_key,
+            "appIdHash": self.app_id_hash(),
             "code": auth_code,
         }
         try:
@@ -60,25 +65,26 @@ class FyersV3:
                 self.access_token = body["access_token"]
                 self.refresh_token = body.get("refresh_token")
                 self._token_expiry = time.time() + body.get("expires_in", 86400)
-                logger.info("Fyers token generated successfully")
+                logger.info("Fyers token generated successfully (v3 OAuth)")
                 return {"success": True, "data": body, "error": ""}
-            return {"success": False, "data": body, "error": body.get("message", "Token generation failed")}
+            return {"success": False, "data": body, "error": body.get("message", "Token generation failed (check App ID, Secret, Redirect URI match Fyers app settings)")}
         except httpx.RequestError as exc:
             logger.error("Fyers token generation error: %s", exc)
             return {"success": False, "data": {}, "error": str(exc)}
 
-    async def refresh_access_token(self) -> dict:
+    async def refresh_access_token(self, pin: str = "") -> dict:
         if not self.refresh_token:
-            return {"success": False, "data": {}, "error": "No refresh token available"}
+            return {"success": False, "data": {}, "error": "No refresh token available — Login with Fyers again"}
         payload = {
             "grant_type": "refresh_token",
-            "appId": self.app_id,
-            "secretKey": self.secret_key,
+            "appIdHash": self.app_id_hash(),
             "refresh_token": self.refresh_token,
         }
+        if pin:
+            payload["pin"] = pin
         try:
             async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(self.TOKEN_URL, json=payload)
+                resp = await client.post(self.REFRESH_URL, json=payload)
             body = resp.json()
             if resp.status_code == 200 and body.get("access_token"):
                 self.access_token = body["access_token"]
@@ -86,7 +92,10 @@ class FyersV3:
                 self._token_expiry = time.time() + body.get("expires_in", 86400)
                 logger.info("Fyers token refreshed successfully")
                 return {"success": True, "data": body, "error": ""}
-            return {"success": False, "data": body, "error": body.get("message", "Token refresh failed")}
+            msg = body.get("message", "")
+            if "pin" in msg.lower():
+                msg += " (Fyers needs your trading PIN for refresh — else login again)"
+            return {"success": False, "data": body, "error": msg or "Token refresh failed — Login with Fyers again"}
         except httpx.RequestError as exc:
             logger.error("Fyers token refresh error: %s", exc)
             return {"success": False, "data": {}, "error": str(exc)}
@@ -108,8 +117,10 @@ class FyersV3:
                 }
 
         url = f"{self.BASE_URL}{path}"
+        # Fyers v3 auth header: {app_id}:{access_token}
+        auth_val = f"{self.app_id}:{self.access_token}" if self.app_id else self.access_token
         headers = {
-            "Authorization": self.access_token,
+            "Authorization": auth_val,
             "Content-Type": "application/json",
         }
 
@@ -202,7 +213,7 @@ class FyersV3:
             "disclosedQty": 0,
             "offlineOrder": False,
         }
-        result = await self._request("POST", "/orders/sync", data=payload)
+        result = await self._request("POST", "/api/v3/orders/sync", data=payload)
         if result["success"]:
             result["data"] = {"order_id": result["data"].get("id", "")}
         return result
@@ -215,19 +226,19 @@ class FyersV3:
             payload["qty"] = quantity
         if price is not None:
             payload["limitPrice"] = price
-        return await self._request("PUT", "/orders/sync", data=payload)
+        return await self._request("PUT", "/api/v3/orders/sync", data=payload)
 
     async def cancel_order(self, order_id: str) -> dict:
-        return await self._request("DELETE", "/orders/sync", data={"id": order_id})
+        return await self._request("DELETE", "/api/v3/orders/sync", data={"id": order_id})
 
     async def get_positions(self) -> dict:
-        return await self._request("GET", "/positions")
+        return await self._request("GET", "/api/v3/positions")
 
     async def get_holdings(self) -> dict:
-        return await self._request("GET", "/holdings")
+        return await self._request("GET", "/api/v3/holdings")
 
     async def get_funds(self) -> dict:
-        return await self._request("GET", "/funds")
+        return await self._request("GET", "/api/v3/funds")
 
     async def get_option_chain(self, symbol: str, expiry: str) -> dict:
         return await self._request(

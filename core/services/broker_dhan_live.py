@@ -124,6 +124,39 @@ class DhanLive:
             res["data"] = {"order_id": str(oid), "raw": data}
         return res
 
+    async def renew_token(self) -> dict:
+        """Renew access token WITHOUT manual web login, using the existing
+        ACTIVE token: GET /v2/RenewToken {access-token, dhanClientId}.
+        Returns {success, access_token?} — caller must save the new token."""
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.get(
+                    f"{BASE_URL}/RenewToken",
+                    headers={"access-token": self.access_token,
+                             "dhanClientId": self.client_id,
+                             "Content-Type": "application/json"},
+                )
+            try:
+                body = resp.json()
+            except Exception:
+                body = {"raw": (resp.text or "")[:300]}
+            if resp.status_code in (200, 201):
+                inner = body if isinstance(body, dict) else {}
+                new_tok = (inner.get("data") or inner).get("accessToken") if isinstance(inner.get("data"), dict) \
+                    else inner.get("accessToken") or inner.get("access_token") or inner.get("token") or ""
+                if new_tok:
+                    self.access_token = new_tok
+                    return {"success": True, "access_token": new_tok, "error": ""}
+            msg = ""
+            try:
+                msg = str(body.get("message") or body.get("remarks") or body)[:250]
+            except Exception:
+                msg = f"HTTP {resp.status_code}"
+            return {"success": False, "data": body, "error": msg or "Renew failed — token expired, manual login needed"}
+        except Exception as e:
+            return {"success": False, "data": {}, "error": str(e)[:200]}
+
     async def cancel_order(self, order_id: str) -> dict:
         return await self._request("DELETE", f"/orders/{order_id}")
 

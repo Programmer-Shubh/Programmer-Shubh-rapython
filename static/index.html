@@ -1530,17 +1530,19 @@ let _lastOpenTrdHTML = null;
     async function fyersOAuth(){
         try{
             const q=new URLSearchParams(window.location.search);
-            const code=q.get('code');
+            const code=q.get('code')||q.get('auth_code');
             if(code){
                 const r=await P('/api/broker/fyers-auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker:'fyers',code})});
-                if(r.success)alert('Fyers connected! Tokens auto-refresh daily.');else alert('Error: '+r.error);
+                if(r.success)alert('Fyers connected! Token 24 hours valid rahega.');else alert('Error: '+r.error);
                 window.history.replaceState({},document.title,window.location.pathname);
                 loadBrokers();return;
             }
             const r=await A('/api/broker/fyers-auth-url');
-            if(r.success&&r.url)window.location.href=r.url;else alert('Error: '+(r.error||'Configure Fyers first'));
+            if(r.success&&r.url)window.location.href=r.url;else alert('Error: '+(r.error||'Configure Fyers first (App ID + Secret, Redirect URI Fyers app me register karo)'));
         }catch(e){alert('OAuth error: '+e.message);}
     }
+    // Auto-capture Fyers auth_code if landing back with ?code= (redirect URI = site root)
+    setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);if(q.get('code')||q.get('auth_code'))fyersOAuth();}catch(e){}},800);
 
     async function autoConnectAll(){
         const r=await A('/api/broker/auto-connect',{method:'POST'});

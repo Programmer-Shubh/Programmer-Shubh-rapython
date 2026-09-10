@@ -207,7 +207,7 @@ def save_config(req: BrokerConfig):
         return {"success": False, "error": "Invalid broker"}
     config = req.config
     if req.broker == "fyers" and config.get("redirect_uri", "").strip() == "":
-        config["redirect_uri"] = "https://subh.infinityfreeapp.com/brokers/fyers-callback"
+        config["redirect_uri"] = _default_redirect()
     _save_config(req.broker, config)
     return {"success": True, "message": "Config saved"}
 
@@ -229,6 +229,38 @@ async def fyers_auth(req: AuthRequest):
         _save_config("fyers", config)
         return {"success": True, "message": "Fyers connected! Tokens auto-refresh daily."}
     return {"success": False, "error": result["error"]}
+
+
+def _default_redirect() -> str:
+    import os
+    base = (os.environ.get("SELF_URL") or "https://ratrade.onrender.com").rstrip("/")
+    return base + "/api/broker/fyers-callback"
+
+
+@router.get("/fyers-callback")
+async def fyers_callback(code: str = "", state: str = ""):
+    """Fyers redirects here after login (?code=...). Exchange auth_code for
+    access_token (24h) and store in DB. Register this exact URL in the Fyers
+    app settings as Redirect URI."""
+    from fastapi.responses import HTMLResponse
+    config = _get_config("fyers")
+    if not code:
+        return HTMLResponse("<h3>Fyers login failed: no auth code received.</h3><p>Go back and click 'Login with Fyers' again.</p>", status_code=400)
+    if not config:
+        return HTMLResponse("<h3>Fyers not configured.</h3><p>Set App ID + Secret in RaTrade Brokers tab first.</p>", status_code=400)
+    fy = FyersV3(
+        app_id=config.get("app_id", ""),
+        secret_key=config.get("secret", ""),
+        redirect_uri=config.get("redirect_uri", ""),
+    )
+    result = await fy.generate_token(code)
+    if result["success"]:
+        config["access_token"] = fy.access_token
+        if fy.refresh_token:
+            config["refresh_token"] = fy.refresh_token
+        _save_config("fyers", config)
+        return HTMLResponse("<h3 style='color:green'>Fyers connected! Token saved for 24 hours.</h3><p>You can close this tab and return to RaTrade → Brokers.</p>")
+    return HTMLResponse(f"<h3 style='color:red'>Fyers login failed.</h3><p>{result['error']}</p><p>Check App ID, Secret and Redirect URI match your Fyers app settings.</p>", status_code=400)
 
 
 @router.get("/fyers-auth-url")
@@ -280,6 +312,13 @@ async def connect_broker(req: ConnectRequest):
             dl = DhanLive(client_id=config.get("client_id", ""),
                           access_token=config.get("access_token", ""))
             v = await dl.validate()
+            if not v.get("success") and "807" in str(v.get("raw", "")):
+                # Expired: one renew attempt with the stored token before giving up
+                rr = await dl.renew_token()
+                if rr.get("success") and rr.get("access_token"):
+                    config["access_token"] = rr["access_token"]
+                    _save_config("dhan", config)
+                    return {"success": True, "message": "Dhan connected! Expired token auto-renewed (no manual login)."}
         except Exception as e:
             return {"success": False, "error": f"Dhan check crashed: {str(e)[:150]}"}
         if v.get("success"):
@@ -382,7 +421,21 @@ async def refresh_tokens():
             else:
                 results[key] = {"success": False, "error": result["error"]}
         elif key == "dhan":
-            results[key] = {"success": bool(config.get("access_token")), "message": "Token cached" if config.get("access_token") else "No token"}
+            # Renew with ACTIVE token first (no manual login); fall back to cached.
+            try:
+                from core.services.broker_dhan_live import DhanLive
+                dl = DhanLive(client_id=config.get("client_id", ""),
+                              access_token=config.get("access_token", ""))
+                rr = await dl.renew_token()
+                if rr.get("success") and rr.get("access_token"):
+                    config["access_token"] = rr["access_token"]
+                    _save_config("dhan", config)
+                    results[key] = {"success": True, "message": "Token renewed (no manual login)"}
+                else:
+                    results[key] = {"success": bool(config.get("access_token")),
+                                    "message": "Renew failed — manual login needed" if not config.get("access_token") else "Cached token kept (renew failed: %s)" % str(rr.get("error", ""))[:120]}
+            except Exception as e:
+                results[key] = {"success": bool(config.get("access_token")), "error": str(e)[:150]}
         elif key in ("shoonya", "angel"):
             # Tokens already simulated and stored; return success
             results[key] = {"success": bool(config.get("access_token")), "message": "Tokens cached"}
