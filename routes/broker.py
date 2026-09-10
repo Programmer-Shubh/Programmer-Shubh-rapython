@@ -158,17 +158,41 @@ def live_toggle(req: LiveToggleRequest):
     return {"enabled": bool(req.enabled)}
 
 
+def _env_config(broker: str) -> dict:
+    """Broker credentials from environment variables (survive Render redeploys
+    + opencode edits, unlike the ephemeral SQLite DB which wipes on deploy).
+    Naming: RATRADE_<BROKER>_<FIELD> e.g. RATRADE_DHAN_CLIENT_ID.
+    Env values override DB values."""
+    import os
+    try:
+        fields = (BROKER_DEFAULTS.get(broker, {}) or {}).get("fields", []) or []
+    except Exception:
+        fields = []
+    out = {}
+    for f in fields:
+        v = os.environ.get(f"RATRADE_{broker.upper()}_{f.upper()}", "")
+        if v:
+            out[f] = v.strip()
+    return out
+
+
 def _get_config(broker: str) -> dict:
     db = Database.get_instance()
+    cfg = {}
     row = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key=?", [f"broker_{broker}"])
     if row and row.get("setting_value"):
         try:
-            cfg = json.loads(row["setting_value"])
+            loaded = json.loads(row["setting_value"])
             # Strip already-saved values too (old trailing-space entries)
-            return {k: (v.strip() if isinstance(v, str) else v) for k, v in cfg.items()} if isinstance(cfg, dict) else {}
+            cfg = {k: (v.strip() if isinstance(v, str) else v) for k, v in loaded.items()} if isinstance(loaded, dict) else {}
         except Exception:
-            return {}
-    return {}
+            cfg = {}
+    # Env wins over DB so redeploys never lose credentials
+    try:
+        cfg.update(_env_config(broker))
+    except Exception:
+        pass
+    return cfg
 
 
 def _save_config(broker: str, config: dict):
@@ -194,6 +218,10 @@ def list_brokers():
     for key, info in BROKER_DEFAULTS.items():
         config = _get_config(key)
         configured = bool(config)
+        try:
+            from_env = sorted(_env_config(key).keys())
+        except Exception:
+            from_env = []
         brokers.append({
             "key": key,
             "name": info["name"],
@@ -203,6 +231,7 @@ def list_brokers():
             "fields": info["fields"],
             "configured": configured,
             "config": config,
+            "from_env": from_env,
         })
     return {"brokers": brokers}
 

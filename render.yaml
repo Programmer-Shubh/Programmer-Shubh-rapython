@@ -15,6 +15,15 @@ services:
         value: /opt/render/project/src/data/ratrade.db
       - key: PYTHONUNBUFFERED
         value: 1
+    # Broker credentials as env vars SURVIVE redeploys (SQLite wipes on free tier).
+    # Fill values once in Render Dashboard → Environment (never commit secrets).
+    # Naming: RATRADE_<BROKER>_<FIELD>, e.g. RATRADE_DHAN_CLIENT_ID.
+    #   Dhan: RATRADE_DHAN_CLIENT_ID, RATRADE_DHAN_ACCESS_TOKEN
+    #   Fyers: RATRADE_FYERS_APP_ID, RATRADE_FYERS_SECRET (+ redirect URI default)
+    #   Shoonya: RATRADE_SHOONYA_UID, RATRADE_SHOONYA_PWD, RATRADE_SHOONYA_VC, RATRADE_SHOONYA_APIKEY, RATRADE_SHOONYA_SECRET
+    #   Angel: RATRADE_ANGEL_CLIENT_CODE, RATRADE_ANGEL_PASSWORD, RATRADE_ANGEL_API_KEY, RATRADE_ANGEL_TOTP_SECRET
+    #   NOTE: Dhan/Fyers access tokens still expire ~daily; use Connect / Refresh
+    #   buttons (Dhan auto-renews when possible). Env only saves re-typing IDs/secrets.
     autoDeploy: true
     # Render free tier has ephemeral filesystem - trades/data disappear on deploy/restart.
     # To persist trades, upgrade to Starter+ plan and uncomment disk config.
