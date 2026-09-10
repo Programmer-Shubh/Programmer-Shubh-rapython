@@ -272,9 +272,19 @@ async def connect_broker(req: ConnectRequest):
         return {"success": False, "error": "Fyers needs OAuth login or Access Token. Click OAuth Login."}
 
     if req.broker == "dhan":
-        if config.get("access_token"):
-            return {"success": True, "message": "Dhan connected (token valid)"}
-        return {"success": False, "error": "Dhan needs Access Token. Paste it in Setup."}
+        if not config.get("access_token") or not config.get("client_id"):
+            return {"success": False, "error": "Dhan needs Client ID + Access Token. Paste both in Setup."}
+        # REAL validation: fake "connected" is what caused confusion earlier.
+        try:
+            from core.services.broker_dhan_live import DhanLive
+            dl = DhanLive(client_id=config.get("client_id", ""),
+                          access_token=config.get("access_token", ""))
+            v = await dl.validate()
+        except Exception as e:
+            return {"success": False, "error": f"Dhan check crashed: {str(e)[:150]}"}
+        if v.get("success"):
+            return {"success": True, "message": "Dhan connected! Token verified live with Dhan."}
+        return {"success": False, "error": v.get("error")}
 
     if req.broker == "shoonya":
         # REAL Noren QuickAuth login (TOTP auto-generated from stored secret).

@@ -127,6 +127,27 @@ class DhanLive:
     async def cancel_order(self, order_id: str) -> dict:
         return await self._request("DELETE", f"/orders/{order_id}")
 
+    async def validate(self) -> dict:
+        """Read-only token check (holdings). Returns success or exact Dhan
+        error with fix guidance. Never places orders."""
+        res = await self._request("GET", "/holdings")
+        if res.get("success"):
+            return {"success": True, "message": "Dhan token valid (holdings readable)."}
+        err = str(res.get("error", ""))
+        data = str(res.get("data", ""))
+        blob = (err + " " + data)
+        hint = ""
+        if "807" in blob:
+            hint = "Token EXPIRED: Dhan dashboard se naya Access Token banao aur paste karo."
+        elif "808" in blob:
+            hint = "Auth FAILED: Client ID + Access Token ka pair match nahi kar raha. Dono same Dhan account ke hone chahiye, bina space ke paste karo."
+        elif "810" in blob:
+            hint = "Client ID INVALID: dhanClientId dobara check karo."
+        elif "806" in blob:
+            hint = "Data APIs not subscribed: token Trading APIs wala hona chahiye."
+        out = f"Dhan rejected token. {hint}" if hint else f"Dhan rejected token: {err[:200]}"
+        return {"success": False, "error": out, "raw": data[:200]}
+
     async def get_order(self, order_id: str) -> dict:
         return await self._request("GET", f"/orders/{order_id}")
 
