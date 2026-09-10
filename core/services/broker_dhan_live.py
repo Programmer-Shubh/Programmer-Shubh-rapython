@@ -226,6 +226,7 @@ class DhanLive:
                 return {"error": f"master download HTTP {resp.status_code}"}
             matches = []
             near = []  # (expiry_date, row) candidates for fallback
+            seen_exp = set()
             lines = (ln.decode("utf-8", errors="replace") if isinstance(ln, (bytes, bytearray)) else ln
                      for ln in resp.iter_lines())
             reader = csv.DictReader(lines)
@@ -256,6 +257,12 @@ class DhanLive:
                     }
                     if not norm["sid"]:
                         continue
+                    try:
+                        _ed = _dt.datetime.strptime(norm["exp"].strip()[:10], "%Y-%m-%d").date()
+                        if _ed >= today:
+                            seen_exp.add(str(_ed))
+                    except Exception:
+                        pass
                     if self._master_match(norm, d, strike, opt):
                         matches.append(norm)
                         if len(matches) >= 5:
@@ -294,7 +301,8 @@ class DhanLive:
                 return {"security_id": m["sid"], "lot_size": m.get("lot", 0),
                         "source": src, "symbol": m.get("tsym", ""),
                         "expiry": str(m.get("exp", ""))[:10]}
-            return {"error": "no matching row in scrip master"}
+            return {"error": "no matching row in scrip master"
+                     + (f". {underlying} expiries available: {', '.join(sorted(seen_exp)[:8])}" if seen_exp else "")}
         except Exception as e:
             return {"error": f"master failed: {str(e)[:150]}"}
 
