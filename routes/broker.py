@@ -320,23 +320,30 @@ async def connect_broker(req: ConnectRequest):
         return {"success": False, "error": "No credentials configured. Click Setup first."}
 
     if req.broker == "fyers":
-        fy = FyersV3(
-            app_id=config.get("app_id", ""),
-            secret_key=config.get("secret", ""),
-            redirect_uri=config.get("redirect_uri", ""),
-            access_token=config.get("access_token", ""),
-            refresh_token=config.get("refresh_token", ""),
-        )
-        if config.get("refresh_token"):
-            result = await fy.refresh_access_token()
-            if result["success"]:
-                config["access_token"] = fy.access_token
-                config["refresh_token"] = fy.refresh_token
-                _save_config("fyers", config)
-                return {"success": True, "message": "Fyers connected (token auto-refreshed)"}
+        # Don't auto-refresh on Connect - just verify token exists. Refresh is
+        # explicit via Refresh Tokens button and auto on 401. This avoids
+        # "Invalid Request" noise when Fyers refresh needs PIN or method mismatch.
         if config.get("access_token"):
-            return {"success": True, "message": "Fyers connected (token valid)"}
-        return {"success": False, "error": "Fyers needs OAuth login or Access Token. Click OAuth Login."}
+            return {"success": True, "message": "Fyers connected (token valid - use Refresh Tokens if expired)"}
+        if config.get("refresh_token"):
+            # Try refresh once, but don't fail Connect if it errors - token may still be valid
+            try:
+                fy = FyersV3(
+                    app_id=config.get("app_id", ""),
+                    secret_key=config.get("secret", ""),
+                    redirect_uri=config.get("redirect_uri", ""),
+                    access_token=config.get("access_token", ""),
+                    refresh_token=config.get("refresh_token", ""),
+                )
+                result = await fy.refresh_access_token()
+                if result["success"]:
+                    config["access_token"] = fy.access_token
+                    config["refresh_token"] = fy.refresh_token
+                    _save_config("fyers", config)
+                    return {"success": True, "message": "Fyers connected (token auto-refreshed)"}
+            except Exception:
+                pass
+        return {"success": False, "error": "Fyers needs OAuth login or Access Token. Click 'Login with Fyers'."}
 
     if req.broker == "dhan":
         if not config.get("access_token") or not config.get("client_id"):
