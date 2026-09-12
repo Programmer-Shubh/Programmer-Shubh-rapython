@@ -1493,7 +1493,7 @@ let _lastOpenTrdHTML = null;
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                     <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('${b.key}')"><i class="bi bi-gear"></i> Setup</button>
                     ${b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> Login with Fyers</button>`:''}
-                    <button class="btn btn-sm btn-outline-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-plug"></i> Connect</button>
+                    ${b.key!=='fyers'?`<button class="btn btn-sm btn-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-box-arrow-in-right"></i> Login with ${b.name}</button>`:''}
                     <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('${b.key}')"><i class="bi bi-wallet2"></i> Account</button>
                 </div>
             </div></div></div>`;
