@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import json
@@ -273,14 +273,25 @@ def _default_redirect() -> str:
 
 
 @router.get("/fyers-callback")
-async def fyers_callback(code: str = "", state: str = ""):
-    """Fyers redirects here after login (?code=...). Exchange auth_code for
+async def fyers_callback(request: Request, code: str = "", state: str = ""):
+    """Fyers v3 redirects here after login with ?auth_code=...&state=...
+    (older docs say ?code=... - accept both). Exchange auth_code for
     access_token (24h) and store in DB. Register this exact URL in the Fyers
     app settings as Redirect URI."""
     from fastapi.responses import HTMLResponse
+    try:
+        qp = dict(request.query_params) if request is not None else {}
+    except Exception:
+        qp = {}
+    # Fyers v3 sends auth_code; accept code too. Also surface s/error flags.
+    auth_code = (code or "").strip() or (qp.get("auth_code") or "").strip()
+    err_flag = (qp.get("error") or qp.get("s") or "").strip()
     config = _get_config("fyers")
-    if not code:
-        return HTMLResponse("<h3>Fyers login failed: no auth code received.</h3><p>Go back and click 'Login with Fyers' again.</p>", status_code=400)
+    if not auth_code:
+        detail = ""
+        if err_flag:
+            detail = f"<p>Fyers said: <code>{err_flag}</code> (access denied or app not approved?)</p>"
+        return HTMLResponse("<h3>Fyers login failed: no auth code received.</h3>" + detail + "<p>Go back and click 'OAuth Login' again. Make sure the Redirect URI in your Fyers app settings EXACTLY matches: <code>/api/broker/fyers-callback</code> on your site (no extra / at end).</p>", status_code=400)
     if not config:
         return HTMLResponse("<h3>Fyers not configured.</h3><p>Set App ID + Secret in RaTrade Brokers tab first.</p>", status_code=400)
     fy = FyersV3(
@@ -288,7 +299,7 @@ async def fyers_callback(code: str = "", state: str = ""):
         secret_key=config.get("secret", ""),
         redirect_uri=config.get("redirect_uri", ""),
     )
-    result = await fy.generate_token(code)
+    result = await fy.generate_token(auth_code)
     if result["success"]:
         config["access_token"] = fy.access_token
         if fy.refresh_token:
