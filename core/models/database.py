@@ -67,52 +67,57 @@ class Database:
         return bool(self._use_postgres and self._pg_url)
 
     def _fix_pg_url(self, url):
-        """Fix unencoded special chars in password (e.g. @ -> %40) for psycopg2/libpq."""
+        """Encode ANY reserved char in the password (@ : / ? & = # %) for
+        psycopg2/libpq. Splits on the LAST @ (hostnames never contain @),
+        then unquote+quote the password so already-encoded values are NOT
+        double-encoded. Also strips copy-paste quotes/whitespace."""
         try:
-            from urllib.parse import quote, urlparse, urlunparse
-            # If password contains raw @, urlparse will mis-split netloc.
-            # Detect: count @ in authority part before first / after ://
-            if "://" in url:
-                scheme_end = url.index("://") + 3
-                # find end of authority (before / or ?)
-                slash = url.find("/", scheme_end)
-                qmark = url.find("?", scheme_end)
-                auth_end = len(url)
-                if slash != -1:
-                    auth_end = min(auth_end, slash)
-                if qmark != -1:
-                    auth_end = min(auth_end, qmark)
-                authority = url[scheme_end:auth_end]
-                # authority should be user:password@host:port  -> one @ separates creds/host
-                if authority.count("@") > 1:
-                    # split on last @ -> creds | host
-                    last_at = authority.rfind("@")
-                    creds = authority[:last_at]
-                    host_part = authority[last_at + 1:]
-                    if ":" in creds:
-                        user, pwd = creds.split(":", 1)
-                        # encode password if it contains reserved chars and not already encoded
-                        if "@" in pwd or ":" in pwd or "/" in pwd or "?" in pwd:
-                            # avoid double-encoding %40
-                            if "%40" not in pwd and "%3A" not in pwd:
-                                pwd = quote(pwd, safe="")
-                        creds = f"{user}:{pwd}"
-                    authority = f"{creds}@{host_part}"
-                    url = url[:scheme_end] + authority + url[auth_end:]
+            import re
+            from urllib.parse import quote, unquote
+            url = (url or "").strip()
+            # strip wrapping quotes from copy-paste
+            if len(url) >= 2 and url[0] == url[-1] and url[0] in ("'", '"'):
+                url = url[1:-1].strip()
+            m = re.match(r"^([a-zA-Z][a-zA-Z0-9+.-]*://)(.*)$", url, re.S)
+            if not m:
+                return url
+            scheme, rest = m.group(1), m.group(2)
+            at = rest.rfind("@")
+            if at == -1:
+                out = scheme + rest
+            else:
+                creds, hostpath = rest[:at], rest[at + 1:]
+                if ":" in creds:
+                    user, pwd = creds.split(":", 1)
+                    pwd = quote(unquote(pwd), safe="")
+                    creds = user + ":" + pwd
+                out = scheme + creds + "@" + hostpath
             # normalize postgres:// -> postgresql://
-            if url.startswith("postgres://"):
-                url = url.replace("postgres://", "postgresql://", 1)
-            return url
+            if out.startswith("postgres://"):
+                out = out.replace("postgres://", "postgresql://", 1)
+            return out
         except Exception:
             return url
 
+    def _redacted_host(self):
+        try:
+            import re
+            u = self._pg_url or ""
+            u = u[u.index("://") + 3:] if "://" in u else u
+            hostpath = u.split("@")[-1]
+            host = re.split(r"[/?#]", hostpath, 1)[0]
+            return host
+        except Exception:
+            return ""
+
     def _mark_pg_failed(self, e):
-        # Never store the URL itself (contains password) - message only.
+        # Never store the URL itself (contains password) - message + host only.
         msg = str(e)[:300]
-        print(f"Postgres connect failed, falling back to SQLite: {msg}")
+        host = self._redacted_host()
+        print(f"Postgres connect failed (host={host}), falling back to SQLite: {msg}")
         self._pg_failed = True
         Database._pg_failed = True
-        Database._pg_last_error = msg
+        Database._pg_last_error = (f"host={host} " if host else "") + msg
 
     def backend_status(self):
         """Password-free DB diagnostics for /api/db-status."""
