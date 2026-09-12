@@ -15,6 +15,13 @@ services:
         value: /opt/render/project/src/data/ratrade.db
       - key: PYTHONUNBUFFERED
         value: 1
+      - key: DATABASE_URL
+        value: ""
+        sync: false
+    # FREE persistence (no paid disk): set DATABASE_URL to a free Postgres
+    # e.g. Supabase (supabase.com) or Neon (neon.tech) or Render Postgres.
+    # Example: postgresql://user:pass@host:5432/dbname?sslmode=require
+    # When set, ALL trades/history/settings survive deploys. When empty, uses SQLite file above (ephemeral on free tier).
     # Broker credentials as env vars SURVIVE redeploys (SQLite wipes on free tier).
     # Fill values once in Render Dashboard → Environment (never commit secrets).
     # Naming: RATRADE_<BROKER>_<FIELD>, e.g. RATRADE_DHAN_CLIENT_ID.
