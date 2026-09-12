@@ -14,6 +14,10 @@ class Database:
     _db_path = None
     _use_postgres = False
     _pg_url = None
+    # Sticky flag: once Postgres proves unreachable, route ALL queries to
+    # SQLite until process restart (prevents %s/RealDictCursor crashes on
+    # sqlite conns). Redeploy restarts the process and re-probes Postgres.
+    _pg_failed = False
 
     @classmethod
     def set_path(cls, path):
@@ -56,6 +60,8 @@ class Database:
             self._path = Database._db_path
 
     def _is_postgres(self):
+        if getattr(self, "_pg_failed", False) or Database._pg_failed:
+            return False
         return bool(self._use_postgres and self._pg_url)
 
     def _fix_pg_url(self, url):
@@ -98,6 +104,11 @@ class Database:
         except Exception:
             return url
 
+    def _mark_pg_failed(self, e):
+        print(f"Postgres connect failed, falling back to SQLite: {e}")
+        self._pg_failed = True
+        Database._pg_failed = True
+
     def _conn(self):
         if self._is_postgres():
             try:
@@ -109,25 +120,21 @@ class Database:
                 conn.autocommit = False
                 return conn
             except Exception as e:
-                # Fallback to SQLite so app stays up even if Postgres is unreachable
-                print(f"Postgres connect failed, falling back to SQLite: {e}")
-                import sqlite3
-                if not self._path:
-                    self._path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "ratrade.db")
-                    self._path = os.path.normpath(self._path)
-                    os.makedirs(os.path.dirname(self._path), exist_ok=True)
-                conn = sqlite3.connect(self._path)
-                conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA foreign_keys=ON")
-                return conn
-        else:
-            import sqlite3
-            conn = sqlite3.connect(self._path)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA foreign_keys=ON")
-            return conn
+                # Fall through to SQLite below (sticky flag routes later
+                # queries to SQLite too, so no %s/cursor_factory mismatch)
+                self._mark_pg_failed(e)
+        import sqlite3
+        if not self._path:
+            self._path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "ratrade.db"))
+            try:
+                os.makedirs(os.path.dirname(self._path), exist_ok=True)
+            except Exception:
+                pass
+        conn = sqlite3.connect(self._path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
 
     def _adapt_query(self, query):
         # Convert ? placeholders to %s for postgres
