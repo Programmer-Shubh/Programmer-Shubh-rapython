@@ -58,19 +58,54 @@ class Database:
     def _is_postgres(self):
         return bool(self._use_postgres and self._pg_url)
 
+    def _fix_pg_url(self, url):
+        """Fix unencoded special chars in password (e.g. @ -> %40) for psycopg2/libpq."""
+        try:
+            from urllib.parse import quote, urlparse, urlunparse
+            # If password contains raw @, urlparse will mis-split netloc.
+            # Detect: count @ in authority part before first / after ://
+            if "://" in url:
+                scheme_end = url.index("://") + 3
+                # find end of authority (before / or ?)
+                slash = url.find("/", scheme_end)
+                qmark = url.find("?", scheme_end)
+                auth_end = len(url)
+                if slash != -1:
+                    auth_end = min(auth_end, slash)
+                if qmark != -1:
+                    auth_end = min(auth_end, qmark)
+                authority = url[scheme_end:auth_end]
+                # authority should be user:password@host:port  -> one @ separates creds/host
+                if authority.count("@") > 1:
+                    # split on last @ -> creds | host
+                    last_at = authority.rfind("@")
+                    creds = authority[:last_at]
+                    host_part = authority[last_at + 1:]
+                    if ":" in creds:
+                        user, pwd = creds.split(":", 1)
+                        # encode password if it contains reserved chars and not already encoded
+                        if "@" in pwd or ":" in pwd or "/" in pwd or "?" in pwd:
+                            # avoid double-encoding %40
+                            if "%40" not in pwd and "%3A" not in pwd:
+                                pwd = quote(pwd, safe="")
+                        creds = f"{user}:{pwd}"
+                    authority = f"{creds}@{host_part}"
+                    url = url[:scheme_end] + authority + url[auth_end:]
+            # normalize postgres:// -> postgresql://
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql://", 1)
+            return url
+        except Exception:
+            return url
+
     def _conn(self):
         if self._is_postgres():
             try:
-                from urllib.parse import urlparse, urlunparse, parse_qsl
-                parsed = urlparse(self._pg_url)
-                # Strip query string to avoid "extra = in sslmode" with encoded passwords
-                # Use parse_qsl for robust handling of special chars in password
-                clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, "", parsed.fragment))
-                qs_dict = dict(parse_qsl(parsed.query, keep_blank_values=True))
-                sslmode = qs_dict.get("sslmode")
-                if not sslmode:
-                    sslmode = "require" if "supabase" in self._pg_url or "render" in self._pg_url else "prefer"
-                conn = psycopg2.connect(clean_url, sslmode=sslmode)
+                # Fix URL (encode raw @ in password) before connecting
+                fixed_url = self._fix_pg_url(self._pg_url)
+                self._pg_url = fixed_url
+                Database._pg_url = fixed_url
+                conn = psycopg2.connect(fixed_url)
                 conn.autocommit = False
                 return conn
             except Exception as e:
@@ -79,6 +114,7 @@ class Database:
                 import sqlite3
                 if not self._path:
                     self._path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "ratrade.db")
+                    self._path = os.path.normpath(self._path)
                     os.makedirs(os.path.dirname(self._path), exist_ok=True)
                 conn = sqlite3.connect(self._path)
                 conn.row_factory = sqlite3.Row
@@ -191,22 +227,41 @@ class Database:
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 );
             """
-            with self._conn() as conn:
-                cur = conn.cursor()
-                try:
-                    cur.execute(sql)
-                finally:
-                    try:
-                        cur.close()
-                    except Exception:
-                        pass
-                conn.commit()
-            # For Postgres (external DB), NEVER wipe bhavcopy_data - it's persistent
             try:
-                self._migrate()
-            except Exception:
-                pass
-            return
+                with self._conn() as conn:
+                    # Detect fallback to SQLite (psycopg2 has server_version, sqlite3 does not)
+                    is_pg = hasattr(conn, "server_version") or "psycopg2" in str(type(conn))
+                    if not is_pg:
+                        # Fell back to SQLite -> run SQLite schema instead
+                        raise RuntimeError("fallback_to_sqlite")
+                    # Execute each statement separately for psycopg2
+                    stmts = [s.strip() for s in sql.split(";") if s.strip()]
+                    cur = conn.cursor()
+                    try:
+                        for stmt in stmts:
+                            cur.execute(stmt)
+                    finally:
+                        try:
+                            cur.close()
+                        except Exception:
+                            pass
+                    conn.commit()
+                # For Postgres (external DB), NEVER wipe bhavcopy_data - it's persistent
+                try:
+                    self._migrate()
+                except Exception:
+                    pass
+                return
+            except RuntimeError as e:
+                if str(e) != "fallback_to_sqlite":
+                    raise
+                # fall through to SQLite path below
+                print("Postgres unavailable during init_schema, using SQLite schema")
+            except Exception as e:
+                # If postgres init fails for any reason, log and fall through to sqlite
+                print(f"Postgres init_schema failed ({e}), falling back to SQLite schema")
+                # mark as sqlite for this instance so _migrate etc use sqlite
+                # do not change class flag, just continue to sqlite block
         # SQLite path (original)
         import sqlite3
         with self._conn() as conn:
