@@ -580,6 +580,7 @@
                         <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('fyers')"><i class="bi bi-gear"></i> Setup</button>
                         <button class="btn btn-sm btn-success" onclick="connectSingleBroker('fyers')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
                         <button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>
+                        <a class="btn btn-sm btn-outline-dark" href="https://trade.fyers.in/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>
                         <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('fyers')"><i class="bi bi-wallet2"></i> Account</button>
                     </div>
                 </div></div></div>
@@ -1586,12 +1587,12 @@ let _lastOpenTrdHTML = null;
     const FALLBACK_BROKERS=[
         {key:'shoonya',name:'Shoonya (Finvasia)',icon:'bi-lightning',color:'text-danger',desc:'User ID + Password + Vendor Code + API Key',fields:['uid','pwd','vc','apikey','secret_code','secret','actid'],configured:false,config:{},login_url:'https://trade.shoonya.com',token_hint:'trade.shoonya.com par login → API credentials (Vendor Code + API Key) copy karke Setup me bhare.'},
         {key:'dhan',name:'Dhan',icon:'bi-bank',color:'text-primary',desc:'Client ID + Access Token + Refresh Token',fields:['client_id','access_token','refresh_token'],configured:false,config:{},login_url:'https://login.dhan.co/',token_hint:'login.dhan.co par login → Profile → API Access se Client ID + Access Token copy karke Setup me bhare.'},
-        {key:'fyers',name:'Fyers',icon:'bi-lightning-charge',color:'text-warning',desc:'App ID + Secret + OAuth Token',fields:['app_id','secret','access_token','refresh_token','redirect_uri'],configured:false,config:{},login_url:'',token_hint:'Fyers app (api.fyers.in) me App ID + Secret banao, Redirect URI register karo, phir OAuth Login dabao.'},
+        {key:'fyers',name:'Fyers',icon:'bi-lightning-charge',color:'text-warning',desc:'App ID + Secret + OAuth Token',fields:['app_id','secret','access_token','refresh_token','redirect_uri'],configured:false,config:{},login_url:'https://trade.fyers.in/',token_hint:'OAuth Login dabao (auto token, sabse easy) — ya trade.fyers.in par login karke api.fyers.in se App ID + Secret banao.'},
         {key:'angel',name:'Angel One',icon:'bi-graph-up-arrow',color:'text-success',desc:'Client Code + Password + API Key',fields:['client_code','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://www.angelone.in/login/',token_hint:'angelone.in/login par login → SmartAPI se API Key + TOTP Secret copy karke Setup me bhare.'}
     ];
     function brokerLoginUrl(key){
         const b=(brokerData||[]).find(x=>x.key===key)||FALLBACK_BROKERS.find(x=>x.key===key);
-        return (b&&b.login_url)||({shoonya:'https://trade.shoonya.com',dhan:'https://login.dhan.co/',angel:'https://www.angelone.in/login/'})[key]||'';
+        return (b&&b.login_url)||({shoonya:'https://trade.shoonya.com',dhan:'https://login.dhan.co/',fyers:'https://trade.fyers.in/',angel:'https://www.angelone.in/login/'})[key]||'';
     }
     function brokerByKey(key){
         // Never return undefined: fall back to offline list so Setup/Connect
@@ -1612,7 +1613,7 @@ let _lastOpenTrdHTML = null;
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                     <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('${b.key}')"><i class="bi bi-gear"></i> Setup</button>
                     <button class="btn btn-sm btn-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
-                    ${b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
+                    ${b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button><a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
                     <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('${b.key}')"><i class="bi bi-wallet2"></i> Account</button>
                 </div>
             </div></div></div>`;
