@@ -1526,15 +1526,25 @@ let _lastOpenTrdHTML = null;
         document.getElementById('broker-cards').innerHTML=h;
     }
     async function loadBrokers(){
+        // Instant optimistic render: buttons NEVER blank, even if server is
+        // spinning up (free-tier cold start) and fetch hangs. fetch has no
+        // built-in timeout, so use AbortController (15s) + live upgrade.
+        brokerData=FALLBACK_BROKERS.slice();
+        renderBrokerCards(brokerData, true);
         try{
-            const r=await A('/api/broker/list');
-            brokerData=(r.brokers&&r.brokers.length)?r.brokers:FALLBACK_BROKERS;
-            renderBrokerCards(brokerData, !(r.brokers&&r.brokers.length));
+            const ctrl=new AbortController();
+            const t=setTimeout(()=>ctrl.abort(),15000);
+            try{
+                const resp=await fetch('/api/broker/list',{signal:ctrl.signal});
+                const r=await resp.json();
+                if(r.brokers&&r.brokers.length){
+                    brokerData=r.brokers;
+                    renderBrokerCards(brokerData, false);
+                }
+            }finally{ clearTimeout(t); }
             try{ liveStatus(); }catch(e2){}
         }catch(e){
-            brokerData=FALLBACK_BROKERS;
-            renderBrokerCards(brokerData, true);
-            showToast('Broker server unreachable, offline buttons dikhaye: '+e.message, 'warning');
+            showToast('Broker server slow/unreachable, offline buttons dikhaye: '+(e.name==='AbortError'?'timeout 15s':e.message), 'warning');
         }
     }
 
