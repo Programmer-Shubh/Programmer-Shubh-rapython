@@ -4,7 +4,7 @@ from typing import List, Dict
 from core.services.indicator_engine import IndicatorEngine
 from core.services.transaction_costs import TransactionCosts
 from core.models.database import Database
-from utils.helpers import get_strike_step, get_lot_size, black_scholes
+from utils.helpers import get_strike_step, get_lot_size, black_scholes, align_strike_price
 
 
 class BacktestEngine:
@@ -720,7 +720,7 @@ class BacktestEngine:
             offset = offset if option_type == "CE" else -offset
         else:
             offset = 0
-        return atm + offset
+        return align_strike_price(symbol, atm + offset)
 
     def _enter_single(self, date, spot, symbol, leg, strike_sel, delta_target, otm_dist):
         option_type = leg.get("option_type", "CE")

@@ -6,7 +6,7 @@ from core.models.bhavcopy_model import BhavcopyModel
 from core.models.trade_model import TradeModel
 from core.services.live_market_data import LiveMarketData
 from core.services.transaction_costs import TransactionCosts
-from utils.helpers import get_lot_size, get_strike_step, black_scholes, model_premium
+from utils.helpers import get_lot_size, get_strike_step, align_strike_price, black_scholes, model_premium
 
 router = APIRouter()
 
@@ -196,12 +196,11 @@ def place_trade(req: TradeRequest):
     # Reject faulty leading zero like '01' (comes as 1.0)
     if raw_strike.startswith("0") and raw_strike not in ("0", "0.0") and not raw_strike.startswith("0."):
         return {"error": f"Faulty strike price '{raw_strike}' - remove leading zeros"}
-    # Validate strike step alignment
+    # Global strike alignment: snap to nearest valid step (e.g. Cipla 123 -> 120)
     try:
-        step = get_strike_step(req.symbol)
-        if req.strike % step != 0:
-            if abs((req.strike % step)) > 0.01 and abs(step - (req.strike % step)) > 0.01:
-                return {"error": f"Strike {req.strike} not aligned to step {step} for {req.symbol}"}
+        aligned = align_strike_price(req.symbol, req.strike)
+        if abs(aligned - req.strike) > 0.01:
+            req.strike = aligned
     except Exception:
         pass
     # ATM-distance guard: trades must land near live ATM (stale scanner/chain data

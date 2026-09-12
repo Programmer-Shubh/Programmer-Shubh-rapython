@@ -115,6 +115,20 @@ def get_strike_step(symbol: str) -> float:
     return steps.get(symbol.upper(), 50)
 
 
+def align_strike_price(symbol: str, strike: float) -> float:
+    """Snap any strike to the exchange's required multiple for this symbol.
+    Global fix: Nifty 50, BankNifty 100, stocks mostly 10/20 etc. Prevents
+    backtest/order failures on invalid strikes like Cipla 123 vs step 20."""
+    try:
+        s = float(strike)
+        step = float(get_strike_step(symbol))
+        if step <= 0 or s <= 0:
+            return s
+        return round(s / step) * step
+    except Exception:
+        return strike
+
+
 def format_currency(amount: float) -> str:
     if abs(amount) >= 10000000:
         return f"₹{amount/10000000:.2f}Cr"

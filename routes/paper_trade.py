@@ -90,6 +90,12 @@ def place_trade(req: PlaceTradeRequest):
         return {"error": "Stop-Loss and Target are mandatory - cannot be blank"}
     if req.stop_loss <= 0 or req.take_profit <= 0:
         return {"error": "Stop-Loss and Target must be > 0 (mandatory for risk management, especially for SELL)"}
+    # Global strike alignment (before validation)
+    try:
+        from utils.helpers import align_strike_price
+        req.strike = align_strike_price(req.symbol, req.strike)
+    except Exception:
+        pass
     # Data Validation: strike, quantity, symbol checks
     trade_model = TradeModel()
     v_err = trade_model.validate_trade_data({"symbol": req.symbol, "option_type": req.option_type, "strike_price": req.strike, "quantity": req.quantity, "entry_price": req.entry_price})

@@ -730,6 +730,12 @@ async def place_live_order(req: LiveOrderRequest):
             strike = round((spot or 0) / step) * step if spot and step else 0
             if strike <= 0:
                 return {"error": "Strike required (spot unavailable for ATM calc)"}
+        # Global strike alignment
+        try:
+            from utils.helpers import align_strike_price
+            strike = align_strike_price(symbol, strike)
+        except Exception:
+            pass
         exp_hint = req.expiry or "weekly"
         # Broker choice
         want = (req.broker or "").lower()

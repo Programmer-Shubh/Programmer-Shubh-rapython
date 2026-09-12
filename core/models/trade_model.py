@@ -390,13 +390,12 @@ class TradeModel:
             return "Quantity must be > 0"
         if data.get("entry_price") is not None and float(data.get("entry_price", 0)) <= 0:
             return "Entry price must be > 0"
-        # Auto-align strike (no error for any symbol like NESTLEIND 25350)
+        # Auto-align strike to exchange step (global fix: Cipla etc. step 20)
         try:
-            from utils.helpers import get_strike_step
-            step = get_strike_step(data["symbol"])
-            if strike % step != 0:
-                if abs((strike % step)) > 0.01 and abs(step - (strike % step)) > 0.01:
-                    data["strike_price"] = round(strike / step) * step
+            from utils.helpers import align_strike_price
+            aligned = align_strike_price(data["symbol"], strike)
+            if abs(aligned - strike) > 0.01:
+                data["strike_price"] = aligned
         except Exception:
             pass
         # Validate symbol existence-ish
