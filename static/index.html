@@ -1028,13 +1028,22 @@ let _lastOpenTrdHTML = null;
         return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
     }
     async function runBacktest(){
+        // Immediate visible feedback FIRST - proves the click fired. Entry is
+        // fully null-guarded: a missing button/element can never silently kill it.
+        const btn=document.getElementById('s-run');
+        const rbtn=document.getElementById('r-run');
+        const orig=btn?btn.innerHTML:''; const rorig=rbtn?rbtn.innerHTML:'';
+        const _restore=()=>{ try{if(btn)btn.innerHTML=orig;}catch(e){} try{if(rbtn)rbtn.innerHTML=rorig;}catch(e){} };
+        try{
+            document.getElementById('bt-results').classList.remove('hidden');
+            document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Starting backtest...</p>';
+        }catch(e){}
         try{updateRunSummary();}catch(e){}
-        const btn=document.getElementById('s-run');const orig=btn.innerHTML;
-        const rbtn=document.getElementById('r-run');const rorig=rbtn?rbtn.innerHTML:'';
-        btn.innerHTML='<span class="spinner"></span> Running...';
+        if(btn)btn.innerHTML='<span class="spinner"></span> Running...';
         if(rbtn)rbtn.innerHTML='<span class="spinner"></span> Running...';
-        const body=_unifiedBody();
-        if(!body){btn.innerHTML=orig;if(rbtn)rbtn.innerHTML=rorig;return;}
+        let body=null;
+        try{ body=_unifiedBody(); }catch(ue){ _restore(); try{document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Form error: '+(ue.message||ue)+'</p>';}catch(e){} return; }
+        if(!body){_restore();return;}
         // Async-first: submit job (instant), poll every 3s with elapsed timer.
         // Long backtests (60s+) get killed by proxy timeouts on sync /run,
         // which is why the button looked "dead". Falls back to sync /run.
@@ -1073,14 +1082,14 @@ let _lastOpenTrdHTML = null;
                 lastErr=e.message||'';
                 const is429 = lastErr.includes('429') || lastErr.includes('Just a moment') || lastErr.includes('Enable JavaScript') || lastErr.includes('Cloudflare') || lastErr.includes('<!DOCTYPE');
                 if(is429 && a<2){ await new Promise(res=>setTimeout(res, 900*(a+1))); continue; }
-                if(a===2){ btn.innerHTML=orig;if(rbtn)rbtn.innerHTML=rorig; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+lastErr.slice(0,300)+' <button class=\"btn btn-sm btn-primary\" onclick=\"runBacktest()\">Retry</button></p>'; return; }
+                if(a===2){ _restore(); document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+lastErr.slice(0,300)+' <button class=\"btn btn-sm btn-primary\" onclick=\"runBacktest()\">Retry</button></p>'; return; }
                 await new Promise(res=>setTimeout(res, 800));
             }
         }
         }
         try{
             if(!r) throw new Error(lastErr||'No response');
-            btn.innerHTML=orig;if(rbtn)rbtn.innerHTML=rorig;
+            _restore();
             if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');return;}
             const m=r.metrics||r; window._lastBacktestMetrics=m;
             document.getElementById('bt-results').classList.remove('hidden');
@@ -1128,7 +1137,7 @@ let _lastOpenTrdHTML = null;
                 h+='</tbody></table>';
                 document.getElementById('bt-tl').innerHTML=h;
             }
-        }catch(e){btn.innerHTML=orig;if(typeof rbtn!=='undefined'&&rbtn)rbtn.innerHTML=rorig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+' <button class="btn btn-sm btn-primary ms-2" onclick="runBacktest()">Retry</button></p>'; showToast('Backtest failed: '+e.message, 'danger');}
+        }catch(e){_restore();document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+' <button class="btn btn-sm btn-primary ms-2" onclick="runBacktest()">Retry</button></p>'; showToast('Backtest failed: '+e.message, 'danger');}
     }
     async function saveStrat(){
         const idx=(rSyms()[0]||'NIFTY');
