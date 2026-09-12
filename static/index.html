@@ -1035,8 +1035,32 @@ let _lastOpenTrdHTML = null;
         if(rbtn)rbtn.innerHTML='<span class="spinner"></span> Running...';
         const body=_unifiedBody();
         if(!body){btn.innerHTML=orig;if(rbtn)rbtn.innerHTML=rorig;return;}
+        // Async-first: submit job (instant), poll every 3s with elapsed timer.
+        // Long backtests (60s+) get killed by proxy timeouts on sync /run,
+        // which is why the button looked "dead". Falls back to sync /run.
+        let r=null; let lastErr=''; let _usedAsync=false;
+        const _btStart=Date.now();
+        const _btSpin=()=>{ const s=Math.round((Date.now()-_btStart)/1000); document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Backtest chal raha hai... '+s+'s (data fetch + engine me 1-2 min lag sakta hai, page band mat karo)</p>'; };
+        _btSpin();
+        try{
+            const sub=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            if(sub && sub.job_id){
+                _usedAsync=true;
+                for(let p=0;p<200;p++){
+                    await new Promise(res=>setTimeout(res,3000));
+                    _btSpin();
+                    let st=null;
+                    try{ st=await A('/api/backtest/result/'+sub.job_id); }
+                    catch(pe){ lastErr=pe.message||''; continue; }
+                    if(!st) continue;
+                    if(st.status==='done'){ r=st.result||null; lastErr=''; break; }
+                    if(st.status==='error'){ lastErr=st.error||'worker failed'; break; }
+                }
+                if(!r && !lastErr) lastErr='timeout (10 min) — chhota period/symbol try karo';
+            }
+        }catch(ae){ lastErr=ae.message||''; }
+        if(!_usedAsync){
         // strategy-style auto-retry 3x with backoff for 429/Cloudflare (same as quickStrat)
-        let r=null; let lastErr='';
         for(let a=0;a<3;a++){
             try{
                 r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -1050,6 +1074,7 @@ let _lastOpenTrdHTML = null;
                 if(a===2){ btn.innerHTML=orig;if(rbtn)rbtn.innerHTML=rorig; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+lastErr.slice(0,300)+' <button class=\"btn btn-sm btn-primary\" onclick=\"runBacktest()\">Retry</button></p>'; return; }
                 await new Promise(res=>setTimeout(res, 800));
             }
+        }
         }
         try{
             if(!r) throw new Error(lastErr||'No response');

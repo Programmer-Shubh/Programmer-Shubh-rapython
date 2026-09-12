@@ -442,8 +442,17 @@ def _fetch_and_store_nselib(symbol, start_date, end_date):
         return 0
 
 
-@router.post("/run")
-def run_backtest(req: BacktestRequest):
+# ---- Async backtest jobs (free-tier proxy kills >~60s requests, so long
+# backtests run in a background thread and the UI polls for the result).
+import threading as _bt_thread
+import time as _bt_time
+import uuid as _bt_uuid
+_BT_JOBS = {}
+_BT_JOBS_LOCK = _bt_thread.Lock()
+_BT_CACHE = {}
+
+
+def _run_backtest_core(req: BacktestRequest):
     import time as _t0m
     _t0 = _t0m.time()
     try:
@@ -519,7 +528,6 @@ def run_backtest(req: BacktestRequest):
 
         # Fast path: 300s cache — instant 2nd run like Quantman (same as 70962cf)
         import time as _bt_t
-        if not hasattr(run_backtest, "_cache"): run_backtest._cache = {}
         # Multi-symbol: same setup runs per symbol (max 5), results merged
         _syms = []
         try:
@@ -539,15 +547,15 @@ def run_backtest(req: BacktestRequest):
         _engine_name = "engine"
         for _sym in _syms:
             _ck = f"{_sym}_{start_date}_{end_date}"
-            _ce = run_backtest._cache.get(_ck)
+            _ce = _BT_CACHE.get(_ck)
             if _ce and _bt_t.time() - _ce[0] < 300:
                 historical = _ce[1]
             else:
                 from core.services.historical_fetcher import fetch_historical
                 historical = fetch_historical(_sym, start_date, end_date, allow_synthetic=True)
-                run_backtest._cache[_ck] = (_bt_t.time(), historical)
-                if len(run_backtest._cache) > 20:
-                    run_backtest._cache.pop(next(iter(run_backtest._cache)))
+                _BT_CACHE[_ck] = (_bt_t.time(), historical)
+                if len(_BT_CACHE) > 20:
+                    _BT_CACHE.pop(next(iter(_BT_CACHE)))
             # If too few bars (<30), indicators won't warm up -> force longer synthetic
             if not historical or len(historical) < 30:
                 synth = _generate_synthetic_fallback(_sym, start_date, end_date)
@@ -644,6 +652,67 @@ def run_backtest(req: BacktestRequest):
         "monthly_pnl": m.get("monthly_pnl", {}),
         "trade_list": m.get("trade_list", []),
     }
+
+
+@router.post("/run")
+def run_backtest(req: BacktestRequest):
+    # Sync path (kept for backward compat + fast cached runs)
+    return _run_backtest_core(req)
+
+
+def _bt_worker(job_id: str, req_dict: dict):
+    try:
+        with _BT_JOBS_LOCK:
+            _BT_JOBS[job_id]["status"] = "running"
+        req = BacktestRequest(**req_dict)
+        result = _run_backtest_core(req)
+        with _BT_JOBS_LOCK:
+            _BT_JOBS[job_id]["status"] = "done"
+            _BT_JOBS[job_id]["result"] = result
+            _BT_JOBS[job_id]["done_at"] = _bt_time.time()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        try:
+            with _BT_JOBS_LOCK:
+                _BT_JOBS[job_id]["status"] = "error"
+                _BT_JOBS[job_id]["error"] = str(e)[:500]
+        except Exception:
+            pass
+
+
+@router.post("/run-async")
+def run_backtest_async(req: BacktestRequest):
+    # Returns instantly {job_id}; UI polls /result/{job_id}. Survives
+    # proxy timeouts that kill 60s+ sync requests on the free tier.
+    job_id = _bt_uuid.uuid4().hex[:12]
+    try:
+        req_dict = req.model_dump()
+    except Exception:
+        req_dict = req.dict() if hasattr(req, "dict") else dict(req)
+    with _BT_JOBS_LOCK:
+        # prune old jobs (keep last 20)
+        while len(_BT_JOBS) >= 20:
+            oldest = min(_BT_JOBS.items(), key=lambda kv: kv[1].get("started_at", 0))[0]
+            _BT_JOBS.pop(oldest, None)
+        _BT_JOBS[job_id] = {"status": "queued", "started_at": _bt_time.time(), "result": None, "error": ""}
+    t = _bt_thread.Thread(target=_bt_worker, args=(job_id, req_dict), daemon=True)
+    t.start()
+    return {"job_id": job_id, "status": "queued"}
+
+
+@router.get("/result/{job_id}")
+def backtest_result(job_id: str):
+    with _BT_JOBS_LOCK:
+        job = _BT_JOBS.get(job_id)
+        if not job:
+            return {"status": "unknown", "error": "job not found (server restarted? re-run backtest)"}
+        out = {"status": job["status"], "elapsed_s": round(_bt_time.time() - job.get("started_at", _bt_time.time()), 1)}
+        if job["status"] == "done":
+            out["result"] = job["result"]
+        elif job["status"] == "error":
+            out["error"] = job.get("error", "worker failed")
+        return out
 
 
 class MasterConfluenceRequest(BaseModel):
