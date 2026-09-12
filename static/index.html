@@ -549,7 +549,49 @@
                     <button class="btn btn-sm btn-outline-warning" onclick="refreshTokens()"><i class="bi bi-arrow-repeat"></i> Refresh Tokens</button>
                 </div>
             </div>
-            <div class="row" id="broker-cards"></div>
+            <div class="row" id="broker-cards">
+                <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
+                    <div style="margin-bottom:12px"><i class="bi bi-lightning text-danger" style="font-size:36px"></i></div>
+                    <h6 class="fw-bold">Shoonya (Finvasia)</h6><p class="text-muted small">User ID + Password + Vendor Code + API Key</p>
+                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
+                    <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
+                        <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('shoonya')"><i class="bi bi-gear"></i> Setup</button>
+                        <button class="btn btn-sm btn-success" onclick="connectSingleBroker('shoonya')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
+                        <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('shoonya')"><i class="bi bi-wallet2"></i> Account</button>
+                    </div>
+                </div></div></div>
+                <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
+                    <div style="margin-bottom:12px"><i class="bi bi-bank text-primary" style="font-size:36px"></i></div>
+                    <h6 class="fw-bold">Dhan</h6><p class="text-muted small">Client ID + Access Token + Refresh Token</p>
+                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
+                    <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
+                        <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('dhan')"><i class="bi bi-gear"></i> Setup</button>
+                        <button class="btn btn-sm btn-success" onclick="connectSingleBroker('dhan')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
+                        <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('dhan')"><i class="bi bi-wallet2"></i> Account</button>
+                    </div>
+                </div></div></div>
+                <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
+                    <div style="margin-bottom:12px"><i class="bi bi-lightning-charge text-warning" style="font-size:36px"></i></div>
+                    <h6 class="fw-bold">Fyers</h6><p class="text-muted small">App ID + Secret + OAuth Token</p>
+                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
+                    <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
+                        <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('fyers')"><i class="bi bi-gear"></i> Setup</button>
+                        <button class="btn btn-sm btn-success" onclick="connectSingleBroker('fyers')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
+                        <button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>
+                        <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('fyers')"><i class="bi bi-wallet2"></i> Account</button>
+                    </div>
+                </div></div></div>
+                <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
+                    <div style="margin-bottom:12px"><i class="bi bi-graph-up-arrow text-success" style="font-size:36px"></i></div>
+                    <h6 class="fw-bold">Angel One</h6><p class="text-muted small">Client Code + Password + API Key</p>
+                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
+                    <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
+                        <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('angel')"><i class="bi bi-gear"></i> Setup</button>
+                        <button class="btn btn-sm btn-success" onclick="connectSingleBroker('angel')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
+                        <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('angel')"><i class="bi bi-wallet2"></i> Account</button>
+                    </div>
+                </div></div></div>
+            </div>
             <div id="broker-config-modal" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center">
                 <div style="background:#fff;border-radius:8px;width:90%;max-width:500px;max-height:80vh;overflow-y:auto">
                     <div style="padding:16px;border-bottom:1px solid #dee2e6;display:flex;justify-content:space-between;align-items:center">
