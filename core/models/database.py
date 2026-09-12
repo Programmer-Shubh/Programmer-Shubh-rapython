@@ -61,11 +61,15 @@ class Database:
     def _conn(self):
         if self._is_postgres():
             try:
-                # Avoid duplicate sslmode if already in URL (causes "extra = in sslmode" error)
-                if "sslmode=" in self._pg_url:
-                    conn = psycopg2.connect(self._pg_url)
-                else:
-                    conn = psycopg2.connect(self._pg_url, sslmode="require" if "supabase" in self._pg_url or "render" in self._pg_url else "prefer")
+                from urllib.parse import urlparse, urlunparse, parse_qs
+                parsed = urlparse(self._pg_url)
+                # Strip query string to avoid "extra = in sslmode" with encoded passwords
+                clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, "", parsed.fragment))
+                qs = parse_qs(parsed.query)
+                sslmode = qs.get("sslmode", [None])[0]
+                if not sslmode:
+                    sslmode = "require" if "supabase" in self._pg_url or "render" in self._pg_url else "prefer"
+                conn = psycopg2.connect(clean_url, sslmode=sslmode)
                 conn.autocommit = False
                 return conn
             except Exception as e:
