@@ -61,12 +61,13 @@ class Database:
     def _conn(self):
         if self._is_postgres():
             try:
-                from urllib.parse import urlparse, urlunparse, parse_qs
+                from urllib.parse import urlparse, urlunparse, parse_qsl
                 parsed = urlparse(self._pg_url)
                 # Strip query string to avoid "extra = in sslmode" with encoded passwords
+                # Use parse_qsl for robust handling of special chars in password
                 clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, "", parsed.fragment))
-                qs = parse_qs(parsed.query)
-                sslmode = qs.get("sslmode", [None])[0]
+                qs_dict = dict(parse_qsl(parsed.query, keep_blank_values=True))
+                sslmode = qs_dict.get("sslmode")
                 if not sslmode:
                     sslmode = "require" if "supabase" in self._pg_url or "render" in self._pg_url else "prefer"
                 conn = psycopg2.connect(clean_url, sslmode=sslmode)
@@ -191,8 +192,14 @@ class Database:
                 );
             """
             with self._conn() as conn:
-                with conn.cursor() as cur:
+                cur = conn.cursor()
+                try:
                     cur.execute(sql)
+                finally:
+                    try:
+                        cur.close()
+                    except Exception:
+                        pass
                 conn.commit()
             # For Postgres (external DB), NEVER wipe bhavcopy_data - it's persistent
             try:

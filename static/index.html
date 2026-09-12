@@ -252,6 +252,10 @@
     <div class="wrap">
         <!-- DASHBOARD -->
         <div id="pg-dashboard" class="pg">
+            <div class="alert alert-warning alert-dismissible fade show mb-2" role="alert" style="font-size:12px; border-left:4px solid #ffc107; background:#fff8e1; color:#664d03;">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i><strong>डिस्क्लेमर:</strong> हम केवल एक तकनीकी (Technology) प्लेटफॉर्म हैं। हम SEBI Registered Investment Advisor (IA) या Research Analyst (RA) नहीं हैं। हम कोई ट्रेडिंग सिग्नल, टिप्स या निवेश सलाह प्रदान नहीं करते हैं। इस प्लेटफॉर्म पर उपलब्ध सभी टूल्स यूज़र के खुद के रिस्क और स्ट्रेटेजी पर काम करते हैं। पिछले परिणाम भविष्य के मुनाफे की गारंटी नहीं हैं।
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" style="font-size:10px"></button>
+            </div>
             <div class="card mb-2" style="overflow:hidden;background:linear-gradient(90deg,#7ec8f7,#1e6fd9,#7ec8f7)"><img src="/static/dashboard-banner.jpg" alt="Stock Exchange" style="width:100%;height:110px;object-fit:contain;display:block"></div>
             <div class="row" id="mkt-cards"></div>
             <div class="card">
@@ -292,7 +296,7 @@
             <div class="row" id="trd-stats"></div>
             <div class="card mb-2">
                 <div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center">
-                    <span class="small fw-bold"><i class="bi bi-layers"></i> Quantman Portfolio</span>
+                    <span class="small fw-bold"><i class="bi bi-layers"></i> Advanced Portfolio</span>
                     <div class="input-group input-group-sm" style="width:180px"><span class="input-group-text">Slippage %</span><input type="number" class="form-control" id="q-slip" value="0.05" step="0.01" min="0" max="2"><button class="btn btn-outline-primary" onclick="applySlippage()">Apply</button></div>
                     <button class="btn btn-sm btn-primary" onclick="combineResults()"><i class="bi bi-collection"></i> Combine Results</button>
                     <button class="btn btn-sm btn-outline-secondary" onclick="loadTrades()">Refresh</button>
@@ -306,14 +310,14 @@
             </div>
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">Open Trades <span class="badge bg-danger">LIVE</span><span class="badge bg-secondary">PAPER</span></div>
-                <div class="card-body p-0"><div id="open-trd"></div></div>
+                <div class="card-body p-0"><div id="open-trd" style="overflow-x:auto; -webkit-overflow-scrolling:touch"></div></div>
             </div>
             <div class="card">
                 <div class="card-header">Trade History <small class="text-muted">(Order-Type Badge: Live/Paper/BT)</small></div>
-                <div class="card-body p-0"><div id="closed-trd"></div></div>
+                <div class="card-body p-0"><div id="closed-trd" style="overflow-x:auto; -webkit-overflow-scrolling:touch"></div></div>
             </div>
         </div>
-        <!-- STRATEGY BUILDER — Quantman.trade style -->
+        <!-- STRATEGY BUILDER — Advanced style -->
         <div id="pg-strategy" class="pg hidden">
             <div class="card mb-2 slab-hero">
                 <div class="card-body p-3 d-flex flex-wrap gap-2 align-items-center justify-content-between">
@@ -378,7 +382,7 @@
             <div class="d-flex gap-1 mb-2 flex-wrap" id="q-instruments"></div>
             </div></div>
             <div id="custom-form">
-                <div class="col-md-4" style="display:none"><label class="form-label">Instrument Settings <span class="badge bg-info">Quantman: NIFTY/BANKNIFTY lot auto</span></label>
+                <div class="col-md-4" style="display:none"><label class="form-label">Instrument Settings <span class="badge bg-info">NIFTY/BANKNIFTY lot auto</span></label>
                     <div class="row g-1">
                         <div class="col"><label class="form-label small">Symbol (All F&O)</label><select class="form-select form-select-sm" id="s-index"><option>Loading...</option></select></div>
                         <div class="col"><label class="form-label small">Select Underlying</label><select class="form-select form-select-sm" id="s-underlying"><option selected>Index</option><option>Stock</option><option>Underlying</option></select></div>
@@ -418,9 +422,9 @@
                 </div>
                 <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
-                <!-- Quantman Strategy Gallery -->
+                <!-- Strategy Templates Gallery -->
                 <div class="card mt-3">
-                    <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Quantman Strategies — Click to Build</strong><small class="text-muted">Template = ready-made legs (upar wali Order setting override hogi)</small></div>
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Strategy Templates — Click to Build</strong><small class="text-muted">Template = ready-made legs (upar wali Order setting override hogi)</small></div>
                     <div class="card-body p-2">
                         <div class="row g-2">
                             <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longcall')"><div class="icon">📈</div><div class="title">Long Call</div><div class="desc">Buy CE ATM<br>Unlimited gain</div></div></div>
@@ -461,11 +465,11 @@
                     </div>
                                         </div>
                 </div>
-                <!-- Quantman Payoff Diagram -->
+                <!-- Payoff Diagram -->
                 <div class="card mt-3 payoff-card" id="payoffCard" style="display:none">
-                    <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-graph-up"></i> Payoff Diagram (Expiry) — Quantman View</strong><span class="badge bg-primary" id="payoff-spot">Spot: -</span></div>
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-graph-up"></i> Payoff Diagram (Expiry) — Strategy View</strong><span class="badge bg-primary" id="payoff-spot">Spot: -</span></div>
                     <div class="card-body p-2">
-                        <div id="payoff-chart" style="height:280px"></div>
+                        <div style="overflow-x:auto"><div id="payoff-chart" style="height:280px;min-width:600px"></div></div>
                         <div class="row g-2 mt-2" id="payoff-metrics"></div>
                         <div class="small text-muted mt-1">Greeks &amp; margin estimated via Black-Scholes (IV 20%, DTE from expiry). Live premiums from Yahoo/NSE when available.</div>
                     </div>
@@ -488,10 +492,10 @@
                     <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="s-mtd" value="5" min="1"></div>
                 </div>
                 <div class="row g-2 mt-1">
-                    <div class="col-md-3"><label class="form-label small">Slippage (%) <span class="badge bg-warning text-dark">Quantman</span></label><input type="number" class="form-control form-control-sm" id="s-slippage" value="0.50" step="0.05" min="0" max="2" title="Quantman: Add Slippage to make results realistic (market impact + spread)"></div>
+                    <div class="col-md-3"><label class="form-label small">Slippage (%) <span class="badge bg-warning text-dark">strategy</span></label><input type="number" class="form-control form-control-sm" id="s-slippage" value="0.50" step="0.05" min="0" max="2" title="Add Slippage to make results realistic (market impact + spread)"></div>
                     <div class="col-md-3"><label class="form-label small">Combined Portfolio</label><select class="form-select form-select-sm" id="s-combine"><option selected>No</option><option>Yes - Merge with previous</option></select></div>
                     <div class="col-md-3"><label class="form-label small">Order-Type Badge</label><select class="form-select form-select-sm" id="s-order-badge"><option selected>Live/Paper/Backtest</option><option>Live Only</option></select></div>
-                    <div class="col-md-3 d-flex align-items-end"><small class="text-muted" style="font-size:10px">Slippage 0.5% realistic | Drawdown Days + Badge as per Quantman Mar 2025 update</small></div>
+                    <div class="col-md-3 d-flex align-items-end"><small class="text-muted" style="font-size:10px">Slippage 0.5% realistic | Drawdown Days + Badge as per strategy Mar 2025 update</small></div>
                 </div>
             </div>
             <div class="card mt-3" style="display:none">
@@ -503,18 +507,18 @@
                         <div><button class="btn btn-sm btn-primary" onclick="addQuantIndicator()">+ Add Indicator</button></div>
                     </div>
                     <div style="overflow-x:auto"><table class="table table-sm mb-0" id="q-ind-table"><thead><tr><th>Indicator</th><th>Params</th><th>Candle Interval</th><th>Field</th><th>Signal</th><th></th></tr></thead><tbody></tbody></table></div>
-                    <small class="text-muted">Like quantman.trade: SuperTrend(10,3), RSI(14), EMA, MACD, Bollinger, VWAP, Volume, OI — candle 1m to 1h, Equity/Future field.</small>
+                    <small class="text-muted">Note: SuperTrend(10,3), RSI(14), EMA, MACD, Bollinger, VWAP, Volume, OI — candle 1m to 1h, Equity/Future field.</small>
                 </div>
             </div>
             <div class="row mt-3 align-items-end" style="display:none">
-                <div class="col-md-3"><label class="form-label"><i class="bi bi-calendar3"></i> Backtest Period <span class="badge bg-primary">Quantman: min 60 bars</span></label><div class="d-flex gap-1"><input type="date" class="form-control form-control-sm" id="s-start" value="2026-07-02"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-20"></div><div class="d-flex gap-1 mt-1"><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1M')">1M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('3M')">3M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('6M')">6M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1Y')">1Y</button></div></div>
+                <div class="col-md-3"><label class="form-label"><i class="bi bi-calendar3"></i> Backtest Period <span class="badge bg-primary">Min 60 bars</span></label><div class="d-flex gap-1"><input type="date" class="form-control form-control-sm" id="s-start" value="2026-07-02"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-20"></div><div class="d-flex gap-1 mt-1"><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1M')">1M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('3M')">3M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('6M')">6M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1Y')">1Y</button></div></div>
                 <div class="col-md-3 d-flex gap-2">
                     <button class="btn btn-success flex-fill" id="s-run" onclick="runBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button>
                     <button class="btn btn-outline-primary" onclick="saveStrat()"><i class="bi bi-save"></i> Save</button>
                     <button class="btn btn-outline-dark" onclick="runBacktestMonteCarlo()" title="Monte Carlo"><i class="bi bi-shuffle"></i> MC</button>
                     <button class="btn btn-outline-danger" onclick="downloadReportPDF()" title="PDF Report"><i class="bi bi-file-earmark-pdf"></i> PDF</button>
                 </div>
-                <div class="col-md-6"><small class="text-muted">Like quantman.trade: Backtest uses NSE archives → nselib → Google fallback (no manual bhavcopy). Results show 4 key metrics + Equity + Monthly P&L + Trade List.</small></div>
+                <div class="col-md-6"><small class="text-muted">Note: Backtest uses NSE archives → nselib → Google fallback (no manual bhavcopy). Results show 4 key metrics + Equity + Monthly P&L + Trade List.</small></div>
             </div>
             <div id="bt-results" class="hidden">
                 <div class="row mt-3" id="bt-metrics"></div>
@@ -570,7 +574,7 @@
             </div>
         </div>
 
-        <!-- EMAIL ALERTS - Multi-Platform (NextLevelBot Style) -->
+        <!-- EMAIL ALERTS - Multi-Platform (Webhook Alert Manager Style) -->
         <div id="pg-alerts" class="pg hidden">
             <h4 class="fw-bold mb-3"><i class="bi bi-envelope-at"></i> Email Alerts — Chartink / Gocharting / Investing.com</h4>
             <div class="row g-3">
@@ -626,7 +630,7 @@
                 </div>
             </div>
             <div class="card mt-3">
-                <div class="card-header"><i class="bi bi-info-circle"></i> How It Works (NextLevelBot Style)</div>
+                <div class="card-header"><i class="bi bi-info-circle"></i> How It Works (Webhook Alert Manager Style)</div>
                 <div class="card-body">
                     <div class="row g-3">
                         <div class="col-md-4"><div class="step"><span class="step-num">1</span><strong>Platform Setup</strong><p class="small text-muted mt-1">Chartink/Gocharting/Investing.com pe alert banaye. Email notification ON kare.</p></div></div>
@@ -681,12 +685,22 @@
             </div>
         </div>
         <div class="card chain-table-card">
-            <div class="card-body p-2" id="chain-body"><p class="text-muted p-2">Select date and expiry to load option chain.</p></div>
+            <div class="card-body p-2" id="chain-body"><p class="text-muted p-2"><div class="text-center p-4"><i class="bi bi-graph-up-arrow" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">Select symbol, date and expiry to load option chain</p></div></p></div>
         </div>
     </div>
     <script>
-    const A=async u=>{const r=await fetch(u);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
-    const P=async (u,o)=>{const r=await fetch(u,o);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
+    let A=async u=>{const r=await fetch(u);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
+    let P=async (u,o)=>{const r=await fetch(u,o);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
+
+    // Global fetch with retry & fallback for Connecting... states
+    const _origA = async (u, o) => { const r = await fetch(u, o); const t = await r.text(); try { return JSON.parse(t); } catch(e) { throw new Error(t.slice(0,400)); } };
+    async function A_retry(u, o, retries=2){ let last; for(let i=0;i<=retries;i++){ try{ const r=await _origA(u,o); if(r && r.error && r.error.includes('429')) throw new Error('429'); return r; }catch(e){ last=e; if(i<retries && (String(e.message).includes('429')||String(e.message).includes('Failed to fetch'))){ await new Promise(r=>setTimeout(r, 800*(i+1))); continue; } } } throw last; }
+    // Patch global A/P to use retry + user-friendly toast on failure
+    const _oldA = A; const _oldP = P;
+    A = async (u, o) => { try { return await A_retry(u, o); } catch(e){ console.warn('API failed', u, e.message); throw e; } };
+    P = async (u, o) => { try { return await A_retry(u, o); } catch(e){ console.warn('API failed', u, e.message); throw e; } };
+    function showToast(msg, type='danger'){ let c=document.getElementById('toast-container'); if(!c){ c=document.createElement('div'); c.id='toast-container'; c.style.cssText='position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(c); } const t=document.createElement('div'); t.className='alert alert-'+type+' py-2 px-3 small'; t.style.cssText='min-width:280px;box-shadow:0 4px 12px rgba(0,0,0,0.15)'; t.innerHTML=msg+' <button class="btn-close ms-2" onclick="this.parentElement.remove()"></button>'; c.appendChild(t); setTimeout(()=>t.remove(), 6000); }
+
     const F=n=>n>=0?'₹'+n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}):'-₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
     const C=n=>n>0?'price-up':n<0?'price-down':'';
     const B=(t,cls)=>`<span class="badge badge-${cls}">${t}</span>`;
@@ -800,7 +814,7 @@
                 if(_lastDashPosHTML && document.getElementById('dash-pos').innerHTML.includes('<table>')){
                     // keep previous, do not overwrite
                 } else {
-                    document.getElementById('dash-pos').innerHTML='<p class="text-muted p-3">No open positions</p>';
+                    document.getElementById('dash-pos').innerHTML='<div class="text-center p-4"><i class="bi bi-inbox" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No open positions yet</p><small class="text-muted">Trades will appear here once you place an order</small></div>';
                 }
             }
         }catch(e){
@@ -820,7 +834,7 @@
         if(/bad_tick/.test(s))return 'Bad Tick Fix';
         if(s==='manual')return 'Manual Exit';
         return s? s.replace(/_/g,' ') : 'Closed';}
-    async function loadDashHistory(){try{const c=await A('/api/dashboard/trade-history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';c.trades.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;});h+='</table>';document.getElementById('dash-hist').innerHTML=h;}else{document.getElementById('dash-hist').innerHTML='<p class="text-muted p-3">No trades yet</p>';};}catch(e){}}
+    async function loadDashHistory(){try{const c=await A('/api/dashboard/trade-history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>';c.trades.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;});h+='</table>';document.getElementById('dash-hist').innerHTML=h;}else{document.getElementById('dash-hist').innerHTML='<div class="text-center p-4"><i class="bi bi-journal-text" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No trade history yet</p><small class="text-muted">Completed trades will be listed here</small></div>';};}catch(e){}}
     async function closeTrade(id,price){if(!confirm('Close #'+id+'?'))return;await P('/api/trades/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,exit_price:price,date:new Date().toISOString().split('T')[0]})});_lastOpenTrdHTML=null;loadDash();loadTrades();}
     async function deleteTrade(id){if(!confirm('Delete trade #'+id+'? This cannot be undone.'))return;const r=await P('/api/trades/'+id,{method:'DELETE'});_lastOpenTrdHTML=null;if(!r.error){loadTrades();try{loadDashPositions();}catch(e){}}else alert('Error: '+r.error);}
     async function setTradeMode(id,mode){const r=await P('/api/trades/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,trade_mode:mode})});_lastOpenTrdHTML=null;if(!r.error){alert('Trade #'+id+' → '+mode.toUpperCase()+' mode');loadTrades();try{loadDashPositions();}catch(e){}}else alert('Error: '+r.error);}
@@ -829,7 +843,7 @@
     async function cLoadDates(){const s=document.getElementById('c-sym').value;if(!s)return;const d=await A('/api/chain/dates/'+s);document.getElementById('c-date').value=d.dates?d.dates[0]:'';cLoadExpiries();}
     async function cLoadExpiries(){const s=document.getElementById('c-sym').value,d=document.getElementById('c-date').value;if(!d)return;const e=await A('/api/chain/expiries/'+s+'/'+d);document.getElementById('c-exp').innerHTML=e.expiries?e.expiries.map(x=>'<option>'+x+'</option>').join(''):'<option>No Expiry</option>';}
     function toggleLiveMode(){if(document.getElementById('c-live').checked){document.getElementById('c-date').parentElement.style.display='none';document.getElementById('c-exp').parentElement.style.display='none';document.getElementById('c-spot').style.display='block';cLoadChain();}else{document.getElementById('c-date').parentElement.style.display='';document.getElementById('c-exp').parentElement.style.display='';document.getElementById('c-spot').style.display='none';cLoadChain();}}
-    async function cLoadChain(){
+    async function cLoadChain(){ try{
         const live=document.getElementById('c-live').checked;
         const s=document.getElementById('c-sym').value;
         let c;let h='';let htm='';
@@ -857,7 +871,7 @@
             htm+=`<tr class="${rowBg}"><td class="text-end small text-muted">${_z(r.ce_vol)}</td><td class="text-end small">${_z(r.ce_oi)}</td><td class="text-end small">${_zc(r.ce_oi_change)}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','CE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','CE',${r.strike})">Sell</button></td><td class="text-end small">₹${r.ce_ltp.toFixed(2)}</td><td class="text-center fw-bold ${strikeClass} small">${r.strike} <br><small class="text-muted">CE: ₹${r.ce_ltp.toFixed(2)} | PE: ₹${r.pe_ltp.toFixed(2)}</small></td><td class="text-end small">₹${r.pe_ltp.toFixed(2)}</td><td class="text-center"><button class="btn btn-sm btn-success" onclick="cTrade('BUY','PE',${r.strike})">Buy</button> <button class="btn btn-sm btn-danger" onclick="cTrade('SELL','PE',${r.strike})">Sell</button></td><td class="text-end small">${_zc(r.pe_oi_change)}</td><td class="text-end small">${_z(r.pe_oi)}</td><td class="text-end small text-muted">${_z(r.pe_vol)} ${peLabel}</td></tr>`;});
         htm+='</tbody></table>';
         document.getElementById('chain-body').innerHTML=htm;
-    }
+    }catch(e){ document.getElementById('chain-body').innerHTML='<div class="alert alert-danger m-2">Failed to load option chain: '+e.message+' <button class="btn btn-sm btn-outline-danger ms-2" onclick="cLoadChain()">Retry</button></div>'; showToast('Option Chain failed: '+e.message, 'danger'); }
     async function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','3000');const modePick=(prompt('Mode: paper ya live? (default paper)','paper')||'paper').toLowerCase(); const isLive=modePick==='live'; if(isLive) setDashMode('live'); else setDashMode('paper'); const tt=((prompt('Type intraday/positional:','intraday')||'intraday').toLowerCase()==='positional')?'positional':'intraday'; if(isLive){ const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt,dry_run:true})}); if(pv.error){alert('Live blocked: '+pv.error); return;} const p=pv.preview||{}; if(!confirm('REAL MONEY preview\nBroker: '+p.broker+'\nSymbol: '+(p.symbol||p.security_id||p.tsym)+'\nSide: '+p.side+' Qty: '+p.quantity+'\n\nSend to exchange?'))return; const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt,dry_run:false})}); if(r.error){alert('Live error: '+r.error);return;} alert('LIVE order sent! Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id); setTimeout(()=>{loadDashPositions();loadTrades();},600); return; } const body={symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt}; for(let a=0;a<3;a++){try{const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error&&r.error.includes('429')){await new Promise(res=>setTimeout(res,700*(a+1))); continue;} if(r.error){alert('Error: '+r.error); return;} alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price); setTimeout(()=>{loadDashPositions();loadTrades();}, 600); return;}catch(e){ if(a===2) alert('Network: '+e.message+' — 5s me auto retry'); await new Promise(res=>setTimeout(res,700*(a+1)));}}}
 
     function openTradeTV(sym){
@@ -887,22 +901,22 @@ let _lastOpenTrdHTML = null;
                 if(_lastOpenTrdHTML && document.getElementById('open-trd').innerHTML.includes('<table>')){
                     // keep previous trades visible - avoid flicker when other tab clicked
                 } else {
-                    document.getElementById('open-trd').innerHTML='<p class="text-muted p-3">No open positions</p>';
+                    document.getElementById('open-trd').innerHTML='<div class="text-center p-4"><i class="bi bi-inbox" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No open positions yet</p><small class="text-muted">Trades will appear here once you place an order</small></div>';
                 }
             }
         }catch(e){ console.error('loadTrades failed',e); }
-        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Badge</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=exitStatusLabel(t.exit_status);const sbg=(t.pnl>=0||/target/i.test(t.exit_status||''))?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const badge=B(t.trade_mode==='live'?'LIVE':t.trade_mode==='paper'?'PAPER':'BT', t.trade_mode==='live'?'sell':'buy');const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td>${badge}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<p class="text-muted p-3">No trades yet</p>';}
+        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){let h='<table><tr><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Badge</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=exitStatusLabel(t.exit_status);const sbg=(t.pnl>=0||/target/i.test(t.exit_status||''))?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const badge=B(t.trade_mode==='live'?'LIVE':t.trade_mode==='paper'?'PAPER':'BT', t.trade_mode==='live'?'sell':'buy');const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td>${badge}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<div class="text-center p-4"><i class="bi bi-journal-text" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No trade history yet</p><small class="text-muted">Completed trades will be listed here</small></div>';}
         }catch(e){}
-        // Quantman Drawdown Days in stats
+        // Drawdown Days in stats
         try{ if(window._lastBacktestMetrics && window._lastBacktestMetrics.max_dd_duration!==undefined) document.getElementById('q-drawdown').textContent='Drawdown Days: '+(window._lastBacktestMetrics.max_dd_duration||0)+' | Trades in DD: '+(window._lastBacktestMetrics.max_trades_in_dd||0); }catch(e){}
     }
-    function applySlippage(){ const v=parseFloat(document.getElementById('q-slip').value)||0; localStorage.setItem('qSlip',v); alert('Quantman: Slippage '+v+'% will apply to next backtest & paper trades (Add Slippage to Results).'); }
-    async function combineResults(){ try{ const o=await A('/api/trades/open'); const c=await A('/api/trades/history'); const all=[...(o.positions||[]), ...(c.trades||[])]; let total=all.reduce((a,t)=>a+(t.pnl||0),0); let wins=all.filter(t=>t.pnl>0).length; const slip=localStorage.getItem('qSlip')||document.getElementById('q-slip').value||0.05; let adjTotal = total * (1 - parseFloat(slip)/100); alert('Quantman Combined Portfolio\nTotal Trades: '+all.length+'\nWins: '+wins+' ('+(all.length? (wins/all.length*100).toFixed(1):0)+'%)\nTotal P&L (raw): ₹'+total.toFixed(2)+'\nWith Slippage '+slip+'%: ₹'+adjTotal.toFixed(2)+'\n\nDrawdown Days & Order-Type Badge as per Quantman March 2025.'); }catch(e){alert(e.message)} }
+    function applySlippage(){ const v=parseFloat(document.getElementById('q-slip').value)||0; localStorage.setItem('qSlip',v); alert('strategy: Slippage '+v+'% will apply to next backtest & paper trades (Add Slippage to Results).'); }
+    async function combineResults(){ try{ const o=await A('/api/trades/open'); const c=await A('/api/trades/history'); const all=[...(o.positions||[]), ...(c.trades||[])]; let total=all.reduce((a,t)=>a+(t.pnl||0),0); let wins=all.filter(t=>t.pnl>0).length; const slip=localStorage.getItem('qSlip')||document.getElementById('q-slip').value||0.05; let adjTotal = total * (1 - parseFloat(slip)/100); alert('strategy Combined Portfolio\nTotal Trades: '+all.length+'\nWins: '+wins+' ('+(all.length? (wins/all.length*100).toFixed(1):0)+'%)\nTotal P&L (raw): ₹'+total.toFixed(2)+'\nWith Slippage '+slip+'%: ₹'+adjTotal.toFixed(2)+'\n\nDrawdown Days & Order-Type Badge as per strategy March 2025.'); }catch(e){alert(e.message)} }
     async function updateTP(id,v){await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,target:parseFloat(v)})});}
     async function updateSL(id,v){await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:parseFloat(v)})});}
     async function runSim(){alert('Simulation: Checking all open trades for SL/TP...');await loadTrades();}
 
-    // Quantman-style indicator builder: Add -> params -> candle interval -> field
+    // strategy-style indicator builder: Add -> params -> candle interval -> field
     const QUANT_IND_DEFS=[
         {id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',def:10},{key:'multiplier',label:'Multiplier',def:3}]},
         {id:'utbot',name:'UT Bot',params:[{key:'keyvalue',label:'Key Value',def:3},{key:'atrperiod',label:'ATR Period',def:10}]},
@@ -931,7 +945,7 @@ let _lastOpenTrdHTML = null;
     function addQuantIndicator(){const id=document.getElementById('q-ind-select').value;const def=QUANT_IND_DEFS.find(d=>d.id===id);if(!def)return;quantIndicators.push({id:def.id,name:def.name,params:def.params.map(p=>({key:p.key,label:p.label,val:p.def})),candle:'5',field:'equity',mode:'both'});renderQuantTable();}
     function removeQuantIndicator(i){quantIndicators.splice(i,1);renderQuantTable();}
     function renderQuantTable(){const autoDir=autoMode();const autoBadge=autoDir==='bullish'?'<span class="badge bg-success">Auto: Bullish</span>':autoDir==='bearish'?'<span class="badge bg-danger">Auto: Bearish</span>':'<span class="badge bg-secondary">Auto: Both</span>';try{const b=document.getElementById('autoDirBadge');if(b){b.textContent='Auto: '+(autoDir==='both'?'Both':autoDir.charAt(0).toUpperCase()+autoDir.slice(1));b.className='badge ms-2 '+(autoDir==='bullish'?'bg-success':autoDir==='bearish'?'bg-danger':'bg-secondary');}}catch(e){}const tb=document.querySelector('#q-ind-table tbody');if(!tb)return;tb.innerHTML=quantIndicators.map((q,i)=>{const pHtml=(q.params||[]).map((p,pi)=>`<label class="small text-muted me-1">${p.label}<input type="number" class="form-control form-control-sm d-inline-block ms-1" style="width:60px" value="${p.val}" step="any" onchange="quantIndicators[${i}].params[${pi}].val=this.value"></label>`).join(' ');const cOpts=QUANT_CANDLES.map(c=>`<option value="${c[0]}" ${q.candle===c[0]?'selected':''}>${c[1]}</option>`).join('');return `<tr><td class="fw-bold small">${q.name}</td><td>${pHtml||'<span class="text-muted small">auto</span>'}</td><td><select class="form-select form-select-sm" onchange="quantIndicators[${i}].candle=this.value">${cOpts}</select></td><td><select class="form-select form-select-sm" onchange="quantIndicators[${i}].field=this.value"><option value="equity" ${q.field==='equity'?'selected':''}>Equity</option><option value="future" ${q.field==='future'?'selected':''}>Future</option></select></td><td>${autoBadge}</td><td><button class="btn btn-sm btn-danger" onclick="removeQuantIndicator(${i})"><i class="bi bi-x"></i></button></td></tr>`;}).join('')||'<tr><td colspan="6" class="text-muted small">No indicators — Add one above (backtest uses default RSI+SuperTrend).</td></tr>';}
-    // Auto direction from Position: Buy CE / Sell PE = Bullish, Sell CE / Buy PE = Bearish (quantman style)
+    // Auto direction from Position: Buy CE / Sell PE = Bullish, Sell CE / Buy PE = Bearish (strategy style)
     function autoMode(){try{let txn='',opt='';if(typeof stratLegs!=='undefined'&&stratLegs.length){txn=(stratLegs[0].transaction||'').toLowerCase();opt=(stratLegs[0].option_type||'').toUpperCase();}else{const ro=(document.getElementById('r-order')||{}).value||'';if(ro==='AUTO'){return 'both';}const pp=ro.split('-');opt=pp[0]||'';txn=(pp[1]||'').toLowerCase();}if((txn==='buy'&&opt==='CE')||(txn==='sell'&&opt==='PE'))return 'bullish';return 'bearish';}catch(e){return 'both';}}
     setTimeout(()=>{try{renderQuantOptions();renderQuantTable();const sp=document.getElementById('s-position'),so=document.getElementById('s-opt');if(sp)sp.addEventListener('change',renderQuantTable);if(so)so.addEventListener('change',renderQuantTable);const ro=document.getElementById('r-order');if(ro)ro.addEventListener('change',renderQuantTable);const rs=document.getElementById('r-strike');if(rs)rs.addEventListener('change',renderQuantTable);}catch(e){}},500);
     function collectIndicators(){
@@ -976,7 +990,7 @@ let _lastOpenTrdHTML = null;
         if(rbtn)rbtn.innerHTML='<span class="spinner"></span> Running...';
         const body=_unifiedBody();
         if(!body){btn.innerHTML=orig;if(rbtn)rbtn.innerHTML=rorig;return;}
-        // Quantman-style auto-retry 3x with backoff for 429/Cloudflare (same as quickStrat)
+        // strategy-style auto-retry 3x with backoff for 429/Cloudflare (same as quickStrat)
         let r=null; let lastErr='';
         for(let a=0;a<3;a++){
             try{
@@ -1008,7 +1022,7 @@ let _lastOpenTrdHTML = null;
                 perSymH+='</tbody></table></div></div>';
             }
             document.getElementById('bt-metrics').innerHTML=perSymH+`
-<div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> Quantman 4 Key Metrics:</strong><span>Win Prob: <strong>${m.win_rate}%</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${m.expectancy}</strong> ${m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>'}</span><span class="ms-auto badge bg-info">Slippage ${(parseFloat(document.getElementById('s-slippage')?.value)||0.50)}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
+<div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> strategy 4 Key Metrics:</strong><span>Win Prob: <strong>${m.win_rate}%</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${m.expectancy}</strong> ${m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>'}</span><span class="ms-auto badge bg-info">Slippage ${(parseFloat(document.getElementById('s-slippage')?.value)||0.50)}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
 <div class="row g-2 mb-2">
 <div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Run Name</div><div class="value fw-bold" style="font-size:13px">${document.getElementById('s-name').value||'-'}</div></div></div>
@@ -1042,7 +1056,7 @@ let _lastOpenTrdHTML = null;
                 h+='</tbody></table>';
                 document.getElementById('bt-tl').innerHTML=h;
             }
-        }catch(e){btn.innerHTML=orig;if(typeof rbtn!=='undefined'&&rbtn)rbtn.innerHTML=rorig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+'</p>';}
+        }catch(e){btn.innerHTML=orig;if(typeof rbtn!=='undefined'&&rbtn)rbtn.innerHTML=rorig;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+' <button class="btn btn-sm btn-primary ms-2" onclick="runBacktest()">Retry</button></p>'; showToast('Backtest failed: '+e.message, 'danger');}
     }
     async function saveStrat(){
         const idx=(rSyms()[0]||'NIFTY');
@@ -1187,7 +1201,7 @@ let _lastOpenTrdHTML = null;
         try{quantIndicators=[{id:'rsi',name:'RSI',params:[{key:'period',label:'Period',val:14}],candle:'5',field:'equity',mode:'both'},{id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',val:10},{key:'multiplier',label:'Multiplier',val:3}],candle:'5',field:'equity',mode:'both'}];renderQuantTable();}catch(e){}
     }
 
-    async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3">No strategies yet. Create your first strategy!</p>';return;}let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const statusCls=s.status==='active'?'active':s.status==='draft'?'draft':'paused';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span class="badge badge-${statusCls}">${s.status}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px"><button class="btn btn-sm btn-success" onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})">Edit</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
+    async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3"><div class="text-center p-4"><i class="bi bi-lightbulb" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">No strategies yet</p><small class="text-muted">Create your first strategy to get started</small></div></p>';return;}let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const statusCls=s.status==='active'?'active':s.status==='draft'?'draft':'paused';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span class="badge badge-${statusCls}">${s.status}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px"><button class="btn btn-sm btn-success" onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})">Edit</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
 
     async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}const legs=Array.isArray(s.legs)?s.legs:[];if(!legs.length){alert('No legs in this strategy');return;}
         let live=null;try{live=await A('/api/chain/live/'+s.symbol);}catch(e){}
@@ -1442,7 +1456,7 @@ let _lastOpenTrdHTML = null;
     addCondition();
     loadDash();
     loadStrategySymbols();
-    // FIX: no bar-bar refresh — dashboard scanner/opportunities manual refresh only (like Quantman), avoid flicker + 429
+    // FIX: no bar-bar refresh — dashboard scanner/opportunities manual refresh only (like strategy), avoid flicker + 429
     // setInterval(loadDash,30000) removed — use manual Refresh buttons + WS ticks
     let _dashWS=null, _dashWSRetry=0;
     function connectDashWS(){
@@ -1476,7 +1490,7 @@ let _lastOpenTrdHTML = null;
     // Fallback HTTP refresh if WS not connected — 60s (not 30s), positions never disappear on Network error
     setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },60000);
     setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 10000);
-    // chain auto-refresh removed — manual Load only (Quantman: no flicker)
+    // chain auto-refresh removed — manual Load only (no flicker)
     // Auto-load saved robots on robot page visit
     document.querySelector('.nav button[onclick*=\"robot\"]')?.addEventListener('click', ()=> setTimeout(loadRobotSaved, 300));
 
@@ -1497,7 +1511,7 @@ let _lastOpenTrdHTML = null;
                     <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('${b.key}')"><i class="bi bi-wallet2"></i> Account</button>
                 </div>
             </div></div></div>`;
-        });document.getElementById('broker-cards').innerHTML=h;liveStatus();}catch(e){document.getElementById('broker-cards').innerHTML='<p class="text-muted">Error loading brokers</p>';}
+        });document.getElementById('broker-cards').innerHTML=h;liveStatus();}catch(e){ document.getElementById('broker-cards').innerHTML='<div class="alert alert-danger">Failed to load brokers: '+e.message+' <button class="btn btn-sm btn-outline-danger ms-2" onclick="loadBrokers()">Retry</button></div>'; showToast('Broker load failed: '+e.message, 'danger'); }
     }
 
     function showBrokerConfig(key){
@@ -1841,6 +1855,7 @@ def run(data):
         fyers:{app_id:'App ID',secret:'App Secret',access_token:'Access Token',refresh_token:'Refresh Token'},
         angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
     };
+    }
 
     </script>
 </body>
