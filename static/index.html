@@ -1273,6 +1273,7 @@ let _lastOpenTrdHTML = null;
         try{await P('/api/email-alerts/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});alert('Config saved!');}catch(e){alert('Error: '+e.message);}
     }
     (function(){document.getElementById('alert-url').value=location.origin+'/api/webhook/email';})();
+    function initWebhook(){ try{ loadAlerts(); }catch(e){} try{ loadAlertTrades(); }catch(e){} try{ loadRiskStatus(); }catch(e){} }
     // Robot: auto-fill dates
     (function(){const e=new Date(); const fmt=d=>d.toISOString().split('T')[0]; try{if(document.getElementById('r-start')){document.getElementById('r-start').value='2026-08-02'; document.getElementById('r-end').value=fmt(e);}}catch(e){}})();
     function updateRunSummary(){try{
@@ -1501,7 +1502,7 @@ let _lastOpenTrdHTML = null;
         try{const r=await A('/api/broker/list');brokerData=r.brokers||[];let h='';brokerData.forEach(b=>{
             const statusH=b.configured?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Configured</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>';
             h+=`<div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
-                <div style="margin-bottom:12px"><i class="bi ${b.icon}" style="font-size:36px" class="${b.color}"></i></div>
+                <div style="margin-bottom:12px"><i class="bi ${b.icon} ${b.color}" style="font-size:36px"></i></div>
                 <h6 class="fw-bold">${b.name}</h6><p class="text-muted small">${b.desc}</p>
                 <div style="margin-bottom:10px">${statusH}</div>
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
