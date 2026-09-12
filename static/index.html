@@ -1538,8 +1538,8 @@ let _lastOpenTrdHTML = null;
                 loadBrokers();return;
             }
             const r=await A('/api/broker/fyers-auth-url');
-            if(r.success&&r.url)window.location.href=r.url;else alert('Error: '+(r.error||'Configure Fyers first (App ID + Secret, Redirect URI Fyers app me register karo)'));
-        }catch(e){alert('OAuth error: '+e.message);}
+            if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; return;} else alert('Error: '+(r.error||'Configure Fyers first (App ID + Secret, Redirect URI Fyers app me register karo)'));
+        }catch(e){alert('OAuth error: '+e.message+'\nTry direct: https://api.fyers.in/api/v3/generate-authcode?client_id=W7AUTU5IUT-100&redirect_uri='+encodeURIComponent('https://ratrade.onrender.com/api/broker/fyers-callback')+'&response_type=code&state=ratrade_login');}
     }
     // Auto-capture Fyers auth_code if landing back with ?code= (redirect URI = site root)
     setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);if(q.get('code')||q.get('auth_code'))fyersOAuth();}catch(e){}},800);
