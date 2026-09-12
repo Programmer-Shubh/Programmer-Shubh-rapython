@@ -18,6 +18,8 @@ class Database:
     # SQLite until process restart (prevents %s/RealDictCursor crashes on
     # sqlite conns). Redeploy restarts the process and re-probes Postgres.
     _pg_failed = False
+    # Last Postgres error (password-free) for /api/db-status diagnostics.
+    _pg_last_error = ""
 
     @classmethod
     def set_path(cls, path):
@@ -105,9 +107,23 @@ class Database:
             return url
 
     def _mark_pg_failed(self, e):
-        print(f"Postgres connect failed, falling back to SQLite: {e}")
+        # Never store the URL itself (contains password) - message only.
+        msg = str(e)[:300]
+        print(f"Postgres connect failed, falling back to SQLite: {msg}")
         self._pg_failed = True
         Database._pg_failed = True
+        Database._pg_last_error = msg
+
+    def backend_status(self):
+        """Password-free DB diagnostics for /api/db-status."""
+        pg_configured = bool(os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or os.environ.get("SUPABASE_DB_URL"))
+        return {
+            "backend": "postgres" if self._is_postgres() else "sqlite",
+            "pg_configured": pg_configured,
+            "pg_failed": bool(getattr(self, "_pg_failed", False) or Database._pg_failed),
+            "pg_error": Database._pg_last_error or "",
+            "sqlite_path": self._path,
+        }
 
     def _conn(self):
         if self._is_postgres():
@@ -116,7 +132,9 @@ class Database:
                 fixed_url = self._fix_pg_url(self._pg_url)
                 self._pg_url = fixed_url
                 Database._pg_url = fixed_url
-                conn = psycopg2.connect(fixed_url)
+                # Fail fast (10s): without this a hanging Supabase stalls
+                # EVERY DB-backed API and all buttons look dead.
+                conn = psycopg2.connect(fixed_url, connect_timeout=10)
                 conn.autocommit = False
                 return conn
             except Exception as e:

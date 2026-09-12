@@ -88,6 +88,16 @@ async def healthz():
     return {"status": "ok"}
 
 
+@app.get("/api/db-status")
+def db_status():
+    # Password-free diagnostics: which backend is active, is Supabase
+    # configured, and the last Postgres error (if any).
+    try:
+        return Database.get_instance().backend_status()
+    except Exception as e:
+        return {"backend": "unknown", "error": str(e)[:200]}
+
+
 @app.get("/api/lot-size/{symbol}")
 def lot_size(symbol: str):
     from utils.helpers import get_lot_size
