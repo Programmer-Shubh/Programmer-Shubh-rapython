@@ -17,7 +17,7 @@ class FyersV3Error(Exception):
 class FyersV3:
     BASE_URL = "https://api.fyers.in"
     # OAuth 2.0 (v3, current): authcode -> validate-authcode (appIdHash).
-    AUTH_URL = "https://api.fyers.in/api/v3/generate-authcode"
+    AUTH_URL = "https://api-t1.fyers.in/api/v3/generate-authcode"
     TOKEN_URL = "https://api.fyers.in/api/v3/validate-authcode"
     REFRESH_URL = "https://api.fyers.in/api/v3/validate-refresh-token"
     MAX_RETRIES = 3
