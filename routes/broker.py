@@ -164,6 +164,8 @@ def _env_config(broker: str) -> dict:
     Naming: RATRADE_<BROKER>_<FIELD> e.g. RATRADE_DHAN_CLIENT_ID.
     Env values override DB values."""
     import os
+    # Forgiving aliases: common misspellings still work (e.g. REDIRECT_URL).
+    _ENV_ALIASES = {"redirect_uri": ["redirect_url"]}
     try:
         fields = (BROKER_DEFAULTS.get(broker, {}) or {}).get("fields", []) or []
     except Exception:
@@ -173,6 +175,13 @@ def _env_config(broker: str) -> dict:
         v = os.environ.get(f"RATRADE_{broker.upper()}_{f.upper()}", "")
         if v:
             out[f] = v.strip()
+    for canon, alts in _ENV_ALIASES.items():
+        if canon in fields and canon not in out:
+            for a in alts:
+                v = os.environ.get(f"RATRADE_{broker.upper()}_{a.upper()}", "")
+                if v:
+                    out[canon] = v.strip()
+                    break
     return out
 
 
