@@ -1498,8 +1498,18 @@ let _lastOpenTrdHTML = null;
     let currentBroker='';
     let brokerData=[];
 
-    async function loadBrokers(){
-        try{const r=await A('/api/broker/list');brokerData=r.brokers||[];let h='';brokerData.forEach(b=>{
+    // Fallback list (mirrors backend BROKER_DEFAULTS) so Connect/OAuth buttons
+    // ALWAYS render even if /api/broker/list is unreachable (server down/deploy).
+    const FALLBACK_BROKERS=[
+        {key:'shoonya',name:'Shoonya (Finvasia)',icon:'bi-lightning',color:'text-danger',desc:'User ID + Password + Vendor Code + API Key',fields:['uid','pwd','vc','apikey','secret_code','secret','actid'],configured:false,config:{}},
+        {key:'dhan',name:'Dhan',icon:'bi-bank',color:'text-primary',desc:'Client ID + Access Token + Refresh Token',fields:['client_id','access_token','refresh_token'],configured:false,config:{}},
+        {key:'fyers',name:'Fyers',icon:'bi-lightning-charge',color:'text-warning',desc:'App ID + Secret + OAuth Token',fields:['app_id','secret','access_token','refresh_token','redirect_uri'],configured:false,config:{}},
+        {key:'angel',name:'Angel One',icon:'bi-graph-up-arrow',color:'text-success',desc:'Client Code + Password + API Key',fields:['client_code','password','api_key','totp_secret'],configured:false,config:{}}
+    ];
+    function renderBrokerCards(list, offline){
+        let h='';
+        if(offline) h+='<div class="alert alert-warning w-100 mb-2">Server unreachable — showing brokers offline. Setup/Login will retry the connection. <button class="btn btn-sm btn-outline-warning ms-2" onclick="loadBrokers()">Retry</button></div>';
+        list.forEach(b=>{
             const statusH=b.configured?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Configured</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>';
             h+=`<div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
                 <div style="margin-bottom:12px"><i class="bi ${b.icon} ${b.color}" style="font-size:36px"></i></div>
@@ -1507,12 +1517,25 @@ let _lastOpenTrdHTML = null;
                 <div style="margin-bottom:10px">${statusH}</div>
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                     <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('${b.key}')"><i class="bi bi-gear"></i> Setup</button>
-                    ${b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> Login with Fyers</button>`:''}
-                    ${b.key!=='fyers'?`<button class="btn btn-sm btn-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-box-arrow-in-right"></i> Login with ${b.name}</button>`:''}
+                    <button class="btn btn-sm btn-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
+                    ${b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:''}
                     <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('${b.key}')"><i class="bi bi-wallet2"></i> Account</button>
                 </div>
             </div></div></div>`;
-        });document.getElementById('broker-cards').innerHTML=h;liveStatus();}catch(e){ document.getElementById('broker-cards').innerHTML='<div class="alert alert-danger">Failed to load brokers: '+e.message+' <button class="btn btn-sm btn-outline-danger ms-2" onclick="loadBrokers()">Retry</button></div>'; showToast('Broker load failed: '+e.message, 'danger'); }
+        });
+        document.getElementById('broker-cards').innerHTML=h;
+    }
+    async function loadBrokers(){
+        try{
+            const r=await A('/api/broker/list');
+            brokerData=(r.brokers&&r.brokers.length)?r.brokers:FALLBACK_BROKERS;
+            renderBrokerCards(brokerData, !(r.brokers&&r.brokers.length));
+            try{ liveStatus(); }catch(e2){}
+        }catch(e){
+            brokerData=FALLBACK_BROKERS;
+            renderBrokerCards(brokerData, true);
+            showToast('Broker server unreachable, offline buttons dikhaye: '+e.message, 'warning');
+        }
     }
 
     function showBrokerConfig(key){
