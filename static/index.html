@@ -1046,15 +1046,17 @@ let _lastOpenTrdHTML = null;
             const sub=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             if(sub && sub.job_id){
                 _usedAsync=true;
+                let _netFails=0;
                 for(let p=0;p<200;p++){
                     await new Promise(res=>setTimeout(res,3000));
                     _btSpin();
                     let st=null;
-                    try{ st=await A('/api/backtest/result/'+sub.job_id); }
-                    catch(pe){ lastErr=pe.message||''; continue; }
+                    try{ st=await A('/api/backtest/result/'+sub.job_id); _netFails=0; }
+                    catch(pe){ lastErr=pe.message||''; if(++_netFails>10){ lastErr='server se sampark toot gaya (10 fails) — dobara Run dabao'; break; } continue; }
                     if(!st) continue;
                     if(st.status==='done'){ r=st.result||null; lastErr=''; break; }
                     if(st.status==='error'){ lastErr=st.error||'worker failed'; break; }
+                    if(st.status==='unknown'){ lastErr='server restart ho gaya, job wipe — dobara Run Backtest dabao'; break; }
                 }
                 if(!r && !lastErr) lastErr='timeout (10 min) — chhota period/symbol try karo';
             }
