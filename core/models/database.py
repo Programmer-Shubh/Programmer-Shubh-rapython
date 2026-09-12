@@ -60,10 +60,26 @@ class Database:
 
     def _conn(self):
         if self._is_postgres():
-            # psycopg2 with RealDictCursor for dict-like rows
-            conn = psycopg2.connect(self._pg_url, sslmode="require" if "supabase" in self._pg_url or "render" in self._pg_url else "prefer")
-            conn.autocommit = False
-            return conn
+            try:
+                # Avoid duplicate sslmode if already in URL (causes "extra = in sslmode" error)
+                if "sslmode=" in self._pg_url:
+                    conn = psycopg2.connect(self._pg_url)
+                else:
+                    conn = psycopg2.connect(self._pg_url, sslmode="require" if "supabase" in self._pg_url or "render" in self._pg_url else "prefer")
+                conn.autocommit = False
+                return conn
+            except Exception as e:
+                # Fallback to SQLite so app stays up even if Postgres is unreachable
+                print(f"Postgres connect failed, falling back to SQLite: {e}")
+                import sqlite3
+                if not self._path:
+                    self._path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "ratrade.db")
+                    os.makedirs(os.path.dirname(self._path), exist_ok=True)
+                conn = sqlite3.connect(self._path)
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
+                return conn
         else:
             import sqlite3
             conn = sqlite3.connect(self._path)
