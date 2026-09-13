@@ -119,12 +119,28 @@ class Database:
         Database._pg_failed = True
         Database._pg_last_error = (f"host={host} " if host else "") + msg
 
+    def _pg_user(self):
+        """Effective Postgres username (NOT secret - also visible in libpq
+        errors). Used to detect stale env: if this differs from dashboard,
+        the running process predates the env save."""
+        try:
+            u = self._pg_url or ""
+            u = u[u.index("://") + 3:] if "://" in u else u
+            creds = u.split("@")[0] if "@" in u else ""
+            if ":" in creds:
+                return creds.split(":")[0]
+            return creds or ""
+        except Exception:
+            return ""
+
     def backend_status(self):
         """Password-free DB diagnostics for /api/db-status."""
         pg_configured = bool(os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or os.environ.get("SUPABASE_DB_URL"))
         return {
             "backend": "postgres" if self._is_postgres() else "sqlite",
             "pg_configured": pg_configured,
+            "pg_user": self._pg_user(),
+            "pg_host": self._redacted_host(),
             "pg_failed": bool(getattr(self, "_pg_failed", False) or Database._pg_failed),
             "pg_error": Database._pg_last_error or "",
             "sqlite_path": self._path,
