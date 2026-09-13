@@ -170,17 +170,25 @@ def _env_config(broker: str) -> dict:
         fields = (BROKER_DEFAULTS.get(broker, {}) or {}).get("fields", []) or []
     except Exception:
         fields = []
+    # Normalized lookup: strip whitespace + uppercase, so keys with
+    # accidental spaces/case issues (e.g. pasted from chat) still match.
+    _norm = {}
+    for k, v in os.environ.items():
+        try:
+            _norm[str(k).strip().upper()] = v
+        except Exception:
+            pass
     out = {}
     for f in fields:
-        v = os.environ.get(f"RATRADE_{broker.upper()}_{f.upper()}", "")
-        if v:
-            out[f] = v.strip()
+        v = _norm.get(f"RATRADE_{broker.upper()}_{f.upper()}", "")
+        if v and str(v).strip():
+            out[f] = str(v).strip()
     for canon, alts in _ENV_ALIASES.items():
         if canon in fields and canon not in out:
             for a in alts:
-                v = os.environ.get(f"RATRADE_{broker.upper()}_{a.upper()}", "")
-                if v:
-                    out[canon] = v.strip()
+                v = _norm.get(f"RATRADE_{broker.upper()}_{a.upper()}", "")
+                if v and str(v).strip():
+                    out[canon] = str(v).strip()
                     break
     return out
 

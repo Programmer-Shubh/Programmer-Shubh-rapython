@@ -136,6 +136,16 @@ class Database:
     def backend_status(self):
         """Password-free DB diagnostics for /api/db-status."""
         pg_configured = bool(os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or os.environ.get("SUPABASE_DB_URL"))
+        # Broker env key NAMES only (never values) + empty flags, so a
+        # misspelled/empty key is visible instantly instead of guessing.
+        seen_keys = []
+        try:
+            for k, v in os.environ.items():
+                ku = str(k).strip().upper()
+                if ku.startswith("RATRADE_"):
+                    seen_keys.append(str(k) if str(v).strip() else (str(k) + " (EMPTY)"))
+        except Exception:
+            pass
         return {
             "backend": "postgres" if self._is_postgres() else "sqlite",
             "pg_configured": pg_configured,
@@ -144,6 +154,7 @@ class Database:
             "pg_failed": bool(getattr(self, "_pg_failed", False) or Database._pg_failed),
             "pg_error": Database._pg_last_error or "",
             "sqlite_path": self._path,
+            "env_keys_seen": sorted(seen_keys),
         }
 
     def _conn(self):
