@@ -36,3 +36,20 @@ binary_search.js
 
 # windows helper
 Start_RaTrade.bat
+
+# removed stale artifacts - never track again
+/db.sqlite3
+ngrok.zip
+click
+audit_site.py
+ai/
+.aionrs/
+opencode/
+test_webhook.py
+data/dhan_master_*.json
+static/ratrade-extension.zip
+static/chain_comparison.html
+static/tutorial.html
+static/download.png
+Dockerfile
+.koyeb.yaml

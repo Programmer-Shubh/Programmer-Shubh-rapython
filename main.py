@@ -66,7 +66,6 @@ app.include_router(strategies.router, prefix="/api/strategies", tags=["Strategie
 app.include_router(custom_code.router, prefix="/api/custom-code", tags=["Custom Code"])
 app.include_router(keepalive.router, prefix="/api/keepalive", tags=["Keep-Alive"])
 app.include_router(tvchart.router, prefix="/api/tvchart", tags=["TV Chart"])
-app.include_router(tvchart.router, prefix="/api/tvchart", tags=["TV Chart"])
 
 
 @app.get("/")
