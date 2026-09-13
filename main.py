@@ -87,6 +87,19 @@ async def healthz():
     return {"status": "ok"}
 
 
+@app.get("/api/version")
+def version():
+    # Proves EXACTLY which commit is live (ends "purana deploy" confusion
+    # forever). Render auto-sets RENDER_GIT_COMMIT on every deploy.
+    import os as _os
+    _sha = _os.environ.get("RENDER_GIT_COMMIT") or "local-dev"
+    return {
+        "commit": _sha[:12],
+        "service": _os.environ.get("RENDER_SERVICE_NAME", ""),
+        "branch": _os.environ.get("RENDER_GIT_BRANCH", ""),
+    }
+
+
 @app.get("/api/db-status")
 def db_status():
     # Password-free diagnostics: which backend is active, is Supabase
