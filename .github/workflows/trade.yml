@@ -1,10 +1,12 @@
 name: Market Hours Auto Trade
 
 on:
-  schedule:
-    # Every 5 minutes, Mon-Fri, during IST market hours (9:15 AM - 3:30 PM IST = 3:45 - 10:00 UTC)
-    # GitHub Actions minimum cron interval is 5 minutes. Cron runs in UTC.
-    - cron: '*/5 3-10 * * 1-5'
+  # Schedule PAUSED to stop Supabase bandwidth bleed (5GB Hobby quota over).
+  # Auto-trading now runs ONLY manually via "Run workflow" button.
+  # To re-enable: uncomment the cron block below.
+  #schedule:
+  #  # Every 5 minutes, Mon-Fri, during IST market hours (9:15 AM - 3:30 PM IST = 3:45 - 10:00 UTC)
+  #  - cron: '*/5 3-10 * * 1-5'
   workflow_dispatch:
 
 concurrency:
