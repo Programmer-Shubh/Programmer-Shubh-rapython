@@ -1,7 +1,11 @@
 db_schema:
   table_1:
     client: none
-    columns: []
+    columns:
+    - admin_ui: {order: 0, width: 200}
+      client_hidden: false
+      name: DATABASE_URL
+      type: simpleObject
     indexes: []
     server: full
     title: Table 1
@@ -11,7 +15,14 @@ db_schema:
     indexes: []
     server: full
     title: Table 2
+  table_3:
+    client: none
+    columns: []
+    indexes: []
+    server: full
+    title: Table 3
 metadata: {title: trading}
+name: trading
 native_deps:
   head_html: |2
 
