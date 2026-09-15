@@ -1,9 +1,24 @@
+db_schema:
+  table_1:
+    client: none
+    columns: []
+    indexes: []
+    server: full
+    title: Table 1
+  table_2:
+    client: none
+    columns: []
+    indexes: []
+    server: full
+    title: Table 2
+metadata: {title: trading}
 native_deps:
   head_html: |2
 
     <style>
       .anvil-panel-section-container { padding: 0 15px; }
     </style>
+package_name: ratrade
 runtime_options:
   client_version: '2'
   server_spec: {}
