@@ -28,3 +28,4 @@ services:
 - client_config: {enable_v2: true}
   server_config: {}
   source: /runtime/services/tables.yml
+startup_form: Form1
