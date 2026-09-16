@@ -300,15 +300,18 @@ async def fyers_callback(request: Request, code: str = "", state: str = ""):
         qp = dict(request.query_params) if request is not None else {}
     except Exception:
         qp = {}
-    # Fyers v3 sends auth_code; accept code too. Also surface s/error flags.
-    auth_code = (code or "").strip() or (qp.get("auth_code") or "").strip()
-    err_flag = (qp.get("error") or qp.get("s") or "").strip()
+    # Fyers v3 sends auth_code; accept code/auth_code/state
+    auth_code = (code or "").strip() or (qp.get("auth_code") or "").strip() or (qp.get("code") or "").strip()
+    err_flag = (qp.get("error") or qp.get("s") or qp.get("message") or "").strip()
+    # also capture state for debugging
+    dbg_qs = str(dict(qp))[:500] if qp else "empty"
     config = _get_config("fyers")
     if not auth_code:
         detail = ""
         if err_flag:
             detail = f"<p>Fyers said: <code>{err_flag}</code> (access denied or app not approved?)</p>"
-        return HTMLResponse("<h3>Fyers login failed: no auth code received.</h3>" + detail + "<p>Go back and click 'OAuth Login' again. Make sure the Redirect URI in your Fyers app settings EXACTLY matches: <code>/api/broker/fyers-callback</code> on your site (no extra / at end).</p>", status_code=400)
+        detail += f"<p style='font-size:11px;color:#6c757d'>Debug: received params {dbg_qs}</p>"
+        return HTMLResponse("<h3>Fyers login failed: no auth code received.</h3>" + detail + "<p>Go back and click 'OAuth Login' again. Make sure the Redirect URI in your Fyers app settings EXACTLY matches: <code>https://ratrade-tjzd.onrender.com/api/broker/fyers-callback</code> (no extra / at end). If you see 'blocked' on fyers.in, try mobile hotspot.</p>", status_code=400)
     if not config:
         return HTMLResponse("<h3>Fyers not configured.</h3><p>Set App ID + Secret in RaTrade Brokers tab first.</p>", status_code=400)
     ruri_cb = (config.get("redirect_uri") or "").strip() or _default_redirect()
