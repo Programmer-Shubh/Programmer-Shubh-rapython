@@ -1605,7 +1605,8 @@ let _lastOpenTrdHTML = null;
         let h='';
         if(offline) h+='<div class="alert alert-warning w-100 mb-2">Server unreachable — showing brokers offline. Setup/Login will retry the connection. <button class="btn btn-sm btn-outline-warning ms-2" onclick="loadBrokers()">Retry</button></div>';
         list.forEach(b=>{
-            const statusH=b.configured?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Configured</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>';
+            const isConnected = b.configured && b.config && (b.config.access_token || b.config.client_id || b.config.app_id);
+            const statusH=isConnected?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Connected</span>':(b.configured?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Configured</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>');
             h+=`<div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
                 <div style="margin-bottom:12px"><i class="bi ${b.icon} ${b.color}" style="font-size:36px"></i></div>
                 <h6 class="fw-bold">${b.name}</h6><p class="text-muted small">${b.desc}</p>
@@ -1621,11 +1622,11 @@ let _lastOpenTrdHTML = null;
         document.getElementById('broker-cards').innerHTML=h;
     }
     async function loadBrokers(){
-        // Instant optimistic render: buttons NEVER blank, even if server is
-        // spinning up (free-tier cold start) and fetch hangs. fetch has no
-        // built-in timeout, so use AbortController (15s) + live upgrade.
-        brokerData=FALLBACK_BROKERS.slice();
-        renderBrokerCards(brokerData, true);
+        const isFirstLoad = !brokerData || brokerData.length===0;
+        if(isFirstLoad){
+            brokerData=FALLBACK_BROKERS.slice();
+            renderBrokerCards(brokerData, true);
+        }
         try{
             const ctrl=new AbortController();
             const t=setTimeout(()=>ctrl.abort(),15000);
@@ -1635,11 +1636,18 @@ let _lastOpenTrdHTML = null;
                 if(r.brokers&&r.brokers.length){
                     brokerData=r.brokers;
                     renderBrokerCards(brokerData, false);
+                } else if(!isFirstLoad){
+                    renderBrokerCards(brokerData, false);
                 }
             }finally{ clearTimeout(t); }
             try{ liveStatus(); }catch(e2){}
         }catch(e){
-            showToast('Broker server slow/unreachable, offline buttons dikhaye: '+(e.name==='AbortError'?'timeout 15s':e.message), 'warning');
+            if(isFirstLoad){
+                showToast('Broker server slow/unreachable, offline buttons dikhaye: '+(e.name==='AbortError'?'timeout 15s':e.message), 'warning');
+            } else {
+                // keep showing current connected state, no flicker to offline
+                renderBrokerCards(brokerData, false);
+            }
         }
     }
 
@@ -1667,22 +1675,35 @@ let _lastOpenTrdHTML = null;
         const config={};(b.fields||[]).forEach(f=>{const el=document.getElementById('cfg_'+f);config[f]=el?el.value:'';});
         try{
             const r=await P('/api/broker/save-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker:currentBroker,config})});
-            if(r.success){closeBrokerModal();loadBrokers();connectSingleBroker(currentBroker);}else{alert('Error: '+r.error);}
+            if(r.success){
+                closeBrokerModal();
+                // update local copy optimistically so Connect sees new creds instantly
+                const idx=(brokerData||[]).findIndex(x=>x.key===currentBroker);
+                if(idx>=0){ brokerData[idx].config={...config}; brokerData[idx].configured=true; renderBrokerCards(brokerData,false); }
+                await loadBrokers();
+                await connectSingleBroker(currentBroker);
+            }else{alert('Error: '+r.error);}
         }catch(e){alert('Save failed (server unreachable?): '+e.message);}
     }
 
     function closeBrokerModal(){document.getElementById('broker-config-modal').classList.add('hidden');}
 
     async function connectSingleBroker(key){
-        // No saved credentials? Open Setup first (like before) instead of
-        // erroring out.
         const b=brokerByKey(key);
         const hasCreds=b&&b.config&&Object.values(b.config).some(v=>v);
         if(!hasCreds){ showBrokerConfig(key); return; }
         try{
             const r=await P('/api/broker/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker:key})});
-            if(r.success)alert(key+' connected!');else alert('Error: '+r.error);loadBrokers();
-        }catch(e){alert('Connect failed (server unreachable?): '+e.message);}
+            if(r.success){
+                // keep Connected badge without flicker to offline
+                const idx2=(brokerData||[]).findIndex(x=>x.key===key);
+                if(idx2>=0){ brokerData[idx2].configured=true; if(!brokerData[idx2].config) brokerData[idx2].config={}; brokerData[idx2].config.access_token = brokerData[idx2].config.access_token || 'connected'; renderBrokerCards(brokerData,false); }
+                showToast(key+' connected! — '+ (r.message||'token verified'), 'success');
+            } else {
+                showToast('Error: '+r.error, 'danger');
+            }
+            await loadBrokers();
+        }catch(e){showToast('Connect failed (server unreachable?): '+e.message, 'danger'); await loadBrokers();}
     }
 
     async function fyersOAuth(){
