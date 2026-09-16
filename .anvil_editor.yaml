@@ -1,8 +1,10 @@
 unique_ids:
-  assets: {}
+  assets:
+    Folder1/.gitkeep: '178952587797685334978156.37059'
   forms:
     Form1: '1789468993980814986906326.8481'
   modules: {}
-  scripts: {}
+  scripts:
+    Script: '1789525844404108054215391.56258'
   server_modules:
     ratrade_server: '1789470981248.39346510556817893'
