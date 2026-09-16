@@ -53,25 +53,43 @@ class FyersV3:
         return f"{self.AUTH_URL}?{query}"
 
     async def generate_token(self, auth_code: str) -> dict:
+        import urllib.parse as _up
+        auth_code = _up.unquote((auth_code or "").strip())
         payload = {
             "grant_type": "authorization_code",
             "appIdHash": self.app_id_hash(),
             "code": auth_code,
         }
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(self.TOKEN_URL, json=payload)
-            body = resp.json()
-            if resp.status_code == 200 and body.get("access_token"):
-                self.access_token = body["access_token"]
-                self.refresh_token = body.get("refresh_token")
-                self._token_expiry = time.time() + body.get("expires_in", 86400)
-                logger.info("Fyers token generated successfully (v3 OAuth)")
-                return {"success": True, "data": body, "error": ""}
-            return {"success": False, "data": body, "error": body.get("message", "Token generation failed (check App ID, Secret, Redirect URI match Fyers app settings)")}
-        except httpx.RequestError as exc:
-            logger.error("Fyers token generation error: %s", exc)
-            return {"success": False, "data": {}, "error": str(exc)}
+        # Try primary (api-t1) then fallback (api) - Fyers docs mix hosts
+        urls = [self.TOKEN_URL, "https://api.fyers.in/api/v3/validate-authcode", "https://api-t1.fyers.in/api/v3/validate-authcode"]
+        last_body = {}
+        for url in urls:
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+                try:
+                    body = resp.json()
+                except Exception:
+                    body = {"raw": (resp.text or "")[:500]}
+                last_body = body
+                if resp.status_code == 200 and body.get("access_token"):
+                    self.access_token = body["access_token"]
+                    self.refresh_token = body.get("refresh_token")
+                    self._token_expiry = time.time() + body.get("expires_in", 86400)
+                    logger.info("Fyers token generated successfully (v3 OAuth) via %s", url)
+                    return {"success": True, "data": body, "error": ""}
+                # invalid auth code is not retryable - but try next host if 400 with method error
+                msg = str(body.get("message") or body.get("error") or body)[:300]
+                if "method" in msg.lower() and url != urls[-1]:
+                    continue
+                if body.get("access_token"):
+                    return {"success": True, "data": body, "error": ""}
+                return {"success": False, "data": body, "error": msg or "Token generation failed (check App ID, Secret, Redirect URI match Fyers app settings). Code single-use, expires in 60s - start fresh OAuth."}
+            except httpx.RequestError as exc:
+                logger.error("Fyers token generation error %s: %s", url, exc)
+                last_body = {"error": str(exc)}
+                continue
+        return {"success": False, "data": last_body, "error": str(last_body.get("message") or last_body.get("error") or last_body)[:300] or "Token generation failed"}
 
     async def refresh_access_token(self, pin: str = "") -> dict:
         if not self.refresh_token:
