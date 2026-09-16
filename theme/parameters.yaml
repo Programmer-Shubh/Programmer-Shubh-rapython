@@ -1,1 +1,5 @@
-{}
+color_scheme:
+  colors:
+  - {color: '#2563eb', name: Primary}
+  - {color: '#f4f7fb', name: Surface}
+  - {color: '#172033', name: Ink}

@@ -1,13 +1,62 @@
----
-custom_component: true
-properties:
-- default_binding_prop: true
-  default_value: ''
-  important: true
-  name: prop
-  type: string
----
-<center style="font-style:italic; color:#888; margin: 3em;">
-  (Edit this HTML in the HTML pane)
-</center>
-<anvil-dropzone name="default"></anvil-dropzone>
+<anvil-form container="ColumnPanel" prop:role="rt-shell">
+  <anvil-component type="FlowPanel" name="topbar" prop:role="rt-topbar">
+    <anvil-component type="Label" name="brand_label" prop:text="RaTrade" prop:role="rt-brand"></anvil-component>
+    <anvil-component type="Label" name="page_title" prop:text="Market dashboard" prop:role="rt-page-title"></anvil-component>
+    <anvil-component type="Label" name="status_label" prop:text="Connecting..." prop:role="rt-status"></anvil-component>
+  </anvil-component>
+  <anvil-component type="FlowPanel" name="nav_panel" prop:role="rt-nav">
+    <anvil-component type="Button" name="dashboard_button" prop:text="Dashboard" prop:role="rt-nav-button"></anvil-component>
+    <anvil-component type="Button" name="trading_button" prop:text="Trading Center" prop:role="rt-nav-button"></anvil-component>
+    <anvil-component type="Button" name="chain_button" prop:text="Option Chain" prop:role="rt-nav-button"></anvil-component>
+    <anvil-component type="Button" name="strategy_button" prop:text="Strategy Lab" prop:role="rt-nav-button"></anvil-component>
+  </anvil-component>
+  <anvil-component type="Label" name="disclaimer_label" prop:text="Paper-only conversion of Programmer-Shubh/Programmer-Shubh-rapython. Market values are simulated; this is not investment advice." prop:role="rt-disclaimer"></anvil-component>
+
+  <anvil-component type="ColumnPanel" name="dashboard_panel" prop:role="rt-page">
+    <anvil-component type="FlowPanel" name="dashboard_toolbar" prop:role="rt-toolbar">
+      <anvil-component type="Label" name="dashboard_stats" prop:text="Loading dashboard..." prop:role="rt-summary"></anvil-component>
+      <anvil-component type="Button" name="refresh_button" prop:text="Refresh" prop:role="rt-primary-button"></anvil-component>
+    </anvil-component>
+    <anvil-component type="RepeatingPanel" name="market_cards" prop:item_template="Form1.MarketCard" prop:role="rt-market-grid"></anvil-component>
+    <anvil-component type="Label" name="feed_status" prop:text="" prop:role="rt-muted"></anvil-component>
+    <anvil-component type="Label" name="movers_heading" prop:text="Top opportunities" prop:role="rt-section-heading"></anvil-component>
+    <anvil-component type="RepeatingPanel" name="mover_rows" prop:item_template="Form1.MoverRow" prop:role="rt-table"></anvil-component>
+    <anvil-component type="Label" name="positions_heading" prop:text="Open paper positions" prop:role="rt-section-heading"></anvil-component>
+    <anvil-component type="RepeatingPanel" name="position_rows" prop:item_template="Form1.TradeRow" prop:role="rt-table"></anvil-component>
+  </anvil-component>
+
+  <anvil-component type="ColumnPanel" name="trading_panel" prop:role="rt-page" prop:visible="false">
+    <anvil-component type="Label" name="trade_mode_label" prop:text="Paper only" prop:role="rt-mode-badge"></anvil-component>
+    <anvil-component type="Label" name="trade_heading" prop:text="Record a paper trade" prop:role="rt-section-heading"></anvil-component>
+    <anvil-component type="DropDown" name="trade_symbol" prop:items='["NIFTY", "BANKNIFTY", "FINNIFTY"]' prop:selected_value="NIFTY" prop:placeholder="Symbol"></anvil-component>
+    <anvil-component type="DropDown" name="trade_option" prop:items='["CE", "PE"]' prop:selected_value="CE" prop:placeholder="Option type"></anvil-component>
+    <anvil-component type="DropDown" name="trade_side" prop:items='["BUY", "SELL"]' prop:selected_value="BUY" prop:placeholder="Side"></anvil-component>
+    <anvil-component type="TextBox" name="trade_strike" prop:text="24900" prop:placeholder="Strike"></anvil-component>
+    <anvil-component type="TextBox" name="trade_price" prop:text="182.50" prop:placeholder="Entry premium"></anvil-component>
+    <anvil-component type="TextBox" name="trade_quantity" prop:text="1" prop:placeholder="Quantity"></anvil-component>
+    <anvil-component type="Button" name="place_trade_button" prop:text="Record paper trade" prop:role="rt-primary-button"></anvil-component>
+    <anvil-component type="Label" name="trade_result" prop:text="" prop:role="rt-result"></anvil-component>
+    <anvil-component type="Label" name="trade_positions_heading" prop:text="Current positions" prop:role="rt-section-heading"></anvil-component>
+    <anvil-component type="RepeatingPanel" name="trade_rows" prop:item_template="Form1.TradeRow" prop:role="rt-table"></anvil-component>
+  </anvil-component>
+
+  <anvil-component type="ColumnPanel" name="chain_panel" prop:role="rt-page" prop:visible="false">
+    <anvil-component type="DropDown" name="chain_symbol" prop:items='["NIFTY", "BANKNIFTY", "FINNIFTY"]' prop:selected_value="NIFTY"></anvil-component>
+    <anvil-component type="Button" name="chain_refresh_button" prop:text="Load chain" prop:role="rt-primary-button"></anvil-component>
+    <anvil-component type="Label" name="chain_meta" prop:text="Choose a symbol" prop:role="rt-summary"></anvil-component>
+    <anvil-component type="RepeatingPanel" name="chain_rows" prop:item_template="Form1.ChainRow" prop:role="rt-chain-table"></anvil-component>
+  </anvil-component>
+
+  <anvil-component type="ColumnPanel" name="strategy_panel" prop:role="rt-page" prop:visible="false">
+    <anvil-component type="Label" name="strategy_heading" prop:text="Run a deterministic paper backtest" prop:role="rt-section-heading"></anvil-component>
+    <anvil-component type="DropDown" name="strategy_symbol" prop:items='["NIFTY", "BANKNIFTY", "FINNIFTY"]' prop:selected_value="NIFTY"></anvil-component>
+    <anvil-component type="TextBox" name="start_date" prop:text="2026-08-01" prop:placeholder="Start date YYYY-MM-DD"></anvil-component>
+    <anvil-component type="TextBox" name="end_date" prop:text="2026-08-20" prop:placeholder="End date YYYY-MM-DD"></anvil-component>
+    <anvil-component type="TextBox" name="lots" prop:text="1" prop:placeholder="Lots"></anvil-component>
+    <anvil-component type="TextBox" name="stop_loss" prop:text="500" prop:placeholder="Stop loss"></anvil-component>
+    <anvil-component type="TextBox" name="take_profit" prop:text="1000" prop:placeholder="Take profit"></anvil-component>
+    <anvil-component type="Button" name="run_backtest_button" prop:text="Run backtest" prop:role="rt-primary-button"></anvil-component>
+    <anvil-component type="Label" name="backtest_metrics" prop:text="" prop:role="rt-summary"></anvil-component>
+    <anvil-component type="RepeatingPanel" name="backtest_trades" prop:item_template="Form1.TradeRow" prop:role="rt-table"></anvil-component>
+  </anvil-component>
+</anvil-form>

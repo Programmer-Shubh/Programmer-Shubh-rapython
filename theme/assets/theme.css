@@ -1,0 +1,234 @@
+:root {
+  --rt-primary: %color:Primary%;
+  --rt-surface: %color:Surface%;
+  --rt-ink: %color:Ink%;
+  --rt-muted: #64748b;
+  --rt-border: #dbe3ef;
+  --rt-positive: #15803d;
+  --rt-negative: #b42318;
+}
+
+body {
+  background: var(--rt-surface);
+  color: var(--rt-ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+.anvil-role-rt-shell {
+  background: var(--rt-surface);
+  min-height: 100vh;
+  padding-bottom: 28px;
+}
+
+.anvil-role-rt-topbar {
+  align-items: center;
+  background: linear-gradient(135deg, var(--rt-primary), #7c3aed);
+  color: white;
+  display: flex;
+  gap: 18px;
+  padding: 18px 24px;
+}
+
+.anvil-role-rt-brand {
+  color: white;
+  font-size: 25px;
+  font-weight: 800;
+}
+
+.anvil-role-rt-page-title {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 16px;
+}
+
+.anvil-role-rt-status {
+  color: #d1fae5;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.anvil-role-rt-nav {
+  background: white;
+  border-bottom: 1px solid var(--rt-border);
+  display: flex;
+  gap: 8px;
+  padding: 9px 18px;
+}
+
+.anvil-role-rt-nav-button > button,
+.anvil-role-rt-primary-button > button {
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.anvil-role-rt-nav-button > button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--rt-muted);
+}
+
+.anvil-role-rt-nav-button > button:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: var(--rt-primary);
+}
+
+.anvil-role-rt-disclaimer {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  color: #9a3412;
+  display: block;
+  margin: 16px 24px 8px;
+  padding: 10px 14px;
+}
+
+.anvil-role-rt-page {
+  padding: 8px 24px 24px;
+}
+
+.anvil-role-rt-toolbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.anvil-role-rt-primary-button > button {
+  background: var(--rt-primary);
+  border-color: var(--rt-primary);
+  color: white;
+}
+
+.anvil-role-rt-summary {
+  color: var(--rt-ink);
+  font-size: 15px;
+  font-weight: 700;
+  margin: 8px 0;
+}
+
+.anvil-role-rt-muted {
+  color: var(--rt-muted);
+  display: block;
+  font-size: 12px;
+  margin: 8px 0 16px;
+}
+
+.anvil-role-rt-market-grid > div {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-bottom: 16px;
+}
+
+.anvil-role-rt-market-card {
+  background: white;
+  border: 1px solid var(--rt-border);
+  border-radius: 12px;
+  box-shadow: 0 5px 16px rgba(37, 99, 235, 0.06);
+  padding: 14px;
+}
+
+.anvil-role-rt-symbol,
+.anvil-role-rt-cell-symbol {
+  font-weight: 800;
+}
+
+.anvil-role-rt-price {
+  color: var(--rt-ink);
+  display: block;
+  font-size: 19px;
+  font-weight: 800;
+  margin: 6px 0;
+}
+
+.anvil-role-rt-change,
+.anvil-role-rt-pnl {
+  color: var(--rt-positive);
+  font-weight: 700;
+}
+
+.anvil-role-rt-section-heading {
+  color: var(--rt-primary);
+  display: block;
+  font-size: 16px;
+  font-weight: 800;
+  margin: 18px 0 8px;
+}
+
+.anvil-role-rt-table {
+  border: 1px solid var(--rt-border);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.anvil-role-rt-table > div {
+  min-width: 520px;
+}
+
+.anvil-role-rt-table-row {
+  align-items: center;
+  border-bottom: 1px solid #eef2f7;
+  display: flex;
+  gap: 12px;
+  min-height: 38px;
+  padding: 6px 12px;
+}
+
+.anvil-role-rt-table-row:last-child {
+  border-bottom: 0;
+}
+
+.anvil-role-rt-cell,
+.anvil-role-rt-cell-symbol {
+  flex: 1 1 120px;
+  font-size: 13px;
+}
+
+.anvil-role-rt-cell-symbol {
+  flex-basis: 140px;
+}
+
+.anvil-role-rt-mode-badge {
+  background: #dcfce7;
+  border-radius: 999px;
+  color: #166534;
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 10px;
+}
+
+.anvil-role-rt-result {
+  color: var(--rt-positive);
+  display: block;
+  font-weight: 700;
+  margin: 10px 0;
+}
+
+.anvil-role-rt-page .anvil-text-box,
+.anvil-role-rt-page .anvil-dropdown {
+  margin: 4px 0;
+  max-width: 420px;
+}
+
+@media (max-width: 700px) {
+  .anvil-role-rt-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .anvil-role-rt-status {
+    margin-left: 0;
+  }
+
+  .anvil-role-rt-page {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .anvil-role-rt-disclaimer {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+}

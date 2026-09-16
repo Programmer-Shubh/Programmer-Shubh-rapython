@@ -158,7 +158,7 @@ def get_option_chain(symbol="NIFTY"):
 
 def _parse_date(value, field_name):
     try:
-        return date.fromisoformat(str(value))
+        return date.fromisoformat(str(value)), None
     except (TypeError, ValueError):
         return None, "{} must use YYYY-MM-DD format".format(field_name)
 
@@ -182,9 +182,13 @@ def run_backtest(config):
     start, error = _parse_date(config.get("start_date", "2026-08-01"), "Start date")
     if error:
         return {"ok": False, "message": error}
+    if start is None:
+        return {"ok": False, "message": "Start date is required"}
     end, error = _parse_date(config.get("end_date", "2026-08-20"), "End date")
     if error:
         return {"ok": False, "message": error}
+    if end is None:
+        return {"ok": False, "message": "End date is required"}
     if end < start:
         return {"ok": False, "message": "End date must be on or after start date"}
     if (end - start).days > 366:
@@ -193,12 +197,18 @@ def run_backtest(config):
     lots, error = _number(config, "lots", 1, 1)
     if error:
         return {"ok": False, "message": error}
+    if lots is None:
+        return {"ok": False, "message": "Lots is required"}
     stop_loss, error = _number(config, "stop_loss", 500, 0)
     if error:
         return {"ok": False, "message": error}
+    if stop_loss is None:
+        return {"ok": False, "message": "Stop loss is required"}
     take_profit, error = _number(config, "take_profit", 1000, 0)
     if error:
         return {"ok": False, "message": error}
+    if take_profit is None:
+        return {"ok": False, "message": "Take profit is required"}
 
     lot_size = LOT_SIZES.get(symbol, 1)
     rng = _seeded_rng("backtest", symbol, start, end, lots, stop_loss, take_profit)
@@ -253,3 +263,82 @@ def _max_drawdown(pnls):
         peak = max(peak, equity)
         drawdown = max(drawdown, peak - equity)
     return drawdown
+
+
+_paper_positions = []
+
+
+@anvil.server.callable(name="get_trade_book")
+def get_trade_book():
+    """Return the paper-trading view used by the Anvil Trading Center.
+
+    The upstream project persists these records in SQLite/Postgres. Anvil's
+    first safe conversion keeps the workflow explicitly paper-only; Data Table
+    persistence can be enabled later without exposing broker credentials.
+    """
+    sample = [{
+        "id": "demo-1",
+        "symbol": "NIFTY",
+        "option_type": "CE",
+        "strike": 24900,
+        "transaction_type": "BUY",
+        "quantity": 1,
+        "entry_price": 182.50,
+        "current_price": 196.20,
+        "pnl": 1_027.50,
+        "status": "Paper",
+    }]
+    return {"mode": "Paper only", "positions": sample + list(_paper_positions)}
+
+
+@anvil.server.callable(name="place_paper_trade")
+def place_paper_trade(config):
+    """Validate and record one paper trade without contacting a broker."""
+    config = config or {}
+    symbol = _normalise_symbol(config.get("symbol"))
+    option_type = str(config.get("option_type", "CE")).upper()
+    transaction_type = str(config.get("transaction_type", "BUY")).upper()
+    if option_type not in ("CE", "PE"):
+        return {"ok": False, "message": "Option type must be CE or PE"}
+    if transaction_type not in ("BUY", "SELL"):
+        return {"ok": False, "message": "Paper trade side must be BUY or SELL"}
+    strike, error = _number(config, "strike", 0, 1)
+    if error:
+        return {"ok": False, "message": error}
+    if strike is None:
+        return {"ok": False, "message": "Strike is required"}
+    entry_price, error = _number(config, "entry_price", 0, 0.01)
+    if error:
+        return {"ok": False, "message": error}
+    if entry_price is None:
+        return {"ok": False, "message": "Entry premium is required"}
+    quantity, error = _number(config, "quantity", 1, 1)
+    if error:
+        return {"ok": False, "message": error}
+    if quantity is None:
+        return {"ok": False, "message": "Quantity is required"}
+    position = {
+        "id": "paper-{}".format(len(_paper_positions) + 1),
+        "symbol": symbol,
+        "option_type": option_type,
+        "strike": int(strike),
+        "transaction_type": transaction_type,
+        "quantity": int(quantity),
+        "entry_price": round(entry_price, 2),
+        "current_price": round(entry_price, 2),
+        "pnl": 0.0,
+        "status": "Paper",
+    }
+    _paper_positions.append(position)
+    return {"ok": True, "message": "Paper trade recorded", "trade": position}
+
+
+@anvil.server.callable(name="get_source_status")
+def get_source_status():
+    """Expose the conversion boundary shown in the UI."""
+    return {
+        "repository": "Programmer-Shubh/Programmer-Shubh-rapython",
+        "source_mode": "Simulated market feed",
+        "execution_mode": "Paper only",
+        "note": "Configure Anvil Secrets before adding a broker integration",
+    }

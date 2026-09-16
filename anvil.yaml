@@ -21,7 +21,7 @@ db_schema:
     indexes: []
     server: full
     title: Table 3
-metadata: {title: trading}
+metadata: {logo_img: 'asset:ratrade-logo.svg', title: trading}
 name: trading
 native_deps:
   head_html: |2
