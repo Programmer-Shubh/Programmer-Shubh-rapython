@@ -285,7 +285,7 @@ async def fyers_auth(req: AuthRequest):
 
 def _default_redirect() -> str:
     import os
-    base = (os.environ.get("SELF_URL") or "https://ratrade.onrender.com").rstrip("/")
+    base = (os.environ.get("SELF_URL") or os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("RENDER_EXTERNAL_HOSTNAME") and f"https://{os.environ['RENDER_EXTERNAL_HOSTNAME']}" or "https://ratrade-tjzd.onrender.com").rstrip("/")
     return base + "/api/broker/fyers-callback"
 
 
@@ -311,10 +311,11 @@ async def fyers_callback(request: Request, code: str = "", state: str = ""):
         return HTMLResponse("<h3>Fyers login failed: no auth code received.</h3>" + detail + "<p>Go back and click 'OAuth Login' again. Make sure the Redirect URI in your Fyers app settings EXACTLY matches: <code>/api/broker/fyers-callback</code> on your site (no extra / at end).</p>", status_code=400)
     if not config:
         return HTMLResponse("<h3>Fyers not configured.</h3><p>Set App ID + Secret in RaTrade Brokers tab first.</p>", status_code=400)
+    ruri_cb = (config.get("redirect_uri") or "").strip() or _default_redirect()
     fy = FyersV3(
         app_id=config.get("app_id", ""),
         secret_key=config.get("secret", ""),
-        redirect_uri=config.get("redirect_uri", ""),
+        redirect_uri=ruri_cb,
     )
     result = await fy.generate_token(auth_code)
     if result["success"]:
@@ -323,7 +324,7 @@ async def fyers_callback(request: Request, code: str = "", state: str = ""):
             config["refresh_token"] = fy.refresh_token
         _save_config("fyers", config)
         return HTMLResponse("<h3 style='color:green'>Fyers connected! Token saved for 24 hours.</h3><p>You can close this tab and return to RaTrade → Brokers.</p>")
-    return HTMLResponse(f"<h3 style='color:red'>Fyers login failed.</h3><p>{result['error']}</p><p>Check App ID, Secret and Redirect URI match your Fyers app settings.</p>", status_code=400)
+    return HTMLResponse(f"<h3 style='color:red'>Fyers login failed.</h3><p>{result['error']}</p><p>Check App ID, Secret and Redirect URI match your Fyers app settings. Expected: <code>{ruri_cb}</code></p>", status_code=400)
 
 
 @router.get("/fyers-auth-url")
@@ -331,10 +332,18 @@ def fyers_auth_url():
     config = _get_config("fyers")
     if not config:
         return {"success": False, "error": "Fyers not configured"}
+    ruri = (config.get("redirect_uri") or "").strip() or _default_redirect()
+    # use live host if env SELF_URL missing (covers tjzd vs old ratrade host)
+    if "ratrade.onrender.com" in ruri and "ratrade-tjzd.onrender.com" not in ruri:
+        try:
+            import os
+            if os.environ.get("RENDER_EXTERNAL_URL"):
+                ruri = os.environ["RENDER_EXTERNAL_URL"].rstrip("/") + "/api/broker/fyers-callback"
+        except: pass
     fy = FyersV3(
         app_id=config.get("app_id", ""),
         secret_key=config.get("secret", ""),
-        redirect_uri=config.get("redirect_uri", ""),
+        redirect_uri=ruri,
     )
     return {"success": True, "url": fy.get_auth_url()}
 
