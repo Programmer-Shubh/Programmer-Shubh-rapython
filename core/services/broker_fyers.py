@@ -17,9 +17,10 @@ class FyersV3Error(Exception):
 class FyersV3:
     BASE_URL = "https://api.fyers.in"
     # OAuth 2.0 (v3, current): authcode -> validate-authcode (appIdHash).
+    # FIX: token endpoints MUST be api-t1 host (official fyers_apiv3 v3.1.15 uses api-t1 for all v3)
     AUTH_URL = "https://api-t1.fyers.in/api/v3/generate-authcode"
-    TOKEN_URL = "https://api.fyers.in/api/v3/validate-authcode"
-    REFRESH_URL = "https://api.fyers.in/api/v3/validate-refresh-token"
+    TOKEN_URL = "https://api-t1.fyers.in/api/v3/validate-authcode"
+    REFRESH_URL = "https://api-t1.fyers.in/api/v3/validate-refresh-token"
     MAX_RETRIES = 3
 
     def __init__(
