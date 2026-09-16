@@ -327,7 +327,8 @@ async def fyers_callback(request: Request, code: str = "", state: str = ""):
             config["refresh_token"] = fy.refresh_token
         _save_config("fyers", config)
         return HTMLResponse("<h3 style='color:green'>Fyers connected! Token saved for 24 hours.</h3><p>You can close this tab and return to RaTrade → Brokers.</p>")
-    return HTMLResponse(f"<h3 style='color:red'>Fyers login failed.</h3><p>{result['error']}</p><p>Check App ID, Secret and Redirect URI match your Fyers app settings. Expected: <code>{ruri_cb}</code></p>", status_code=400)
+    dbg = f"code_len={len(auth_code)}, hash_prefix={fy.app_id_hash()[:8]}..., params={dbg_qs}"
+    return HTMLResponse(f"<h3 style='color:red'>Fyers login failed.</h3><p>{result['error']}</p><p style='font-size:11px;color:#6c757d'>Debug: {dbg}</p><p>Check App ID, Secret and Redirect URI match your Fyers app settings. Expected: <code>{ruri_cb}</code><br>Code single-use, 60s expiry - start FRESH OAuth, don't refresh this page.</p>", status_code=400)
 
 
 @router.get("/fyers-auth-url")
