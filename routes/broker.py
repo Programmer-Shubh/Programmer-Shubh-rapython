@@ -150,7 +150,7 @@ def live_toggle(req: LiveToggleRequest):
     db = Database.get_instance()
     row = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key='live_trading_enabled'")
     if row:
-        db.execute("UPDATE settings SET setting_value=?, updated_at=datetime('now') WHERE setting_key='live_trading_enabled'",
+        db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key='live_trading_enabled'",
                    ["1" if req.enabled else "0"])
     else:
         db.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('live_trading_enabled', ?)",
@@ -220,7 +220,7 @@ def _save_config(broker: str, config: dict):
         pass
     existing = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key=?", [f"broker_{broker}"])
     if existing:
-        db.execute("UPDATE settings SET setting_value=?, updated_at=datetime('now') WHERE setting_key=?", [json.dumps(config), f"broker_{broker}"])
+        db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key=?", [json.dumps(config), f"broker_{broker}"])
     else:
         db.execute("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)", [f"broker_{broker}", json.dumps(config)])
 

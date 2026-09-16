@@ -29,7 +29,7 @@ class TradeModel:
                (user_id, strategy_id, symbol, option_type, strike_price, expiry_date,
                 transaction_type, quantity, lot_size, entry_price, stop_loss, target,
                 auto_action, total_cost, entry_date, trade_mode, trade_type, broker_order_id, entry_iv, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', datetime('now'), datetime('now'))""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
             [
                 data.get("user_id", 1), data.get("strategy_id"), data["symbol"],
                 data["option_type"], data["strike_price"], data.get("expiry_date", ""),
@@ -567,7 +567,7 @@ class TradeModel:
         pnl_pct = (pnl / (trade["entry_price"] * qty * lot)) * 100 if trade["entry_price"] > 0 else 0
         return self.db.execute(
             """UPDATE paper_trades SET exit_price=?, exit_date=?, exit_cost=?, pnl=?, pnl_percent=?,
-               exit_status=?, status='closed', updated_at=datetime('now') WHERE id=?""",
+               exit_status=?, status='closed', updated_at=CURRENT_TIMESTAMP WHERE id=?""",
             [exit_price, exit_date, exit_costs["total"], pnl, pnl_pct, exit_status, trade_id],
         )
 
@@ -581,7 +581,7 @@ class TradeModel:
         if not row:
             return 0
         self.db.execute(
-            "UPDATE paper_trades SET trade_mode=?, updated_at=datetime('now') WHERE id=?",
+            "UPDATE paper_trades SET trade_mode=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             [trade_mode, trade_id],
         )
         return 1
@@ -601,7 +601,7 @@ class TradeModel:
             vals.append(auto_action)
         if not sets:
             return 0
-        sets.append("updated_at=datetime('now')")
+        sets.append("updated_at=CURRENT_TIMESTAMP")
         vals.append(trade_id)
         return self.db.execute(
             f"UPDATE paper_trades SET {', '.join(sets)} WHERE id=?",

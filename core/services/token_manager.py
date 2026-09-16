@@ -52,7 +52,7 @@ class TokenManager:
         )
         if existing:
             self._db.execute(
-                "UPDATE settings SET setting_value=?, updated_at=datetime('now') WHERE setting_key=?",
+                "UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key=?",
                 [json.dumps(config), f"broker_{broker}"],
             )
         else:

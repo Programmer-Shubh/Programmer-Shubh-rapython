@@ -78,7 +78,7 @@ def save_strategy(req: StrategyRequest):
     if req.id:
         sets = ", ".join(f"{k}=?" for k in data)
         vals = list(data.values()) + [req.id]
-        db.execute(f"UPDATE strategies SET {sets}, updated_at=datetime('now') WHERE id=?", vals)
+        db.execute(f"UPDATE strategies SET {sets}, updated_at=CURRENT_TIMESTAMP WHERE id=?", vals)
         return {"id": req.id, "status": "updated"}
     else:
         cols = ", ".join(data.keys())
