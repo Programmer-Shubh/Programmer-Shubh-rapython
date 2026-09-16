@@ -568,6 +568,7 @@
                     <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                         <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('dhan')"><i class="bi bi-gear"></i> Setup</button>
                         <button class="btn btn-sm btn-success" onclick="connectSingleBroker('dhan')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
+                        <button class="btn btn-sm btn-danger" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>
                         <a class="btn btn-sm btn-outline-dark" href="https://login.dhan.co/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>
                         <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('dhan')"><i class="bi bi-wallet2"></i> Account</button>
                     </div>
@@ -1615,7 +1616,7 @@ let _lastOpenTrdHTML = null;
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                     <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('${b.key}')"><i class="bi bi-gear"></i> Setup</button>
                     <button class="btn btn-sm btn-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
-                    ${b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button><a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
+                    ${b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button><a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`:b.key==='dhan'?`<button class="btn btn-sm btn-danger" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button><a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
                     <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('${b.key}')"><i class="bi bi-wallet2"></i> Account</button>
                 </div>
             </div></div></div>`;
@@ -1721,6 +1722,7 @@ let _lastOpenTrdHTML = null;
             if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; return;} else alert('Error: '+(r.error||'Configure Fyers first (App ID + Secret, Redirect URI Fyers app me register karo)'));
         }catch(e){alert('OAuth error: '+e.message+'\nTry direct: https://api-t1.fyers.in/api/v3/generate-authcode?client_id=W7AUTU5IUT-100&redirect_uri='+encodeURIComponent('https://ratrade.onrender.com/api/broker/fyers-callback')+'&response_type=code&state=ratrade_login');}
     }
+    async function dhanOAuth(){ const b=brokerByKey('dhan'); if(!b||!b.config||!b.config.client_id){ showBrokerConfig('dhan'); return; } const url=brokerLoginUrl('dhan'); window.open(url,'_blank'); showToast('Dhan: login.dhan.co par login karke API Access se Client ID + Access Token copy karo, phir Setup me paste karke Save dabao - ek baar hi karna hai, token auto-renew hoga', 'info'); setTimeout(()=>showBrokerConfig('dhan'),800); }
     // Auto-capture Fyers auth_code if landing back with ?code= (redirect URI = site root)
     setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);if(q.get('code')||q.get('auth_code'))fyersOAuth();}catch(e){}},800);
 
