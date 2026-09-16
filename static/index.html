@@ -1605,8 +1605,9 @@ let _lastOpenTrdHTML = null;
         let h='';
         if(offline) h+='<div class="alert alert-warning w-100 mb-2">Server unreachable — showing brokers offline. Setup/Login will retry the connection. <button class="btn btn-sm btn-outline-warning ms-2" onclick="loadBrokers()">Retry</button></div>';
         list.forEach(b=>{
-            const isConnected = b.configured && b.config && (b.config.access_token || b.config.client_id || b.config.app_id);
-            const statusH=isConnected?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Connected</span>':(b.configured?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Configured</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>');
+            const hasRealToken = b.config && b.config.access_token && !String(b.config.access_token).startsWith('SIM-') && !String(b.config.access_token).startsWith('ANG-') && String(b.config.access_token).length>10;
+            const isConnected = b.configured && hasRealToken;
+            const statusH=isConnected?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Connected</span>':(b.configured?'<span class="badge" style="background:#fff3cd;color:#664d03"><i class="bi bi-exclamation-circle"></i> Configured - Hit Connect</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>');
             h+=`<div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
                 <div style="margin-bottom:12px"><i class="bi ${b.icon} ${b.color}" style="font-size:36px"></i></div>
                 <h6 class="fw-bold">${b.name}</h6><p class="text-muted small">${b.desc}</p>

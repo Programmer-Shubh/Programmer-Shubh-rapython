@@ -164,6 +164,7 @@ def get_live_chain(symbol: str):
 
 @router.post("/place-trade")
 def place_trade(req: TradeRequest):
+    try:
     # Mandatory SL/Target validation
     if req.stop_loss is None or req.take_profit is None:
         return {"error": "Stop-Loss and Target are mandatory - cannot be blank (SELL requires SL to prevent unmanaged risk)"}
@@ -360,3 +361,7 @@ def place_trade(req: TradeRequest):
         "trade_type": req.trade_type,
     })
     return {"trade_id": trade_id, "entry_price": round(adj_premium, 2), "costs": costs}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Order failed: {str(e)[:250]}"}
