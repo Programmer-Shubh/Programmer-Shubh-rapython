@@ -377,6 +377,7 @@ async def connect_broker(req: ConnectRequest):
         if not config.get("access_token") or not config.get("client_id"):
             return {"success": False, "error": "Dhan needs Client ID + Access Token. Paste both in Setup."}
         # REAL validation: fake "connected" is what caused confusion earlier.
+        v = {"success": False, "error": "Dhan check did not run"}
         try:
             from core.services.broker_dhan_live import DhanLive
             dl = DhanLive(client_id=config.get("client_id", ""),
@@ -390,7 +391,7 @@ async def connect_broker(req: ConnectRequest):
                     _save_config("dhan", config)
                     return {"success": True, "message": "Dhan connected! Expired token auto-renewed (no manual login)."}
         except Exception as e:
-            return {"success": False, "error": f"Dhan check crashed: {str(e)[:150]}"}
+            return {"success": False, "error": f"Dhan check failed: {str(e)[:150]}"}
         if v.get("success"):
             return {"success": True, "message": "Dhan connected! Token verified live with Dhan."}
         return {"success": False, "error": v.get("error")}
