@@ -377,6 +377,26 @@
                     
                     </div>
                 </div>
+                <!-- Strategy Templates Gallery -->
+                <div class="card mt-3">
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Strategy Templates — Click to Build</strong><small class="text-muted">Template = ready-made legs (upar wali Order setting override hogi)</small></div>
+                    <div class="card-body p-2">
+                        <div class="row g-2">
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longcall')"><div class="icon">📈</div><div class="title">Long Call</div><div class="desc">Buy CE ATM<br>Unlimited gain</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longput')"><div class="icon">📉</div><div class="title">Long Put</div><div class="desc">Buy PE ATM<br>Bearish</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortcall')"><div class="icon">🔻</div><div class="title">Short Call</div><div class="desc">Sell CE OTM<br>Theta decay</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortput')"><div class="icon">🔺</div><div class="title">Short Put</div><div class="desc">Sell PE OTM<br>Premium</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bullspread')"><div class="icon">⚡</div><div class="title">Bull Call Spread</div><div class="desc">Buy ATM + Sell OTM CE</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bearputspread')"><div class="icon">🛡️</div><div class="title">Bear Put Spread</div><div class="desc">Buy ATM PE + Sell OTM</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('straddle')"><div class="icon">🔄</div><div class="title">Long Straddle</div><div class="desc">Buy CE+PE ATM<br>Volatility</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('strangle')"><div class="icon">↔️</div><div class="title">Short Strangle</div><div class="desc">Sell OTM CE+PE<br>Range</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironcondor')"><div class="icon">🏛️</div><div class="title">Iron Condor</div><div class="desc">Sell OTM 1 + Buy OTM 3 (CE/PE)</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironbutterfly')"><div class="icon">🦋</div><div class="title">Iron Butterfly</div><div class="desc">ATM Straddle + OTM Wings</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('butterfly')"><div class="icon">✈️</div><div class="title">Long Butterfly</div><div class="desc">1-2-1 CE<br>Limited risk</div></div></div>
+                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('calendar')"><div class="icon">📅</div><div class="title">Calendar Spread</div><div class="desc">Sell Weekly + Buy Monthly</div></div></div>
+                        </div>
+                    </div>
+
             </div>
             
             <div class="step-indicator mb-2 slab"><div class="step active">1 Setup</div><div class="step">2 Legs</div><div class="step">3 Indicators</div><div class="step">4 Backtest</div><div class="step">5 Robot</div></div>
@@ -424,25 +444,6 @@
                 </div>
                 <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
-                <!-- Strategy Templates Gallery -->
-                <div class="card mt-3">
-                    <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Strategy Templates — Click to Build</strong><small class="text-muted">Template = ready-made legs (upar wali Order setting override hogi)</small></div>
-                    <div class="card-body p-2">
-                        <div class="row g-2">
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longcall')"><div class="icon">📈</div><div class="title">Long Call</div><div class="desc">Buy CE ATM<br>Unlimited gain</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longput')"><div class="icon">📉</div><div class="title">Long Put</div><div class="desc">Buy PE ATM<br>Bearish</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortcall')"><div class="icon">🔻</div><div class="title">Short Call</div><div class="desc">Sell CE OTM<br>Theta decay</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('shortput')"><div class="icon">🔺</div><div class="title">Short Put</div><div class="desc">Sell PE OTM<br>Premium</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bullspread')"><div class="icon">⚡</div><div class="title">Bull Call Spread</div><div class="desc">Buy ATM + Sell OTM CE</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('bearputspread')"><div class="icon">🛡️</div><div class="title">Bear Put Spread</div><div class="desc">Buy ATM PE + Sell OTM</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('straddle')"><div class="icon">🔄</div><div class="title">Long Straddle</div><div class="desc">Buy CE+PE ATM<br>Volatility</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('strangle')"><div class="icon">↔️</div><div class="title">Short Strangle</div><div class="desc">Sell OTM CE+PE<br>Range</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironcondor')"><div class="icon">🏛️</div><div class="title">Iron Condor</div><div class="desc">Sell OTM 1 + Buy OTM 3 (CE/PE)</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('ironbutterfly')"><div class="icon">🦋</div><div class="title">Iron Butterfly</div><div class="desc">ATM Straddle + OTM Wings</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('butterfly')"><div class="icon">✈️</div><div class="title">Long Butterfly</div><div class="desc">1-2-1 CE<br>Limited risk</div></div></div>
-                            <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('calendar')"><div class="icon">📅</div><div class="title">Calendar Spread</div><div class="desc">Sell Weekly + Buy Monthly</div></div></div>
-                        </div>
-                    </div>
                 </div>
                 <div class="card mt-3 slab-card">
                     <div class="card-header"><span class="slab-num">4</span><i class="bi bi-play-circle"></i> Run & Backtest <small class="text-muted">pehle legs/indicators set karo, phir chalao</small></div>
