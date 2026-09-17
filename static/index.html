@@ -376,21 +376,6 @@
                     </div>
                     
                     </div>
-                    <div class="slab-sec" style="border-color:#198754;background:#f0fff4"><div class="slab-sec-title"><i class="bi bi-bullseye"></i> High Accuracy Nifty Option Buying — Combo Indicator Template <span class="badge bg-success ms-2">Score 80+ Ready</span></div>
-                    <div class="row g-2 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Fast EMA (13)</label><input type="number" id="ha-fast" class="form-control form-control-sm" value="13" min="2" max="50"></div>
-                        <div class="col-md-3"><label class="form-label small">Slow EMA (34)</label><input type="number" id="ha-slow" class="form-control form-control-sm" value="34" min="2" max="100"></div>
-                        <div class="col-md-3"><label class="form-label small">Trend EMA (20)</label><input type="number" id="ha-trend" class="form-control form-control-sm" value="20" min="2" max="100"></div>
-                        <div class="col-md-3"><label class="form-label small">RSI Length / Entry >65</label><div class="d-flex gap-1"><input type="number" id="ha-rsi" class="form-control form-control-sm" value="14" min="2" max="50"><input type="number" id="ha-rsi-entry" class="form-control form-control-sm" value="65" min="50" max="80"></div></div>
-                    </div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-3"><label class="form-label small">Supertrend Period / Mult</label><div class="d-flex gap-1"><input type="number" id="ha-st-p" class="form-control form-control-sm" value="14" min="2" max="30"><input type="number" id="ha-st-m" class="form-control form-control-sm" value="2.0" step="0.1" min="1" max="5"></div></div>
-                        <div class="col-md-3"><label class="form-label small">Risk Reward 1:2 / Capital</label><div class="d-flex gap-1"><input type="text" class="form-control form-control-sm" value="1:2" disabled><input type="number" id="ha-capital" class="form-control form-control-sm" value="100000" step="10000"></div></div>
-                        <div class="col-md-3"><label class="form-label small">Time Filter</label><select id="ha-timefilter" class="form-select form-select-sm"><option value="on" selected>09:30-11:00 + 13:30-15:15</option><option value="off">All Day</option></select></div>
-                        <div class="col-md-3 d-flex align-items-end"><button class="btn btn-sm btn-success w-100" onclick="applyHighAccuracyTemplate()"><i class="bi bi-lightning"></i> Apply High Accuracy Settings</button></div>
-                    </div>
-                    <small class="text-muted">Entry: Close>EMA34 && EMA13>EMA34 && Supertrend Bullish && RSI>65 && Time allowed — Exit: 1:2 RR / SL=Supertrend+buffer / Trailing EMA13</small>
-                    </div>
                 </div>
             </div>
             
@@ -1336,26 +1321,6 @@ let _lastOpenTrdHTML = null;
     document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); });
     ['r-order','r-strike','r-lots','r-expiry','r-type'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){}});});
     document.getElementById('r-syms')?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){}});
-    function applyHighAccuracyTemplate(){
-        try{
-            const fe=document.getElementById('ha-fast'), se=document.getElementById('ha-slow'), te=document.getElementById('ha-trend');
-            const rsi=document.getElementById('ha-rsi'), rsie=document.getElementById('ha-rsi-entry');
-            const stp=document.getElementById('ha-st-p'), stm=document.getElementById('ha-st-m');
-            // Apply to Strategy Lab fields
-            const setIf=(id,val)=>{ const el=document.getElementById(id); if(el) el.value=val; };
-            setIf('r-p-rsi', rsi?rsi.value:14);
-            setIf('r-p-st', stp?stp.value:14);
-            setIf('r-p-stm', stm?stm.value:2.0);
-            // EMA fields
-            const emaEl=document.getElementById('r-p-ema'); if(emaEl) emaEl.value=te?te.value:20;
-            // Enable RSI + Supertrend + EMA
-            const rsiCb=document.getElementById('r-ind-rsi'); if(rsiCb) rsiCb.checked=true;
-            const stCb=document.getElementById('r-ind-supertrend'); if(stCb) stCb.checked=true;
-            const emaCb=document.getElementById('r-ind-ema'); if(emaCb) emaCb.checked=true;
-            showToast('High Accuracy settings applied: EMA13/34/20, ST14/2.0, RSI14>65, Time Filter, 1:2 RR', 'success');
-            try{updateRunSummary();}catch(e){}
-        }catch(e){ showToast('Apply failed: '+e.message,'danger'); }
-    }
 
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
