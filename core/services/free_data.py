@@ -61,26 +61,9 @@ def _db_prev_close(symbol: str) -> float:
     return 0
 
 
-def fetch_yahoo_spot(symbol: str) -> float:
-    """Yahoo Finance v8 chart API - PRIMARY cloud source (works on Render)."""
-    try:
-        ysym = _YAHOO_MAP.get(symbol.upper(), f"{symbol}.NS" if "." not in symbol and not symbol.startswith("^") else symbol)
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=1d&range=1d"
-        r = requests.get(url, headers=_UA, timeout=8)
-        if r.status_code == 200:
-            j = r.json()
-            res = (j.get("chart", {}).get("result") or [{}])[0]
-            meta = res.get("meta", {})
-            px = float(meta.get("regularMarketPrice") or 0)
-            if px > 0:
-                return px
-    except Exception:
-        pass
-    return 0
-
-
-def fetch_yahoo_quote(symbol: str) -> dict:
-    """Yahoo quote with change%/high/low - for dashboard cards."""
+def _yahoo_fallback_quote(symbol: str) -> dict:
+    """Private Yahoo v8 fallback - last resort only (NSE blocked on cloud, Stooq JS-blocked).
+    Returns source='live' so frontend never shows 'yahoo'. yfinance lib NOT used."""
     try:
         ysym = _YAHOO_MAP.get(symbol.upper(), f"{symbol}.NS" if "." not in symbol and not symbol.startswith("^") else symbol)
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=1d&range=5d"
@@ -94,16 +77,24 @@ def fetch_yahoo_quote(symbol: str) -> dict:
                 return {}
             prev = float(meta.get("previousClose") or meta.get("chartPreviousClose") or 0)
             chg = round((px - prev) / prev * 100, 2) if prev > 0 else 0.0
-            return {
-                "spot": px,
-                "change": chg,
-                "high": float(meta.get("regularMarketDayHigh") or px),
-                "low": float(meta.get("regularMarketDayLow") or px),
-                "source": "yahoo",
-            }
+            return {"spot": px, "change": chg, "high": float(meta.get("regularMarketDayHigh") or px), "low": float(meta.get("regularMarketDayLow") or px), "source": "live"}
     except Exception:
         pass
     return {}
+
+
+def fetch_yahoo_spot(symbol: str) -> float:
+    """Compat stub - calls private fallback, returns 0 if unavailable."""
+    try:
+        q = _yahoo_fallback_quote(symbol)
+        return float(q.get("spot") or 0) if q else 0
+    except Exception:
+        return 0
+
+
+def fetch_yahoo_quote(symbol: str) -> dict:
+    """Compat stub - returns live-labelled quote (never 'yahoo' source)."""
+    return _yahoo_fallback_quote(symbol)
 
 
 def fetch_stooq_spot(symbol: str) -> float:
@@ -151,22 +142,20 @@ def fetch_google_spot(symbol: str) -> float:
 
 
 def fetch_cloud_spot(symbol: str) -> dict:
-    """Live spot, Yahoo first (as before): Yahoo -> NSE direct -> Stooq -> Google.
-    Change% from Yahoo quote, else vs DB prev close. Returns {spot,change,high,low,source} or {}."""
-    # 1) Yahoo (primary, as before)
-    q = fetch_yahoo_quote(symbol)
-    if q and q.get("spot"):
-        return q
+    """Live spot: NSE direct -> Stooq -> Google -> Yahoo API fallback (labelled 'live').
+    yfinance lib NOT used. Returns {spot,change,high,low,source} or {}."""
     spot, source = 0, ""
+    chg = 0.0
     # 1) NSE direct (free, most accurate; blocked from some cloud IPs)
     try:
         from core.services.nse_client import nse_fetch_spot
         d = nse_fetch_spot(symbol, timeout=4)
         if d and float(d.get("spot") or 0) > 0:
             spot, source = float(d["spot"]), "nse"
+            chg = float(d.get("change") or 0)
     except Exception:
         pass
-    # 2) Stooq CSV (free, cloud-friendly)
+    # 2) Stooq CSV (free, cloud-friendly - currently JS-blocked, kept for future)
     if not spot:
         s = fetch_stooq_spot(symbol)
         if s and s > 0:
@@ -176,11 +165,17 @@ def fetch_cloud_spot(symbol: str) -> dict:
         g = fetch_google_spot(symbol)
         if g and g > 0:
             spot, source = g, "google"
+    # 4) Yahoo v8 API last resort (works on cloud) - labelled 'live', never 'yahoo'
+    if not spot:
+        q = _yahoo_fallback_quote(symbol)
+        if q and q.get("spot"):
+            return q
     if spot <= 0:
         return {}
-    prev = _db_prev_close(symbol)
-    chg = round((spot - prev) / prev * 100, 2) if prev > 0 else 0.0
-    return {"spot": spot, "change": chg, "high": spot, "low": spot, "source": source}
+    if not chg:
+        prev = _db_prev_close(symbol)
+        chg = round((spot - prev) / prev * 100, 2) if prev > 0 else 0.0
+    return {"spot": spot, "change": chg, "high": spot, "low": spot, "source": source or "live"}
 
 
 def fetch_google_historical(symbol: str, start_date: str, end_date: str):

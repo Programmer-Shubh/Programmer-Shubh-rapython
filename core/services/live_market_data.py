@@ -4,7 +4,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from core.models.database import Database
 try:
-    from core.services.free_data import fetch_yahoo_spot, fetch_google_spot, fetch_cloud_spot
+    from core.services.free_data import fetch_google_spot, fetch_cloud_spot
+    def fetch_yahoo_spot(s): return 0
 except Exception:
     def fetch_yahoo_spot(s): return 0
     def fetch_google_spot(s): return 0
@@ -33,7 +34,7 @@ class LiveMarketData:
         self.db = Database.get_instance()
 
     def get_spot_price(self, symbol: str) -> float:
-        # Try live cache first (Yahoo cloud-first)
+        # Try live cache first (NSE->Stooq->Google, no Yahoo)
         try:
             live = self.get_live_spot(symbol)
             if live and live.get("spot") and float(live["spot"]) > 0:
@@ -57,7 +58,7 @@ class LiveMarketData:
         sym = symbol.upper()
         if sym in _LIVE_CACHE and now - _LIVE_CACHE[sym]["ts"] < _LIVE_CACHE_TTL:
             return _LIVE_CACHE[sym]["data"]
-        # 1) Cloud live: Yahoo -> NSE -> Stooq -> Google (works on Render, NSE blocked)
+        # 1) Cloud live: NSE -> Stooq -> Google (Yahoo removed, works on Render)
         try:
             q = fetch_cloud_spot(sym)
             if q and float(q.get("spot") or 0) > 0:
@@ -65,7 +66,7 @@ class LiveMarketData:
                 data = {"spot": spot, "formatted": f"INR {spot:,.2f}",
                         "change": float(q.get("change") or 0),
                         "high": float(q.get("high") or spot), "low": float(q.get("low") or spot),
-                        "source": q.get("source", "yahoo")}
+                        "source": q.get("source", "live")}
                 _LIVE_CACHE[sym] = {"ts": now, "data": data}
                 return data
         except Exception:

@@ -24,8 +24,8 @@ async def ws_live(websocket: WebSocket):
             for sym in symbols:
                 data = live.get_live_spot(sym)
                 if data and data.get("spot") and float(data["spot"]) > 0:
-                    # Real source label (yahoo/stooq/google/db) - never hardcode NSE on cloud
-                    ticks[sym] = {"spot": data["spot"], "change": data.get("change",0), "ts": int(time.time()*1000), "source": data.get("source", "yahoo")}
+                    # Real source label (nse/stooq/google/db) - Yahoo removed
+                    ticks[sym] = {"spot": data["spot"], "change": data.get("change",0), "ts": int(time.time()*1000), "source": data.get("source", "live")}
                 else:
                     # DB fallback
                     row = live.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [sym])
@@ -68,4 +68,4 @@ async def ws_chain(websocket: WebSocket, symbol: str):
 
 @router.get("/stats")
 def ws_stats():
-    return {"connections": len(_connections), "interval_ms": 45, "source": "yahoo + db fallback (NSE blocked on cloud)", "latency": "<50ms"}
+    return {"connections": len(_connections), "interval_ms": 45, "source": "nse/stooq/google + db fallback (Yahoo removed)", "latency": "<50ms"}

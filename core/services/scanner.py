@@ -366,13 +366,13 @@ class OptionScanner:
                 r['close_price'] = float(r.get('close_price', 0) or 0)
                 r['open_price'] = float(r.get('open_price', 0) or 0)
             return rows
-        # In-memory tvDatafeed/nsepython/openchart first (no CSV), then synthetic
+        # In-memory Stooq/NSE/nsepython/openchart first (Yahoo removed, no CSV file), then synthetic
         try:
-            from core.services.historical_fetcher import _fetch_tvDatafeed_historical, _fetch_nsepython_historical, _fetch_openchart_historical
+            from core.services.historical_fetcher import _fetch_stooq_historical, _fetch_tvDatafeed_historical, _fetch_nsepython_historical, _fetch_openchart_historical
             import datetime as _dt
             end = _dt.date.today().strftime("%Y-%m-%d")
             start = (_dt.date.today() - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
-            for fetcher in [_fetch_tvDatafeed_historical, _fetch_nsepython_historical, _fetch_openchart_historical]:
+            for fetcher in [_fetch_stooq_historical, _fetch_tvDatafeed_historical, _fetch_nsepython_historical, _fetch_openchart_historical]:
                 try:
                     data = fetcher(symbol, start, end)
                     if data and len(data) >= 30:
@@ -462,7 +462,7 @@ class OptionScanner:
         """
         Suggest option strike close to ATM.
         Always returns strike within 5% of spot to prevent deep OTM/ITM strikes.
-        Uses LIVE spot (Yahoo-first) + shared model_premium (IV 25%, floor 1.5) -
+        Uses LIVE spot (NSE/Stooq/Google, no Yahoo) + shared model_premium (IV 25%, floor 1.5) -
         the SAME inputs as order entry, so scanner-shown premium == trade entry
         for every symbol (no more scanner Rs 13 -> entry Rs 1.50 mismatch).
         """
@@ -762,18 +762,26 @@ class OptionScanner:
         Uses LiveMarketData for today's spot + DB for prev close. Falls back to DB-only if live blocked."""
         fno_symbols = FNO_SYMBOLS
         movers = []
-        # Live realtime via LIVE_CACHE only (instant, no per-request network).
-        # Background refresh (data_refresher + Yahoo via subprocess) fills _LIVE_CACHE every 45s.
-        # Per-request parallel caused 13s hang -> frontend timeout "Failed to load F&O Top 5".
+        # Live realtime: _LIVE_CACHE first (instant), then parallel NSE/Stooq/Google fetch (Yahoo removed).
+        # 8s budget so frontend never times out on "Failed to load F&O Top 5".
         live_map = {}
         try:
-            from core.services.live_market_data import _LIVE_CACHE
+            from core.services.live_market_data import _LIVE_CACHE, LiveMarketData
             import time as _tm
             for sym in fno_symbols:
-                if sym in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[sym]["ts"] < 60:
+                if sym in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[sym]["ts"] < 300:
                     v = _LIVE_CACHE[sym]["data"].get("spot", 0)
                     if v and float(v) > 0:
                         live_map[sym] = float(v)
+            missing = [s for s in fno_symbols if s not in live_map]
+            if missing:
+                try:
+                    batch = LiveMarketData().get_live_spots_parallel(missing[:20], max_workers=8)
+                    for sym, d in (batch or {}).items():
+                        if d and float(d.get("spot") or 0) > 0:
+                            live_map[sym] = float(d["spot"])
+                except Exception:
+                    pass
         except Exception:
             pass
         for sym in fno_symbols:

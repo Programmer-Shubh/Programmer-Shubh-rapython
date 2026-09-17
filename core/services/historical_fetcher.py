@@ -376,14 +376,29 @@ def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Di
 
 
 def _fetch_tvDatafeed_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """tvDatafeed: TradingView in-memory DataFrame, no CSV. Falls back to openchart if tvDatafeed not installed."""
+    """tvDatafeed-enhanced: TradingView in-memory DataFrame, no CSV. pip install tvdatafeed-enhanced."""
     try:
-        # Try tvDatafeed first
+        # Try tvDatafeed first (correct package: tvdatafeed-enhanced, repo rongardF/tvdatafeed)
+        # Single attempt, 150 bars (fast, no Render timeout). No retry loop - caller has 8s budget.
         try:
-            from tvDatafeed import TvDatafeed
-            tv = TvDatafeed()
-            # tvDatafeed uses interval and n_bars, we fetch daily
-            df = tv.get_hist(symbol=symbol, exchange='NSE', interval='1d', n_bars=500)
+            from tvDatafeed import TvDatafeed, Interval
+            from concurrent.futures import ThreadPoolExecutor
+            df = None
+            try:
+                tv = TvDatafeed()
+                def _do_hist():
+                    try:
+                        return tv.get_hist(symbol=symbol, exchange='NSE', interval=Interval.in_daily, n_bars=150)
+                    except Exception:
+                        return tv.get_hist(symbol=symbol, exchange='NSE', interval='1d', n_bars=150)
+                with ThreadPoolExecutor(max_workers=1) as _ex:
+                    _fut = _ex.submit(_do_hist)
+                    try:
+                        df = _fut.result(timeout=12)
+                    except Exception:
+                        df = None
+            except Exception:
+                df = None
             if df is not None and not df.empty:
                 # tvDatafeed returns DataFrame with columns: symbol, open, high, low, close, volume, datetime
                 # Normalize to our format
@@ -487,6 +502,40 @@ def _fetch_openchart_historical(symbol: str, start_date: str, end_date: str) -> 
         pass
     return []
 
+def _fetch_stooq_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Stooq daily CSV in-memory (no file write) - cloud-friendly, free, no key. Replaces Yahoo."""
+    try:
+        import io, csv as _csv
+        import datetime as _dt
+        _STOOQ = {"NIFTY": "^nsei", "BANKNIFTY": "^nsebank", "FINNIFTY": "^cnxfin", "MIDCPNIFTY": "^nsemidcap50", "SENSEX": "^sensex"}
+        ssym = _STOOQ.get(symbol.upper(), f"{symbol.lower()}.in")
+        sd = _dt.datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d")
+        ed = _dt.datetime.strptime(end_date, "%Y-%m-%d").strftime("%Y%m%d")
+        url = f"https://stooq.com/q/d/l/?s={ssym}&d1={sd}&d2={ed}&i=d"
+        r = requests.get(url, headers=_HEADERS, timeout=8)
+        if r.status_code != 200 or "Date" not in r.text:
+            return []
+        reader = _csv.DictReader(io.StringIO(r.text))
+        out = []
+        for row in reader:
+            try:
+                td = str(row.get("Date", ""))[:10]
+                if td < start_date or td > end_date:
+                    continue
+                o = _clean_num(row.get("Open")); h = _clean_num(row.get("High"))
+                l = _clean_num(row.get("Low")); cl = _clean_num(row.get("Close"))
+                vol = int(_clean_num(row.get("Volume")))
+                if cl <= 0:
+                    continue
+                out.append({"symbol": symbol, "trade_date": td, "open_price": round(o or cl, 2), "high_price": round(h or cl, 2), "low_price": round(l or cl, 2), "close_price": round(cl, 2), "volume": vol, "oi": 0})
+            except Exception:
+                continue
+        if len(out) >= 5:
+            return out
+    except Exception:
+        pass
+    return []
+
 def _last_trading_day():
     d = datetime.date.today() - datetime.timedelta(days=1)
     while d.weekday() >= 5: d -= datetime.timedelta(days=1)
@@ -509,10 +558,10 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
             return db_data
     except Exception:
         pass
-    # 2) External sources — 2s budget for instant backtest (DB-first), heavy 1Y seed via /api/backtest/seed
+    # 2) External sources — 8s budget (Yahoo removed): Stooq -> NSE archives -> nselib -> nsepython/openchart/tvDatafeed
     import time as _t
-    _deadline = _t.time() + 2
-    for fetcher in [_fetch_tvDatafeed_historical, _fetch_nsepython_historical, _fetch_openchart_historical, _fetch_nselib_historical, _fetch_jugaad_historical, _fetch_nse_archives_historical]:
+    _deadline = _t.time() + 8
+    for fetcher in [_fetch_stooq_historical, _fetch_nse_archives_historical, _fetch_nselib_historical, _fetch_nsepython_historical, _fetch_openchart_historical, _fetch_tvDatafeed_historical, _fetch_jugaad_historical]:
         try:
             if _t.time() > _deadline:
                 break
