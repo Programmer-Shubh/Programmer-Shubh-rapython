@@ -1102,7 +1102,7 @@ let _lastOpenTrdHTML = null;
         const _btStart=Date.now();
         const _btSpin=()=>{
             const s=Math.round((Date.now()-_btStart)/1000);
-            const pct=Math.min(95, Math.round((s/30)*100));
+            const pct=Math.min(95, Math.round((s/60)*100));
             document.getElementById('bt-results').classList.remove('hidden');
             const pb=document.getElementById('bt-progress'); if(pb) pb.classList.remove('hidden');
             const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width=pct+'%'; bar.textContent=pct+'%'; }
@@ -1110,7 +1110,7 @@ let _lastOpenTrdHTML = null;
             // Algotest-like instant skeleton: show last cached result instantly as estimate
             try{
                 const cached=localStorage.getItem('lastBacktestResult');
-                if(cached && s<3){
+                if(cached && s<15){
                     const c=JSON.parse(cached);
                     const m=c.metrics||{};
                     document.getElementById('bt-metrics').innerHTML=`<div class="row"><div class="col"><div class="card stat-card" style="opacity:0.6"><div class="label">Est. Net P&L</div><div class="value">${(m.net_pnl||0).toLocaleString()}</div><small>Estimated - live update...</small></div></div><div class="col"><div class="card stat-card" style="opacity:0.6"><div class="label">Est. Win Rate</div><div class="value">${m.win_rate||0}%</div></div></div><div class="col"><div class="card stat-card" style="opacity:0.6"><div class="label">Trades</div><div class="value">${m.total_trades||0}</div></div></div></div><p class="text-muted small p-2"><span class="spinner"></span> Live calculation... ${s}s</p>`;

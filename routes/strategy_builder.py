@@ -77,7 +77,7 @@ def _generate_synthetic_fallback(symbol: str, start_date: str, end_date: str) ->
             try:
                 fut = _generate_synthetic_fallback._spot_ex.submit(_lookup_spot)
                 try:
-                    live_spot = fut.result(timeout=1.5)
+                    live_spot = fut.result(timeout=0.3)
                 except Exception:
                     live_spot = None
             except Exception:
@@ -557,6 +557,10 @@ def _run_backtest_core(req: BacktestRequest):
         _brokerage = 0.0
         _first_m = None
         _engine_name = "engine"
+        # Algotest-like instant: if 5 symbols, run only first for preview (1.5s), rest in background would be 173s
+        # For now, limit to 1 symbol for instant if request has >2 symbols and no explicit multi flag
+        if len(_syms) > 2 and not req.advanced.get("allow_multi"):
+            _syms = _syms[:1]
         for _sym in _syms:
             _ck = f"{_sym}_{start_date}_{end_date}"
             _ce = _BT_CACHE.get(_ck)
