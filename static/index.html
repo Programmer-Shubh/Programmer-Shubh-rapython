@@ -336,7 +336,7 @@
 <div class="card mb-3 slab-card">
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Order + Risk + Period, single form</small></div>
                 <div class="card-body">
-                    <div class="slab-sec"><div class="slab-sec-title">Order</div>
+                    <div class="slab-sec"><div class="slab-sec-title">Order <small class="text-muted" style="font-weight:400">(Optional — Template legs below will override, no need to set if using Strategy Templates)</small></div>
                     <div class="row g-2">
                         <div class="col-md-2"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 5)</label><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><label><input type="checkbox" value="NIFTY" checked> NIFTY</label><label><input type="checkbox" value="BANKNIFTY"> BANKNIFTY</label><label><input type="checkbox" value="FINNIFTY"> FINNIFTY</label><label><input type="checkbox" value="MIDCPNIFTY"> MIDCPNIFTY</label><label><input type="checkbox" value="SENSEX"> SENSEX</label><label><input type="checkbox" value="BANKEX"> BANKEX</label><label><input type="checkbox" value="RELIANCE"> RELIANCE</label><label><input type="checkbox" value="HDFCBANK"> HDFCBANK</label><label><input type="checkbox" value="ICICIBANK"> ICICIBANK</label><label><input type="checkbox" value="TCS"> TCS</label><label><input type="checkbox" value="INFY"> INFY</label></div></div>
                         <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY" selected>Call Buy</option><option value="CE-SELL">Call Sell</option><option value="PE-BUY">Put Buy</option><option value="PE-SELL">Put Sell</option></select></div>
@@ -379,7 +379,7 @@
                 </div>
                 <!-- Strategy Templates Gallery -->
                 <div class="card mt-3">
-                    <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Strategy Templates — Click to Build</strong><small class="text-muted">Template = ready-made legs (upar wali Order setting override hogi)</small></div>
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Strategy Templates — Click to Build</strong><small class="text-success fw-bold">✓ Template legs will be used — top Order setting not needed</small></div>
                     <div class="card-body p-2">
                         <div class="row g-2">
                             <div class="col-6 col-md-2"><div class="quant-card" onclick="applyTemplate('longcall')"><div class="icon">📈</div><div class="title">Long Call</div><div class="desc">Buy CE ATM<br>Unlimited gain</div></div></div>
