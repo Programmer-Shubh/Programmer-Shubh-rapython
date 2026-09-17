@@ -530,6 +530,19 @@ class IndicatorEngine:
             prev_o, prev_c = ho, hc
         return {"open": ha_open, "close": ha_close, "high": ha_high, "low": ha_low, "signal": sig}
 
+    def calculate_bollinger(self, prices: List[float], period: int = 20, std: float = 2.0) -> Dict:
+        n = len(prices)
+        mid, upper, lower = [None]*n, [None]*n, [None]*n
+        for i in range(period-1, n):
+            window = prices[i-period+1:i+1]
+            sma = sum(window)/period
+            var = sum((p - sma) ** 2 for p in window)/period
+            sd = math.sqrt(var) if var>0 else 0
+            mid[i]=sma
+            upper[i]=sma + std*sd
+            lower[i]=sma - std*sd
+        return {"mid": mid, "upper": upper, "lower": lower}
+
     def calculate_range_breakout(self, data: List[Dict], period: int = 20) -> Dict:
         """Donchian-style range breakout (quantman Range Breakout indicator).
         Upper = highest high of last `period` bars (excluding current),
