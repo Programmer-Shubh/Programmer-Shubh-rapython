@@ -366,7 +366,7 @@ def _fetch_stocksrin_live(symbol):
         import random
         random.seed(hash(symbol))
         end = datetime.datetime.now()
-        start = end - datetime.timedelta(days=90)
+        start = end - datetime.timedelta(days=45)
         records = []
         price = spot
         dates = []
@@ -602,8 +602,8 @@ def _run_backtest_core(req: BacktestRequest):
                 _per_symbol[_sym] = {"error": f"No data for {_sym}", "total_trades": 0,
                                      "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
                 continue
-            if len(historical) > 120:
-                historical = historical[-120:]
+            if len(historical) > 60:
+                historical = historical[-60:]
             engine = BacktestEngine(is_live=False)
             result = engine.run(
                 historical, _sym, start_date, end_date,
