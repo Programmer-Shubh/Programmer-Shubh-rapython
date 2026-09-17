@@ -561,14 +561,31 @@ def _run_backtest_core(req: BacktestRequest):
         # For now, limit to 1 symbol for instant if request has >2 symbols and no explicit multi flag
         if len(_syms) > 2 and not req.advanced.get("allow_multi"):
             _syms = _syms[:1]
+        timeframe = (advanced_in.get("timeframe") or "1d").lower()
         for _sym in _syms:
-            _ck = f"{_sym}_{start_date}_{end_date}"
+            _ck = f"{_sym}_{start_date}_{end_date}_{timeframe}"
             _ce = _BT_CACHE.get(_ck)
             if _ce and _bt_t.time() - _ce[0] < 300:
                 historical = _ce[1]
             else:
                 # Algotest-like instant: synthetic only, no DB/network - <50ms
                 historical = _generate_synthetic_fallback(_sym, start_date, end_date)
+                # Resample to intraday if needed (5m,15m etc. like algotest)
+                if timeframe in ("1m","5m","15m","30m","1h"):
+                    try:
+                        # Expand daily candles to intraday by splitting
+                        intraday=[]
+                        mins = {"1m":1,"5m":5,"15m":15,"30m":30,"1h":60}[timeframe]
+                        bars_per_day = int(375 / mins)  # 9:15-15:30 = 375 mins
+                        for d in historical:
+                            base_price = d["close_price"]
+                            for i in range(bars_per_day):
+                                # Small random drift per intraday bar
+                                drift = (i - bars_per_day/2) * 0.0001
+                                c = base_price * (1 + drift + (i%3-1)*0.001)
+                                intraday.append({**d, "trade_date": d["trade_date"], "close_price": round(c,2), "open_price": round(c*0.999,2), "high_price": round(c*1.002,2), "low_price": round(c*0.998,2)})
+                        historical = intraday[-600:] if len(intraday)>600 else intraday
+                    except: pass
                 _BT_CACHE[_ck] = (_bt_t.time(), historical)
                 if len(_BT_CACHE) > 20:
                     _BT_CACHE.pop(next(iter(_BT_CACHE)))

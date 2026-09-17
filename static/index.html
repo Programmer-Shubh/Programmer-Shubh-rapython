@@ -356,6 +356,7 @@
                         <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
+                        <div class="col-md-2"><label class="form-label small">Chart Timeframe</label><select id="r-timeframe" class="form-select form-select-sm"><option value="1d" selected>Daily</option><option value="5m">5 Minute</option><option value="15m">15 Minute</option><option value="30m">30 Minute</option><option value="1h">1 Hour</option><option value="1m">1 Minute</option></select></div>
                         
                     </div>
                     </div>
@@ -1059,11 +1060,12 @@ let _lastOpenTrdHTML = null;
             {const pp=order.split('-');legs=[{option_type:pp[0],transaction:pp[1].toLowerCase(),lots:lots,strike_selection:strikeType,otm_distance:rOtmDist,expiry:rExp}];}
         }
         const rType=(document.getElementById('r-type')?.value||'intraday').toLowerCase();
+        const timeframe=document.getElementById('r-timeframe')?.value||'1d';
         const entryTime=document.getElementById('r-entry').value||'09:35';
         const exitTime=document.getElementById('r-exit').value||'15:05';
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50;
-        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
     }
     async function runBacktest(){
         // Immediate visible feedback FIRST - proves the click fired. Entry is
