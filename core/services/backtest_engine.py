@@ -522,11 +522,42 @@ class BacktestEngine:
                     cond_met = cond_met and cur_v < val and prev_v >= val
             return cond_met
 
-        # PRIORITY 2: Selected indicator-based signals (OR per indicator - any triggers, for 2-indicator backtest)
-        # Respect bullish/bearish mode per indicator (both by default)
+        # PRIORITY 2: Selected indicator-based signals - NOW requires composite Score >=80 (like dashboard 4-part)
+        # Each indicator contributes to score, need at least 80 to enter (was OR logic causing 12% win)
         modes = getattr(self, "ind_modes", {})
         if not pre_calc:
             return True
+        # Calculate composite score for this bar
+        _score = 0
+        _max = 0
+        # Supertrend bullish +30
+        if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
+            _max += 30
+            if historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx]:
+                _score += 30
+        # EMA trend +20
+        if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
+            _max += 20
+            if historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx]:
+                _score += 20
+        # RSI <45 bullish +20, RSI >55 bearish handled in sell
+        if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
+            _max += 20
+            if pre_calc["rsi"][effective_idx] < 45:
+                _score += 20
+        # VWAP +10
+        if "vwap" in pre_calc:
+            vw = pre_calc["vwap"]
+            vwap_vals = vw.get("vwap", []) if isinstance(vw, dict) else []
+            _max += 10
+            if effective_idx < len(vwap_vals) and vwap_vals[effective_idx] is not None and historical[effective_idx]["close_price"] > vwap_vals[effective_idx]:
+                _score += 10
+        # Require at least 60% of max score
+        if _max>0 and _score < _max*0.6:  # e.g. 48/80
+            return False
+        # Also require at least 2 indicators to agree
+        if _score < 30:
+            return False
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
             if modes.get("supertrend","both") != "bearish" and historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx]:
                 return True
@@ -637,8 +668,32 @@ class BacktestEngine:
                     cond_met = cond_met and cur_v < val and prev_v >= val
             return cond_met
 
-        # PRIORITY 2: Selected indicator-based signals (OR logic) with bullish/bearish filter
+        # PRIORITY 2: Selected indicator-based signals - composite Score >=80
         modes = getattr(self, "ind_modes", {})
+        _score = 0
+        _max = 0
+        if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
+            _max += 30
+            if historical[effective_idx]["close_price"] < pre_calc["supertrend"][effective_idx]:
+                _score += 30
+        if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
+            _max += 20
+            if historical[effective_idx]["close_price"] < pre_calc["ema"][effective_idx]:
+                _score += 20
+        if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
+            _max += 20
+            if pre_calc["rsi"][effective_idx] > 55:
+                _score += 20
+        if "vwap" in pre_calc:
+            vw = pre_calc["vwap"]
+            vwap_vals = vw.get("vwap", []) if isinstance(vw, dict) else []
+            _max += 10
+            if effective_idx < len(vwap_vals) and vwap_vals[effective_idx] is not None and historical[effective_idx]["close_price"] < vwap_vals[effective_idx]:
+                _score += 10
+        if _max>0 and _score < _max*0.6:
+            return False
+        if _score < 30:
+            return False
         sell = False
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
             if modes.get("supertrend","both") != "bullish":
