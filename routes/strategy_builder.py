@@ -19,18 +19,21 @@ def _generate_synthetic_fallback(symbol: str, start_date: str, end_date: str) ->
         e = datetime.datetime.now()
         s = e - datetime.timedelta(days=90)
     
-    # Base prices for common symbols
+    # Base prices for common symbols — must match historical_fetcher _SPOTS
     base_prices = {
-        'NIFTY': 19800, 'BANKNIFTY': 44000, 'FINNIFTY': 21000, 'MIDCPNIFTY': 12000,
-        'RELIANCE': 2500, 'HDFCBANK': 1600, 'ICICIBANK': 1000, 'TCS': 3800,
-        'INFY': 1500, 'ITC': 450, 'SBIN': 800, 'AXISBANK': 1050, 'KOTAKBANK': 1750,
-        'LT': 3200, 'HINDUNILVR': 2500, 'BHARTIARTL': 900, 'M&M': 1400,
-        'MARUTI': 11000, 'BAJFINANCE': 7000, 'WIPRO': 450, 'ONGC': 250,
-        'SUNPHARMA': 1200, 'ULTRACEMCO': 9000, 'NTPC': 350, 'POWERGRID': 280,
-        'TATAMOTORS': 850, 'TATASTEEL': 150, 'HCLTECH': 1300, 'JSWSTEEL': 800,
-        'COALINDIA': 450, 'DRREDDY': 5200, 'CIPLA': 1300, 'ADANIENT': 2800,
-        'SBILIFE': 1400, 'BPCL': 600, 'GRASIM': 2200, 'TECHM': 1200,
-        'DIVISLAB': 3500, 'EICHERMOT': 3800, 'BRITANNIA': 4800
+        'NIFTY': 24500, 'BANKNIFTY': 51200, 'FINNIFTY': 22800, 'MIDCPNIFTY': 14800,
+        'RELIANCE': 2850, 'HDFCBANK': 1780, 'ICICIBANK': 1250, 'TCS': 3950,
+        'INFY': 1580, 'ITC': 470, 'SBIN': 780, 'AXISBANK': 1050, 'KOTAKBANK': 1820,
+        'LT': 3650, 'HINDUNILVR': 2500, 'BHARTIARTL': 1650, 'M&M': 2900,
+        'MARUTI': 12500, 'BAJFINANCE': 6800, 'WIPRO': 560, 'ONGC': 280,
+        'SUNPHARMA': 1780, 'ULTRACEMCO': 11000, 'NTPC': 350, 'POWERGRID': 310,
+        'TATAMOTORS': 980, 'TATASTEEL': 145, 'HCLTECH': 1700, 'JSWSTEEL': 880,
+        'COALINDIA': 480, 'DRREDDY': 6200, 'CIPLA': 1500, 'ADANIENT': 3200,
+        'SBILIFE': 1550, 'BPCL': 650, 'GRASIM': 2300, 'TECHM': 1650,
+        'DIVISLAB': 3500, 'EICHERMOT': 4800, 'BRITANNIA': 5200,
+        'HINDALCO': 620, 'VEDL': 450, 'INDUSINDBK': 1450, 'NESTLEIND': 25000,
+        'BAJAJFINSV': 1750, 'HEROMOTOCO': 4900, 'APOLLOHOSP': 6300, 'UPL': 550,
+        'SHREECEM': 28000, 'TITAN': 3200, 'BAJAJFINSV': 1750,
     }
     
     # Ensure at least 60 trading days for indicator warmup (SuperTrend/EMA need 20+ bars)
@@ -641,7 +644,14 @@ def _run_backtest_core(req: BacktestRequest):
                                  "net_pnl": round(_sm.get("net_pnl", 0), 2)}
         if not _all_trades:
             errs = "; ".join(f"{k}: {v.get('error')}" for k, v in _per_symbol.items() if v.get("error"))
-            return {"error": errs or f"No data available for {symbol}. All free sources failed. Try importing bhavcopy data or check dates."}
+            if errs:
+                return {"error": errs}
+            # Data exists but no indicator signals -> return 0-trade success (not misleading 'No data' error)
+            # Use first symbol's metrics (0 trades) so frontend shows correct empty state with Win% 0
+            if _first_m is not None:
+                m = _first_m
+            else:
+                m = {"initial_capital": 100000, "final_capital": 100000, "total_return": 0, "total_return_pct": 0, "win_rate": 0, "loss_rate": 0, "max_drawdown": 0, "profit_factor": 0, "sharpe_ratio": 0, "total_trades": 0, "winning_trades": 0, "losing_trades": 0, "avg_win": 0, "avg_loss": 0, "avg_profit_per_trade": 0, "net_pnl": 0, "max_win": 0, "max_loss": 0, "max_dd_duration": 0, "return_maxdd": 0, "reward_risk": 0, "expectancy": 0, "max_win_streak": 0, "max_loss_streak": 0, "max_trades_in_dd": 0, "total_brokerage": 0, "equity_curve": [], "monthly_pnl": {}, "trade_list": []}
         if len(_syms) == 1 and _first_m is not None and not _per_symbol.get(_syms[0], {}).get("error"):
             m = _first_m
         else:
