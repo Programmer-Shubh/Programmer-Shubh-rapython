@@ -949,6 +949,28 @@ class BacktestEngine:
             return {"reason": "target", "level": tp_level}
         return None
 
+    def run_vectorbt(self, df, symbol="NIFTY"):
+        """Vectorbt lightning-fast in-memory backtest on DataFrame (no CSV)."""
+        try:
+            import vectorbt as vbt
+            # df is Pandas DataFrame with columns: open, high, low, close (lowercase from tvDatafeed/nsepython/openchart)
+            # Map to proper case for vectorbt
+            if 'close' in df.columns:
+                close = df['close']
+            elif 'Close' in df.columns:
+                close = df['Close']
+            else:
+                close = df.iloc[:,3] if len(df.columns)>3 else df.iloc[:,0]
+            # Simple SMA crossover via vectorbt
+            fast_ma = vbt.MA.run(close, 13)
+            slow_ma = vbt.MA.run(close, 34)
+            entries = fast_ma.ma_crossed_above(slow_ma)
+            exits = fast_ma.ma_crossed_below(slow_ma)
+            pf = vbt.Portfolio.from_signals(close, entries, exits, fees=0.001, sl_stop=0.02, tp_stop=0.04)
+            return {"success": True, "stats": pf.stats(), "trades": pf.trades.records_readable, "equity": pf.value()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def _square_off_expiry(self, historical, entries, exits, symbol, option_type, txn_type, qty, risk_management):
         """Automatically square off all open option positions on expiry day at market close.
         This prevents physical delivery risk and is critical for F&O options."""

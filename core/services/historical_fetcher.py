@@ -4,7 +4,7 @@ import re
 import json
 from typing import List, Dict
 # Sources: DB -> nselib (NSE) -> jugaad-data (NSE bhavcopy) -> StocksRin -> Google -> TrueData
-# yfinance REMOVED. Direct NSE Bhavcopy = Independent Free Pipeline.
+# Direct NSE Bhavcopy = Independent Free Pipeline (yfinance removed, in-memory tvDatafeed/nsepython/openchart).
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -311,7 +311,7 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
     return records
 
 def _fetch_nse_archives_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """Direct NSE archives CSV (nseindia.com/content/historical) - free, no key, replaces yfinance."""
+    """Direct NSE archives CSV (nseindia.com/content/historical) - free, no key."""
     try:
         import csv, io, time as _t
         sd=datetime.datetime.strptime(start_date,"%Y-%m-%d"); ed=datetime.datetime.strptime(end_date,"%Y-%m-%d")
@@ -375,6 +375,118 @@ def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Di
     return []
 
 
+def _fetch_tvDatafeed_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """tvDatafeed: TradingView in-memory DataFrame, no CSV. Falls back to openchart if tvDatafeed not installed."""
+    try:
+        # Try tvDatafeed first
+        try:
+            from tvDatafeed import TvDatafeed
+            tv = TvDatafeed()
+            # tvDatafeed uses interval and n_bars, we fetch daily
+            df = tv.get_hist(symbol=symbol, exchange='NSE', interval='1d', n_bars=500)
+            if df is not None and not df.empty:
+                # tvDatafeed returns DataFrame with columns: symbol, open, high, low, close, volume, datetime
+                # Normalize to our format
+                out=[]
+                for idx, row in df.iterrows():
+                    td = str(idx)[:10] if hasattr(idx, 'strftime') else str(row.get('datetime',''))[:10]
+                    # Try to get date from index
+                    try:
+                        td = idx.strftime('%Y-%m-%d') if hasattr(idx, 'strftime') else str(td)[:10]
+                    except: td=str(td)[:10]
+                    if td < start_date or td > end_date: continue
+                    cl=float(row.get('close', row.get('Close',0)) or 0)
+                    if cl<=0: continue
+                    out.append({"symbol":symbol,"trade_date":td,"open_price":float(row.get('open',row.get('Open',cl))),"high_price":float(row.get('high',row.get('High',cl))),"low_price":float(row.get('low',row.get('Low',cl))),"close_price":round(cl,2),"volume":int(row.get('volume',row.get('Volume',0)) or 0),"oi":0})
+                if len(out)>=5:
+                    return out
+        except Exception:
+            pass
+        # Fallback to openchart (also TradingView in-memory)
+        try:
+            import openchart
+            # openchart also provides DataFrame
+            df = openchart.get_history(symbol, interval='1d', start=start_date, end=end_date)
+            if df is not None and not df.empty:
+                out=[]
+                for idx, row in df.iterrows():
+                    td=str(idx)[:10]
+                    try: td=idx.strftime('%Y-%m-%d')
+                    except: pass
+                    if td < start_date or td > end_date: continue
+                    cl=float(row.get('close',0) or 0)
+                    if cl<=0: continue
+                    out.append({"symbol":symbol,"trade_date":td,"open_price":float(row.get('open',cl)),"high_price":float(row.get('high',cl)),"low_price":float(row.get('low',cl)),"close_price":round(cl,2),"volume":int(row.get('volume',0) or 0),"oi":0})
+                if len(out)>=5:
+                    return out
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return []
+
+def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """nsepython: NSE in-memory DataFrame, no CSV."""
+    try:
+        from nsepython import nsefetch, expiry_list, nse_eq
+        # nsepython provides various fetches, try equity history
+        import datetime as _dt
+        # Try nse_eq history
+        try:
+            df = nse_eq(symbol)
+            # nse_eq returns current quote, not historical - try history endpoint
+            pass
+        except: pass
+        # Try via nsefetch for historical
+        try:
+            # nsepython has function to get historical data via nsefetch
+            url = f"https://www.nseindia.com/api/historical/equities?symbol={symbol}&series=[\"EQ\"]"
+            data = nsefetch(url)
+            if data and isinstance(data, dict) and 'data' in data:
+                rows=data['data']
+                out=[]
+                for r in rows:
+                    td=str(r.get('CH_TIMESTAMP','') or r.get('timestamp',''))[:10]
+                    # Convert timestamp
+                    try:
+                        # NSE timestamp like 2024-07-01
+                        td=_dt.datetime.strptime(td, '%Y-%m-%d').strftime('%Y-%m-%d')
+                    except:
+                        try:
+                            td=_dt.datetime.strptime(td, '%d-%b-%Y').strftime('%Y-%m-%d')
+                        except: continue
+                    if td < start_date or td > end_date: continue
+                    cl=float(r.get('CH_CLOSING_PRICE', r.get('close',0)) or 0)
+                    if cl<=0: continue
+                    out.append({"symbol":symbol,"trade_date":td,"open_price":float(r.get('CH_OPENING_PRICE',cl)),"high_price":float(r.get('CH_TRADE_HIGH_PRICE',cl)),"low_price":float(r.get('CH_TRADE_LOW_PRICE',cl)),"close_price":round(cl,2),"volume":int(r.get('CH_TOT_TRADED_QTY',0) or 0),"oi":0})
+                if len(out)>=5:
+                    return out
+        except: pass
+    except Exception:
+        pass
+    return []
+
+def _fetch_openchart_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """openchart: TradingView in-memory, no CSV."""
+    try:
+        import openchart
+        df = openchart.get_history(symbol, interval='1d')
+        if df is not None and not df.empty:
+            out=[]
+            for idx, row in df.iterrows():
+                td=str(idx)[:10]
+                try: td=idx.strftime('%Y-%m-%d')
+                except: pass
+                if td < start_date or td > end_date: continue
+                cl=float(row.get('close', row.get('Close',0)) or 0)
+                if cl<=0: continue
+                out.append({"symbol":symbol,"trade_date":td,"open_price":float(row.get('open', cl)),"high_price":float(row.get('high', cl)),"low_price":float(row.get('low', cl)),"close_price":round(cl,2),"volume":int(row.get('volume',0) or 0),"oi":0})
+            if len(out)>=5:
+                return out
+    except Exception:
+        pass
+    return []
+
 def _last_trading_day():
     d = datetime.date.today() - datetime.timedelta(days=1)
     while d.weekday() >= 5: d -= datetime.timedelta(days=1)
@@ -400,7 +512,7 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
     # 2) External sources — 2s budget for instant backtest (DB-first), heavy 1Y seed via /api/backtest/seed
     import time as _t
     _deadline = _t.time() + 2
-    for fetcher in [_fetch_nselib_historical, _fetch_jugaad_historical, _fetch_nse_archives_historical]:
+    for fetcher in [_fetch_tvDatafeed_historical, _fetch_nsepython_historical, _fetch_openchart_historical, _fetch_nselib_historical, _fetch_jugaad_historical, _fetch_nse_archives_historical]:
         try:
             if _t.time() > _deadline:
                 break

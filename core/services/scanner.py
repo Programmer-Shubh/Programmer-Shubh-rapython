@@ -366,6 +366,24 @@ class OptionScanner:
                 r['close_price'] = float(r.get('close_price', 0) or 0)
                 r['open_price'] = float(r.get('open_price', 0) or 0)
             return rows
+        # In-memory tvDatafeed/nsepython/openchart first (no CSV), then synthetic
+        try:
+            from core.services.historical_fetcher import _fetch_tvDatafeed_historical, _fetch_nsepython_historical, _fetch_openchart_historical
+            import datetime as _dt
+            end = _dt.date.today().strftime("%Y-%m-%d")
+            start = (_dt.date.today() - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
+            for fetcher in [_fetch_tvDatafeed_historical, _fetch_nsepython_historical, _fetch_openchart_historical]:
+                try:
+                    data = fetcher(symbol, start, end)
+                    if data and len(data) >= 30:
+                        for r in data:
+                            r['high_price'] = float(r.get('high_price', 0) or 0)
+                            r['low_price'] = float(r.get('low_price', 0) or 0)
+                            r['close_price'] = float(r.get('close_price', 0) or 0)
+                            r['open_price'] = float(r.get('open_price', 0) or 0)
+                        return data[-250:]
+                except: pass
+        except: pass
         # DB empty/sparse: use synthetic directly for scanner speed (no network for 50 symbols)
         # nselib per-symbol is 2s * 50 = 100s timeout on Render free tier; synthetic is instant
         try:
