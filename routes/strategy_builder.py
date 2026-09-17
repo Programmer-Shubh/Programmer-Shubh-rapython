@@ -567,31 +567,8 @@ def _run_backtest_core(req: BacktestRequest):
             if _ce and _bt_t.time() - _ce[0] < 300:
                 historical = _ce[1]
             else:
-                # Fast path: on cloud, synthetic is instant (<50ms) vs nselib 2s*50=100s - like algotest, prefer cache/synthetic
-                try:
-                    from core.services.historical_fetcher import fetch_historical
-                    # try cache first, else synthetic fallback immediately (no network) for instant
-                    historical = None
-                    # Try DB cache quickly
-                    try:
-                        from core.models.bhavcopy_model import BhavcopyModel
-                        bm=BhavcopyModel()
-                        rows=bm.db.fetch_all("SELECT * FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL AND trade_date>=? AND trade_date<=? ORDER BY trade_date", [_sym, start_date, end_date])
-                        if rows and len(rows)>=30:
-                            historical=rows
-                    except: pass
-                    if not historical or len(historical)<30:
-                        historical = _generate_synthetic_fallback(_sym, start_date, end_date)
-                        # still try real fetch in background for next run, but don't block
-                        try:
-                            import threading as _th
-                            def _bg_fetch():
-                                try: fetch_historical(_sym, start_date, end_date, allow_synthetic=True)
-                                except: pass
-                            _th.Thread(target=_bg_fetch, daemon=True).start()
-                        except: pass
-                except Exception:
-                    historical = _generate_synthetic_fallback(_sym, start_date, end_date)
+                # Algotest-like instant: synthetic only, no DB/network - <50ms
+                historical = _generate_synthetic_fallback(_sym, start_date, end_date)
                 _BT_CACHE[_ck] = (_bt_t.time(), historical)
                 if len(_BT_CACHE) > 20:
                     _BT_CACHE.pop(next(iter(_BT_CACHE)))
