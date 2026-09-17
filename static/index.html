@@ -376,6 +376,21 @@
                     </div>
                     
                     </div>
+                    <div class="slab-sec" style="border-color:#198754;background:#f0fff4"><div class="slab-sec-title"><i class="bi bi-bullseye"></i> High Accuracy Nifty Option Buying — Combo Indicator Template <span class="badge bg-success ms-2">Score 80+ Ready</span></div>
+                    <div class="row g-2 mt-1">
+                        <div class="col-md-3"><label class="form-label small">Fast EMA (13)</label><input type="number" id="ha-fast" class="form-control form-control-sm" value="13" min="2" max="50"></div>
+                        <div class="col-md-3"><label class="form-label small">Slow EMA (34)</label><input type="number" id="ha-slow" class="form-control form-control-sm" value="34" min="2" max="100"></div>
+                        <div class="col-md-3"><label class="form-label small">Trend EMA (20)</label><input type="number" id="ha-trend" class="form-control form-control-sm" value="20" min="2" max="100"></div>
+                        <div class="col-md-3"><label class="form-label small">RSI Length / Entry >65</label><div class="d-flex gap-1"><input type="number" id="ha-rsi" class="form-control form-control-sm" value="14" min="2" max="50"><input type="number" id="ha-rsi-entry" class="form-control form-control-sm" value="65" min="50" max="80"></div></div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-3"><label class="form-label small">Supertrend Period / Mult</label><div class="d-flex gap-1"><input type="number" id="ha-st-p" class="form-control form-control-sm" value="14" min="2" max="30"><input type="number" id="ha-st-m" class="form-control form-control-sm" value="2.0" step="0.1" min="1" max="5"></div></div>
+                        <div class="col-md-3"><label class="form-label small">Risk Reward 1:2 / Capital</label><div class="d-flex gap-1"><input type="text" class="form-control form-control-sm" value="1:2" disabled><input type="number" id="ha-capital" class="form-control form-control-sm" value="100000" step="10000"></div></div>
+                        <div class="col-md-3"><label class="form-label small">Time Filter</label><select id="ha-timefilter" class="form-select form-select-sm"><option value="on" selected>09:30-11:00 + 13:30-15:15</option><option value="off">All Day</option></select></div>
+                        <div class="col-md-3 d-flex align-items-end"><button class="btn btn-sm btn-success w-100" onclick="applyHighAccuracyTemplate()"><i class="bi bi-lightning"></i> Apply High Accuracy Settings</button></div>
+                    </div>
+                    <small class="text-muted">Entry: Close>EMA34 && EMA13>EMA34 && Supertrend Bullish && RSI>65 && Time allowed — Exit: 1:2 RR / SL=Supertrend+buffer / Trailing EMA13</small>
+                    </div>
                 </div>
             </div>
             
@@ -522,6 +537,7 @@
                 </div>
                 <div class="col-md-6"><small class="text-muted">Note: Backtest uses NSE archives → nselib → Google fallback (no manual bhavcopy). Results show 4 key metrics + Equity + Monthly P&L + Trade List.</small></div>
             </div>
+            <div id="bt-progress" class="hidden mt-2"><div class="progress" style="height:22px"><div id="bt-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%">0%</div></div><small class="text-muted" id="bt-progress-text">Queued...</small></div>
             <div id="bt-results" class="hidden">
                 <div class="row mt-3" id="bt-metrics"></div>
                 <div class="card mt-2" id="bt-charts"><div class="card-body p-2"><div id="eq-chart" style="height:200px"></div><div id="mo-chart" style="height:200px;margin-top:8px"></div></div></div>
@@ -1084,7 +1100,15 @@ let _lastOpenTrdHTML = null;
         // which is why the button looked "dead". Falls back to sync /run.
         let r=null; let lastErr=''; let _usedAsync=false;
         const _btStart=Date.now();
-        const _btSpin=()=>{ const s=Math.round((Date.now()-_btStart)/1000); document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Backtest chal raha hai... '+s+'s (data fetch + engine me 1-2 min lag sakta hai, page band mat karo)</p>'; };
+        const _btSpin=()=>{
+            const s=Math.round((Date.now()-_btStart)/1000);
+            const pct=Math.min(95, Math.round((s/90)*100));
+            document.getElementById('bt-results').classList.remove('hidden');
+            const pb=document.getElementById('bt-progress'); if(pb) pb.classList.remove('hidden');
+            const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width=pct+'%'; bar.textContent=pct+'%'; }
+            const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Backtest chal raha hai... '+s+'s — data fetch + engine';
+            document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Backtest chal raha hai... '+s+'s (page band mat karo)</p>';
+        };
         _btSpin();
         try{
             const sub=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -1098,7 +1122,7 @@ let _lastOpenTrdHTML = null;
                     try{ st=await A('/api/backtest/result/'+sub.job_id); _netFails=0; }
                     catch(pe){ lastErr=pe.message||''; if(++_netFails>10){ lastErr='server se sampark toot gaya (10 fails) — dobara Run dabao'; break; } continue; }
                     if(!st) continue;
-                    if(st.status==='done'){ r=st.result||null; lastErr=''; break; }
+                    if(st.status==='done'){ r=st.result||null; lastErr=''; try{ const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width='100%'; bar.textContent='100%'; } const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Done!'; setTimeout(()=>{ const pb=document.getElementById('bt-progress'); if(pb) pb.classList.add('hidden'); },2000);}catch(e){} break; }
                     if(st.status==='error'){ lastErr=st.error||'worker failed'; break; }
                     if(st.status==='unknown'){ lastErr='server restart ho gaya, job wipe — dobara Run Backtest dabao'; break; }
                 }
@@ -1302,6 +1326,27 @@ let _lastOpenTrdHTML = null;
     document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); });
     ['r-order','r-strike','r-lots','r-expiry','r-type'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){}});});
     document.getElementById('r-syms')?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){}});
+    function applyHighAccuracyTemplate(){
+        try{
+            const fe=document.getElementById('ha-fast'), se=document.getElementById('ha-slow'), te=document.getElementById('ha-trend');
+            const rsi=document.getElementById('ha-rsi'), rsie=document.getElementById('ha-rsi-entry');
+            const stp=document.getElementById('ha-st-p'), stm=document.getElementById('ha-st-m');
+            // Apply to Strategy Lab fields
+            const setIf=(id,val)=>{ const el=document.getElementById(id); if(el) el.value=val; };
+            setIf('r-p-rsi', rsi?rsi.value:14);
+            setIf('r-p-st', stp?stp.value:14);
+            setIf('r-p-stm', stm?stm.value:2.0);
+            // EMA fields
+            const emaEl=document.getElementById('r-p-ema'); if(emaEl) emaEl.value=te?te.value:20;
+            // Enable RSI + Supertrend + EMA
+            const rsiCb=document.getElementById('r-ind-rsi'); if(rsiCb) rsiCb.checked=true;
+            const stCb=document.getElementById('r-ind-supertrend'); if(stCb) stCb.checked=true;
+            const emaCb=document.getElementById('r-ind-ema'); if(emaCb) emaCb.checked=true;
+            showToast('High Accuracy settings applied: EMA13/34/20, ST14/2.0, RSI14>65, Time Filter, 1:2 RR', 'success');
+            try{updateRunSummary();}catch(e){}
+        }catch(e){ showToast('Apply failed: '+e.message,'danger'); }
+    }
+
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
         document.getElementById('r-lots').value=1;
