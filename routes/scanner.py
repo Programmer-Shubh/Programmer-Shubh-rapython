@@ -113,15 +113,35 @@ def fno_top5():
 
 
 @router.get("/opportunities")
-def top_opportunities():
-    k="opp"; now=_t.time()
+def top_opportunities(min_score: int = 80):
+    try: min_score=int(min_score)
+    except: min_score=80
+    k=f"opp_{min_score}"; now=_t.time()
     if k in _CACHE and now-_CACHE[k][0] < 300:
         return _CACHE[k][1]
     try:
         scanner = OptionScanner()
-        res={"opportunities": scanner.get_top_opportunities()}
+        res={"opportunities": scanner.get_top_opportunities(min_score=min_score)}
         _CACHE[k]=(now,res)
         return res
     except Exception as e:
         import traceback; traceback.print_exc()
         return {"opportunities": [], "error": str(e)[:300]}
+
+
+@router.get("/opportunities-4part")
+def opportunities_4part(min_score: int = 80):
+    """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, Score>=80"""
+    try: min_score=int(min_score)
+    except: min_score=80
+    k=f"opp4_{min_score}"; now=_t.time()
+    if k in _CACHE and now-_CACHE[k][0] < 120:
+        return _CACHE[k][1]
+    try:
+        scanner = OptionScanner()
+        res = scanner.get_4_part_opportunities(min_score=min_score)
+        _CACHE[k]=(now,res)
+        return res
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {"ce_buy": [], "pe_buy": [], "ce_sell": [], "pe_sell": [], "error": str(e)[:300]}

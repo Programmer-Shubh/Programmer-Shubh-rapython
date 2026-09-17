@@ -263,19 +263,21 @@
                 <div class="card-body p-0"><div id="fno-top5" class="sig-grid" style="padding:12px"></div></div>
             </div>
             <div class="card">
-                <div class="card-header">Top 5 Opportunities <small class="text-muted">(70+ score only)</small>
-                    <span class="ms-2"><label class="badge bg-success" style="font-size:13px"><input type="radio" name="dash-mode" value="paper" checked onchange="setDashMode('paper')"> Paper</label>
-                    <label class="badge" style="font-size:13px;color:#842029;background:#f8d7da;border:1px solid #f5c2c7"><input type="radio" name="dash-mode" value="live" onchange="setDashMode('live')"> Live</label></span>
-                    <span class="ms-2 small text-muted">Order banate time default <strong>Paper</strong> tik hai</span>
-                    <button class="btn btn-sm btn-primary ms-2" onclick="loadOpps()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
-                <div class="card-body p-0"><div id="opp-table" style="overflow-x:auto"></div></div>
-            </div>
-            <div class="card">
-                <div class="card-header">Scanner <small class="text-muted">(SuperTrend + MACD + VWAP + RSI + EMA, 80+ only)</small></div>
-                <div class="card-body">
-                    <div id="scan-stats" class="row"></div>
-                    <div id="scan-st" class="sig-grid"></div>
-                    <div id="scan-vwap" class="sig-grid hidden"></div>
+                <div class="card-header d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                    <span>Trade Opportunities <small class="text-muted">(Score 80+ only — 4-part)</small> <span class="badge bg-success">Live NSE Data</span></span>
+                    <span class="d-flex gap-2 align-items-center">
+                        <label class="badge bg-success" style="font-size:13px"><input type="radio" name="dash-mode" value="paper" checked onchange="setDashMode('paper')"> Paper</label>
+                        <label class="badge" style="font-size:13px;color:#842029;background:#f8d7da;border:1px solid #f5c2c7"><input type="radio" name="dash-mode" value="live" onchange="setDashMode('live')"> Live</label>
+                        <button class="btn btn-sm btn-primary" onclick="loadOpps()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                    </span>
+                </div>
+                <div class="card-body p-2">
+                    <div class="sig-grid" style="grid-template-columns:1fr 1fr;gap:12px">
+                        <div class="sig-box bull"><h5 class="price-up"><i class="bi bi-graph-up"></i> CE Buy — Bullish (Score 80+)</h5><div id="opp-ce-buy"></div></div>
+                        <div class="sig-box bear"><h5 class="price-down"><i class="bi bi-graph-down"></i> PE Buy — Bearish (Score 80+)</h5><div id="opp-pe-buy"></div></div>
+                        <div class="sig-box bear"><h5 style="color:#b7791f"><i class="bi bi-arrow-down-circle"></i> CE Sell — Resistance (Score 80+)</h5><div id="opp-ce-sell"></div></div>
+                        <div class="sig-box bull"><h5 style="color:#2b6cb0"><i class="bi bi-arrow-up-circle"></i> PE Sell — Support (Score 80+)</h5><div id="opp-pe-sell"></div></div>
+                    </div>
                 </div>
             </div>
             <div class="card">
@@ -782,7 +784,7 @@
             }
         }catch(e){console.error('Failed to load symbols',e);}
     }
-    function stab(t,btn){document.getElementById('scan-st').classList.toggle('hidden',t!=='st');document.getElementById('scan-vwap').classList.toggle('hidden',t!=='vwap');btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+    function stab(t,btn){} // Scanner removed
     let conds=[];let condIdx=0;
     function addCondition(){const id=condIdx++;conds.push(id);const div=document.createElement('div');div.className='condition-row';div.id='cond-'+id;div.innerHTML=`<div class="col"><select class="form-select" id="ci-${id}"><option value="close">Close</option><option value="rsi">RSI</option><option value="predicted_moving_average">Predicted MA</option><option value="ai_sentiment">AI Sentiment</option><option value="ai_volatility_range">AI Volatility</option><option value="ai_trend_score">AI Trend</option><option value="macd">MACD</option></select></div><div class="col"><select class="form-select" id="co-${id}"><option value="greater_than">></option><option value="less_than"><</option><option value="crosses_above">Crosses Above</option><option value="crosses_below">Crosses Below</option></select></div><div class="col"><input type="number" class="form-control" id="cv-${id}" value="0" step="1"></div><div class="col" style="max-width:60px"><button class="btn btn-sm btn-danger" onclick="rmCond(${id})"><i class="bi bi-x"></i></button></div>`;const parent=document.getElementById('conditions');if(parent)parent.appendChild(div);}
     function rmCond(id){conds=conds.filter(c=>c!==id);const el=document.getElementById('cond-'+id);if(el)el.remove();}
@@ -817,8 +819,38 @@
         loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();
     }
     function stratBtns(x){const bull=(x.direction==='bullish')||(!x.direction&&((x.signal_type||x.type).includes('CE')));const opt=x.option_suggestion||{};const sym=x.symbol,strike=opt.strike||0,exp=opt.expiry||'';if(bull)return`<button class="btn btn-sm btn-buy" onclick="quickStrat('${sym}','BUY','CE',${strike},'${exp}')">Buy Call</button> <button class="btn btn-sm btn-sell" onclick="quickStrat('${sym}','SELL','PE',${strike},'${exp}')">Sell Put</button>`;return`<button class="btn btn-sm btn-sell" onclick="quickStrat('${sym}','BUY','PE',${strike},'${exp}')">Buy Put</button> <button class="btn btn-sm btn-buy" onclick="quickStrat('${sym}','SELL','CE',${strike},'${exp}')">Sell Call</button>`;}
-    async function loadOpps(){try{const r=await A('/api/scanner/opportunities');const o=r.opportunities||[];if(!o.length){document.getElementById('opp-table').innerHTML='<p class="text-muted p-3">No 70+ score opportunities right now.</p>';return;}let h='<div style="overflow-x:auto"><table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Spot</th><th>Strike</th><th>Expiry</th><th>Premium</th><th>Reasons</th><th>Action</th></tr>';o.forEach(x=>{const dir=(x.direction==='bearish'||((x.signal_type||x.type||'').includes('PE')))?'sell':'buy';h+=sigRow(x,dir);});h+='</table></div>';document.getElementById('opp-table').innerHTML=h;}catch(e){document.getElementById('opp-table').innerHTML='<p class="text-danger">Error: '+e.message+'</p>';}}
-    let _lastScan=0; async function loadDashScanner(){const now=Date.now(); if(now-_lastScan<5000) return; _lastScan=now; try{const r=await A('/api/scanner/scan-combined?min_score=80');const vw={long:[],short:[]};document.getElementById('scan-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Scanned</div><div class="value">${r.total_scanned||0}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Bullish 80+</div><div class="value price-up">${(r.bullish||[]).length}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Bearish 80+</div><div class="value price-down">${(r.bearish||[]).length}</div></div></div>`;renderSig('scan-st',r.bullish||[],r.bearish||[],'ST + MACD + VWAP + RSI + EMA (80+)');document.getElementById('scan-vwap').innerHTML='';}catch(e){}}
+    async function loadOpps(){
+        // 4-part Score 80+ dashboard
+        const renderPart=(elId, list, emptyMsg)=>{
+            const el=document.getElementById(elId);
+            if(!el) return;
+            if(!list||!list.length){ el.innerHTML='<p class="text-muted small p-2">'+emptyMsg+'</p>'; return; }
+            let h='<div class="d-flex flex-column gap-2">';
+            list.forEach(s=>{
+                const opt=s.option_suggestion||{};
+                const score=s.score||0;
+                const badgeCls=score>=90?'bg-success':score>=80?'bg-primary':'bg-secondary';
+                const ivTxt=s.indicators?`RSI ${s.indicators.rsi||'-'} | VWAP ${s.indicators.vwap||'-'}`:'';
+                const volTxt=s.reasons? s.reasons.slice(0,2).join(' \u2022 '):'';
+                const btns=stratBtns({symbol:s.symbol, direction:s.direction, signal_type:s.signal_type, option_suggestion:opt});
+                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol} <small class="text-muted">\u20B9${(s.price||0).toFixed(0)}</small></span><span class="d-flex gap-1 align-items-center"><span class="badge ${badgeCls}">Score ${score}</span>${btns}</span></div><div class="meta">${s.signal_type} ${opt.strike||''} | Prem \u20B9${(opt.premium||0).toFixed(2)} | ${ivTxt}</div><div class="meta" style="font-size:10px">${volTxt}</div><div style="margin-top:4px">${R(s.reasons||[])}</div></div>`;
+            });
+            h+='</div>';
+            el.innerHTML=h;
+        };
+        try{
+            const r=await A('/api/scanner/opportunities-4part?min_score=80');
+            renderPart('opp-ce-buy', r.ce_buy, 'No 80+ CE Buy signals');
+            renderPart('opp-pe-buy', r.pe_buy, 'No 80+ PE Buy signals');
+            renderPart('opp-ce-sell', r.ce_sell, 'No 80+ CE Sell signals');
+            renderPart('opp-pe-sell', r.pe_sell, 'No 80+ PE Sell signals');
+        }catch(e){
+            ['opp-ce-buy','opp-pe-buy','opp-ce-sell','opp-pe-sell'].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML='<p class="text-danger small">Failed to load</p>'; });
+        }
+    }
+
+    function loadDashScanner(){} // Scanner removed - merged into 4-part
+    function stab(t,btn){} // Scanner removed
     function sigRow(s,dir){const opt=s.option_suggestion||{};const prem=opt.premium?'₹'+opt.premium.toFixed(2):'—';const live=s.live?'<span class="badge badge-active">LIVE</span>':(s.date||'');const sig=dir==='buy'?'BUY CE':'BUY PE';const d={symbol:s.symbol,direction:dir==='buy'?'bullish':'bearish',signal_type:sig,option_suggestion:opt};return `<tr><td class="fw-bold">${s.symbol}</td><td>${B(sig,dir==='buy'?'buy':'sell')}</td><td><span class="score-badge">${s.score}/100</span></td><td>₹${(s.price||0).toLocaleString()} <small class="text-muted">${live}</small></td><td>${opt.strike||'-'}</td><td>${opt.expiry||'-'}</td><td>${prem}</td><td>${R(s.reasons||[])}</td><td style="white-space:nowrap">${stratBtns(d)}</td></tr>`;}
     function sigTbl(list,dir){if(!list.length)return '<p class="text-muted small">No signals</p>';let h='<div style="overflow-x:auto"><table><tr><th>Symbol</th><th>Signal</th><th>Score</th><th>Spot</th><th>Strike</th><th>Expiry</th><th>Premium</th><th>Reasons</th><th>Action</th></tr>';list.forEach(s=>{h+=sigRow(s,dir);});h+='</table></div>';return h;}
     function renderSig(cid,buy,sell,title){document.getElementById(cid).innerHTML=`<div class="sig-box bull"><h5 class="price-up">${title} - Bullish (Buy CE) (${buy.length})</h5>${sigTbl(buy,'buy')}</div><div class="sig-box bear"><h5 class="price-down">${title} - Bearish (Buy PE) (${sell.length})</h5>${sigTbl(sell,'sell')}</div>`;}

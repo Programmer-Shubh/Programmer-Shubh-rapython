@@ -102,11 +102,11 @@ class OptionScanner:
                 "total_scanned": st.get("total_scanned", len(symbols)),
                 "min_score": min_score}
 
-    def get_top_opportunities(self, symbols=None, top_n: int = 5, min_score: int = 70) -> list:
+    def get_top_opportunities(self, symbols=None, top_n: int = 5, min_score: int = 80) -> list:
         try:
             min_score = int(min_score)
         except Exception:
-            min_score = 70
+            min_score = 80
         if symbols is None:
             symbols = FNO_SYMBOLS
         # Mix indices + stocks equally - shuffle ordered to avoid indices always winning
@@ -158,6 +158,36 @@ class OptionScanner:
         top = (idx_sigs[:n_idx] + stk_sigs[:n_stk])[:top_n]
         top.sort(key=lambda x: x['score'], reverse=True)
         return top
+
+    def get_4_part_opportunities(self, symbols=None, min_score: int = 80, top_n: int = 5) -> dict:
+        """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, each Score>=80.
+        CE Buy = bullish BUY CE, PE Buy = bearish BUY PE, CE Sell = bearish SELL CE, PE Sell = bullish SELL PE.
+        Score calculated per spec: Supertrend + EMA9/21 + MACD + RSI + Bollinger + VWAP + Volume/MFI + IV."""
+        base = self.get_top_opportunities(symbols=symbols, top_n=top_n*4, min_score=min_score)
+        ce_buy = [s for s in base if s.get('signal_type')=='BUY CE'][:top_n]
+        pe_buy = [s for s in base if s.get('signal_type')=='BUY PE'][:top_n]
+        # Derive Sell legs by swapping option type but keeping direction/score (premium decay capture)
+        ce_sell = []
+        pe_sell = []
+        for s in base:
+            score = s.get('score',0)
+            if score < min_score:
+                continue
+            # Bearish signals can also be CE Sell (resistance)
+            if s.get('direction')=='bearish':
+                ns=dict(s); ns['signal_type']='SELL CE'; ns['direction']='bearish'; ns['transaction_type']='SELL'
+                ns['option_suggestion']=self._suggest_option(s['symbol'], s['price'], 'CE')
+                if ns['option_suggestion'].get('strike'):
+                    ce_sell.append(ns)
+            # Bullish signals can be PE Sell (support)
+            if s.get('direction')=='bullish':
+                ns=dict(s); ns['signal_type']='SELL PE'; ns['direction']='bullish'; ns['transaction_type']='SELL'
+                ns['option_suggestion']=self._suggest_option(s['symbol'], s['price'], 'PE')
+                if ns['option_suggestion'].get('strike'):
+                    pe_sell.append(ns)
+        ce_sell = sorted(ce_sell, key=lambda x: x['score'], reverse=True)[:top_n]
+        pe_sell = sorted(pe_sell, key=lambda x: x['score'], reverse=True)[:top_n]
+        return {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell, "min_score": min_score}
 
     def _ai_fallback_signal(self, result: dict) -> dict:
         """AI-enhanced fallback using 5 advanced indicators when VWAP signals are insufficient.
