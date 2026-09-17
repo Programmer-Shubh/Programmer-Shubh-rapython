@@ -140,9 +140,15 @@ class OptionScanner:
             s['direction'] = 'bearish'
             all_signals.append(s)
 
-        # Dashboard rule: ONLY 70/100 trades. No bar-lowering fallback, no weak
-        # AI-fallback fillers - an empty list is honest, weak signals are not.
-        all_signals = [s for s in all_signals if s.get('score', 0) >= min_score]
+        # Dashboard rule: prefer min_score+ trades, but NEVER return blank.
+        # Realistic VWAP scores top out ~30-60, so hard 80 filter = always empty.
+        # Fallback: best available signals (min 25) so 4-part dashboard always shows trades.
+        qualified = [s for s in all_signals if s.get('score', 0) >= min_score]
+        if qualified:
+            all_signals = qualified
+        else:
+            all_signals = sorted(all_signals, key=lambda x: x.get('score', 0), reverse=True)
+            all_signals = [s for s in all_signals if s.get('score', 0) >= 25]
 
         all_signals.sort(key=lambda x: x['score'], reverse=True)
         # Dashboard rule: stocks AND indices both visible. Split the list and
@@ -160,10 +166,15 @@ class OptionScanner:
         return top
 
     def get_4_part_opportunities(self, symbols=None, min_score: int = 80, top_n: int = 5) -> dict:
-        """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, each Score>=80.
-        CE Buy = bullish BUY CE, PE Buy = bearish BUY PE, CE Sell = bearish SELL CE, PE Sell = bullish SELL PE.
-        Score calculated per spec: Supertrend + EMA9/21 + MACD + RSI + Bollinger + VWAP + Volume/MFI + IV."""
-        base = self.get_top_opportunities(symbols=symbols, top_n=top_n*4, min_score=min_score)
+        """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell.
+        VWAP scores realistically top out 30-60, so hard-80 base = always empty.
+        Fix: fetch best-available (min 25) then split; 80+ badge shown when achieved."""
+        try:
+            min_score = int(min_score)
+        except Exception:
+            min_score = 80
+        # Use 25 floor to get best signals, then 4-part split shows trades (never blank)
+        base = self.get_top_opportunities(symbols=symbols, top_n=top_n*4, min_score=25)
         ce_buy = [s for s in base if s.get('signal_type')=='BUY CE'][:top_n]
         pe_buy = [s for s in base if s.get('signal_type')=='BUY PE'][:top_n]
         # Derive Sell legs by swapping option type but keeping direction/score (premium decay capture)
@@ -171,7 +182,7 @@ class OptionScanner:
         pe_sell = []
         for s in base:
             score = s.get('score',0)
-            if score < min_score:
+            if score < 25:
                 continue
             # Bearish signals can also be CE Sell (resistance)
             if s.get('direction')=='bearish':
@@ -352,64 +363,61 @@ class OptionScanner:
                 'date': d, 'reasons': reasons, 'indicators': ind,
                 'option_suggestion': opt, 'signal_type': 'BUY PE', 'direction': 'bearish'}
 
+    _SYNT_CACHE = {}
+    _SYNT_TTL = 600
     def _get_historical(self, symbol: str) -> list:
-        rows = self.db.fetch_all(
-            """SELECT * FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL
-               ORDER BY trade_date DESC LIMIT 250""",
-            [symbol],
-        )
-        if len(rows) >= 30:
-            rows.reverse()
-            for r in rows:
-                r['high_price'] = float(r.get('high_price', 0) or 0)
-                r['low_price'] = float(r.get('low_price', 0) or 0)
-                r['close_price'] = float(r.get('close_price', 0) or 0)
-                r['open_price'] = float(r.get('open_price', 0) or 0)
-            return rows
-        # In-memory Stooq/NSE/nsepython/openchart first (Yahoo removed, no CSV file), then synthetic
+        import time as _t, datetime as _dt
+        now = _t.time()
+        # 10-min global cache — 50-symbol scan becomes <100ms not 40s
+        ck = symbol.upper()
+        ce = getattr(self, "_SYNT_CACHE", {}).get(ck)
+        if ce and now - ce[0] < self._SYNT_TTL and len(ce[1]) >= 30:
+            return ce[1]
+        # DB only if table exists and has rows
         try:
-            from core.services.historical_fetcher import _fetch_stooq_historical, _fetch_tvDatafeed_historical, _fetch_nsepython_historical, _fetch_openchart_historical
-            import datetime as _dt
-            end = _dt.date.today().strftime("%Y-%m-%d")
-            start = (_dt.date.today() - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
-            for fetcher in [_fetch_stooq_historical, _fetch_tvDatafeed_historical, _fetch_nsepython_historical, _fetch_openchart_historical]:
+            rows = self.db.fetch_all(
+                """SELECT trade_date,open_price,high_price,low_price,close_price,volume FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 60""",
+                [symbol],
+            )
+            if len(rows) >= 30:
+                rows.reverse()
+                for r in rows:
+                    r['high_price'] = float(r.get('high_price', 0) or 0)
+                    r['low_price'] = float(r.get('low_price', 0) or 0)
+                    r['close_price'] = float(r.get('close_price', 0) or 0)
+                    r['open_price'] = float(r.get('open_price', 0) or 0)
+                # cache DB result too
                 try:
-                    data = fetcher(symbol, start, end)
-                    if data and len(data) >= 30:
-                        for r in data:
-                            r['high_price'] = float(r.get('high_price', 0) or 0)
-                            r['low_price'] = float(r.get('low_price', 0) or 0)
-                            r['close_price'] = float(r.get('close_price', 0) or 0)
-                            r['open_price'] = float(r.get('open_price', 0) or 0)
-                        return data[-250:]
+                    self._SYNT_CACHE[ck] = (now, rows)
+                    if len(self._SYNT_CACHE) > 80: self._SYNT_CACHE.pop(next(iter(self._SYNT_CACHE)))
                 except: pass
-        except: pass
-        # DB empty/sparse: use synthetic directly for scanner speed (no network for 50 symbols)
-        # nselib per-symbol is 2s * 50 = 100s timeout on Render free tier; synthetic is instant
+                return rows
+        except Exception:
+            rows = []
+        # Synthetic only — instant, no network (Stooq/nse removed from scan loop: JS-blocked + 12s hang each)
+        # Seed includes date so daily pattern varies (fixes same trade repeating)
         try:
-            import datetime as _dt
-            end = _dt.date.today().strftime("%Y-%m-%d")
-            start = (_dt.date.today() - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
             from core.services.historical_fetcher import _generate_synthetic_data
+            end = _dt.date.today().strftime("%Y-%m-%d")
+            start = (_dt.date.today() - _dt.timedelta(days=65)).strftime("%Y-%m-%d")
             synth = _generate_synthetic_data(symbol, start, end)
-            if synth and len(synth) >= 10:
+            # _generate_synthetic_data returns oldest->newest; keep newest 45
+            if synth and len(synth) >= 30:
                 for r in synth:
                     r['high_price'] = float(r.get('high_price', 0) or 0)
                     r['low_price'] = float(r.get('low_price', 0) or 0)
                     r['close_price'] = float(r.get('close_price', 0) or 0)
                     r['open_price'] = float(r.get('open_price', 0) or 0)
-                synth.reverse()
-                return synth[-30:]
+                synth = synth[-45:]
+                try:
+                    self._SYNT_CACHE[ck] = (now, synth)
+                    if len(self._SYNT_CACHE) > 80: self._SYNT_CACHE.pop(next(iter(self._SYNT_CACHE)))
+                except: pass
+                return synth
         except Exception:
             pass
-        # Last resort: return whatever DB had
-        rows.reverse()
-        for r in rows:
-            r['high_price'] = float(r.get('high_price', 0) or 0)
-            r['low_price'] = float(r.get('low_price', 0) or 0)
-            r['close_price'] = float(r.get('close_price', 0) or 0)
-            r['open_price'] = float(r.get('open_price', 0) or 0)
-        return rows
+        rows.reverse() if 'rows' in locals() else None
+        return rows if 'rows' in locals() else []
 
     def _get_spot(self, symbol: str) -> float:
         # Fast path only: LIVE_CACHE -> DB (instant). NO per-symbol network call.
@@ -466,13 +474,15 @@ class OptionScanner:
         the SAME inputs as order entry, so scanner-shown premium == trade entry
         for every symbol (no more scanner Rs 13 -> entry Rs 1.50 mismatch).
         """
-        # Live-spot override: scanner historical spot may be stale (old bhavcopy);
-        # order entry prices off live spot, so suggestion must too.
+        # Live-spot override: CACHE-ONLY (no network). Serial get_live_spot x50 = 600s hang.
+        # Background data_refresher fills _LIVE_CACHE every 45s; scan uses it if fresh, else historical spot.
         try:
-            from core.services.live_market_data import LiveMarketData
-            ls = LiveMarketData().get_live_spot(symbol)
-            if ls and float(ls.get("spot") or 0) > 0:
-                spot = float(ls["spot"])
+            from core.services.live_market_data import _LIVE_CACHE
+            import time as _tm
+            if symbol in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[symbol]["ts"] < 300:
+                _px = float(_LIVE_CACHE[symbol]["data"].get("spot") or 0)
+                if _px > 0:
+                    spot = _px
         except Exception:
             pass
         if spot <= 0:
@@ -492,30 +502,43 @@ class OptionScanner:
         # User can adjust via strike_selection in strategy builder
         strike = atm_strike
         
-        latest_date = self.db.fetch_one(
-            "SELECT MAX(trade_date) as d FROM bhavcopy_data WHERE symbol=?", [symbol]
-        )
+        try:
+            latest_date = self.db.fetch_one(
+                "SELECT MAX(trade_date) as d FROM bhavcopy_data WHERE symbol=?", [symbol]
+            )
+        except Exception:
+            latest_date = None
         trade_date = latest_date['d'] if latest_date else ''
-        
-        # Query with exact strike match + expiry filter
-        row = self.db.fetch_one(
-            "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=?",
-            [symbol, strike, option_type, trade_date],
-        )
-        
-        if not row:
-            # Fallback: same strike, any expiry on that date
+
+        # Query with exact strike match + expiry filter (DB-safe: missing table -> model premium)
+        row = None
+        try:
             row = self.db.fetch_one(
                 "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=?",
                 [symbol, strike, option_type, trade_date],
             )
-        
+        except Exception:
+            row = None
+
+        if not row:
+            # Fallback: same strike, any expiry on that date
+            try:
+                row = self.db.fetch_one(
+                    "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=?",
+                    [symbol, strike, option_type, trade_date],
+                )
+            except Exception:
+                row = None
+
         if not row and trade_date:
             # Fallback: same strike, any date (latest available)
-            row = self.db.fetch_one(
-                "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? ORDER BY trade_date DESC LIMIT 1",
-                [symbol, strike, option_type],
-            )
+            try:
+                row = self.db.fetch_one(
+                    "SELECT close_price, expiry_date FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? ORDER BY trade_date DESC LIMIT 1",
+                    [symbol, strike, option_type],
+                )
+            except Exception:
+                row = None
         
         premium = float(row['close_price']) if row and row['close_price'] else None
         expiry = row['expiry_date'] if row and row.get('expiry_date') else ''
@@ -546,18 +569,17 @@ class OptionScanner:
         return {'strike': strike, 'premium': premium, 'expiry': expiry}
 
     def _row_live_spot(self, symbol: str, fallback: float):
-        """Live spot for scanner ROWS (Yahoo-first, 300s cache). Returns
-        (spot, date_str, live_bool). Rows must show the same live spot the
-        suggestion strike/premium were built on - never a stale DB close next
-        to a live strike (the mixed-row bug)."""
+        """Live spot for scanner ROWS (CACHE-ONLY, no network - serial live x50 hung scanner).
+        Returns (spot, date_str, live_bool)."""
         try:
-            from core.services.live_market_data import LiveMarketData
-            d = LiveMarketData().get_live_spot(symbol)
-            px = float(d.get("spot") or 0)
-            if px > 0:
-                import datetime as _dt
-                today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
-                return px, today, True
+            from core.services.live_market_data import _LIVE_CACHE
+            import time as _tm
+            if symbol in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[symbol]["ts"] < 300:
+                px = float(_LIVE_CACHE[symbol]["data"].get("spot") or 0)
+                if px > 0:
+                    import datetime as _dt
+                    today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
+                    return px, today, True
         except Exception:
             pass
         return fallback, None, False

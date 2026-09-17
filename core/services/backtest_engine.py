@@ -1018,11 +1018,14 @@ class BacktestEngine:
         key = f"{date}_{strike}_{option_type}_e"
         if key in self.premium_cache:
             return self.premium_cache[key]
-        # 1) Real DB LTP (historical)
-        row = Database.get_instance().fetch_one(
-            "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-            [self.bt_symbol, date, strike, option_type],
-        )
+        # 1) Real DB LTP (historical) — skip if table missing (fresh local DB)
+        try:
+            row = Database.get_instance().fetch_one(
+                "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+                [self.bt_symbol, date, strike, option_type],
+            )
+        except Exception:
+            row = None
         if row:
             if row["open_price"] and float(row["open_price"]) > 0:
                 val = float(row["open_price"])
@@ -1100,19 +1103,22 @@ class BacktestEngine:
         key = f"{date}_{strike}_{option_type}_c"
         if key in self.premium_cache:
             return self.premium_cache[key]
-        row = Database.get_instance().fetch_one(
-            "SELECT close_price, open_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-            [self.bt_symbol, date, strike, option_type],
-        )
-        if row:
-            if row["close_price"] and float(row["close_price"]) > 0:
-                val = float(row["close_price"])
-                self.premium_cache[key] = val
-                return val
-            if row["open_price"] and float(row["open_price"]) > 0:
-                val = float(row["open_price"])
-                self.premium_cache[key] = val
-                return val
+        try:
+            row = Database.get_instance().fetch_one(
+                "SELECT close_price, open_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+                [self.bt_symbol, date, strike, option_type],
+            )
+            if row:
+                if row["close_price"] and float(row["close_price"]) > 0:
+                    val = float(row["close_price"])
+                    self.premium_cache[key] = val
+                    return val
+                if row["open_price"] and float(row["open_price"]) > 0:
+                    val = float(row["open_price"])
+                    self.premium_cache[key] = val
+                    return val
+        except Exception:
+            pass
         # Real live LTP fallback - only in live mode
         if self.is_live:
             try:

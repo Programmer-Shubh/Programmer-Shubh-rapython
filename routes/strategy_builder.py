@@ -570,21 +570,25 @@ def _run_backtest_core(req: BacktestRequest):
             else:
                 # Algotest-like instant: synthetic only, no DB/network - <50ms
                 historical = _generate_synthetic_fallback(_sym, start_date, end_date)
+                # Cap daily to 60 bars BEFORE intraday expansion (1Y range = 250 bars x 75 = 18750 -> 60s hang)
+                if len(historical) > 60:
+                    historical = historical[-60:]
                 # Resample to intraday if needed (5m,15m etc. like algotest)
                 if timeframe in ("1m","5m","15m","30m","1h"):
                     try:
-                        # Expand daily candles to intraday by splitting
+                        # Daily capped to 20 days for intraday (20x75=1500 max, then 300 cap) - instant <2s
+                        _daily = historical[-20:] if len(historical) > 20 else historical
                         intraday=[]
                         mins = {"1m":1,"5m":5,"15m":15,"30m":30,"1h":60}[timeframe]
                         bars_per_day = int(375 / mins)  # 9:15-15:30 = 375 mins
-                        for d in historical:
+                        for d in _daily:
                             base_price = d["close_price"]
                             for i in range(bars_per_day):
                                 # Small random drift per intraday bar
                                 drift = (i - bars_per_day/2) * 0.0001
                                 c = base_price * (1 + drift + (i%3-1)*0.001)
                                 intraday.append({**d, "trade_date": d["trade_date"], "close_price": round(c,2), "open_price": round(c*0.999,2), "high_price": round(c*1.002,2), "low_price": round(c*0.998,2)})
-                        historical = intraday[-600:] if len(intraday)>600 else intraday
+                        historical = intraday[-300:] if len(intraday)>300 else intraday
                     except: pass
                 _BT_CACHE[_ck] = (_bt_t.time(), historical)
                 if len(_BT_CACHE) > 20:
