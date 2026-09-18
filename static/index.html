@@ -228,6 +228,22 @@
         .slab-cta{font-size:16px;padding:9px 22px;border-radius:10px;font-weight:800;box-shadow:0 3px 10px rgba(25,135,84,.35)}
         .slab .step{font-size:13px;padding:10px 4px;font-weight:700}
         .slab .step.active{background:linear-gradient(135deg,#0d6efd,#6610f2);border-color:transparent}
+        /* Redesigned Strategy Lab - Premium 2026 */
+        #pg-strategy .slab-card{border-radius:16px;box-shadow:0 4px 20px rgba(13,110,253,0.08);border:1px solid #e8eef7;overflow:hidden}
+        #pg-strategy .slab-card>.card-header{background:linear-gradient(90deg,#f8fbff 0%,#ffffff 100%);border-bottom:1px solid #e8eef7;padding:14px 20px;font-weight:700;font-size:15px;color:#0d47a1}
+        #pg-strategy .slab-card>.card-header .slab-num{width:28px;height:28px;font-size:13px}
+        #pg-strategy .slab-sec{background:#ffffff;border:1px solid #eef2f9;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,0.03)}
+        #pg-strategy .slab-sec-title{font-size:13px;font-weight:800;color:#0d47a1;letter-spacing:0.3px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+        #pg-strategy .slab-sec-title i{color:#0d6efd}
+        #pg-strategy .form-label{font-weight:600;color:#334155}
+        #pg-strategy .form-control, #pg-strategy .form-select{border-radius:8px;border:1px solid #dbe4f0;background:#f8fbff;transition:all 0.2s}
+        #pg-strategy .form-control:focus, #pg-strategy .form-select:focus{border-color:#0d6efd;box-shadow:0 0 0 3px rgba(13,110,253,0.1);background:#fff}
+        #pg-strategy .quant-card{border-radius:10px;transition:all 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+        #pg-strategy .quant-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(13,110,253,0.12);border-color:#0d6efd}
+        #pg-strategy .slab-hero{border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(13,110,253,0.15)}
+        #pg-strategy .step-indicator{border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
+        #pg-strategy .step{padding:12px 6px;font-weight:700;transition:all 0.3s}
+
     </style>
 </head>
 <body>
@@ -328,15 +344,18 @@
         </div>
         <!-- STRATEGY BUILDER — Advanced style -->
         <div id="pg-strategy" class="pg hidden">
-            <div class="card mb-2 slab-hero">
-                <div class="card-body p-3 d-flex flex-wrap gap-2 align-items-center justify-content-between">
-                    <div class="d-flex gap-2 align-items-center">
-                        <h4 class="fw-bold mb-0"><i class="bi bi-robot"></i> Strategy Lab</h4><span class="badge bg-light text-primary">Backtest + Robot</span><small class="ms-2">Setup → Backtest → Paper/Live, sab ek jagah</small>
-                    </div>
-                    <div class="d-flex gap-2 align-items-center">
-                        <div class="input-group input-group-sm" style="width:260px"><span class="input-group-text">Run Name</span><input type="text" class="form-control" id="s-name" placeholder="Nifty Breakout Strategy"></div>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="resetStrat()">Reset</button>
-                        <button class="btn btn-sm btn-primary" onclick="saveStrat()"><i class="bi bi-check-circle"></i> Save Strategy</button>
+            <div class="card mb-3 slab-hero" style="background:linear-gradient(135deg,#0d6efd 0%,#6610f2 50%,#00d4ff 100%);border:none">
+                <div class="card-body p-4">
+                    <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
+                        <div>
+                            <h4 class="fw-bold mb-1 text-white"><i class="bi bi-robot"></i> Strategy Lab <span class="badge bg-white text-primary ms-2" style="font-size:11px">PRO • Backtest + Robot</span></h4>
+                            <p class="mb-0 text-white-50" style="font-size:13px">5-step flow: Setup → Templates → Indicators → Backtest → Live/Paper — SEBI Compliant, AI Powered</p>
+                        </div>
+                        <div class="d-flex gap-2 align-items-center bg-white rounded-pill p-1 shadow-sm">
+                            <div class="input-group input-group-sm" style="width:240px"><span class="input-group-text bg-transparent border-0"><i class="bi bi-pencil"></i></span><input type="text" class="form-control border-0" id="s-name" placeholder="Nifty Breakout Strategy" style="font-size:13px"></div>
+                            <button class="btn btn-sm btn-light rounded-pill" onclick="resetStrat()" title="Reset"><i class="bi bi-arrow-counterclockwise"></i></button>
+                            <button class="btn btn-sm btn-primary rounded-pill px-3" onclick="saveStrat()"><i class="bi bi-check-circle"></i> Save</button>
+                        </div>
                     </div>
                 </div>
             </div>
