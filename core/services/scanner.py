@@ -721,18 +721,26 @@ class OptionScanner:
         short_score = 0
         long_reasons = []
         short_reasons = []
+        # VWAP band check with 1% gap sanity (fixes BANKNIFTY 7600 gap mislabeled as Near VWAP)
+        vwap_gap = abs(closes[i] - vwap_val) / closes[i] if closes[i] else 0
         if lows[i] <= lower2 or closes[i] <= lower2:
             long_score += 35
             long_reasons.append('Price at/below -2 VWAP band')
-        elif closes[i] <= vwap_val:
+        elif vwap_gap < 0.01 and closes[i] <= vwap_val:
             long_score += 10
             long_reasons.append('Price near VWAP')
+        elif closes[i] <= vwap_val:
+            long_score += 5
+            long_reasons.append('Price below VWAP')
         if highs[i] >= upper2 or closes[i] >= upper2:
             short_score += 35
             short_reasons.append('Price at/above +2 VWAP band')
-        elif closes[i] >= vwap_val:
+        elif vwap_gap < 0.01 and closes[i] >= vwap_val:
             short_score += 10
             short_reasons.append('Price near VWAP')
+        elif closes[i] >= vwap_val:
+            short_score += 5
+            short_reasons.append('Price above VWAP')
         if rsi[i] < 30:
             long_score += 35
             long_reasons.append(f'RSI oversold ({rsi[i]:.1f})')

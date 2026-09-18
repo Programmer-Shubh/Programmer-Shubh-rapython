@@ -114,7 +114,7 @@ def place_trade(req: PlaceTradeRequest):
             if req.entry_price > intrinsic + 600:
                 return {"error": f"Premium ₹{req.entry_price} too high vs spot ₹{_sp:.0f} (likely spot sent as premium). Correct premium ~₹{intrinsic+80:.0f}. Use option LTP, not spot."}
     except Exception: pass
-    # Deep ITM/OTM guard: ATM ±5 only
+    # Deep ITM/OTM guard: relaxed to ATM±8 / 12% and chain-aware (fixes KOTAKBANK/BANKNIFTY false blocks)
     try:
         from core.services.live_market_data import LiveMarketData as _LMD
         from utils.helpers import get_strike_step
@@ -123,10 +123,23 @@ def place_trade(req: PlaceTradeRequest):
             try: _s=_lm.get_live_spot(req.symbol); _spot=float(_s["spot"]) if _s and _s.get("spot") else 0
             except: pass
         _step=get_strike_step(req.symbol); _atm=round(_spot/_step)*_step if _spot>0 else 0
-        if _atm>0 and abs(req.strike-_atm)>_step*4:
-            return {"error": f"Deep {'ITM' if req.strike<_atm else 'OTM'} blocked: strike {req.strike} far from ATM {_atm} (ATM±4 only, spot {_spot:.0f})"}
-        if _spot>0 and abs(req.strike-_spot)/_spot>0.04:
-            return {"error": f"Deep ITM/OTM blocked: >4% from spot {_spot:.2f} (ATM±4 only)"}
+        # If strike exists in DB chain, allow even if dev >12%
+        _has = False
+        try:
+            from core.models.bhavcopy_model import BhavcopyModel as _BM
+            _b = _BM()
+            _d = _b.get_dates(req.symbol)
+            if _d:
+                _exps = _b.get_expiries(req.symbol, _d[0])
+                if _exps:
+                    _chk = _b.get_option_chain(req.symbol, _d[0], _exps[0])
+                    if _chk and any(float(r.get("strike_price",0))==float(req.strike) for r in _chk):
+                        _has = True
+        except: pass
+        if _atm>0 and abs(req.strike-_atm)>_step*8 and not _has:
+            return {"error": f"Strike {req.strike} far from ATM {_atm} (ATM±8, spot {_spot:.0f}) - try nearer ATM"}
+        if _spot>0 and abs(req.strike-_spot)/_spot>0.12 and not _has:
+            return {"error": f"Strike {req.strike} is {abs(req.strike-_spot)/_spot*100:.1f}% away from spot {_spot:.2f} (12% limit) - try nearer ATM {_atm}"}
     except Exception: pass
     # Deduplication: if identical open position exists, block duplicate
     existing = trade_model.db.fetch_one("SELECT id FROM paper_trades WHERE symbol=? AND strike_price=? AND option_type=? AND transaction_type=? AND status='open' LIMIT 1", [req.symbol, req.strike, req.option_type, req.transaction_type])

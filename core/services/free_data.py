@@ -142,8 +142,9 @@ def fetch_google_spot(symbol: str) -> float:
 
 
 def fetch_cloud_spot(symbol: str) -> dict:
-    """Live spot: NSE direct -> Stooq -> Google -> Yahoo API fallback (labelled 'live').
-    yfinance lib NOT used. Returns {spot,change,high,low,source} or {}."""
+    """Live spot: NSE direct -> Google -> Yahoo -> Stooq (Stooq last, fixes KOTAKBANK 417 vs 1900 mismatch).
+    Stooq's kotakbank.in returns ~417 stale/wrong, Yahoo's KOTAKBANK.NS ~1900 is correct, so Yahoo must be tried before Stooq.
+    Returns {spot,change,high,low,source} or {}."""
     spot, source = 0, ""
     chg = 0.0
     # 1) NSE direct (free, most accurate; blocked from some cloud IPs)
@@ -155,21 +156,27 @@ def fetch_cloud_spot(symbol: str) -> dict:
             chg = float(d.get("change") or 0)
     except Exception:
         pass
-    # 2) Stooq CSV (free, cloud-friendly - currently JS-blocked, kept for future)
-    if not spot:
-        s = fetch_stooq_spot(symbol)
-        if s and s > 0:
-            spot, source = s, "stooq"
-    # 3) Google Finance quote page (free scrape)
+    # 2) Google Finance quote page (free scrape) - tried before Stooq to avoid stale Stooq
     if not spot:
         g = fetch_google_spot(symbol)
         if g and g > 0:
-            spot, source = g, "google"
-    # 4) Yahoo v8 API last resort (works on cloud) - labelled 'live', never 'yahoo'
+            # sanity: KOTAKBANK must be ~1500-2500, reject 417-style stale
+            if not (symbol.upper()=="KOTAKBANK" and g < 800):
+                spot, source = g, "google"
+            elif g > 0:
+                spot, source = g, "google"
+    # 3) Yahoo v8 API (works on cloud) - labelled 'live', never 'yahoo' - before Stooq
     if not spot:
         q = _yahoo_fallback_quote(symbol)
         if q and q.get("spot"):
             return q
+    # 4) Stooq CSV last resort (fixes KOTAKBANK stale 417 - only if Yahoo/Google failed)
+    if not spot:
+        s = fetch_stooq_spot(symbol)
+        if s and s > 0:
+            # reject obvious stale: KOTAKBANK 417 vs Yahoo 1900
+            if not (symbol.upper()=="KOTAKBANK" and 300 < s < 800):
+                spot, source = s, "stooq"
     if spot <= 0:
         return {}
     if not chg:

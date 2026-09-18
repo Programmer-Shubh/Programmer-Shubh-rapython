@@ -204,17 +204,29 @@ def place_trade(req: TradeRequest):
                 req.strike = aligned
         except Exception:
             pass
-        # ATM-distance guard: trades must land near live ATM (stale scanner/chain data
-        # produces garbage strikes like SENSEX 4900 vs spot 76826). Fail open when
-        # live spot is unavailable.
+        # ATM-distance guard: relaxed to 12% and chain-aware (fixes false 60% error for KOTAKBANK/BANKNIFTY)
+        # If the exact strike exists in the visible chain (DB or model), allow it even if dev >12% — stale price, not stale strike.
         try:
             _live0 = LiveMarketData()
             _spot0 = _live0.get_spot_price(req.symbol) or 0
             if _spot0 > 0:
+                # chain_has_strike = already fetched chain contains this strike?
+                _chain_has = False
+                try:
+                    if 'chain' in locals() and chain:
+                        _chain_has = any(float(r.get("strike_price",0))==float(req.strike) for r in chain)
+                except: pass
+                if not _chain_has:
+                    try:
+                        bhav2 = BhavcopyModel()
+                        _chk = bhav2.get_option_chain(req.symbol, req.date, req.expiry) if req.date and req.expiry else []
+                        if _chk and any(float(r.get("strike_price",0))==float(req.strike) for r in _chk):
+                            _chain_has = True
+                    except: pass
                 _step0 = get_strike_step(req.symbol)
                 _atm0 = round(_spot0 / _step0) * _step0
-                _dev = abs(float(req.strike) - _atm0) / _spot0
-                if _dev > 0.05:
+                _dev = abs(float(req.strike) - _atm0) / _spot0 if _spot0 else 0
+                if _dev > 0.12 and not _chain_has:
                     return {"error": f"Strike {req.strike} is {_dev*100:.1f}% away from live ATM {_atm0} (spot {_spot0:,.2f}) - stale data? Refresh chain/scanner and retry near ATM"}
         except Exception:
             pass
