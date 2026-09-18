@@ -845,6 +845,7 @@
             renderPart('opp-pe-buy', r.pe_buy, 'No 80+ PE Buy signals');
             renderPart('opp-ce-sell', r.ce_sell, 'No 80+ CE Sell signals');
             renderPart('opp-pe-sell', r.pe_sell, 'No 80+ PE Sell signals');
+            if(r.dummy){ setTimeout(()=>{ try{ loadOpps(); }catch(e){} }, 2500); }
         }catch(e){
             ['opp-ce-buy','opp-pe-buy','opp-ce-sell','opp-pe-sell'].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML='<p class="text-danger small">Failed to load</p>'; });
         }

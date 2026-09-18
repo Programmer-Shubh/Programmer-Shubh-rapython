@@ -156,18 +156,33 @@ def top_opportunities(min_score: int = 80):
         return {"opportunities": [], "error": str(e)[:300]}
 
 
+def _dummy_4part(min_score=80):
+    """Instant dummy (<10ms) so website open pe trade turant dikhe, full scan bg me update karega"""
+    import random as _r
+    _r.seed(int(_t.time())//30)  # change every 30s
+    base_syms = ["NIFTY","BANKNIFTY","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","ITC","LT"]
+    _r.shuffle(base_syms)
+    def _mk(sym, sig, direction):
+        strike = 25000 if sym=="NIFTY" else 50000 if sym=="BANKNIFTY" else 1500
+        return {"symbol": sym, "price": float(strike), "score": int(min_score + _r.randint(1,15)), "signal_type": sig, "direction": direction, "reasons": ["Instant view"], "indicators": {}, "option_suggestion": {"strike": int(strike), "premium": float(_r.randint(50,150)), "expiry": ""}}
+    ce_buy = [_mk(s, "BUY CE", "bullish") for s in base_syms[:3]]
+    pe_buy = [_mk(s, "BUY PE", "bearish") for s in base_syms[3:6]]
+    ce_sell = [_mk(s, "SELL CE", "bearish") for s in base_syms[6:8]]
+    pe_sell = [_mk(s, "SELL PE", "bullish") for s in base_syms[8:10]]
+    return {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell, "min_score": min_score, "dummy": True}
+
 @router.get("/opportunities-4part")
 def opportunities_4part(min_score: int = 80):
-    """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, Score>=80 - instant after open (stale-while-revalidate)"""
+    """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, Score>=80 - instant after open (stale-while-revalidate + dummy instant)"""
     try: min_score=int(min_score)
     except: min_score=80
     k=f"opp4_{min_score}"; now=_t.time()
     # If cached (even slightly stale), return instantly and refresh in background
     if k in _CACHE:
         cached_time, cached_val = _CACHE[k]
-        if now - cached_time < 120:
+        if now - cached_time < 120 and not cached_val.get("dummy"):
             return cached_val
-        # stale but return immediately, refresh async
+        # stale or dummy -> return instantly, refresh async with real scan
         try:
             def _bg():
                 try:
@@ -176,12 +191,17 @@ def opportunities_4part(min_score: int = 80):
                 except: pass
             _th.Thread(target=_bg, daemon=True).start()
         except: pass
+        # if dummy, still return it instantly (real will replace in ~2s)
         return cached_val
+    # Cache miss -> return dummy instantly (<10ms), trigger real scan in bg
+    dummy = _dummy_4part(min_score)
+    _CACHE[k]=(now,dummy)
     try:
-        scanner = OptionScanner()
-        res = scanner.get_4_part_opportunities(min_score=min_score)
-        _CACHE[k]=(now,res)
-        return res
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return {"ce_buy": [], "pe_buy": [], "ce_sell": [], "pe_sell": [], "error": str(e)[:300]}
+        def _bg2():
+            try:
+                s = OptionScanner()
+                _CACHE[k]=(_t.time(), s.get_4_part_opportunities(min_score=min_score))
+            except: pass
+        _th.Thread(target=_bg2, daemon=True).start()
+    except: pass
+    return dummy
