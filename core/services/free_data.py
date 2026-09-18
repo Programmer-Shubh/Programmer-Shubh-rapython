@@ -160,22 +160,38 @@ def fetch_cloud_spot(symbol: str) -> dict:
     if not spot:
         g = fetch_google_spot(symbol)
         if g and g > 0:
-            # sanity: KOTAKBANK must be ~1500-2500, reject 417-style stale
-            if not (symbol.upper()=="KOTAKBANK" and g < 800):
-                spot, source = g, "google"
-            elif g > 0:
+            # generic sanity vs DB prev close (fixes ITC 3850 vs 470, KOTAK 417 vs 1900)
+            try:
+                _prev = _db_prev_close(symbol)
+                if _prev and _prev>0 and abs(g - _prev)/_prev > 0.50:
+                    g = 0  # reject outlier, try next source
+            except: pass
+            if g and g > 0:
                 spot, source = g, "google"
     # 3) Yahoo v8 API (works on cloud) - labelled 'live', never 'yahoo' - before Stooq
     if not spot:
         q = _yahoo_fallback_quote(symbol)
         if q and q.get("spot"):
-            return q
-    # 4) Stooq CSV last resort (fixes KOTAKBANK stale 417 - only if Yahoo/Google failed)
+            # sanity vs DB prev
+            try:
+                _prev = _db_prev_close(symbol)
+                _qs = float(q.get("spot") or 0)
+                if _prev and _prev>0 and _qs>0 and abs(_qs - _prev)/_prev > 0.50:
+                    pass  # reject, try Stooq
+                else:
+                    return q
+            except: 
+                return q
+    # 4) Stooq CSV last resort
     if not spot:
         s = fetch_stooq_spot(symbol)
         if s and s > 0:
-            # reject obvious stale: KOTAKBANK 417 vs Yahoo 1900
-            if not (symbol.upper()=="KOTAKBANK" and 300 < s < 800):
+            try:
+                _prev = _db_prev_close(symbol)
+                if _prev and _prev>0 and abs(s - _prev)/_prev > 0.50:
+                    s = 0
+            except: pass
+            if s and s > 0:
                 spot, source = s, "stooq"
     if spot <= 0:
         return {}

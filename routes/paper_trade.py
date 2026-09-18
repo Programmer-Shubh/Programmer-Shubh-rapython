@@ -123,7 +123,7 @@ def place_trade(req: PlaceTradeRequest):
             try: _s=_lm.get_live_spot(req.symbol); _spot=float(_s["spot"]) if _s and _s.get("spot") else 0
             except: pass
         _step=get_strike_step(req.symbol); _atm=round(_spot/_step)*_step if _spot>0 else 0
-        # If strike exists in DB chain, allow even if dev >12%
+        # If strike exists in DB chain, allow even if dev >65%
         _has = False
         try:
             from core.models.bhavcopy_model import BhavcopyModel as _BM
@@ -136,10 +136,10 @@ def place_trade(req: PlaceTradeRequest):
                     if _chk and any(float(r.get("strike_price",0))==float(req.strike) for r in _chk):
                         _has = True
         except: pass
-        if _atm>0 and abs(req.strike-_atm)>_step*8 and not _has:
-            return {"error": f"Strike {req.strike} far from ATM {_atm} (ATM±8, spot {_spot:.0f}) - try nearer ATM"}
-        if _spot>0 and abs(req.strike-_spot)/_spot>0.12 and not _has:
-            return {"error": f"Strike {req.strike} is {abs(req.strike-_spot)/_spot*100:.1f}% away from spot {_spot:.2f} (12% limit) - try nearer ATM {_atm}"}
+        if _atm>0 and abs(req.strike-_atm)>_step*20 and not _has:
+            return {"error": f"Strike {req.strike} far from ATM {_atm} (ATM±20, spot {_spot:.0f}) - try nearer ATM"}
+        if _spot>0 and abs(req.strike-_spot)/_spot>0.65 and not _has:
+            return {"error": f"Strike {req.strike} is {abs(req.strike-_spot)/_spot*100:.1f}% away from spot {_spot:.2f} (65% limit) - try nearer ATM {_atm}"}
     except Exception: pass
     # Deduplication: if identical open position exists, block duplicate
     existing = trade_model.db.fetch_one("SELECT id FROM paper_trades WHERE symbol=? AND strike_price=? AND option_type=? AND transaction_type=? AND status='open' LIMIT 1", [req.symbol, req.strike, req.option_type, req.transaction_type])
