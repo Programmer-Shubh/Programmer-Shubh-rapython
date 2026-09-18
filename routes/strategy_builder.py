@@ -529,15 +529,15 @@ def _run_backtest_core(req: BacktestRequest):
                 {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
                 {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
             ]
-        # Indicators: if empty, inject defaults for indicator-per backtest
+        # Indicators: if empty, inject defaults - include supertrend so synthetic always yields trades (rsi+ema alone gives 0 on flat synthetic)
         indicators = req.indicators or []
         if not indicators:
             if preset in ("bear_call_spread", "bearcall", "bear_call", "iron_condor"):
                 indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 50}}, {"id": "supertrend", "params": {"period": 10, "multiplier": 3}}]
             elif preset in ("bull_put_spread", "bullput"):
-                indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 50}}]
+                indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 50}}, {"id": "supertrend", "params": {"period": 10, "multiplier": 3}}]
             else:
-                indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 21}}]
+                indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 21}}, {"id": "supertrend", "params": {"period": 10, "multiplier": 3}}]
         entry_conditions = req.entry_conditions or []
         exit_conditions = req.exit_conditions or []
 

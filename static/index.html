@@ -360,7 +360,7 @@
                     </div>
                 <!-- Strategy Templates — Click to Build (compact, above Indicators per user) -->
                 <div class="card mt-2" style="border:1px dashed #0d6efd">
-                    <div class="card-header py-1 d-flex justify-content-between align-items-center" style="font-size:13px"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Strategy Templates — Click to Build</strong><small class="text-success" style="font-size:11px">✓ Template → per-leg ITM/OTM 1-6</small></div>
+                    <div class="card-header py-1 d-flex justify-content-between align-items-center" style="font-size:13px"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Strategy Templates — Click to Build</strong></div>
                     <div class="card-body p-1">
                         <div class="row g-1">
                             <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('longcall')"><div class="icon" style="font-size:14px;margin-bottom:2px">📈</div><div class="title" style="font-size:11px">Long Call</div><div class="desc" style="font-size:9px">Buy CE ATM</div></div></div>
@@ -428,6 +428,18 @@
                 <span class="slab-num">2</span><button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Strategies — Click to Build (multi-leg, optional)</button>
             </div>
             <div class="collapse show mt-2" id="legBuilder">
+                <div class="mt-2 d-flex gap-1 flex-wrap" style="display:none">
+                    <span class="small text-muted me-1">Templates:</span>
+                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('single')">Single</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('straddle')">Straddle (ATM CE+PE Sell)</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('strangle')">Strangle (OTM CE+PE Sell)</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bullspread')">Bull Call Spread</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bearspread')">Bear Call Spread</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('bearputspread')">Bear Put Spread</button>
+                    <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('bullputspread')">Bull Put Spread</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironcondor')">Iron Condor</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="clearLegs()">Clear</button>
+                </div>
                 <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
                 </div>
