@@ -31,8 +31,8 @@ async def ws_live(websocket: WebSocket):
                     row = live.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [sym])
                     spot = float(row["close_price"]) if row and row["close_price"] else 0
                     ticks[sym] = {"spot": spot, "change": 0, "ts": int(time.time()*1000), "source": "db" if spot > 0 else "na"}
-            await websocket.send_text(json.dumps({"type":"tick","ticks": ticks, "interval_ms": 45}))
-            await asyncio.sleep(0.045)  # 45ms <50ms
+            await websocket.send_text(json.dumps({"type":"tick","ticks": ticks, "interval_ms": 15}))
+            await asyncio.sleep(0.015)  # 15ms NSE-like ultra-fast
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -60,7 +60,7 @@ async def ws_chain(websocket: WebSocket, symbol: str):
                     if expiries:
                         chain = bhav.get_option_chain(symbol, dates[0], expiries[0])
                         await websocket.send_text(json.dumps({"symbol": symbol, "source":"db", "rows": [{"strike": r["strike_price"], "ce_ltp": r["close_price"] if r["option_type"]=="CE" else 0, "pe_ltp": r["close_price"] if r["option_type"]=="PE" else 0} for r in chain[:20]]}))
-            await asyncio.sleep(0.045)
+            await asyncio.sleep(0.015)  # 15ms chain tick
     except WebSocketDisconnect:
         pass
     finally:
@@ -68,4 +68,4 @@ async def ws_chain(websocket: WebSocket, symbol: str):
 
 @router.get("/stats")
 def ws_stats():
-    return {"connections": len(_connections), "interval_ms": 45, "source": "nse/stooq/google + db fallback (Yahoo removed)", "latency": "<50ms"}
+    return {"connections": len(_connections), "interval_ms": 15, "source": "nse/stooq/google + db fallback (Yahoo removed)", "latency": "15ms NSE-like"}
