@@ -1,8 +1,25 @@
 from fastapi import APIRouter
 from core.services.scanner import OptionScanner
 import time as _t
+import threading as _th
 _CACHE = {}
 router = APIRouter()
+
+# Warm 4-part cache at startup so first website open is instant (not 5-8s scan)
+def _warm_scanner():
+    try:
+        import time as _w
+        _w.sleep(2)  # let DB init
+        s = OptionScanner()
+        # pre-fill all dashboard caches
+        for k, fn in [("opp4_80", lambda: s.get_4_part_opportunities(min_score=80)), ("fno", lambda: s.get_fno_top5_today()), ("opp_80", lambda: {"opportunities": s.get_top_opportunities(min_score=80)})]:
+            try:
+                res = fn()
+                _CACHE[k] = (_t.time(), res)
+            except: pass
+    except: pass
+try: _th.Thread(target=_warm_scanner, daemon=True).start()
+except: pass
 
 
 @router.get("/vwap/{symbol}")
@@ -100,8 +117,18 @@ def scan_combined(min_score: int = 80):
 @router.get("/fno-top5")
 def fno_top5():
     k="fno"; now=_t.time()
-    if k in _CACHE and now-_CACHE[k][0] < 300:
-        return _CACHE[k][1]
+    if k in _CACHE:
+        ct, cv = _CACHE[k]
+        if now-ct < 300:
+            return cv
+        # stale return + bg refresh
+        try:
+            def _bg():
+                try: _CACHE[k]=(_t.time(), OptionScanner().get_fno_top5_today())
+                except: pass
+            _th.Thread(target=_bg, daemon=True).start()
+        except: pass
+        return cv
     try:
         scanner = OptionScanner()
         res=scanner.get_fno_top5_today()
@@ -131,12 +158,25 @@ def top_opportunities(min_score: int = 80):
 
 @router.get("/opportunities-4part")
 def opportunities_4part(min_score: int = 80):
-    """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, Score>=80"""
+    """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, Score>=80 - instant after open (stale-while-revalidate)"""
     try: min_score=int(min_score)
     except: min_score=80
     k=f"opp4_{min_score}"; now=_t.time()
-    if k in _CACHE and now-_CACHE[k][0] < 120:
-        return _CACHE[k][1]
+    # If cached (even slightly stale), return instantly and refresh in background
+    if k in _CACHE:
+        cached_time, cached_val = _CACHE[k]
+        if now - cached_time < 120:
+            return cached_val
+        # stale but return immediately, refresh async
+        try:
+            def _bg():
+                try:
+                    s = OptionScanner()
+                    _CACHE[k]=(_t.time(), s.get_4_part_opportunities(min_score=min_score))
+                except: pass
+            _th.Thread(target=_bg, daemon=True).start()
+        except: pass
+        return cached_val
     try:
         scanner = OptionScanner()
         res = scanner.get_4_part_opportunities(min_score=min_score)
