@@ -871,7 +871,7 @@
             }).catch(e=>alert('Live preview failed: '+e.message));
             return;
         }
-        P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}}).catch(e=>alert('Order failed: '+e.message));}
+        showOptimisticOrder(sym,type,strike,lots); P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry,date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000)})}).then(r=>{if(r.error)alert('Error: '+r.error);else{alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price);loadDashPositions();}}).catch(e=>alert('Order failed: '+e.message));}
     let _lastDashPosHTML = null;
     async function loadDashPositions(){
         try{
@@ -954,7 +954,7 @@
         document.getElementById('chain-body').innerHTML=htm;
     }catch(e){ document.getElementById('chain-body').innerHTML='<div class="alert alert-danger m-2">Failed to load option chain: '+e.message+' <button class="btn btn-sm btn-outline-danger ms-2" onclick="cLoadChain()">Retry</button></div>'; showToast('Option Chain failed: '+e.message, 'danger'); }
     }
-    async function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','3000');const modePick=(prompt('Mode: paper ya live? (default paper)','paper')||'paper').toLowerCase(); const isLive=modePick==='live'; if(isLive) setDashMode('live'); else setDashMode('paper'); const tt=((prompt('Type intraday/positional:','intraday')||'intraday').toLowerCase()==='positional')?'positional':'intraday'; if(isLive){ const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt,dry_run:true})}); if(pv.error){alert('Live blocked: '+pv.error); return;} const p=pv.preview||{}; if(!confirm('REAL MONEY preview\nBroker: '+p.broker+'\nSymbol: '+(p.symbol||p.security_id||p.tsym)+'\nSide: '+p.side+' Qty: '+p.quantity+'\n\nSend to exchange?'))return; const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt,dry_run:false})}); if(r.error){alert('Live error: '+r.error);return;} alert('LIVE order sent! Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id); setTimeout(()=>{loadDashPositions();loadTrades();},150); return; } const body={symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt}; for(let a=0;a<3;a++){try{const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error&&r.error.includes('429')){await new Promise(res=>setTimeout(res,700*(a+1))); continue;} if(r.error){alert('Error: '+r.error); return;} alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price); setTimeout(()=>{loadDashPositions();loadTrades();}, 600); return;}catch(e){ if(a===2) alert('Network: '+e.message+' — 5s me auto retry'); await new Promise(res=>setTimeout(res,700*(a+1)));}}}
+    async function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp=document.getElementById('c-exp').value;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','3000');const modePick=(prompt('Mode: paper ya live? (default paper)','paper')||'paper').toLowerCase(); const isLive=modePick==='live'; if(isLive) setDashMode('live'); else setDashMode('paper'); const tt=((prompt('Type intraday/positional:','intraday')||'intraday').toLowerCase()==='positional')?'positional':'intraday'; if(isLive){ const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt,dry_run:true})}); if(pv.error){alert('Live blocked: '+pv.error); return;} const p=pv.preview||{}; if(!confirm('REAL MONEY preview\nBroker: '+p.broker+'\nSymbol: '+(p.symbol||p.security_id||p.tsym)+'\nSide: '+p.side+' Qty: '+p.quantity+'\n\nSend to exchange?'))return; const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt,dry_run:false})}); if(r.error){alert('Live error: '+r.error);return;} alert('LIVE order sent! Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id); setTimeout(()=>{loadDashPositions();loadTrades();},150); return; } showOptimisticOrder(sym,type,strike,lots); const body={symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt}; for(let a=0;a<3;a++){try{const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error&&r.error.includes('429')){await new Promise(res=>setTimeout(res,700*(a+1))); continue;} if(r.error){alert('Error: '+r.error); return;} alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price); setTimeout(()=>{loadDashPositions();loadTrades();}, 600); return;}catch(e){ if(a===2) alert('Network: '+e.message+' — 5s me auto retry'); await new Promise(res=>setTimeout(res,700*(a+1)));}}}
 
     function openTradeTV(sym){
         if(!sym)return;
@@ -1623,6 +1623,12 @@ let _lastOpenTrdHTML = null;
                         }
                         if(h) document.getElementById('mkt-cards').innerHTML=h;
                         document.getElementById('status').innerHTML='<span class="live-dot"></span> Live Streaming';
+                        // Real-time open position P&L sync via WS (1s throttle) - fixes price streaming lag
+                        if(!window._lastPnLWS) window._lastPnLWS=0;
+                        if(Date.now()-window._lastPnLWS>1000){
+                            window._lastPnLWS=Date.now();
+                            try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); }catch(e){}
+                        }
                     }
                 }catch(err){}
             };
@@ -1631,6 +1637,16 @@ let _lastOpenTrdHTML = null;
         }catch(e){}
     }
     connectDashWS();
+    // Optimistic order: show instantly in Open Position before server confirms (fixes order lag perception)
+    function showOptimisticOrder(sym,type,strike,lots){
+        try{
+            const el=document.getElementById('dash-pos')||document.getElementById('open-trd');
+            if(!el || el.innerHTML.includes('Optimistic')) return;
+            const row=`<tr style="background:#fff3cd"><td>~</td><td>${sym}</td><td><span class="badge badge-buy">${type}</span></td><td>${strike}</td><td>...</td><td>Placing...</td><td>...</td><td>...</td><td>...</td><td>...</td></tr>`;
+            if(el.innerHTML.includes('No open positions')) el.innerHTML='<table><tr><th>#</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Lot</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>'+row+'</table>';
+            else if(el.querySelector('table')) el.querySelector('table').insertAdjacentHTML('beforeend', row);
+        }catch(e){}
+    }
     // Fallback HTTP refresh if WS not connected — 8s (was 60s lag), plus WS gives <50ms ticks when live
     setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },8000);
     // Open positions: 2s streaming (was 10s lag) — real-time P&L sync without UI delay

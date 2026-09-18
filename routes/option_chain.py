@@ -258,29 +258,23 @@ def place_trade(req: TradeRequest):
         if premium <= 0:
             live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type)
             premium = live_premium if live_premium and live_premium > 0 else 0
-        # If still no premium, try Google Finance real premium (no synthetic 2%)
+        # If still no premium, instant model premium via cached spot (no Google 8s scrape - fixes order lag)
         if premium <= 0:
-            # Try Google Finance real option quote as last real source
             try:
-                import requests
-                # Google Finance option quote: try NSE option page
-                headers = {"User-Agent": "Mozilla/5.0"}
-                g_url = f"https://www.google.com/finance/quote/{req.symbol}:NSE"
-                gr = requests.get(g_url, headers=headers, timeout=8)
-                if gr.status_code == 200 and "data-last-price" in gr.text:
-                    import re
-                    m = re.search(r'data-last-price="([^"]+)"', gr.text)
-                    if m:
-                        spot_g = float(m.group(1).replace(",", ""))
-                        if spot_g > 0 and req.strike > 0:
-                            # Unified model premium (IV 25%, floor 1.5) - same as open positions
-                            try:
-                                expiry_days = 7
-                                if req.expiry and "monthly" in req.expiry.lower():
-                                    expiry_days = 28
-                                premium = model_premium(spot_g, req.strike, expiry_days, req.option_type, symbol=req.symbol)
-                            except Exception:
-                                premium = max(round(spot_g * 0.015, 2), 1.5)
+                _spot_g = live.get_spot_price(req.symbol) or 0
+                if _spot_g <= 0:
+                    try:
+                        _ls = live.get_live_spot(req.symbol)
+                        _spot_g = float(_ls["spot"]) if _ls and _ls.get("spot") else 0
+                    except: pass
+                if _spot_g > 0 and req.strike > 0:
+                    try:
+                        expiry_days = 7
+                        if req.expiry and "monthly" in req.expiry.lower():
+                            expiry_days = 28
+                        premium = model_premium(_spot_g, req.strike, expiry_days, req.option_type, symbol=req.symbol)
+                    except Exception:
+                        premium = max(round(_spot_g * 0.015, 2), 1.5)
             except Exception:
                 pass
         if premium <= 0:
