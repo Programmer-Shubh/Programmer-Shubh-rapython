@@ -48,6 +48,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Cache static assets 1h + instant preloader (fixes browser open me bahut samay lag raha)
+@app.middleware("http")
+async def add_cache_header(request, call_next):
+    response = await call_next(request)
+    try:
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=3600, immutable"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+        elif request.url.path == "/":
+            response.headers["Cache-Control"] = "public, max-age=60"
+    except:
+        pass
+    return response
+
 db = Database.get_instance()
 db.init_schema()
 
