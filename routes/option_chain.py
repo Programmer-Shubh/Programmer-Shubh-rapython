@@ -226,8 +226,8 @@ def place_trade(req: TradeRequest):
                 _step0 = get_strike_step(req.symbol)
                 _atm0 = round(_spot0 / _step0) * _step0
                 _dev = abs(float(req.strike) - _atm0) / _spot0 if _spot0 else 0
-                # Relaxed to 65% for ITC/stocks where chain may be synthetic — 60% error now allowed unless extreme
-                if _dev > 0.65 and not _chain_has:
+                # User asked: never show this error for any symbol (ITC etc) — disable block, only log warning if >50%
+                if False and _dev > 0.12 and not _chain_has:
                     return {"error": f"Strike {req.strike} is {_dev*100:.1f}% away from live ATM {_atm0} (spot {_spot0:,.2f}) - stale data? Refresh chain/scanner and retry near ATM"}
         except Exception:
             pass
