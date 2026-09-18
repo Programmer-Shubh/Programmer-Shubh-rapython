@@ -761,6 +761,10 @@
     const C=n=>n>0?'price-up':n<0?'price-down':'';
     const B=(t,cls)=>`<span class="badge badge-${cls}">${t}</span>`;
     const R=r=>r.map(x=>`<span class="reason-tag">${x}</span>`).join('');
+    // Refresh instant: cached dashboard shows 0s while fresh fetch in bg (fixes page refresh bahut der)
+    const _dashCacheKey='ratrade_dash_cache_v2';
+    function _getDashCache(){try{const v=localStorage.getItem(_dashCacheKey); if(v){const j=JSON.parse(v); if(Date.now()-j.ts<120000) return j.data;}}catch(e){} return null;}
+    function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
         if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
@@ -822,7 +826,9 @@
         }catch(e){ document.getElementById('fno-top5').innerHTML='<p class="text-danger p-2">Failed to load F&O Top 5</p>';}
     }
     async function loadDash(){
-        try{const s=await A('/api/dashboard/spot');document.getElementById('status').innerHTML='<span class="live-dot"></span> Connected';let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h;}catch(e){document.getElementById('status').innerHTML='Offline';}
+        // Instant cached render for refresh perception (0s)
+        try{const _c=_getDashCache(); if(_c&&_c.spot){let h='';for(const [sym,d] of Object.entries(_c.spot)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; document.getElementById('status').innerHTML='<span class="live-dot"></span> Cached';}}catch(e){}
+        try{const s=await A('/api/dashboard/spot');document.getElementById('status').innerHTML='<span class="live-dot"></span> Connected';let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; try{_setDashCache({spot:s});}catch(e){}}catch(e){document.getElementById('status').innerHTML='Offline';}
         loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();
     }
     function singleBtn(sym,action,type,strike,exp,label,cls){return `<button class="btn btn-sm ${cls}" onclick="quickStrat('${sym}','${action}','${type}',${strike},'${exp}')">${label}</button>`;}
