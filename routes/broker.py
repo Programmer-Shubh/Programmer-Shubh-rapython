@@ -300,9 +300,29 @@ async def fyers_callback(request: Request, code: str = "", state: str = ""):
         qp = dict(request.query_params) if request is not None else {}
     except Exception:
         qp = {}
-    # Fyers v3 sends auth_code; accept code/auth_code/state
-    auth_code = (code or "").strip() or (qp.get("auth_code") or "").strip() or (qp.get("code") or "").strip()
-    err_flag = (qp.get("error") or qp.get("s") or qp.get("message") or "").strip()
+    # Fyers v3 sends ?s=ok&code=200&auth_code=eyJ... (code=200 is HTTP status, NOT the auth code!)
+    # Must prefer auth_code; plain `code` is numeric and will fail validation (code_len=3 bug).
+    raw_code = (code or "").strip()
+    raw_qp_code = (qp.get("code") or "").strip()
+    raw_auth = (qp.get("auth_code") or "").strip()
+    # Prefer JWT-looking value: contains '.' and long, otherwise use raw_auth
+    auth_code = ""
+    for cand in [raw_auth, raw_code, raw_qp_code]:
+        if cand and ("." in cand or len(cand) > 20):
+            auth_code = cand
+            break
+    if not auth_code:
+        # fallback: if no JWT-looking, take longest non-empty (covers legacy ?code=<jwt>)
+        candidates = [c for c in [raw_auth, raw_code, raw_qp_code] if c]
+        if candidates:
+            auth_code = max(candidates, key=len)
+    # Detect Fyers error flag: s != ok
+    s_flag = (qp.get("s") or "").strip().lower()
+    if s_flag and s_flag not in ("ok", "success"):
+        err_flag = (qp.get("message") or qp.get("error") or qp.get("s") or "").strip()
+        dbg_qs = str(dict(qp))[:500] if qp else "empty"
+        return HTMLResponse(f"<h3 style='color:red'>Fyers login rejected (s={s_flag}).</h3><p>{err_flag or 'User denied or app not approved'}</p><p style='font-size:11px;color:#6c757d'>Debug: {dbg_qs}</p><p>Expected Redirect URI: <code>{_default_redirect()}</code></p>", status_code=400)
+    err_flag = (qp.get("error") or qp.get("message") or "").strip()
     # also capture state for debugging
     dbg_qs = str(dict(qp))[:500] if qp else "empty"
     config = _get_config("fyers")
