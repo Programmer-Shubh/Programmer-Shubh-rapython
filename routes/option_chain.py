@@ -317,29 +317,38 @@ def place_trade(req: TradeRequest):
                     premium = max(round(spot_est * 0.015, 2), 1.5)
             if premium <= 0:
                 return {"error": "No premium data for this strike"}
-            # Stale-DB guard: DB close like 1.0 for ATM is unrealistic -> recompute with
-            # live spot via the SAME unified model (floor 1.5, never inflated to 5).
-            # Real DB premiums are otherwise used as-is.
-            if premium < 10:
+            # Stale-DB guard: DB close like 1.50 for ATM is unrealistic (shows 1.50 vs scanner 105) -> ALWAYS recompute via SAME model_premium as scanner (fixes NIFTY 105 vs 1.50 mismatch for all symbols)
+            # Use DB/historical spot FIRST (same as scanner's _suggest_option), then live — ensures dashboard 25000 vs order 25000 match, not 23376
+            if premium is not None and premium < 10:
                 try:
                     spot_chk = 0
-                    # NSE/Stooq/Google via LiveMarketData (Yahoo removed)
+                    # Prefer DB/historical spot (scanner uses this when live cache miss, shows 25000)
                     try:
-                        spot_chk = live.get_spot_price(req.symbol)
-                    except Exception:
-                        pass
+                        _latest = bhav.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [req.symbol])
+                        spot_chk = float(_latest['close_price']) if _latest and _latest['close_price'] else 0
+                    except: pass
+                    if spot_chk <= 0:
+                        try:
+                            spot_chk = live.get_spot_price(req.symbol)
+                        except Exception:
+                            pass
                     if spot_chk <= 0:
                         try:
                             ls = live.get_live_spot(req.symbol)
                             spot_chk = float(ls["spot"]) if ls and ls.get("spot") else 0
                         except Exception:
                             spot_chk = 0
-                    step_chk = get_strike_step(req.symbol)
-                    atm_chk = round(spot_chk / step_chk) * step_chk if spot_chk > 0 else 0
-                    if atm_chk > 0 and abs(req.strike - atm_chk) <= step_chk * 4:
+                    if spot_chk > 0:
                         expiry_days = 7
                         if req.expiry and "monthly" in req.expiry.lower():
                             expiry_days = 28
+                        elif req.expiry and "-" in req.expiry:
+                            try:
+                                import datetime as _dt2
+                                exp_d2 = _dt2.datetime.strptime(req.expiry, "%Y-%m-%d")
+                                expiry_days = max(2, min(45, (exp_d2 - _dt2.datetime.now()).days))
+                            except: pass
+                        # Use same model as scanner — ensures 105 vs 1.50 mismatch never happens for any symbol
                         premium = model_premium(spot_chk, req.strike, expiry_days, req.option_type, symbol=req.symbol)
                 except Exception:
                     pass
