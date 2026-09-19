@@ -355,7 +355,7 @@
 <div class="card mb-3 slab-card">
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols • Expiry • Risk</small></div>
                 <div class="card-body">
-                    <div class="slab-sec"><div class="slab-sec-title">Trade Setup</div>
+                    <div class="slab-sec"><div class="slab-sec-title">Strategy Templates — Click to Build <small class="text-muted" style="font-weight:400">(Order / Strike / Lots ab yahin se — niche template chuniye, per-leg ITM/OTM 1-6/ATM + Expiry editable)</small></div>
                     <div class="row g-2">
                         <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 5)</label><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><label><input type="checkbox" value="NIFTY" checked> NIFTY</label><label><input type="checkbox" value="BANKNIFTY"> BANKNIFTY</label><label><input type="checkbox" value="FINNIFTY"> FINNIFTY</label><label><input type="checkbox" value="MIDCPNIFTY"> MIDCPNIFTY</label><label><input type="checkbox" value="SENSEX"> SENSEX</label><label><input type="checkbox" value="BANKEX"> BANKEX</label><label><input type="checkbox" value="RELIANCE"> RELIANCE</label><label><input type="checkbox" value="HDFCBANK"> HDFCBANK</label><label><input type="checkbox" value="ICICIBANK"> ICICIBANK</label><label><input type="checkbox" value="TCS"> TCS</label><label><input type="checkbox" value="INFY"> INFY</label></div></div>
                         <!-- Order / Strike / OTM Dist / Lots hidden per user request — replaced by Strategy Templates below -->
@@ -444,10 +444,10 @@
                 </div>
             </div>
             <div class="mt-3">
-                <span class="slab-num">2</span><button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Legs</button>
+                <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Templates — Click to add legs (Order ignore hota hai)</button>
             </div>
             <div class="collapse show mt-2" id="legBuilder">
-                <div class="mt-2 d-flex gap-1 flex-wrap" style="display:none">
+                <div class="mt-2 d-flex gap-1 flex-wrap">
                     <span class="small text-muted me-1">Templates:</span>
                     <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('single')">Single</button>
                     <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('straddle')">Straddle (ATM CE+PE Sell)</button>
@@ -463,7 +463,7 @@
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
                 </div>
                 <div class="card mt-3 slab-card">
-                    <div class="card-header"><span class="slab-num">4</span><i class="bi bi-play-circle"></i> Run & Backtest <small class="text-muted">pehle legs/indicators set karo, phir chalao</small></div>
+                    <div class="card-header"><span class="slab-num">2</span><i class="bi bi-play-circle"></i> Run & Backtest <small class="text-muted">Templates wali legs chalengi, Order ignore hota hai</small></div>
                     <div class="card-body">
                         <div class="alert alert-info py-1 px-2 mb-2 small" id="run-summary">Loading...</div>
                         <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
@@ -1088,7 +1088,7 @@ let _lastOpenTrdHTML = null;
         const exitTime=document.getElementById('r-exit').value||'15:05';
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50;
-        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{allow_multi:true,trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
     }
     async function runBacktest(){
         // Immediate visible feedback FIRST - proves the click fired. Entry is
@@ -1454,14 +1454,13 @@ let _lastOpenTrdHTML = null;
             const syms=rSyms();const symTxt=syms.join('+')||'NIFTY';
             let legTxt='';
             if(typeof stratLegs!=='undefined'&&stratLegs.length){
-                legTxt=stratLegs.length+' legs ('+stratLegs.map(l=>(l.transaction||'').toUpperCase()+' '+(l.option_type||'')).join(', ')+') — <strong>gallery/templates wali legs chalengi</strong>, upar wali Order ignore hogi';
+                legTxt=stratLegs.length+' leg(s) ('+stratLegs.map(l=>(l.transaction||'').toUpperCase()+' '+(l.option_type||'')).join(', ')+') — <strong>gallery/templates wali legs chalengi, upar wali Order ignore hogi</strong>';
             } else {
                 const o=document.getElementById('r-order').value;
-                const st=document.getElementById('r-strike').value;
-                legTxt='Single: <strong>'+o+'</strong> '+st+' (upar wali Order setting chalegi)';
+                legTxt='Single: <strong>'+o+'</strong> (gallery/templates wali legs chalengi, upar wali Order ignore hogi)';
             }
             const inds=robotCollectIndicators().length;
-            el.innerHTML='Chalega: <strong>'+symTxt+'</strong> | '+legTxt+' | '+inds+' indicator(s)';
+            el.innerHTML='Chalega: <strong>'+symTxt+'</strong> | '+legTxt+' | '+inds+' indicator(s) | <span class="badge bg-success">Multi-symbol ON</span>';
         }catch(e){}}
     async function robotBacktest(){return runBacktest();}
         function isMarketOpenIST(){
