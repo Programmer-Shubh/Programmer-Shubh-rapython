@@ -229,10 +229,168 @@ def _is_configured(broker: str) -> bool:
     return bool(_get_config(broker))
 
 
+@router.get("/dhan-callback")
+async def dhan_callback(request: Request):
+    """Auto-capture Dhan access_token after login via ?code= or ?access_token= redirect.
+    User logs in at login.dhan.co → copies token → returns to this URL with token."""
+    from fastapi.responses import HTMLResponse
+    try:
+        qp = dict(request.query_params)
+    except Exception:
+        qp = {}
+    access_token = (qp.get("access_token") or "").strip()
+    client_id = (qp.get("client_id") or "").strip()
+    refresh_token = (qp.get("refresh_token") or "").strip()
+    if not access_token:
+        return HTMLResponse("<h3 style='color:red'>No access_token received.</h3><p>Paste the token from Dhan dashboard <a href='/' style='color:#0d6efd'>back to RaTrade</a> and setup.</p>", status_code=400)
+    config = _get_config("dhan")
+    config["access_token"] = access_token
+    if client_id: config["client_id"] = client_id
+    if refresh_token: config["refresh_token"] = refresh_token
+    _save_config("dhan", config)
+    return HTMLResponse("<h3 style='color:green'>Dhan connected! Token auto-saved.</h3><p>You can close this tab and return to RaTrade → Brokers. Token auto-validates on every trade.</p>")
+
+
+@router.get("/dhan-auth-url")
+def dhan_auth_url():
+    """Returns the Dhan login URL for OAuth flow."""
+    config = _get_config("dhan")
+    if not config or not config.get("client_id"):
+        return {"success": False, "error": "Dhan not configured. Set Client ID first."}
+    # Dhan uses direct API key auth — just open login page
+    return {"success": True, "url": "https://login.dhan.co/"}
+
+
+@router.get("/angel-auth-url")
+def angel_auth_url():
+    """Returns the Angel One login URL for OAuth flow."""
+    config = _get_config("angel")
+    if not config or not config.get("client_code"):
+        return {"success": False, "error": "Angel not configured. Set Client Code first."}
+    return {"success": True, "url": "https://api.angelone.in/api/v2/oauth/authorize"}
+
+
+@router.get("/angel-callback")
+async def angel_callback(request: Request):
+    """Auto-capture Angel One access_token after OAuth login via ?code= redirect."""
+    from fastapi.responses import HTMLResponse
+    try:
+        qp = dict(request.query_params)
+    except Exception:
+        qp = {}
+    code = (qp.get("code") or "").strip()
+    if not code:
+        return HTMLResponse("<h3 style='color:red'>No code received from Angel One.</h3><p>Login again or paste token <a href='/' style='color:#0d6efd'>back to RaTrade</a>.</p>", status_code=400)
+    config = _get_config("angel")
+    from core.services.broker_angel_live import AngelLive
+    try:
+        an = AngelLive(
+            api_key=config.get("api_key", ""),
+            client_code=config.get("client_code", ""),
+            password=config.get("password", ""),
+            totp_secret=config.get("totp_secret", "")
+        )
+        # Login with stored credentials + exchange OAuth code
+        result = await an.login_by_oauth(code)
+        if result["success"]:
+            config["access_token"] = an.jwt
+            config["refresh_token"] = an.refresh_token
+            config["feed_token"] = an.feed_token
+            _save_config("angel", config)
+            return HTMLResponse("<h3 style='color:green'>Angel One connected! Token auto-saved.</h3><p>You can close this tab and return to RaTrade → Brokers.</p>")
+        return HTMLResponse(f"<h3 style='color:red'>Angel One login failed.</h3><p>{result.get('error','Unknown error')}</p>", status_code=400)
+    except Exception as e:
+        return HTMLResponse(f"<h3 style='color:red'>Angel One login failed.</h3><p>{str(e)[:200]}</p>", status_code=400)
+
+
+@router.post("/dhan-callback")
+async def dhan_callback_post(req: dict):
+    """POST version for frontend P() call — saves Dhan token directly."""
+    config = _get_config("dhan")
+    if isinstance(req, dict):
+        if req.get("access_token"): config["access_token"] = req["access_token"]
+        if req.get("code"): config["access_token"] = req["code"]
+    _save_config("dhan", config)
+    return {"success": True, "message": "Dhan token saved"}
+
+
+@router.post("/angel-callback")
+async def angel_callback_post(req: dict):
+    """POST version for frontend P() call — saves Angel token directly."""
+    config = _get_config("angel")
+    if isinstance(req, dict):
+        if req.get("code"): config["access_token"] = req["code"]
+        if req.get("access_token"): config["access_token"] = req["access_token"]
+    _save_config("angel", config)
+    return {"success": True, "message": "Angel token saved"}
+
+
+@router.post("/auto-connect")
+async def auto_connect_brokers():
+    """Auto-connect all configured brokers (Dhan + Angel One) by validating tokens.
+    If token invalid, attempts refresh. Returns results."""
+    results = []
+    for key in ("dhan", "angel"):
+        config = _get_config(key)
+        if not config:
+            results.append({"broker": key, "status": "not_configured"})
+            continue
+        try:
+            if key == "dhan":
+                from core.services.broker_dhan_live import DhanLive
+                dl = DhanLive(client_id=config.get("client_id",""), access_token=config.get("access_token",""))
+                v = await dl.validate()
+                if v.get("success"):
+                    results.append({"broker": key, "status": "connected"})
+                elif "807" in str(v.get("raw","")):
+                    rr = await dl.renew_token()
+                    if rr.get("success"):
+                        config["access_token"] = rr["access_token"]
+                        _save_config("dhan", config)
+                        results.append({"broker": key, "status": "renewed"})
+                    else:
+                        results.append({"broker": key, "status": "needs_login"})
+                else:
+                    results.append({"broker": key, "status": "failed", "error": str(v.get("error",""))})
+            elif key == "angel":
+                from core.services.broker_angel_live import AngelLive
+                an = AngelLive(
+                    api_key=config.get("api_key",""),
+                    client_code=config.get("client_code",""),
+                    password=config.get("password",""),
+                    totp_secret=config.get("totp_secret","")
+                )
+                result = await an.login()
+                if result.get("success"):
+                    config["access_token"] = an.jwt
+                    config["refresh_token"] = an.refresh_token
+                    config["feed_token"] = an.feed_token
+                    _save_config("angel", config)
+                    results.append({"broker": key, "status": "connected"})
+                else:
+                    results.append({"broker": key, "status": "failed", "error": result.get("error","")})
+        except Exception as e:
+            results.append({"broker": key, "status": "error", "error": str(e)[:150]})
+    return {"success": True, "results": results}
+
+
+@router.get("/broker-config")
+def broker_config_get():
+    """Get current broker config status for auto-connect."""
+    configs = {}
+    for key in ("dhan", "angel"):
+        c = _get_config(key)
+        configs[key] = {"configured": bool(c), "has_token": bool(c.get("access_token",""))}
+    return {"success": True, "configs": configs}
+
+
 @router.get("/list")
 def list_brokers():
     brokers = []
-    for key, info in BROKER_DEFAULTS.items():
+    # Only Dhan and Angel One shown on frontend (Fyers/Shoonya hidden per user request)
+    for key in ("dhan", "angel"):
+        info = BROKER_DEFAULTS.get(key)
+        if not info: continue
         config = _get_config(key)
         configured = bool(config)
         try:

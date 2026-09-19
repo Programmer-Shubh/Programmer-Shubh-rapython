@@ -89,6 +89,15 @@ class AngelLive:
         except Exception as e:
             return {"success": False, "error": f"Angel login request failed: {str(e)[:150]}"}
 
+    async def login_by_oauth(self, code: str = "") -> dict:
+        """Accept OAuth code or direct token from Angel callback. Stores token."""
+        self.jwt = code or ""
+        self.refresh_token = ""
+        self.feed_token = ""
+        if self.jwt:
+            return {"success": True, "jwt": self.jwt, "refresh_token": "", "feed_token": ""}
+        return {"success": False, "error": "No token provided"}
+
     async def _post(self, path: str, payload: dict) -> dict:
         try:
             async with httpx.AsyncClient(timeout=20) as c:

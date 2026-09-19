@@ -1690,19 +1690,19 @@ let _lastOpenTrdHTML = null;
     // ALWAYS render even if /api/broker/list is unreachable (server down/deploy).
     // login_url = official broker login page (new tab) - verified Sep 2026.
     const FALLBACK_BROKERS=[
-        {key:'shoonya',name:'Shoonya (Finvasia)',icon:'bi-lightning',color:'text-danger',desc:'User ID + Password + Vendor Code + API Key',fields:['uid','pwd','vc','apikey','secret_code','secret','actid'],configured:false,config:{},login_url:'https://trade.shoonya.com',token_hint:'trade.shoonya.com par login → API credentials (Vendor Code + API Key) copy karke Setup me bhare.'},
-        {key:'dhan',name:'Dhan',icon:'bi-bank',color:'text-primary',desc:'Client ID + Access Token + Refresh Token',fields:['client_id','access_token','refresh_token'],configured:false,config:{},login_url:'https://login.dhan.co/',token_hint:'login.dhan.co par login → Profile → API Access se Client ID + Access Token copy karke Setup me bhare.'},
-        {key:'fyers',name:'Fyers',icon:'bi-lightning-charge',color:'text-warning',desc:'App ID + Secret + OAuth Token',fields:['app_id','secret','access_token','refresh_token','redirect_uri'],configured:false,config:{},login_url:'https://trade.fyers.in/',token_hint:'OAuth Login dabao (auto token, sabse easy) — ya trade.fyers.in par login karke api.fyers.in se App ID + Secret banao.'},
-        {key:'angel',name:'Angel One',icon:'bi-graph-up-arrow',color:'text-success',desc:'Client Code + Password + API Key',fields:['client_code','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://www.angelone.in/login/',token_hint:'angelone.in/login par login → SmartAPI se API Key + TOTP Secret copy karke Setup me bhare.'}
+        {key:'dhan',name:'Dhan',icon:'bi-bank',color:'text-primary',desc:'Client ID + Access Token + Refresh Token',fields:['client_id','access_token','refresh_token'],configured:false,config:{},login_url:'https://login.dhan.co/',token_hint:'login.dhan.co par login karke Profile → API Access se Client ID + Access Token copy karo, phir setup me paste karo — token auto-save ho jaega.'},
+        {key:'angel',name:'Angel One',icon:'bi-graph-up-arrow',color:'text-success',desc:'Client Code + Password + API Key',fields:['client_code','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://www.angelone.in/login/',token_hint:'angelone.in par login karke SmartAPI se Client Code + API Key + TOTP Secret copy karo — Auto-connect dabao token save hoga.'}
     ];
     function brokerLoginUrl(key){
         const b=(brokerData||[]).find(x=>x.key===key)||FALLBACK_BROKERS.find(x=>x.key===key);
-        return (b&&b.login_url)||({shoonya:'https://trade.shoonya.com',dhan:'https://login.dhan.co/',fyers:'https://trade.fyers.in/',angel:'https://www.angelone.in/login/'})[key]||'';
+        return (b&&b.login_url)||({dhan:'https://login.dhan.co/',angel:'https://www.angelone.in/login/'})[key]||'';
     }
     function brokerByKey(key){
-        // Never return undefined: fall back to offline list so Setup/Connect
-        // buttons always work (previously silent `return` = dead buttons).
         return (brokerData||[]).find(x=>x.key===key)||FALLBACK_BROKERS.find(x=>x.key===key);
+    }
+    async function autoConnectAll(){
+        const r=await P('/api/broker/auto-connect',{method:'POST'});
+        if(r&&r.success){showToast('Auto-connect done! Check results.', 'success');loadBrokers();}else{showToast('Auto-connect failed: '+(r?.error||''), 'danger');}
     }
     // Surface JS errors as visible toasts (no more silent dead buttons)
     window.addEventListener('error',e=>{ try{ showToast('Page error: '+(e.message||'unknown'), 'danger'); }catch(_){} });
@@ -1720,7 +1720,7 @@ let _lastOpenTrdHTML = null;
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                     <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('${b.key}')"><i class="bi bi-gear"></i> Setup</button>
                     <button class="btn btn-sm btn-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
-                    ${b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button><a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`:b.key==='dhan'?`<button class="btn btn-sm btn-danger" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button><a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
+                    ${b.key==='dhan'?`<button class="btn btn-sm btn-primary" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='angel'?`<button class="btn btn-sm btn-danger" onclick="angelOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
                     <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('${b.key}')"><i class="bi bi-wallet2"></i> Account</button>
                 </div>
             </div></div></div>`;
@@ -1826,9 +1826,18 @@ let _lastOpenTrdHTML = null;
             if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; return;} else alert('Error: '+(r.error||'Configure Fyers first (App ID + Secret, Redirect URI Fyers app me register karo)'));
         }catch(e){alert('OAuth error: '+e.message+'\nTry direct: https://api-t1.fyers.in/api/v3/generate-authcode?client_id=W7AUTU5IUT-100&redirect_uri='+encodeURIComponent('https://ratrade.onrender.com/api/broker/fyers-callback')+'&response_type=code&state=ratrade_login');}
     }
-    async function dhanOAuth(){ const b=brokerByKey('dhan'); if(!b||!b.config||!b.config.client_id){ showBrokerConfig('dhan'); return; } const url=brokerLoginUrl('dhan'); window.open(url,'_blank'); showToast('Dhan: login.dhan.co par login karke API Access se Client ID + Access Token copy karo, phir Setup me paste karke Save dabao - ek baar hi karna hai, token auto-renew hoga', 'info'); setTimeout(()=>showBrokerConfig('dhan'),800); }
-    // Auto-capture Fyers auth_code if landing back with ?code= (redirect URI = site root)
-    setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);if(q.get('code')||q.get('auth_code'))fyersOAuth();}catch(e){}},800);
+    async function dhanOAuth(){
+        const r=await A('/api/broker/dhan-auth-url');
+        if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; showToast('Dhan login page opened — login karke Profile se Access Token copy karo, phir site pe wapas aao — Auto-callback me save ho jaega.', 'info'); return;}
+        showToast('Dhan Setup pe jaake Client ID paste karo — OAuth Login auto-connect karega.', 'info');
+    }
+    async function angelOAuth(){
+        const r=await A('/api/broker/angel-auth-url');
+        if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; showToast('Angel One login page opened — login karke SmartAPI se Client Code + API Key + TOTP copy karo.', 'info'); return;}
+        showToast('Angel Setup pe jaake Client Code paste karo — Auto-connect dabao.', 'info');
+    }
+    // Auto-capture callback tokens
+    setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);const p='/api/broker/dhan-callback';const ap='/api/broker/angel-callback';if(q.get('access_token')){P(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:q.get('access_token'),client_id:q.get('client_id')||''})}).then(r=>{if(r.success){showToast('Dhan token auto-saved!', 'success');loadBrokers();}else{showToast('Dhan callback failed: '+r.error, 'danger');}}).catch(()=>{});}if(q.get('code')&&window.location.pathname.includes('angel-callback')){P(ap,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:q.get('code'),client_code:q.get('client_code')||''})}).then(r=>{if(r.success){showToast('Angel token auto-saved!', 'success');loadBrokers();}else{showToast('Angel callback failed', 'danger');}}).catch(()=>{});}document.history.replaceState({},document.title,window.location.pathname);}catch(e){}},800);
 
     async function autoConnectAll(){
         const r=await A('/api/broker/auto-connect',{method:'POST'});
