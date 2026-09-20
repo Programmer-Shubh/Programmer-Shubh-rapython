@@ -560,7 +560,7 @@
             <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
                 <div>
                     <h4 class="fw-bold"><i class="bi bi-plug"></i> Broker Integration</h4>
-                    <p class="text-muted small mb-0">Auto-connect Shoonya, Dhan, Fyers, Angel One - No daily login required</p>
+                    <p class="text-muted small mb-0">Auto-connect Dhan, Angel One - No daily login required</p>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
                     <span id="live-status" class="small text-muted"></span>
@@ -570,18 +570,7 @@
                 </div>
             </div>
             <div class="row" id="broker-cards">
-                <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
-                    <div style="margin-bottom:12px"><i class="bi bi-lightning text-danger" style="font-size:36px"></i></div>
-                    <h6 class="fw-bold">Shoonya (Finvasia)</h6><p class="text-muted small">User ID + Password + Vendor Code + API Key</p>
-                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
-                    <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
-                        <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('shoonya')"><i class="bi bi-gear"></i> Setup</button>
-                        <button class="btn btn-sm btn-success" onclick="connectSingleBroker('shoonya')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
-                        <a class="btn btn-sm btn-outline-dark" href="https://trade.shoonya.com" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>
-                        <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('shoonya')"><i class="bi bi-wallet2"></i> Account</button>
-                    </div>
-                </div></div></div>
-                <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
+                 <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
                     <div style="margin-bottom:12px"><i class="bi bi-bank text-primary" style="font-size:36px"></i></div>
                     <h6 class="fw-bold">Dhan</h6><p class="text-muted small">Client ID + Access Token + Refresh Token</p>
                     <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
@@ -591,18 +580,6 @@
                         <button class="btn btn-sm btn-danger" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>
                         <a class="btn btn-sm btn-outline-dark" href="https://login.dhan.co/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>
                         <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('dhan')"><i class="bi bi-wallet2"></i> Account</button>
-                    </div>
-                </div></div></div>
-                <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
-                    <div style="margin-bottom:12px"><i class="bi bi-lightning-charge text-warning" style="font-size:36px"></i></div>
-                    <h6 class="fw-bold">Fyers</h6><p class="text-muted small">App ID + Secret + OAuth Token</p>
-                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
-                    <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
-                        <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('fyers')"><i class="bi bi-gear"></i> Setup</button>
-                        <button class="btn btn-sm btn-success" onclick="connectSingleBroker('fyers')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
-                        <button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>
-                        <a class="btn btn-sm btn-outline-dark" href="https://trade.fyers.in/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>
-                        <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('fyers')"><i class="bi bi-wallet2"></i> Account</button>
                     </div>
                 </div></div></div>
                 <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
@@ -1812,21 +1789,7 @@ let _lastOpenTrdHTML = null;
         }catch(e){showToast('Connect failed (server unreachable?): '+e.message, 'danger'); await loadBrokers();}
     }
 
-    async function fyersOAuth(){
-        try{
-            const q=new URLSearchParams(window.location.search);
-            const code=q.get('code')||q.get('auth_code');
-            if(code){
-                const r=await P('/api/broker/fyers-auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker:'fyers',code})});
-                if(r.success)alert('Fyers connected! Token 24 hours valid rahega.');else alert('Error: '+r.error);
-                window.history.replaceState({},document.title,window.location.pathname);
-                loadBrokers();return;
-            }
-            const r=await A('/api/broker/fyers-auth-url');
-            if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; return;} else alert('Error: '+(r.error||'Configure Fyers first (App ID + Secret, Redirect URI Fyers app me register karo)'));
-        }catch(e){alert('OAuth error: '+e.message+'\nTry direct: https://api-t1.fyers.in/api/v3/generate-authcode?client_id=W7AUTU5IUT-100&redirect_uri='+encodeURIComponent('https://ratrade.onrender.com/api/broker/fyers-callback')+'&response_type=code&state=ratrade_login');}
-    }
-    async function dhanOAuth(){
+     async function dhanOAuth(){
         const r=await A('/api/broker/dhan-auth-url');
         if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; showToast('Dhan login page opened — login karke Profile se Access Token copy karo, phir site pe wapas aao — Auto-callback me save ho jaega.', 'info'); return;}
         showToast('Dhan Setup pe jaake Client ID paste karo — OAuth Login auto-connect karega.', 'info');
@@ -2130,12 +2093,10 @@ def run(data):
     }
     async function kaTest(){const s=document.getElementById('ka-status');s.textContent='pinging...';try{const r=await A('/api/keepalive/ping');s.textContent=(r&&r.status==='ok')?('OK - uptime '+Math.round(r.uptime_sec||0)+'s'):'Failed';}catch(e){try{const r2=await A(location.origin+'/api/keepalive/ping');s.textContent=(r2&&r2.status==='ok')?'OK (same origin)':'Failed';}catch(e2){s.textContent='Failed: '+e.message;}}}
 
-    const BROKER_FIELD_LABELS={
-        shoonya:{uid:'User ID',pwd:'Password',vc:'Vendor Code',apikey:'API Key',secret_code:'Secret Code',secret:'TOTP Secret (2FA)',actid:'Account ID'},
-        dhan:{client_id:'Client ID',access_token:'Access Token',refresh_token:'Refresh Token'},
-        fyers:{app_id:'App ID',secret:'App Secret',access_token:'Access Token',refresh_token:'Refresh Token'},
-        angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
-    };
+     const BROKER_FIELD_LABELS={
+         dhan:{client_id:'Client ID',access_token:'Access Token',refresh_token:'Refresh Token'},
+         angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
+     };
 
     </script>
 </body>
