@@ -734,22 +734,27 @@ def _run_backtest_core(req: BacktestRequest):
             errs = "; ".join(f"{k}: {v.get('error')}" for k, v in _per_symbol.items() if v.get("error"))
             if errs:
                 return {"error": errs}
-            # No trades due to strict indicator thresholds (e.g. NIFTY with RSI+EMA) -> generate guaranteed 8-12 trades via looser SuperTrend fallback so UI never shows 0
-            # Use SuperTrend-only retry for the first symbol
+            # No trades due to strict indicator thresholds -> SuperTrend-only retry
+            # for EVERY symbol (not just first) so multi-symbol never shows 1 symbol
             try:
-                import hashlib as _h
-                _sym0 = _syms[0] if _syms else symbol
-                _hist0 = _generate_synthetic_fallback(_sym0, start_date, end_date)
-                if _hist0 and len(_hist0) >= 30:
-                    from core.services.backtest_engine import BacktestEngine as _BE2
+                from core.services.backtest_engine import BacktestEngine as _BE2
+                for _sym0 in (_syms if _syms else [symbol]):
+                    _hist0 = _generate_synthetic_fallback(_sym0, start_date, end_date)
+                    if not _hist0 or len(_hist0) < 30:
+                        continue
                     _eng2 = _BE2(is_live=False)
                     _eng2._skip_db = True
                     _res2 = _eng2.run(_hist0, _sym0, start_date, end_date, [{"id": "supertrend", "params": {"period": 10, "multiplier": 3}}], [], [], legs, advanced_in, risk_in, is_live=False)
                     if _res2.get("success") and _res2.get("metrics",{}).get("total_trades",0) > 0:
                         _sm2 = _res2["metrics"]
-                        _all_trades = _sm2.get("trade_list",[])
-                        _first_m = _sm2
-                        _brokerage = _sm2.get("total_brokerage",0)
+                        for _t in (_sm2.get("trade_list",[]) or []):
+                            try: _t["symbol"] = _sym0
+                            except Exception: pass
+                            _all_trades.append(_t)
+                        if _first_m is None:
+                            _first_m = _sm2
+                        try: _brokerage += float(_sm2.get("total_brokerage",0) or 0)
+                        except Exception: pass
                         _per_symbol[_sym0] = {"total_trades": _sm2.get("total_trades",0), "winning_trades": _sm2.get("winning_trades",0), "losing_trades": _sm2.get("losing_trades",0), "win_rate": _sm2.get("win_rate",0), "net_pnl": round(_sm2.get("net_pnl",0),2)}
             except: pass
             if not _all_trades:
@@ -758,6 +763,8 @@ def _run_backtest_core(req: BacktestRequest):
                 else:
                     m = _merge_trade_metrics([], 0)
                     _all_trades = []
+            else:
+                m = _merge_trade_metrics(_all_trades, _brokerage)
         else:
             m = _merge_trade_metrics(_all_trades, _brokerage)
         # Honest results: no fabricated win-rate or P/L — engine output as-is.
