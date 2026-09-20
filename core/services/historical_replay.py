@@ -106,6 +106,9 @@ class HistoricalReplayEngine:
         daily_loss_limit = float(self.risk_management.get("daily_loss_limit", 0) or 0)
         leg_sl = float(leg.get("stop_loss", self.risk_management.get("daily_stop_loss", 1500)))
         leg_tp = float(leg.get("take_profit", self.risk_management.get("daily_take_profit", 1000)))
+        # Strategy-wise MTM Stop Loss and Target
+        strategy_sl = float(self.risk_management.get("daily_stop_loss", 0) or 0)
+        strategy_tp = float(self.risk_management.get("daily_take_profit", 0) or 0)
         
         is_spread = len(self.legs) > 1
         latency = TransactionCosts.latency_delay(False)  # backtest mode
@@ -208,7 +211,7 @@ class HistoricalReplayEngine:
                     self.trades[open_trade_idx]["exit_price"] = exit_prem
                     self.trades[open_trade_idx]["exit_time"] = exit_time
                 self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
-                if daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit:
+                if (daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
                     self.kill_switch_on = True
                 self.pending_exit = None
             
@@ -230,10 +233,26 @@ class HistoricalReplayEngine:
                     self.trades[open_trade_idx]["exit_price"] = exit_prem
                     self.trades[open_trade_idx]["exit_time"] = exit_time
                 self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
-                if daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit:
+                if (daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
                     self.kill_switch_on = True
             
-            # Expiry-day square-off for positional carries (NO roll-over)
+            # Strategy-wise MTM SL/TP — close all positions at once
+            has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
+            if has_open and (strategy_sl > 0 or strategy_tp > 0):
+                if (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
+                    while len(self.trades) > len([t for t in self.trades if t.get("exit_date")]):
+                        open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
+                        entry = self.trades[open_trade_idx]
+                        if entry.get("is_spread"):
+                            self.bt_engine._close_spread(self.trades, [], entry, "strategy_sl_tp", cur_date)
+                        else:
+                            exit_prem = self.bt_engine._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
+                            exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", False)
+                            self.bt_engine._close_position(self.trades, [], entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type)
+                            self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
+                    self.kill_switch_on = True
+            
+            # Expiry-day square-off
             has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
             if has_open and trade_mode != "intraday" and _rexp and cur_date >= _rexp and is_last:
                 open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
@@ -252,7 +271,7 @@ class HistoricalReplayEngine:
                     self.trades[open_trade_idx]["exit_price"] = exit_prem
                     self.trades[open_trade_idx]["exit_time"] = exit_time
                 self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
-                if daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit:
+                if (daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
                     self.kill_switch_on = True
                 self.bt_engine.bt_expiry = ""
                 _rexp = ""

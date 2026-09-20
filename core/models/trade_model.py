@@ -405,6 +405,8 @@ class TradeModel:
     _last_premiums = {}
     # Cache for bad-tick filter: last underlying spot per symbol (same units!)
     _last_spots = {}
+    _last_premiums_max = 200
+    _last_spots_max = 100
 
     @staticmethod
     def ist_hhmm(dt_str: str) -> str:
@@ -417,7 +419,15 @@ class TradeModel:
         except Exception:
             return ""
 
+    @staticmethod
+    def _trim_cache(d, max_size):
+        if len(d) > max_size:
+            for k in list(d.keys())[:len(d)-max_size]:
+                del d[k]
+
     def get_option_premium(self, symbol, option_type, strike, expiry, iv=None) -> float:
+        self._trim_cache(self._last_premiums, self._last_premiums_max)
+        self._trim_cache(self._last_spots, self._last_spots_max)
         if strike is None or float(strike or 0) <= 0:
             return None
         strike = float(strike)

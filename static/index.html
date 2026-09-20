@@ -1653,9 +1653,9 @@ let _lastOpenTrdHTML = null;
         }catch(e){}
     }
     // Fallback HTTP refresh if WS not connected — 8s (was 60s lag), plus WS gives <50ms ticks when live
-    setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },8000);
+    setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },15000);
     // Open positions: 2s streaming (was 10s lag) — real-time P&L sync without UI delay
-    setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 2000);
+    setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 5000);
     // chain auto-refresh removed — manual Load only (no flicker)
     // Auto-load saved robots on robot page visit
     document.querySelector('.nav button[onclick*=\"robot\"]')?.addEventListener('click', ()=> setTimeout(loadRobotSaved, 300));
@@ -2087,7 +2087,7 @@ def run(data):
             _tvChart.timeScale().fitContent();
             document.getElementById('tv-info').textContent=sym+' | '+r.candles.length+' candles | '+marks.length+' trade markers (paper+live entries/exits) | ST('+r.params.st_period+','+r.params.st_mult+') EMA('+r.params.ema_fast+'/'+r.params.ema_slow+')';
             if(_tvTimer)clearInterval(_tvTimer);
-            if(document.getElementById('tv-auto').checked)_tvTimer=setInterval(()=>{if(!document.getElementById('pg-tvchart').classList.contains('hidden'))tvLoad();},8000);
+            if(document.getElementById('tv-auto').checked)_tvTimer=setInterval(()=>{if(!document.getElementById('pg-tvchart').classList.contains('hidden'))tvLoad();},15000);
             window.addEventListener('resize',()=>{try{_tvChart.applyOptions({width:el.clientWidth});}catch(e){}});
         }catch(err){btn.innerHTML=orig;document.getElementById('tv-info').textContent='Error: '+err.message;}
     }

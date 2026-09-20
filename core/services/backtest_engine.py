@@ -64,6 +64,9 @@ class BacktestEngine:
             max_holding = max(max_holding, 5)
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
+        # Strategy-wise MTM Stop Loss and Target (overall portfolio level)
+        strategy_sl = float(risk_management.get("daily_stop_loss", 0) or 0)
+        strategy_tp = float(risk_management.get("daily_take_profit", 0) or 0)
         # Min entry premium: skip SELL entries cheaper than this (far-OTM lottery
         # tickets like Rs2-3 have tiny max profit but huge adverse-move loss).
         min_premium = float(advanced_options.get("min_entry_premium", 0) or 0)
@@ -186,7 +189,7 @@ class BacktestEngine:
                 exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                 self._close_position(entries, exits, entry, exit_prem, pending_exit, cur_date, qty, txn_type)
                 daily_pnl += exits[-1]["pnl"]
-                if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
+                if (daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and daily_pnl <= -strategy_sl) or (strategy_tp > 0 and daily_pnl >= strategy_tp):
                     kill_switch_on = True
                 pending_exit = None
 
@@ -203,6 +206,22 @@ class BacktestEngine:
                         daily_pnl += exits[-1]["pnl"]
                         if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
                             kill_switch_on = True
+
+            # Strategy-wise MTM Stop Loss / Target — close ALL positions at once
+            has_open = len(entries) > len(exits)
+            if has_open and (strategy_sl > 0 or strategy_tp > 0):
+                if (strategy_sl > 0 and daily_pnl <= -strategy_sl) or (strategy_tp > 0 and daily_pnl >= strategy_tp):
+                    # Close all open positions simultaneously
+                    while len(entries) > len(exits):
+                        entry = entries[len(exits)]
+                        if entry.get("is_spread"):
+                            self._close_spread(entries, exits, entry, "strategy_sl_tp", cur_date)
+                        else:
+                            exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
+                            exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                            self._close_position(entries, exits, entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type)
+                            daily_pnl += exits[-1]["pnl"]
+                    kill_switch_on = True
 
             has_open = len(entries) > len(exits)
             # Early exit: close by early_exit_time (default 15:10) instead of 15:14
@@ -221,7 +240,7 @@ class BacktestEngine:
                     exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                     self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type)
                 daily_pnl += exits[-1]["pnl"]
-                if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
+                if (daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and daily_pnl <= -strategy_sl) or (strategy_tp > 0 and daily_pnl >= strategy_tp):
                     kill_switch_on = True
 
             # Expiry-day square-off for positional carries (NO roll-over):
@@ -237,7 +256,7 @@ class BacktestEngine:
                     exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                     self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff", cur_date, qty, txn_type)
                 daily_pnl += exits[-1]["pnl"]
-                if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
+                if (daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and daily_pnl <= -strategy_sl) or (strategy_tp > 0 and daily_pnl >= strategy_tp):
                     kill_switch_on = True
                 self.bt_expiry = ""
                 exp_date = ""

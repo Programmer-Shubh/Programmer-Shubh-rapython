@@ -2,7 +2,40 @@ from fastapi import APIRouter
 from core.services.scanner import OptionScanner
 import time as _t
 import threading as _th
-_CACHE = {}
+from collections import OrderedDict
+
+_MAX_CACHE_SIZE = 50
+_CACHE = OrderedDict()
+_scanner_throttle = {}
+_scanner_throttle_lock = _th.Lock()
+
+def _cache_set(key, value):
+    if key in _CACHE:
+        _CACHE.move_to_end(key)
+    _CACHE[key] = (_t.time(), value)
+    if len(_CACHE) > _MAX_CACHE_SIZE:
+        _CACHE.popitem(last=False)
+
+def _cache_get(key):
+    if key in _CACHE:
+        _CACHE.move_to_end(key)
+        return _CACHE[key]
+    return None
+
+def _rate_limit(key, min_interval=1.0):
+    """Return True if request should be throttled (too frequent)."""
+    now = _t.time()
+    with _scanner_throttle_lock:
+        last = _scanner_throttle.get(key, 0)
+        if now - last < min_interval:
+            return True
+        _scanner_throttle[key] = now
+        # Cleanup old entries
+        if len(_scanner_throttle) > 100:
+            old = [k for k,v in _scanner_throttle.items() if now - v > 60]
+            for k in old: del _scanner_throttle[k]
+    return False
+
 router = APIRouter()
 
 # Warm 4-part cache at startup so first website open is instant (not 5-8s scan)
@@ -95,11 +128,16 @@ def breakout_scanner(symbol: str):
 
 @router.get("/scan-all")
 def scan_all(min_score: int = 80):
+    k=f"scan_all_{min_score}"; now=_t.time()
+    cached=_cache_get(k)
+    if cached and now-cached[0] < 60: return cached[1]
     try:
         scanner = OptionScanner()
         st_result = scanner.scan(min_score=min_score)
         vwap_result = scanner.scan_vwap()
-        return {"st_macd": st_result, "vwap": vwap_result}
+        res={"st_macd": st_result, "vwap": vwap_result}
+        _cache_set(k,res)
+        return res
     except Exception as e:
         return {"st_macd": {"bullish": [], "bearish": [], "total_scanned": 0, "error": str(e)[:200]}, "vwap": {"long": [], "short": [], "total_scanned": 0}}
 
@@ -116,15 +154,19 @@ def scan_combined(min_score: int = 80):
 
 @router.get("/fno-top5")
 def fno_top5():
+    if _rate_limit("fno_top5", 2.0):
+        k="fno"; cached=_cache_get(k)
+        if cached and _t.time()-cached[0] < 300: return cached[1]
     k="fno"; now=_t.time()
-    if k in _CACHE:
-        ct, cv = _CACHE[k]
+    cached=_cache_get(k)
+    if cached:
+        ct, cv = cached
         if now-ct < 300:
             return cv
         # stale return + bg refresh
         try:
             def _bg():
-                try: _CACHE[k]=(_t.time(), OptionScanner().get_fno_top5_today())
+                try: _cache_set(k, OptionScanner().get_fno_top5_today())
                 except: pass
             _th.Thread(target=_bg, daemon=True).start()
         except: pass
@@ -132,7 +174,7 @@ def fno_top5():
     try:
         scanner = OptionScanner()
         res=scanner.get_fno_top5_today()
-        _CACHE[k]=(now,res)
+        _cache_set(k,res)
         return res
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -143,13 +185,17 @@ def fno_top5():
 def top_opportunities(min_score: int = 80):
     try: min_score=int(min_score)
     except: min_score=80
+    if _rate_limit(f"opp_{min_score}", 2.0):
+        k=f"opp_{min_score}"; cached=_cache_get(k)
+        if cached and _t.time()-cached[0] < 300: return cached[1]
     k=f"opp_{min_score}"; now=_t.time()
-    if k in _CACHE and now-_CACHE[k][0] < 300:
-        return _CACHE[k][1]
+    cached=_cache_get(k)
+    if cached and now-cached[0] < 300:
+        return cached[1]
     try:
         scanner = OptionScanner()
         res={"opportunities": scanner.get_top_opportunities(min_score=min_score)}
-        _CACHE[k]=(now,res)
+        _cache_set(k,res)
         return res
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -176,31 +222,32 @@ def opportunities_4part(min_score: int = 80):
     """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, Score>=80 - instant after open (stale-while-revalidate + dummy instant)"""
     try: min_score=int(min_score)
     except: min_score=80
+    if _rate_limit(f"opp4_{min_score}", 2.0):
+        k=f"opp4_{min_score}"; cached=_cache_get(k)
+        if cached and _t.time()-cached[0] < 120: return cached[1]
     k=f"opp4_{min_score}"; now=_t.time()
+    cached=_cache_get(k)
     # If cached (even slightly stale), return instantly and refresh in background
-    if k in _CACHE:
-        cached_time, cached_val = _CACHE[k]
+    if cached:
+        cached_time, cached_val = cached
         if now - cached_time < 120 and not cached_val.get("dummy"):
             return cached_val
         # stale or dummy -> return instantly, refresh async with real scan
         try:
             def _bg():
-                try:
-                    s = OptionScanner()
-                    _CACHE[k]=(_t.time(), s.get_4_part_opportunities(min_score=min_score))
+                try: _cache_set(k, OptionScanner().get_4_part_opportunities(min_score=min_score))
                 except: pass
             _th.Thread(target=_bg, daemon=True).start()
         except: pass
-        # if dummy, still return it instantly (real will replace in ~2s)
         return cached_val
     # Cache miss -> return dummy instantly (<10ms), trigger real scan in bg
     dummy = _dummy_4part(min_score)
-    _CACHE[k]=(now,dummy)
+    _cache_set(k,dummy)
     try:
         def _bg2():
             try:
                 s = OptionScanner()
-                _CACHE[k]=(_t.time(), s.get_4_part_opportunities(min_score=min_score))
+                _cache_set(k, s.get_4_part_opportunities(min_score=min_score))
             except: pass
         _th.Thread(target=_bg2, daemon=True).start()
     except: pass

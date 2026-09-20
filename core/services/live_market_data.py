@@ -11,10 +11,35 @@ except Exception:
     def fetch_google_spot(s): return 0
     def fetch_cloud_spot(s): return {}
 
-_LIVE_CACHE = {}
-_LIVE_CACHE_TTL = 300  # 5 min cache on cloud (NSE blocked)
-_CHAIN_CACHE = {}
-_CHAIN_CACHE_TTL = 300  # 5 min cache on cloud
+from collections import OrderedDict
+_LIVE_CACHE = OrderedDict()
+_LIVE_CACHE_TTL = 300
+_LIVE_CACHE_MAX = 50
+_CHAIN_CACHE = OrderedDict()
+_CHAIN_CACHE_TTL = 300
+_CHAIN_CACHE_MAX = 50
+
+def _live_cache_set(sym, data):
+    if sym in _LIVE_CACHE: _LIVE_CACHE.move_to_end(sym)
+    _LIVE_CACHE[sym] = {"ts": time.time(), "data": data}
+    if len(_LIVE_CACHE) > _LIVE_CACHE_MAX: _LIVE_CACHE.popitem(last=False)
+
+def _chain_cache_set(sym, data):
+    if sym in _CHAIN_CACHE: _CHAIN_CACHE.move_to_end(sym)
+    _CHAIN_CACHE[sym] = {"ts": time.time(), "data": data}
+    if len(_CHAIN_CACHE) > _CHAIN_CACHE_MAX: _CHAIN_CACHE.popitem(last=False)
+
+def _live_cache_get(sym):
+    if sym in _LIVE_CACHE and time.time()-_LIVE_CACHE[sym]["ts"] < _LIVE_CACHE_TTL:
+        _LIVE_CACHE.move_to_end(sym)
+        return _LIVE_CACHE[sym]["data"]
+    return None
+
+def _chain_cache_get(sym):
+    if sym in _CHAIN_CACHE and time.time()-_CHAIN_CACHE[sym]["ts"] < _CHAIN_CACHE_TTL:
+        _CHAIN_CACHE.move_to_end(sym)
+        return _CHAIN_CACHE[sym]["data"]
+    return None
 
 _SYMBOL_MAP = {"NIFTY": "nifty", "BANKNIFTY": "banknifty", "FINNIFTY": "finnifty", "MIDCPNIFTY": "midcpnifty"}
 
@@ -56,8 +81,8 @@ class LiveMarketData:
     def get_live_spot(self, symbol: str) -> dict:
         now = time.time()
         sym = symbol.upper()
-        if sym in _LIVE_CACHE and now - _LIVE_CACHE[sym]["ts"] < _LIVE_CACHE_TTL:
-            return _LIVE_CACHE[sym]["data"]
+        cached = _live_cache_get(sym)
+        if cached is not None: return cached
         # 1) Cloud live: NSE -> Stooq -> Google (Yahoo removed, works on Render)
         try:
             q = fetch_cloud_spot(sym)
@@ -67,7 +92,7 @@ class LiveMarketData:
                         "change": float(q.get("change") or 0),
                         "high": float(q.get("high") or spot), "low": float(q.get("low") or spot),
                         "source": q.get("source", "live")}
-                _LIVE_CACHE[sym] = {"ts": now, "data": data}
+                _live_cache_set(sym, data)
                 return data
         except Exception:
             pass
@@ -80,29 +105,25 @@ class LiveMarketData:
             if row and row["close_price"] and float(row["close_price"]) > 0:
                 spot = float(row["close_price"])
                 data = {"spot": spot, "formatted": f"INR {spot:,.2f}", "change": 0, "high": spot, "low": spot, "source": "db"}
-                _LIVE_CACHE[sym] = {"ts": now, "data": data}
+                _live_cache_set(sym, data)
                 return data
         except Exception:
             pass
         # 3) No data
         data = {"spot": 0, "formatted": "No Data", "change": 0, "high": 0, "low": 0, "source": "na"}
-        _LIVE_CACHE[sym] = {"ts": now, "data": data}
+        _live_cache_set(sym, data)
         return data
 
     def get_live_spots_cached(self, symbols):
-        now = time.time()
         result = {}
         for sym in symbols:
-            if sym in _LIVE_CACHE and now - _LIVE_CACHE[sym]["ts"] < _LIVE_CACHE_TTL:
-                result[sym] = _LIVE_CACHE[sym]["data"]
+            cached = _live_cache_get(sym)
+            if cached is not None: result[sym] = cached
         return result
 
     def get_live_chain_cached(self, symbol: str) -> dict:
-        now = time.time()
         sym = symbol.upper()
-        if sym in _CHAIN_CACHE and now - _CHAIN_CACHE[sym]["ts"] < _CHAIN_CACHE_TTL:
-            return _CHAIN_CACHE[sym]["data"]
-        return None
+        return _chain_cache_get(sym)
 
     def get_live_spots_parallel(self, symbols, max_workers: int = 8):
         """Batch live spots (missing method that data_refresher calls).
@@ -133,8 +154,9 @@ class LiveMarketData:
         result = {}
         fresh = []
         for sym in symbols:
-            if sym in _CHAIN_CACHE and now - _CHAIN_CACHE[sym]["ts"] < _CHAIN_CACHE_TTL:
-                result[sym] = _CHAIN_CACHE[sym]["data"]
+            cached = _chain_cache_get(sym)
+            if cached is not None:
+                result[sym] = cached
             else:
                 fresh.append(sym)
         if fresh:
@@ -144,7 +166,7 @@ class LiveMarketData:
                     sym = futures[fut]
                     data = fut.result() if not fut.exception() else None
                     if data and data.get("rows"):
-                        _CHAIN_CACHE[sym] = {"ts": now, "data": data}
+                        _chain_cache_set(sym, data)
                         result[sym] = data
         return result
 

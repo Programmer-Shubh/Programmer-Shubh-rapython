@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import time
-from core.services.live_market_data import LiveMarketData, _LIVE_CACHE
+from core.services.live_market_data import LiveMarketData, _live_cache_set
 from core.models.database import Database
 from core.models.bhavcopy_model import BhavcopyModel
 
@@ -117,7 +117,7 @@ def refresh_all(light: bool = False):
             ibatch = live.get_live_spots_parallel(INDEX_SYMBOLS, max_workers=4)
             for sym, spot_data in ibatch.items():
                 if spot_data and spot_data.get("spot"):
-                    _LIVE_CACHE[sym] = {"ts": time.time(), "data": spot_data}
+                    _live_cache_set(sym, {"ts": time.time(), "data": spot_data})
         except Exception:
             pass
         # Seed historical spot cache so backtest/option-chain use DB (instant, no 'Network error')
