@@ -353,15 +353,12 @@
                 </div>
             </div>
 <div class="card mb-3 slab-card">
-                <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols • Expiry • Risk</small></div>
+                <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols</small></div>
                 <div class="card-body">
                     <div class="row g-2">
                         <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 5)</label><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><label><input type="checkbox" value="NIFTY" checked> NIFTY</label><label><input type="checkbox" value="BANKNIFTY"> BANKNIFTY</label><label><input type="checkbox" value="FINNIFTY"> FINNIFTY</label><label><input type="checkbox" value="MIDCPNIFTY"> MIDCPNIFTY</label><label><input type="checkbox" value="SENSEX"> SENSEX</label><label><input type="checkbox" value="BANKEX"> BANKEX</label><label><input type="checkbox" value="RELIANCE"> RELIANCE</label><label><input type="checkbox" value="HDFCBANK"> HDFCBANK</label><label><input type="checkbox" value="ICICIBANK"> ICICIBANK</label><label><input type="checkbox" value="TCS"> TCS</label><label><input type="checkbox" value="INFY"> INFY</label></div></div>
                         <!-- Order / Strike / OTM Dist / Lots hidden per user request — replaced by Strategy Templates below -->
                         <input type="hidden" id="r-order" value="CE-BUY"><input type="hidden" id="r-strike" value="ATM"><input type="hidden" id="r-otm" value="1"><input type="hidden" id="r-lots" value="1">
-                        <div class="col-md-2"><label class="form-label small">Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
-                        <div class="col-md-3"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
-                        <div class="col-md-3"><label class="form-label small">Target (₹)</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
                     </div>
                     </div>
                     <div class="slab-sec"><div class="slab-sec-title">Schedule & Risk</div>
@@ -459,6 +456,11 @@
                     <button class="btn btn-sm btn-outline-secondary" onclick="clearLegs()">Clear</button>
                 </div>
                 <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
+                <div class="row g-2 mt-2" id="strategyRiskRow">
+                    <div class="col-md-4"><label class="form-label small">Strategy Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
+                    <div class="col-md-4"><label class="form-label small">Strategy Stop Loss (₹) — overall MTM</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
+                    <div class="col-md-4"><label class="form-label small">Strategy Target (₹) — overall MTM</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
+                </div>
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
                 </div>
                 <div class="card mt-3 slab-card">
@@ -1334,12 +1336,19 @@ let _lastOpenTrdHTML = null;
     document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); });
     ['r-order','r-strike','r-lots','r-expiry','r-type'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){}});});
     document.getElementById('r-syms')?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){}});
+    // Sync: Overall settings (s-sl/s-tp) <-> Strategy risk (r-sl/r-tp) — dono me se jo bhi bhare, wahi chalega
+    function _syncRisk(fromSl,fromTp,toSl,toTp){try{const a=document.getElementById(fromSl),b=document.getElementById(fromTp),c=document.getElementById(toSl),d=document.getElementById(toTp);if(a&&c&&a.value!=='')c.value=a.value;if(b&&d&&b.value!=='')d.value=b.value;}catch(e){}}
+    document.getElementById('s-sl')?.addEventListener('change',()=>_syncRisk('s-sl','s-tp','r-sl','r-tp'));
+    document.getElementById('s-tp')?.addEventListener('change',()=>_syncRisk('s-sl','s-tp','r-sl','r-tp'));
+    document.getElementById('r-sl')?.addEventListener('change',()=>_syncRisk('r-sl','r-tp','s-sl','s-tp'));
+    document.getElementById('r-tp')?.addEventListener('change',()=>_syncRisk('r-sl','r-tp','s-sl','s-tp'));
 
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
         document.getElementById('r-lots').value=1;
         document.getElementById('r-sl').value=1500;
         document.getElementById('r-tp').value=3000;
+        try{document.getElementById('s-sl').value=1500;document.getElementById('s-tp').value=3000;}catch(e){}
         document.getElementById('s-lock-profit').value=0;
         document.getElementById('s-lock-amount').value=1;
         document.getElementById('s-reentry-sl').value='RE ASAP';
