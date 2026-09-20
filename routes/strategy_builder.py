@@ -484,11 +484,11 @@ def _dummy_trades_all_symbols(syms, start_date, end_date, legs, indicators):
         leg0 = legs[0] if legs else {"option_type": "CE", "transaction": "buy"}
         opt = leg0.get("option_type", "CE")
         txn = leg0.get("transaction", "buy").upper()
-        # Generate 2-3 trades per symbol sequentially
-        n_per = 2 if len(syms) > 3 else 3
+        # Generate trades per symbol — more for longer date ranges (2 months = 60 days → more trades)
+        n_per = max(3, min(12, total_days // 10))
         for i in range(n_per):
             # Sequential entry/exit dates
-            entry_dt = sd + _dt.timedelta(days= int(i * total_days / (n_per*len(syms)) + syms.index(sym)*2))
+            entry_dt = sd + _dt.timedelta(days= int(i * total_days / max(n_per*len(syms),1) + syms.index(sym)*2))
             exit_dt = entry_dt + _dt.timedelta(days= 5 + _rnd.randint(0,4))
             if exit_dt > ed: exit_dt = ed
             entry_s = entry_dt.strftime("%Y-%m-%d")
@@ -520,7 +520,8 @@ def _dummy_trades_all_symbols(syms, start_date, end_date, legs, indicators):
                 "entry_price": round(entry_prem,2), "exit_price": round(exit_prem,2),
                 "pnl": pnl, "pnl_formatted": f"₹{pnl:,.2f}" if pnl>=0 else f"-₹{abs(pnl):,.2f}",
                 "quantity": qty, "strike": int(atm), "expiry_date": exit_s,
-                "transaction_type": txn, "option_type": opt, "trade_type": "intraday"
+                "transaction_type": txn, "option_type": opt, "trade_type": "intraday",
+                "lot_size": int(lot)
             })
         per_sym[sym] = {"total_trades": n_per}
     # Shuffle to mix symbols
