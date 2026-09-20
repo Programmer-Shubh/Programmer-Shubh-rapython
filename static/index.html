@@ -443,7 +443,7 @@
                 </div>
             </div>
             <div class="mt-3">
-                <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Templates — Click to add legs (Order ignore hota hai)</button>
+                <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Templates — Click to add legs</button>
             </div>
             <div class="collapse show mt-2" id="legBuilder">
                 <div class="mt-2 d-flex gap-1 flex-wrap">
@@ -462,7 +462,7 @@
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
                 </div>
                 <div class="card mt-3 slab-card">
-                    <div class="card-header"><span class="slab-num">3</span><i class="bi bi-play-circle"></i> Run & Backtest <small class="text-muted">Templates wali legs chalengi, Order ignore hota hai</small></div>
+                    <div class="card-header"><span class="slab-num">3</span><i class="bi bi-play-circle"></i> Run & Backtest</div>
                     <div class="card-body">
                         <div class="alert alert-info py-1 px-2 mb-2 small" id="run-summary">Loading...</div>
                         <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
@@ -1118,8 +1118,8 @@ let _lastOpenTrdHTML = null;
             if(sub && sub.job_id){
                 _usedAsync=true;
                 let _netFails=0;
-                for(let p=0;p<60;p++){
-                    await new Promise(res=>setTimeout(res,1500));
+                for(let p=0;p<100;p++){
+                    await new Promise(res=>setTimeout(res,900));
                     _btSpin();
                     let st=null;
                     try{ st=await A('/api/backtest/result/'+sub.job_id); _netFails=0; }
@@ -1191,11 +1191,11 @@ let _lastOpenTrdHTML = null;
             else{Plotly.newPlot('mo-chart',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
             if(r.trade_list&&r.trade_list.length){
                 document.getElementById('bt-trades').classList.remove('hidden');
-                let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Type</th><th>Strike</th><th>B/S</th><th>Qty</th><th>Lots</th><th>Entry Price</th><th>Exit Price</th><th>Vix</th><th>P/L</th></tr></thead><tbody>';
+                let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Type</th><th>Strike</th><th>B/S</th><th>Qty</th><th>Lots</th><th>Entry Price</th><th>Exit Price</th><th>Exit Reason</th><th>Vix</th><th>P/L</th></tr></thead><tbody>';
                 let tradeIdx=0;
                 r.trade_list.forEach(t=>{
-                    if(t.is_group){h+=`<tr class="table-active"><td>${++tradeIdx}</td><td>${t.symbol||''}</td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="text-muted small">${t.vix||'12.0'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`}
-                    else{h+=`<tr><td>${tradeIdx}.1</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike}</td><td>${t.position||'Sell'}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+t.entry_price.toFixed(2):'-'}</td><td>${t.exit_price?'₹'+t.exit_price.toFixed(2):'-'}</td><td class="text-muted small">${t.vix||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;}});
+                    if(t.is_group){h+=`<tr class="table-active"><td>${++tradeIdx}</td><td>${t.symbol||''}</td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="text-muted small">${t.exit_reason||''}</td><td class="text-muted small">${t.vix||'12.0'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`}
+                    else{h+=`<tr><td>${tradeIdx}.1</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike}</td><td>${t.position||'Sell'}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+t.entry_price.toFixed(2):'-'}</td><td>${t.exit_price?'₹'+t.exit_price.toFixed(2):'-'}</td><td class="text-muted small">${t.exit_reason||'-'}</td><td class="text-muted small">${t.vix||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;}});
                 h+='</tbody></table>';
                 document.getElementById('bt-tl').innerHTML=h;
             }
@@ -1430,10 +1430,10 @@ let _lastOpenTrdHTML = null;
             const syms=rSyms();const symTxt=syms.join('+')||'NIFTY';
             let legTxt='';
             if(typeof stratLegs!=='undefined'&&stratLegs.length){
-                legTxt=stratLegs.length+' leg(s) ('+stratLegs.map(l=>(l.transaction||'').toUpperCase()+' '+(l.option_type||'')).join(', ')+') — <strong>gallery/templates wali legs chalengi, upar wali Order ignore hogi</strong>';
+                legTxt=stratLegs.length+' leg(s) ('+stratLegs.map(l=>(l.transaction||'').toUpperCase()+' '+(l.option_type||'')).join(', ')+')';
             } else {
                 const o=document.getElementById('r-order').value;
-                legTxt='Single: <strong>'+o+'</strong> (gallery/templates wali legs chalengi, upar wali Order ignore hogi)';
+                legTxt='Single: <strong>'+o+'</strong>';
             }
             const inds=robotCollectIndicators().length;
             el.innerHTML='Chalega: <strong>'+symTxt+'</strong> | '+legTxt+' | '+inds+' indicator(s) | <span class="badge bg-success">Multi-symbol ON</span>';

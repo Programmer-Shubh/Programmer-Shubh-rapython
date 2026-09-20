@@ -104,8 +104,8 @@ class HistoricalReplayEngine:
         max_holding = int(self.advanced_options.get("max_holding_bars", 20))
         max_trades_day = int(self.risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(self.risk_management.get("daily_loss_limit", 0) or 0)
-        leg_sl = float(leg.get("stop_loss", 0) or 0)
-        leg_tp = float(leg.get("take_profit", 0) or 0)
+        leg_sl = float(leg.get("stop_loss", self.risk_management.get("daily_stop_loss", 1500)) or 0)
+        leg_tp = float(leg.get("take_profit", self.risk_management.get("daily_take_profit", 1000)) or 0)
         # Strategy-wise MTM Stop Loss and Target
         strategy_sl = float(self.risk_management.get("daily_stop_loss", 0) or 0)
         strategy_tp = float(self.risk_management.get("daily_take_profit", 0) or 0)

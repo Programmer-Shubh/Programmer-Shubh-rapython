@@ -637,6 +637,7 @@ def _run_backtest_core(req: BacktestRequest):
         if len(_syms) > 5:
             _syms = _syms[:5]
         timeframe = (advanced_in.get("timeframe") or "1d").lower()
+        _bar_cap = 40 if len(_syms) > 1 else 60
         for _sym in _syms:
             _ck = f"{_sym}_{start_date}_{end_date}_{timeframe}"
             _ce = _BT_CACHE.get(_ck)
@@ -646,8 +647,8 @@ def _run_backtest_core(req: BacktestRequest):
                 # Algotest-like instant: synthetic only, no DB/network - <50ms
                 historical = _generate_synthetic_fallback(_sym, start_date, end_date)
                 # Cap daily to 60 bars BEFORE intraday expansion (1Y range = 250 bars x 75 = 18750 -> 60s hang)
-                if len(historical) > 60:
-                    historical = historical[-60:]
+                if len(historical) > _bar_cap:
+                    historical = historical[-_bar_cap:]
                 # Resample to intraday if needed (5m,15m etc. like algotest)
                 if timeframe in ("1m","5m","15m","30m","1h"):
                     try:
@@ -679,8 +680,8 @@ def _run_backtest_core(req: BacktestRequest):
                 _per_symbol[_sym] = {"error": f"No data for {_sym}", "total_trades": 0,
                                      "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
                 continue
-            if len(historical) > 60:
-                historical = historical[-60:]
+            if len(historical) > _bar_cap:
+                historical = historical[-_bar_cap:]
             # Overall strategy MTM split per symbol: engine runs per symbol, so
             # divide overall SL/TP by symbol count to keep combined MTM correct.
             _n_syms = max(1, len(_syms))
@@ -751,134 +752,13 @@ def _run_backtest_core(req: BacktestRequest):
             except: pass
             if not _all_trades:
                 if _first_m is not None:
-                    # Fix 4 bugs dummy: per-symbol ATM, multi-symbol, correct P/L, sequential timestamps
-                    if _first_m.get("total_trades",0)==0:
-                        _all_dummy, _per_dummy = _dummy_trades_all_symbols(_syms if _syms else [symbol], start_date, end_date, legs, indicators)
-                        # Use dummy trades for all symbols
-                        _all_trades = _all_dummy
-                        for _k,_v in _per_dummy.items():
-                            _per_symbol[_k] = {"total_trades": _v["total_trades"], "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
-                        # Recompute metrics from dummy trades
-                        m = _merge_trade_metrics(_all_trades, 0)
-                        _first_m = m
-                    else:
-                        m = _first_m
+                    m = _first_m
                 else:
-                    _all_dummy2, _ = _dummy_trades_all_symbols(_syms if _syms else [symbol], start_date, end_date, legs, indicators)
-                    m = _merge_trade_metrics(_all_dummy2, 0)
-                    _all_trades = _all_dummy2
-        if len(_syms) == 1 and _first_m is not None and not _per_symbol.get(_syms[0], {}).get("error"):
-            m = _first_m
-            # Ensure single-symbol still not 0 - time-varying
-            if m.get("total_trades",0)==0:
-                import hashlib as _h2, time as _tt2
-                _h2v = int(hashlib.md5(f"{_syms[0]}{start_date}{int(_tt2.time()//60)}{str(indicators)}".encode()).hexdigest()[:4],16)
-                m["total_trades"]= 8 + (_h2v % 6)
-                m["winning_trades"]= int(m["total_trades"]*0.55)
-                m["losing_trades"]= m["total_trades"] - m["winning_trades"]
-                m["win_rate"]= round(m["winning_trades"]/m["total_trades"]*100,1)
+                    m = _merge_trade_metrics([], 0)
+                    _all_trades = []
         else:
             m = _merge_trade_metrics(_all_trades, _brokerage)
-            if m.get("total_trades",0)==0 and _all_trades:
-                m["total_trades"]= len(_all_trades)
-        # Fix: koi bhi indicator change karne pe her trade loss (0% win) na dikhe — win 45-62% guaranteed, indicator hash se vary
-        if m.get("total_trades",0) > 0 and m.get("win_rate",0) == 0:
-            import hashlib as _hw
-            import time as _ttw
-            _hwv = int(hashlib.md5(f"{_syms[0] if _syms else symbol}{str(indicators)}{str(legs)}{start_date}{int(_ttw.time()//60)}".encode()).hexdigest()[:4],16)
-            m["win_rate"] = 45 + (_hwv % 18)  # 45-62, indicator + time se har bar alag
-            m["winning_trades"] = max(1, int(m["total_trades"] * m["win_rate"]/100))
-            m["losing_trades"] = m["total_trades"] - m["winning_trades"]
-            m["loss_rate"] = round(100 - m["win_rate"],1)
-            if m.get("net_pnl",0) <= 0 and m["win_rate"] >= 50:
-                m["net_pnl"] = 2800 + (_hwv % 4000)
-                m["final_capital"] = m["initial_capital"] + m["net_pnl"]
-                m["total_return"] = m["net_pnl"]
-                m["total_return_pct"] = round(m["net_pnl"]/10000,2)
-                m["expectancy"] = round(m["net_pnl"]/m["total_trades"],2) if m["total_trades"] else 0
-                m["avg_profit_per_trade"] = round(m["net_pnl"]/m["total_trades"],2) if m["total_trades"] else 0
-                m["avg_win"] = 1200 + (_hwv % 800)
-                m["avg_loss"] = 800 + (_hwv % 400)
-                m["profit_factor"] = round(m["avg_win"]/max(m["avg_loss"],1),2)
-        # Fix very low win (<30%) — per-symbol for multi, global for single
-        if m.get("total_trades",0) > 5 and m.get("win_rate",0) < 30:
-            import hashlib as _h3, time as _tt3, random as _rnd3
-            _h3v = int(hashlib.md5(f"{_syms[0] if _syms else symbol}{str(indicators)}{str(legs)}{start_date}lowwin{int(_tt3.time()//60)}".encode()).hexdigest()[:4],16)
-            if len(_syms) > 1 and _all_trades:
-                # Per-symbol lowwin fix — each symbol gets 48-62% win
-                for _sym in _syms:
-                    _h3v_sym = int(hashlib.md5(f"{_sym}{str(indicators)}{str(legs)}{start_date}lowwin{int(_tt3.time()//60)}".encode()).hexdigest()[:4],16)
-                    _rnd3.seed(_h3v_sym)
-                    _sym_trades = [x for x in _all_trades if x.get("symbol")==_sym]
-                    if not _sym_trades: continue
-                    _n = len(_sym_trades)
-                    _wr = 48 + (_h3v_sym % 15)  # 48-62
-                    _n_win = max(2, int(_n * _wr/100))
-                    _win_idx = set(_rnd3.sample(range(_n), _n_win))
-                    for _i,_tr in enumerate(_sym_trades):
-                        _is_win = _i in _win_idx
-                        _qty = int(_tr.get("quantity",1) or 1)
-                        _lot = int(_tr.get("lot_size", _gls(_tr.get("symbol","NIFTY"))) or 50)
-                        _entry = float(_tr.get("entry_price",0) or 100)
-                        if _is_win:
-                            _tr["pnl"] = abs(float(_tr.get("pnl",0) or _rnd3.randint(400,1800)))
-                            _tr["exit_price"] = round(_entry + (_tr["pnl"] / max(_qty*_lot,1)), 2) if _tr.get("transaction_type","BUY")=="BUY" else round(_entry - (_tr["pnl"] / max(_qty*_lot,1)), 2)
-                        else:
-                            _tr["pnl"] = -abs(float(_tr.get("pnl",0) or _rnd3.randint(200,900)))
-                            _tr["exit_price"] = round(_entry + (_tr["pnl"] / max(_qty*_lot,1)), 2) if _tr.get("transaction_type","BUY")=="BUY" else round(_entry - (_tr["pnl"] / max(_qty*_lot,1)), 2)
-                        _tr["pnl_formatted"] = f"₹{_tr['pnl']:,.2f}" if _tr["pnl"]>=0 else f"-₹{abs(_tr['pnl']):,.2f}"
-                    # Update per_symbol for this symbol
-                    if _sym in _per_symbol:
-                        _wp = [float(x.get("pnl",0) or 0) for x in _sym_trades if float(x.get("pnl",0) or 0) > 0]
-                        _wl = [abs(float(x.get("pnl",0) or 0)) for x in _sym_trades if float(x.get("pnl",0) or 0) < 0]
-                        _tot = len(_sym_trades)
-                        _wpn = round(sum(float(x.get("pnl",0) or 0) for x in _sym_trades),2)
-                        _per_symbol[_sym] = {"total_trades": _tot, "winning_trades": len(_wp), "losing_trades": _tot-len(_wp), "win_rate": round(len(_wp)/_tot*100,1), "net_pnl": _wpn}
-                # Update global m
-                _allw = [float(x.get("pnl",0) or 0) for x in _all_trades if float(x.get("pnl",0) or 0) > 0]
-                _alll = [abs(float(x.get("pnl",0) or 0)) for x in _all_trades if float(x.get("pnl",0) or 0) < 0]
-                m["net_pnl"] = round(sum(float(x.get("pnl",0) or 0) for x in _all_trades),2)
-                m["win_rate"] = round(len(_allw)/len(_all_trades)*100,1) if _all_trades else 0
-                m["winning_trades"] = len(_allw)
-                m["losing_trades"] = len(_all_trades)-len(_allw)
-                m["loss_rate"] = round(100 - m["win_rate"],1)
-                m["final_capital"] = m["initial_capital"] + m["net_pnl"]
-                m["total_return"] = m["net_pnl"]
-                m["total_return_pct"] = round(m["net_pnl"]/10000,2) if m["initial_capital"] else 0
-                m["avg_profit_per_trade"] = round(m["net_pnl"]/m["total_trades"],2) if m["total_trades"] else 0
-                m["expectancy"] = m["avg_profit_per_trade"]
-                m["avg_win"] = round(sum(_allw)/len(_allw),2) if _allw else 0
-                m["avg_loss"] = round(sum(_alll)/len(_alll),2) if _alll else 0
-                m["profit_factor"] = round(sum(_allw)/max(sum(_alll),1),2) if _alll else 0
-            else:
-                # Single symbol — same as before
-                _rnd3.seed(_h3v)
-                _win_idx = set(_rnd3.sample(range(len(_all_trades)), m["winning_trades"]))
-                for _i,_tr in enumerate(_all_trades):
-                    _is_win = _i in _win_idx
-                    _qty = int(_tr.get("quantity",1) or 1)
-                    _lot = int(_tr.get("lot_size", _gls(_tr.get("symbol","NIFTY"))) or 50)
-                    _entry = float(_tr.get("entry_price",0) or 100)
-                    if _is_win:
-                        _tr["pnl"] = abs(float(_tr.get("pnl",0) or _rnd3.randint(400,1800)))
-                        _tr["exit_price"] = round(_entry + (_tr["pnl"] / max(_qty*_lot,1)), 2) if _tr.get("transaction_type","BUY")=="BUY" else round(_entry - (_tr["pnl"] / max(_qty*_lot,1)), 2)
-                    else:
-                        _tr["pnl"] = -abs(float(_tr.get("pnl",0) or _rnd3.randint(200,900)))
-                        _tr["exit_price"] = round(_entry + (_tr["pnl"] / max(_qty*_lot,1)), 2) if _tr.get("transaction_type","BUY")=="BUY" else round(_entry - (_tr["pnl"] / max(_qty*_lot,1)), 2)
-                    _tr["pnl_formatted"] = f"₹{_tr['pnl']:,.2f}" if _tr["pnl"]>=0 else f"-₹{abs(_tr['pnl']):,.2f}"
-                m["net_pnl"] = round(sum(float(x.get("pnl",0) or 0) for x in _all_trades),2)
-                m["final_capital"] = m["initial_capital"] + m["net_pnl"]
-                m["total_return"] = m["net_pnl"]
-                m["total_return_pct"] = round(m["net_pnl"]/10000,2) if m["initial_capital"] else 0
-                m["avg_profit_per_trade"] = round(m["net_pnl"]/m["total_trades"],2) if m["total_trades"] else 0
-                m["expectancy"] = m["avg_profit_per_trade"]
-                _wins = [float(x.get("pnl",0) or 0) for x in _all_trades if float(x.get("pnl",0) or 0) > 0]
-                _loss = [abs(float(x.get("pnl",0) or 0)) for x in _all_trades if float(x.get("pnl",0) or 0) < 0]
-                m["avg_win"] = round(sum(_wins)/len(_wins),2) if _wins else 0
-                m["avg_loss"] = round(sum(_loss)/len(_loss),2) if _loss else 0
-                m["max_win"] = round(max(_wins),2) if _wins else 0
-                m["max_loss"] = round(-max(_loss),2) if _loss else 0
-                m["profit_factor"] = round(sum(_wins)/max(sum(_loss),1),2) if _loss else 0
+        # Honest results: no fabricated win-rate or P/L — engine output as-is.
     except Exception as e:
         import traceback
         traceback.print_exc()
