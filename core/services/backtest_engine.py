@@ -17,6 +17,8 @@ class BacktestEngine:
         self.bt_expiry = ""
         self.implied_volatility = 0.14
         self.is_live = is_live  # Unified switch: False=backtest, True=live/paper
+        self._skip_db = False  # True => synthetic-only fast path, no DB roundtrips
+        self._cur_close = 0.0
 
     def run(self, historical, symbol, start_date, end_date, ind_list, entry_conditions,
             exit_conditions, legs, advanced_options, risk_management, is_live: bool = None) -> dict:
@@ -117,6 +119,10 @@ class BacktestEngine:
 
         for i in range(min_bars, len(historical)):
             cur = historical[i]
+            try:
+                self._cur_close = float(cur.get("close_price", 0) or 0)
+            except Exception:
+                pass
             cur_date = cur["trade_date"]
             nxt = historical[i + 1] if i + 1 < len(historical) else None
             is_last = nxt is None or nxt["trade_date"] != cur_date
@@ -1044,13 +1050,16 @@ class BacktestEngine:
         if key in self.premium_cache:
             return self.premium_cache[key]
         # 1) Real DB LTP (historical) — skip if table missing (fresh local DB)
-        try:
-            row = Database.get_instance().fetch_one(
-                "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-                [self.bt_symbol, date, strike, option_type],
-            )
-        except Exception:
-            row = None
+        # Fast path: synthetic-only backtest never hits DB (Render free tier = slow roundtrips)
+        row = None
+        if not getattr(self, "_skip_db", False):
+            try:
+                row = Database.get_instance().fetch_one(
+                    "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+                    [self.bt_symbol, date, strike, option_type],
+                )
+            except Exception:
+                row = None
         if row:
             if row["open_price"] and float(row["open_price"]) > 0:
                 val = float(row["open_price"])
@@ -1071,18 +1080,19 @@ class BacktestEngine:
                     return val
             except Exception:
                 pass
-        # 3) Nearest strike real LTP fallback
-        try:
-            from utils.helpers import get_strike_step
-            step = get_strike_step(self.bt_symbol)
-            row2 = Database.get_instance().fetch_one(
-                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
-                [self.bt_symbol, option_type, strike, step, date, strike],
-            )
-            if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
-                return float(row2["close_price"])
-        except Exception:
-            pass
+        # 3) Nearest strike real LTP fallback (skipped on synthetic fast path)
+        if not getattr(self, "_skip_db", False):
+            try:
+                from utils.helpers import get_strike_step
+                step = get_strike_step(self.bt_symbol)
+                row2 = Database.get_instance().fetch_one(
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
+                    [self.bt_symbol, option_type, strike, step, date, strike],
+                )
+                if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
+                    return float(row2["close_price"])
+            except Exception:
+                pass
         # 4) Try Google Finance / nselib real historical via strategy_builder fetch (no synthetic) - live only
         if self.is_live:
             try:
@@ -1128,22 +1138,24 @@ class BacktestEngine:
         key = f"{date}_{strike}_{option_type}_c"
         if key in self.premium_cache:
             return self.premium_cache[key]
-        try:
-            row = Database.get_instance().fetch_one(
-                "SELECT close_price, open_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-                [self.bt_symbol, date, strike, option_type],
-            )
-            if row:
-                if row["close_price"] and float(row["close_price"]) > 0:
-                    val = float(row["close_price"])
-                    self.premium_cache[key] = val
-                    return val
-                if row["open_price"] and float(row["open_price"]) > 0:
-                    val = float(row["open_price"])
-                    self.premium_cache[key] = val
-                    return val
-        except Exception:
-            pass
+        skip_db = getattr(self, "_skip_db", False)
+        if not skip_db:
+            try:
+                row = Database.get_instance().fetch_one(
+                    "SELECT close_price, open_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+                    [self.bt_symbol, date, strike, option_type],
+                )
+                if row:
+                    if row["close_price"] and float(row["close_price"]) > 0:
+                        val = float(row["close_price"])
+                        self.premium_cache[key] = val
+                        return val
+                    if row["open_price"] and float(row["open_price"]) > 0:
+                        val = float(row["open_price"])
+                        self.premium_cache[key] = val
+                        return val
+            except Exception:
+                pass
         # Real live LTP fallback - only in live mode
         if self.is_live:
             try:
@@ -1155,20 +1167,21 @@ class BacktestEngine:
                     return val
             except Exception:
                 pass
-        # Nearest strike real LTP fallback
-        try:
-            from utils.helpers import get_strike_step
-            step = get_strike_step(self.bt_symbol)
-            row2 = Database.get_instance().fetch_one(
-                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
-                [self.bt_symbol, option_type, strike, step, date, strike],
-            )
-            if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
-                val = float(row2["close_price"])
-                self.premium_cache[key] = val
-                return val
-        except Exception:
-            pass
+        # Nearest strike real LTP fallback (skipped on synthetic fast path)
+        if not skip_db:
+            try:
+                from utils.helpers import get_strike_step
+                step = get_strike_step(self.bt_symbol)
+                row2 = Database.get_instance().fetch_one(
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
+                    [self.bt_symbol, option_type, strike, step, date, strike],
+                )
+                if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
+                    val = float(row2["close_price"])
+                    self.premium_cache[key] = val
+                    return val
+            except Exception:
+                pass
         # Black-Scholes fallback — same fix as option_chain/scanner: premium <=5 → BS 22% → spot*0.02, and post-slippage floor
         if spot and spot > 0 and strike and strike > 0:
             dte = max(self._days_to_expiry(date, self._get_expiry_type()) / 365.0, 1/365)
@@ -1293,6 +1306,8 @@ class BacktestEngine:
         })
 
     def _close_spot_for_date(self, bar_date):
+        if getattr(self, "_skip_db", False):
+            return float(getattr(self, "_cur_close", 0) or 0)
         row = Database.get_instance().fetch_one(
             "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND option_type IS NULL",
             [self.bt_symbol, bar_date],

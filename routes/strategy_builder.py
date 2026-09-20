@@ -664,7 +664,7 @@ def _run_backtest_core(req: BacktestRequest):
                                 drift = (i - bars_per_day/2) * 0.0001
                                 c = base_price * (1 + drift + (i%3-1)*0.001)
                                 intraday.append({**d, "trade_date": d["trade_date"], "close_price": round(c,2), "open_price": round(c*0.999,2), "high_price": round(c*1.002,2), "low_price": round(c*0.998,2)})
-                        historical = intraday[-300:] if len(intraday)>300 else intraday
+                        historical = intraday[-150:] if len(intraday)>150 else intraday
                     except: pass
                 _BT_CACHE[_ck] = (_bt_t.time(), historical)
                 if len(_BT_CACHE) > 20:
@@ -697,6 +697,7 @@ def _run_backtest_core(req: BacktestRequest):
             except Exception:
                 pass
             engine = BacktestEngine(is_live=False)
+            engine._skip_db = True  # synthetic-only fast path: no DB roundtrips
             result = engine.run(
                 historical, _sym, start_date, end_date,
                 indicators, entry_conditions, exit_conditions,
@@ -742,6 +743,7 @@ def _run_backtest_core(req: BacktestRequest):
                 if _hist0 and len(_hist0) >= 30:
                     from core.services.backtest_engine import BacktestEngine as _BE2
                     _eng2 = _BE2(is_live=False)
+                    _eng2._skip_db = True
                     _res2 = _eng2.run(_hist0, _sym0, start_date, end_date, [{"id": "supertrend", "params": {"period": 10, "multiplier": 3}}], [], [], legs, advanced_in, risk_in, is_live=False)
                     if _res2.get("success") and _res2.get("metrics",{}).get("total_trades",0) > 0:
                         _sm2 = _res2["metrics"]
