@@ -10,16 +10,12 @@ from core.services.broker_dhan import DhanHQ
 router = APIRouter()
 
 BROKER_DEFAULTS = {
-    "shoonya": {"name": "Shoonya (Finvasia)", "icon": "bi-lightning", "color": "text-danger", "fields": ["uid", "pwd", "vc", "apikey", "secret_code", "secret", "actid"], "desc": "User ID + Password + Vendor Code + API Key"},
     "dhan": {"name": "Dhan", "icon": "bi-bank", "color": "text-primary", "fields": ["client_id", "access_token", "refresh_token"], "desc": "Client ID + Access Token + Refresh Token"},
-    "fyers": {"name": "Fyers", "icon": "bi-lightning-charge", "color": "text-warning", "fields": ["app_id", "secret", "access_token", "refresh_token", "redirect_uri"], "desc": "App ID + Secret + OAuth Token"},
     "angel": {"name": "Angel One", "icon": "bi-graph-up-arrow", "color": "text-success", "fields": ["client_code", "password", "api_key", "totp_secret"], "desc": "Client Code + Password + API Key"},
 }
 
 BROKER_FIELD_LABELS = {
-    "shoonya": {"uid": "User ID", "pwd": "Password", "vc": "Vendor Code", "apikey": "API Key", "secret_code": "Secret Code", "secret": "TOTP Secret (2FA)", "actid": "Account ID"},
     "dhan": {"client_id": "Client ID", "access_token": "Access Token", "refresh_token": "Refresh Token"},
-    "fyers": {"app_id": "App ID", "secret": "App Secret", "access_token": "Access Token", "refresh_token": "Refresh Token", "redirect_uri": "Redirect URI"},
     "angel": {"client_code": "Client Code", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
 }
 
@@ -416,8 +412,6 @@ def save_config(req: BrokerConfig):
     if req.broker not in BROKER_DEFAULTS:
         return {"success": False, "error": "Invalid broker"}
     config = req.config
-    if req.broker == "fyers" and config.get("redirect_uri", "").strip() == "":
-        config["redirect_uri"] = _default_redirect()
     _save_config(req.broker, config)
     return {"success": True, "message": "Config saved"}
 
@@ -654,21 +648,32 @@ async def auto_connect_all():
                     results.append({"broker": key, "status": "failed", "error": str(v.get("error",""))})
             elif key == "angel":
                 from core.services.broker_angel_live import AngelLive
-                an = AngelLive(
-                    api_key=config.get("api_key",""),
-                    client_code=config.get("client_code",""),
-                    password=config.get("password",""),
-                    totp_secret=config.get("totp_secret","")
-                )
-                result = await an.login()
-                if result.get("success"):
-                    config["access_token"] = an.jwt
-                    config["refresh_token"] = an.refresh_token
-                    config["feed_token"] = an.feed_token
-                    _save_config("angel", config)
-                    results.append({"broker": key, "status": "connected"})
+                # OAuth mode: access_token exists but no password/totp
+                if config.get("access_token") and not config.get("password"):
+                    an = AngelLive(api_key=config.get("api_key",""), client_code=config.get("client_code",""), password="", totp_secret="")
+                    result = await an.login_by_oauth(config.get("access_token",""))
+                    if result.get("success"):
+                        config["access_token"] = an.jwt
+                        _save_config("angel", config)
+                        results.append({"broker": key, "status": "connected"})
+                    else:
+                        results.append({"broker": key, "status": "needs_login"})
                 else:
-                    results.append({"broker": key, "status": "failed", "error": result.get("error","")})
+                    an = AngelLive(
+                        api_key=config.get("api_key",""),
+                        client_code=config.get("client_code",""),
+                        password=config.get("password",""),
+                        totp_secret=config.get("totp_secret","")
+                    )
+                    result = await an.login()
+                    if result.get("success"):
+                        config["access_token"] = an.jwt
+                        config["refresh_token"] = an.refresh_token
+                        config["feed_token"] = an.feed_token
+                        _save_config("angel", config)
+                        results.append({"broker": key, "status": "connected"})
+                    else:
+                        results.append({"broker": key, "status": "failed", "error": result.get("error","")})
         except Exception as e:
             results.append({"broker": key, "status": "error", "error": str(e)[:150]})
     return {"success": True, "results": results}
@@ -677,7 +682,7 @@ async def auto_connect_all():
 @router.post("/refresh-tokens")
 async def refresh_tokens():
     results = {}
-    for key in BROKER_DEFAULTS:
+    for key in ("dhan", "angel"):
         config = _get_config(key)
         if not config:
             results[key] = {"success": False, "error": "Not configured"}
@@ -714,28 +719,21 @@ async def refresh_tokens():
                                     "message": "Renew failed — manual login needed" if not config.get("access_token") else "Cached token kept (renew failed: %s)" % str(rr.get("error", ""))[:120]}
             except Exception as e:
                 results[key] = {"success": bool(config.get("access_token")), "error": str(e)[:150]}
-        elif key in ("shoonya", "angel"):
-            # Tokens already simulated and stored; return success
-            results[key] = {"success": bool(config.get("access_token")), "message": "Tokens cached"}
-        else:
-            results[key] = {"success": True, "message": "OK (demo)"}
+        elif key == "angel":
+            # OAuth mode: access_token exists but no password
+            if config.get("access_token") and not config.get("password"):
+                results[key] = {"success": True, "message": "Token cached (OAuth mode)"}
+            else:
+                results[key] = {"success": bool(config.get("access_token")), "message": "Tokens cached"}
     return {"success": True, "results": results}
 
 
 @router.get("/token-status")
 def token_status():
     status = {}
-    for key in BROKER_DEFAULTS:
+    for key in ("dhan", "angel"):
         config = _get_config(key)
-        valid = False
-        if key == "fyers":
-            valid = bool(config.get("access_token"))
-        elif key == "dhan":
-            valid = bool(config.get("access_token"))
-        elif key in ("shoonya", "angel"):
-            valid = bool(config.get("access_token"))
-        else:
-            valid = bool(config)
+        valid = bool(config.get("access_token"))
         status[key] = {"valid": valid, "expires_at": ""}
     return {"success": True, "status": status}
 
