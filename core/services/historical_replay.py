@@ -104,8 +104,8 @@ class HistoricalReplayEngine:
         max_holding = int(self.advanced_options.get("max_holding_bars", 20))
         max_trades_day = int(self.risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(self.risk_management.get("daily_loss_limit", 0) or 0)
-        leg_sl = float(leg.get("stop_loss", self.risk_management.get("daily_stop_loss", 1500)))
-        leg_tp = float(leg.get("take_profit", self.risk_management.get("daily_take_profit", 1000)))
+        leg_sl = float(leg.get("stop_loss", 0) or 0)
+        leg_tp = float(leg.get("take_profit", 0) or 0)
         # Strategy-wise MTM Stop Loss and Target
         strategy_sl = float(self.risk_management.get("daily_stop_loss", 0) or 0)
         strategy_tp = float(self.risk_management.get("daily_take_profit", 0) or 0)
@@ -236,10 +236,17 @@ class HistoricalReplayEngine:
                 if (daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
                     self.kill_switch_on = True
             
-            # Strategy-wise MTM SL/TP — close all positions at once
+            # Strategy-wise MTM SL/TP — unrealized MTM of ALL open positions +
+            # realized daily_pnl. Limit hit => square-off everything at once.
             has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
             if has_open and (strategy_sl > 0 or strategy_tp > 0):
-                if (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
+                try:
+                    _closed = len([t for t in self.trades if t.get("exit_date")])
+                    open_unreal = sum(self.bt_engine._open_unrealized(self.trades[j], cur, option_type, txn_type, qty) for j in range(_closed, len(self.trades)))
+                except Exception:
+                    open_unreal = 0.0
+                total_mtm = self.daily_pnl + open_unreal
+                if (strategy_sl > 0 and total_mtm <= -strategy_sl) or (strategy_tp > 0 and total_mtm >= strategy_tp):
                     while len(self.trades) > len([t for t in self.trades if t.get("exit_date")]):
                         open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
                         entry = self.trades[open_trade_idx]
@@ -249,7 +256,7 @@ class HistoricalReplayEngine:
                             exit_prem = self.bt_engine._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
                             exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", False)
                             self.bt_engine._close_position(self.trades, [], entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type)
-                            self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
+                        self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
                     self.kill_switch_on = True
             
             # Expiry-day square-off

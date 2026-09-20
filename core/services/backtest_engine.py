@@ -84,8 +84,8 @@ class BacktestEngine:
         option_type = leg.get("option_type", "CE")
         qty = int(leg.get("lots", 1)) * get_lot_size(symbol)
         txn_type = leg.get("transaction", "buy").lower()
-        leg_sl = float(leg.get("stop_loss", risk_management.get("daily_stop_loss", 500)))
-        leg_tp = float(leg.get("take_profit", risk_management.get("daily_take_profit", 1000)))
+        leg_sl = float(leg.get("stop_loss", 0) or 0)
+        leg_tp = float(leg.get("take_profit", 0) or 0)
         strike_sel = advanced_options.get("strike_selection", "otm")
         delta_target = advanced_options.get("delta_target")
         otm_dist = int(advanced_options.get("otm_distance", 2))
@@ -207,10 +207,16 @@ class BacktestEngine:
                         if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
                             kill_switch_on = True
 
-            # Strategy-wise MTM Stop Loss / Target — close ALL positions at once
+            # Strategy-wise MTM Stop Loss / Target — unrealized MTM of ALL open
+            # positions + realized daily_pnl. Limit hit => square-off everything.
             has_open = len(entries) > len(exits)
             if has_open and (strategy_sl > 0 or strategy_tp > 0):
-                if (strategy_sl > 0 and daily_pnl <= -strategy_sl) or (strategy_tp > 0 and daily_pnl >= strategy_tp):
+                try:
+                    open_unreal = sum(self._open_unrealized(entries[j], cur, option_type, txn_type, qty) for j in range(len(exits), len(entries)))
+                except Exception:
+                    open_unreal = 0.0
+                total_mtm = daily_pnl + open_unreal
+                if (strategy_sl > 0 and total_mtm <= -strategy_sl) or (strategy_tp > 0 and total_mtm >= strategy_tp):
                     # Close all open positions simultaneously
                     while len(entries) > len(exits):
                         entry = entries[len(exits)]
@@ -220,7 +226,7 @@ class BacktestEngine:
                             exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
                             exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                             self._close_position(entries, exits, entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type)
-                            daily_pnl += exits[-1]["pnl"]
+                        daily_pnl += exits[-1]["pnl"]
                     kill_switch_on = True
 
             has_open = len(entries) > len(exits)
@@ -1216,6 +1222,29 @@ class BacktestEngine:
             return max(1, (exp_dt - bar_dt).days)
         except:
             return 7
+
+    def _open_unrealized(self, entry, cur, option_type, txn_type, qty):
+        """Unrealized MTM of one OPEN position at current bar (costs ignored for trigger)."""
+        try:
+            if entry.get("is_spread"):
+                spot = float(cur.get("close_price", 0) or 0)
+                cur_val = 0.0
+                for leg in entry.get("legs", []):
+                    prem = self._close_premium(cur.get("trade_date", ""), spot, float(leg["strike"]), leg["option_type"])
+                    if leg.get("type") == "buy":
+                        cur_val += prem * float(leg.get("quantity", 0) or 0)
+                    else:
+                        cur_val -= prem * float(leg.get("quantity", 0) or 0)
+                entry_cash = sum(float(l.get("signed_value", 0) or 0) for l in entry.get("legs", []))
+                return cur_val + entry_cash
+            spot = float(cur.get("close_price", 0) or 0)
+            prem = self._close_premium(cur.get("trade_date", ""), spot, float(entry["strike"]), option_type)
+            eqty = float(entry.get("quantity", qty) or qty)
+            if txn_type == "buy":
+                return prem * eqty - float(entry.get("total_cost", 0) or 0)
+            return float(entry.get("price", 0) or 0) * eqty - prem * eqty
+        except Exception:
+            return 0.0
 
     def _close_position(self, entries, exits, entry, exit_prem, reason, exit_date, qty, txn_type):
         if entry.get("is_spread"):

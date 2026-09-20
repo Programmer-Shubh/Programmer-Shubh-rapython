@@ -681,11 +681,25 @@ def _run_backtest_core(req: BacktestRequest):
                 continue
             if len(historical) > 60:
                 historical = historical[-60:]
+            # Overall strategy MTM split per symbol: engine runs per symbol, so
+            # divide overall SL/TP by symbol count to keep combined MTM correct.
+            _n_syms = max(1, len(_syms))
+            risk_sym = dict(risk_in)
+            try:
+                if _n_syms > 1:
+                    if float(risk_sym.get("daily_stop_loss", 0) or 0) > 0:
+                        risk_sym["daily_stop_loss"] = float(risk_sym["daily_stop_loss"]) / _n_syms
+                    if float(risk_sym.get("daily_take_profit", 0) or 0) > 0:
+                        risk_sym["daily_take_profit"] = float(risk_sym["daily_take_profit"]) / _n_syms
+                    if float(risk_sym.get("daily_loss_limit", 0) or 0) > 0:
+                        risk_sym["daily_loss_limit"] = float(risk_sym["daily_loss_limit"]) / _n_syms
+            except Exception:
+                pass
             engine = BacktestEngine(is_live=False)
             result = engine.run(
                 historical, _sym, start_date, end_date,
                 indicators, entry_conditions, exit_conditions,
-                legs, advanced_in, risk_in,
+                legs, advanced_in, risk_sym,
                 is_live=False,
             )
             if not result.get("success"):
