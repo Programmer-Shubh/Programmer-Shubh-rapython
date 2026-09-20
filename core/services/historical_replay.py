@@ -106,9 +106,10 @@ class HistoricalReplayEngine:
         daily_loss_limit = float(self.risk_management.get("daily_loss_limit", 0) or 0)
         leg_sl = float(leg.get("stop_loss", self.risk_management.get("daily_stop_loss", 1500)) or 0)
         leg_tp = float(leg.get("take_profit", self.risk_management.get("daily_take_profit", 1000)) or 0)
-        # Strategy-wise MTM Stop Loss and Target
-        strategy_sl = float(self.risk_management.get("daily_stop_loss", 0) or 0)
-        strategy_tp = float(self.risk_management.get("daily_take_profit", 0) or 0)
+        # Strategy-wise MTM Stop Loss and Target (dedicated split keys fall
+        # back to full daily values; leg-level always uses full values)
+        strategy_sl = float(self.risk_management.get("strategy_stop_loss", self.risk_management.get("daily_stop_loss", 0)) or 0)
+        strategy_tp = float(self.risk_management.get("strategy_take_profit", self.risk_management.get("daily_take_profit", 0)) or 0)
         
         is_spread = len(self.legs) > 1
         latency = TransactionCosts.latency_delay(False)  # backtest mode

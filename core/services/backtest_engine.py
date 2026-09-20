@@ -66,9 +66,11 @@ class BacktestEngine:
             max_holding = max(max_holding, 5)
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
-        # Strategy-wise MTM Stop Loss and Target (overall portfolio level)
-        strategy_sl = float(risk_management.get("daily_stop_loss", 0) or 0)
-        strategy_tp = float(risk_management.get("daily_take_profit", 0) or 0)
+        # Strategy-wise MTM Stop Loss and Target (overall portfolio level).
+        # Dedicated strategy_* keys (per-symbol split by caller) fall back to
+        # full daily_* values. Leg-level SL/TP always uses FULL daily values.
+        strategy_sl = float(risk_management.get("strategy_stop_loss", risk_management.get("daily_stop_loss", 0)) or 0)
+        strategy_tp = float(risk_management.get("strategy_take_profit", risk_management.get("daily_take_profit", 0)) or 0)
         # Min entry premium: skip SELL entries cheaper than this (far-OTM lottery
         # tickets like Rs2-3 have tiny max profit but huge adverse-move loss).
         min_premium = float(advanced_options.get("min_entry_premium", 0) or 0)

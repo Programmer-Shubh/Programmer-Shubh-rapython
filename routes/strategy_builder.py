@@ -683,15 +683,17 @@ def _run_backtest_core(req: BacktestRequest):
             if len(historical) > _bar_cap:
                 historical = historical[-_bar_cap:]
             # Overall strategy MTM split per symbol: engine runs per symbol, so
-            # divide overall SL/TP by symbol count to keep combined MTM correct.
+            # the STRATEGY-level cap is divided by symbol count to keep the
+            # combined MTM correct. Per-leg SL/TP keeps FULL values so every
+            # single trade honors the exact Stop Loss / Target rupees.
             _n_syms = max(1, len(_syms))
             risk_sym = dict(risk_in)
             try:
                 if _n_syms > 1:
                     if float(risk_sym.get("daily_stop_loss", 0) or 0) > 0:
-                        risk_sym["daily_stop_loss"] = float(risk_sym["daily_stop_loss"]) / _n_syms
+                        risk_sym["strategy_stop_loss"] = float(risk_sym["daily_stop_loss"]) / _n_syms
                     if float(risk_sym.get("daily_take_profit", 0) or 0) > 0:
-                        risk_sym["daily_take_profit"] = float(risk_sym["daily_take_profit"]) / _n_syms
+                        risk_sym["strategy_take_profit"] = float(risk_sym["daily_take_profit"]) / _n_syms
                     if float(risk_sym.get("daily_loss_limit", 0) or 0) > 0:
                         risk_sym["daily_loss_limit"] = float(risk_sym["daily_loss_limit"]) / _n_syms
             except Exception:
