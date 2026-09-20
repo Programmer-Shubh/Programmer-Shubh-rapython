@@ -628,33 +628,49 @@ async def connect_broker(req: ConnectRequest):
 
 @router.post("/auto-connect")
 async def auto_connect_all():
+    """Auto-connect Dhan+Angel Only (Fyers/Shoonya hidden per user request)."""
     results = []
-    for key in BROKER_DEFAULTS:
+    for key in ("dhan", "angel"):
         config = _get_config(key)
         if not config:
             results.append({"broker": key, "status": "not_configured"})
             continue
-        if key == "fyers" and config.get("refresh_token"):
-            fy = FyersV3(
-                app_id=config.get("app_id", ""),
-                secret_key=config.get("secret", ""),
-                redirect_uri=config.get("redirect_uri", ""),
-                access_token=config.get("access_token", ""),
-                refresh_token=config.get("refresh_token", ""),
-            )
-            result = await fy.refresh_access_token()
-            if result["success"]:
-                config["access_token"] = fy.access_token
-                config["refresh_token"] = fy.refresh_token
-                _save_config("fyers", config)
-                results.append({"broker": key, "status": "connected"})
-            else:
-                results.append({"broker": key, "status": "failed", "error": result["error"]})
-        elif key in ("shoonya", "angel", "dhan"):
-            # Already configured tokens present
-            results.append({"broker": key, "status": "connected"})
-        else:
-            results.append({"broker": key, "status": "configured_but_no_token"})
+        try:
+            if key == "dhan":
+                from core.services.broker_dhan_live import DhanLive
+                dl = DhanLive(client_id=config.get("client_id",""), access_token=config.get("access_token",""))
+                v = await dl.validate()
+                if v.get("success"):
+                    results.append({"broker": key, "status": "connected"})
+                elif "807" in str(v.get("raw","")):
+                    rr = await dl.renew_token()
+                    if rr.get("success"):
+                        config["access_token"] = rr["access_token"]
+                        _save_config("dhan", config)
+                        results.append({"broker": key, "status": "renewed"})
+                    else:
+                        results.append({"broker": key, "status": "needs_login"})
+                else:
+                    results.append({"broker": key, "status": "failed", "error": str(v.get("error",""))})
+            elif key == "angel":
+                from core.services.broker_angel_live import AngelLive
+                an = AngelLive(
+                    api_key=config.get("api_key",""),
+                    client_code=config.get("client_code",""),
+                    password=config.get("password",""),
+                    totp_secret=config.get("totp_secret","")
+                )
+                result = await an.login()
+                if result.get("success"):
+                    config["access_token"] = an.jwt
+                    config["refresh_token"] = an.refresh_token
+                    config["feed_token"] = an.feed_token
+                    _save_config("angel", config)
+                    results.append({"broker": key, "status": "connected"})
+                else:
+                    results.append({"broker": key, "status": "failed", "error": result.get("error","")})
+        except Exception as e:
+            results.append({"broker": key, "status": "error", "error": str(e)[:150]})
     return {"success": True, "results": results}
 
 
