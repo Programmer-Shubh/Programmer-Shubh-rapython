@@ -443,7 +443,72 @@ class BacktestEngine:
                     result["robot_conf"] = self._calc_robot_confluence(historical, closes, params)
                 except Exception:
                     result["robot_conf"] = {"buy": [], "sell": []}
+            elif iid == "opp_combo":
+                # Dashboard Opportunity Combo: SuperTrend + MACD + EMA + Volume
+                # scoring (same rules as scanner opportunity), min_score gate.
+                try:
+                    result["opp_combo"] = self._calc_opp_combo(historical, closes, params)
+                except Exception:
+                    result["opp_combo"] = {"buy": [], "sell": []}
         return result
+
+    def _calc_opp_combo(self, historical, closes, params):
+        """Dashboard Opportunity Combo (scanner parity): SuperTrend breakout 30 /
+        above 10, MACD cross 30 / above 10, high volume 20, EMA trend 20.
+        Signal when side score >= min_score (default 50).
+        Returns {'buy':[...], 'sell':[...]} bool lists."""
+        ms = int(params.get("min_score", 50) or 50)
+        n = len(closes)
+        buy = [False] * n
+        sell = [False] * n
+        try:
+            st = self.indicators.calculate_supertrend(historical, 10, 3.0) or []
+            md = self.indicators.calculate_macd(closes, 12, 26, 9) or {}
+            m = md.get("macd", []) if isinstance(md, dict) else []
+            s = md.get("signal", []) if isinstance(md, dict) else []
+            ep = 200 if n >= 200 else 50 if n >= 50 else 20
+            ema = self.indicators.calculate_ema(closes, ep) or []
+            vols = [float(h.get("volume", 0) or 0) for h in historical]
+            for i in range(max(21, 2), n):
+                try:
+                    c = closes[i]
+                    pc = closes[i - 1]
+                    vsma = sum(vols[max(0, i - 20):i]) / max(1, min(20, i))
+                    bs = 0
+                    ss = 0
+                    if i < len(st) and st[i]:
+                        if c > st[i]:
+                            prev_st = st[i - 1] if i - 1 < len(st) else 0
+                            bs += 30 if (prev_st and pc <= prev_st) else 10
+                        elif c < st[i]:
+                            prev_st = st[i - 1] if i - 1 < len(st) else 0
+                            ss += 30 if (prev_st and pc >= prev_st) else 10
+                    mv = m[i] if i < len(m) else 0
+                    sv = s[i] if i < len(s) else 0
+                    pmv = m[i - 1] if i - 1 < len(m) else 0
+                    psv = s[i - 1] if i - 1 < len(s) else 0
+                    if mv and sv:
+                        if mv > sv:
+                            bs += 30 if (pmv and psv and pmv <= psv) else 10
+                        elif mv < sv:
+                            ss += 30 if (pmv and psv and pmv >= psv) else 10
+                    if vsma > 0:
+                        if vols[i] > vsma * 1.5:
+                            bs += 20
+                        if vols[i] > vsma * 1.2:
+                            ss += 20
+                    ev = ema[i] if i < len(ema) else 0
+                    if ev and c > ev:
+                        bs += 20
+                    elif ev and c < ev:
+                        ss += 20
+                    buy[i] = bs >= ms
+                    sell[i] = ss >= ms
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return {"buy": buy, "sell": sell}
 
     def _calc_robot_confluence(self, historical, closes, params):
         """BUY CALL = close>VWAP + green candle + EMAfast>EMAslow (not flat)
@@ -560,6 +625,12 @@ class BacktestEngine:
         modes = getattr(self, "ind_modes", {})
         if not pre_calc:
             return True
+        # Dashboard Opportunity Combo: standalone gate (its own min_score)
+        if "opp_combo" in pre_calc:
+            oc = pre_calc["opp_combo"]
+            bl = oc.get("buy", []) if isinstance(oc, dict) else []
+            if modes.get("opp_combo", "both") != "bearish" and effective_idx < len(bl) and bl[effective_idx]:
+                return True
         # Calculate composite score for this bar
         _score = 0
         _max = 0
@@ -703,6 +774,12 @@ class BacktestEngine:
 
         # PRIORITY 2: Selected indicator-based signals - composite Score >=80
         modes = getattr(self, "ind_modes", {})
+        # Dashboard Opportunity Combo: standalone gate (its own min_score)
+        if "opp_combo" in pre_calc:
+            oc = pre_calc["opp_combo"]
+            sl2 = oc.get("sell", []) if isinstance(oc, dict) else []
+            if modes.get("opp_combo", "both") != "bullish" and effective_idx < len(sl2) and sl2[effective_idx]:
+                return True
         _score = 0
         _max = 0
         if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):

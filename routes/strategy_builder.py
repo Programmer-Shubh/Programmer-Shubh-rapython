@@ -673,6 +673,21 @@ def _run_backtest_core(req: BacktestRequest):
                 _db_hist = _load_db_history(_sym, start_date, end_date)
             except Exception:
                 _db_hist = []
+            if (not _db_hist or len(_db_hist) < 15):
+                # On-demand gap fill: TradingView last ~150 daily bars -> DB,
+                # so ANY recent 3-month range backtests on real data (one-time ~2s)
+                try:
+                    from core.services.historical_fetcher import _fetch_tvDatafeed_historical as _tvf
+                    _tv = _tvf(_sym, start_date, end_date) or []
+                    if _tv:
+                        try:
+                            from core.models.bhavcopy_model import BhavcopyModel as _BM
+                            _BM().import_data(_tv)
+                        except Exception:
+                            pass
+                        _db_hist = _load_db_history(_sym, start_date, end_date)
+                except Exception:
+                    pass
             if _db_hist and len(_db_hist) >= 15:
                 historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
                 _use_db = True

@@ -406,6 +406,7 @@
                                 <label><input type="checkbox" id="r-ind-oi"> Open Interest(<input type="number" id="r-p-oi" value="20" min="2" max="60" style="width:44px;font-size:11px">)</label>
                                 <label title="UT Bot (TradingView): ATR trailing-stop flip. Buy = close crosses above stop, Sell = below."><input type="checkbox" id="r-ind-utbot"> <strong>UT Bot</strong>(Key<input type="number" id="r-p-utk" value="3" min="1" max="10" step="0.5" style="width:44px;font-size:11px">,ATR<input type="number" id="r-p-utp" value="10" min="2" max="30" style="width:44px;font-size:11px">)</label>
                                 <label title="Bollinger Bands: Volatility squeeze breakout"><input type="checkbox" id="r-ind-bb" checked> <strong>Bollinger</strong>(<input type="number" id="r-p-bb" value="20" min="2" max="50" style="width:44px;font-size:11px">,<input type="number" id="r-p-bbstd" value="2.0" min="1" max="3" step="0.1" style="width:44px;font-size:11px">)</label>
+                                <label title="Opportunity Combo: dashboard wali scoring (SuperTrend+MACD+EMA+Volume) — min score par signal"><input type="checkbox" id="r-ind-oppcombo" checked> <strong>Opp Combo</strong>(Score<input type="number" id="r-p-ocscore" value="50" min="10" max="100" step="5" style="width:48px;font-size:11px">)</label>
                             </div>
                         </div>
                     </div>
@@ -1020,6 +1021,7 @@ let _lastOpenTrdHTML = null;
         {id:'range_breakout',name:'Range Breakout',params:[{key:'period',label:'Period',def:20}]},
         {id:'ml_signal_filter',name:'ML Signal Filter',params:[]},
         {id:'neural_network',name:'Neural Network',params:[{key:'period',label:'Period',def:14}]},
+        {id:'opp_combo',name:'Opportunity Combo (Dashboard)',params:[{key:'min_score',label:'Min Score',def:50}]},
     ];
     const QUANT_CANDLES=[['1','1 minute'],['3','3 minutes'],['5','5 minutes'],['15','15 minutes'],['30','30 minutes'],['45','45 minutes'],['60','1 hour']];
     let quantIndicators=[
@@ -1507,6 +1509,7 @@ let _lastOpenTrdHTML = null;
         if(document.getElementById('r-ind-vol')?.checked) indicators.push({id:'volume_indicator',params:{period:parseInt(document.getElementById('r-p-vol')?.value)||20}});
         if(document.getElementById('r-ind-oi')?.checked) indicators.push({id:'open_interest',params:{period:parseInt(document.getElementById('r-p-oi')?.value)||20}});
         if(document.getElementById('r-ind-utbot')?.checked) indicators.push({id:'utbot',params:{keyvalue:parseFloat(document.getElementById('r-p-utk')?.value)||3,atrperiod:parseInt(document.getElementById('r-p-utp')?.value)||10}});
+        if(document.getElementById('r-ind-oppcombo')?.checked) indicators.push({id:'opp_combo',params:{min_score:parseInt(document.getElementById('r-p-ocscore')?.value)||50}});
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         return indicators;
     }
