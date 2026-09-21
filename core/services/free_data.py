@@ -67,7 +67,7 @@ def _yahoo_fallback_quote(symbol: str) -> dict:
     try:
         ysym = _YAHOO_MAP.get(symbol.upper(), f"{symbol}.NS" if "." not in symbol and not symbol.startswith("^") else symbol)
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=1d&range=5d"
-        r = requests.get(url, headers=_UA, timeout=8)
+        r = requests.get(url, headers=_UA, timeout=5)
         if r.status_code == 200:
             j = r.json()
             res = (j.get("chart", {}).get("result") or [{}])[0]
@@ -110,7 +110,7 @@ def fetch_stooq_spot(symbol: str) -> float:
         for ssym in candidates:
             try:
                 url = f"https://stooq.com/q/l/?s={ssym}&f=sd2t2ohlcv&h&e=csv"
-                r = requests.get(url, headers=_UA, timeout=8)
+                r = requests.get(url, headers=_UA, timeout=5)
                 if r.status_code == 200 and "N/D" not in r.text:
                     lines = r.text.strip().split("\n")
                     if len(lines) >= 2:
@@ -131,7 +131,7 @@ def fetch_google_spot(symbol: str) -> float:
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         url = f"https://www.google.com/finance/quote/{symbol}:NSE"
-        r = requests.get(url, headers=headers, timeout=8)
+        r = requests.get(url, headers=headers, timeout=5)
         if r.status_code == 200:
             m = re.search(r'data-last-price="([^"]+)"', r.text)
             if m:
@@ -142,8 +142,9 @@ def fetch_google_spot(symbol: str) -> float:
 
 
 def fetch_cloud_spot(symbol: str) -> dict:
-    """Live spot: NSE direct -> Google -> Yahoo -> Stooq (Stooq last, fixes KOTAKBANK 417 vs 1900 mismatch).
-    Stooq's kotakbank.in returns ~417 stale/wrong, Yahoo's KOTAKBANK.NS ~1900 is correct, so Yahoo must be tried before Stooq.
+    """Live spot: NSE direct -> Yahoo -> Google -> Stooq (Stooq last, fixes KOTAKBANK 417 vs 1900 mismatch).
+    Yahoo first for indices (Google has no index price markup; verified ^NSEI/^NSEBANK/^CNXFIN/^NSEMDCP50).
+    Short timeouts (5s) so dashboard never hangs into proxy 502.
     Returns {spot,change,high,low,source} or {}."""
     spot, source = 0, ""
     chg = 0.0
@@ -156,7 +157,12 @@ def fetch_cloud_spot(symbol: str) -> dict:
             chg = float(d.get("change") or 0)
     except Exception:
         pass
-    # 2) Google Finance quote page (free scrape) - tried before Stooq to avoid stale Stooq
+    # 2) Yahoo v8 API (works on cloud, indices included) - labelled 'live', never 'yahoo'
+    if not spot:
+        q = _yahoo_fallback_quote(symbol)
+        if q and q.get("spot"):
+            return q
+    # 3) Google Finance quote page (free scrape) - tried before Stooq to avoid stale Stooq
     if not spot:
         g = fetch_google_spot(symbol)
         if g and g > 0:
@@ -165,11 +171,6 @@ def fetch_cloud_spot(symbol: str) -> dict:
                 spot, source = g, "google"
             elif g > 0:
                 spot, source = g, "google"
-    # 3) Yahoo v8 API (works on cloud) - labelled 'live', never 'yahoo' - before Stooq
-    if not spot:
-        q = _yahoo_fallback_quote(symbol)
-        if q and q.get("spot"):
-            return q
     # 4) Stooq CSV last resort (fixes KOTAKBANK stale 417 - only if Yahoo/Google failed)
     if not spot:
         s = fetch_stooq_spot(symbol)

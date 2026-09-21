@@ -13,13 +13,18 @@ router = APIRouter()
 
 @router.get("/spot")
 def get_spots():
-    # Cloud-first live prices: NSE -> Stooq -> Google -> DB (Yahoo removed, NSE blocked on Render)
+    # Cloud-first live prices (parallel, ~5s max): Yahoo -> Google -> Stooq -> DB stale.
+    # Sequential 8s fetches caused proxy 502s; parallel fixes it.
     live = LiveMarketData()
     symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "RELIANCE", "HDFCBANK", "TCS", "INFY"]
+    try:
+        found = live.get_live_spots_parallel(symbols, max_workers=8) or {}
+    except Exception:
+        found = {}
     result = {}
     for sym in symbols:
         try:
-            d = live.get_live_spot(sym)
+            d = found.get(sym)
         except Exception:
             d = None
         spot = float(d.get("spot") or 0) if d else 0
@@ -57,7 +62,7 @@ def get_spots():
 
 
 def _free_latest_spot(symbol: str):
-    """Cloud-first: LiveMarketData (NSE->Stooq->Google, no Yahoo), then DB stale close."""
+    """Cloud-first: LiveMarketData (Yahoo/Google/Stooq, no NSE-direct), then DB stale close."""
     try:
         live = LiveMarketData()
         data = live.get_live_spot(symbol)
