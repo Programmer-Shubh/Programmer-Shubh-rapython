@@ -22,6 +22,21 @@ async def _start_background_refresh():
         pass
 
 
+async def _fno_sync_loop():
+    """Official F&O bhavcopy auto-download + old-data purge.
+    Runs after startup settles, then every 6h. Best-effort (never crashes app)."""
+    import asyncio as _aio
+    await _aio.sleep(180)
+    while True:
+        try:
+            from core.services import nsefin_bhav as _fb
+            await _aio.to_thread(_fb.backfill_fno, 30, 3)
+            await _aio.to_thread(_fb.purge_old_data, 12)
+        except Exception:
+            pass
+        await _aio.sleep(6 * 3600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -34,6 +49,9 @@ async def lifespan(app: FastAPI):
             except: pass
     except: pass
     try: await _start_background_refresh()
+    except: pass
+    try:
+        asyncio.get_running_loop().create_task(_fno_sync_loop())
     except: pass
     yield
 

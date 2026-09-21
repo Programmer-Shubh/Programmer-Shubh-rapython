@@ -411,15 +411,9 @@ class Database:
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
             """)
-        # Market data is API-only — clear stale bhavcopy (db ko hatao) - ONLY for SQLite ephemeral
-        # For Postgres, skip wipe to preserve persistent data
-        if not self._is_postgres():
-            try:
-                with self._conn() as c2:
-                    c2.execute("DELETE FROM bhavcopy_data")
-                    c2.commit()
-            except Exception:
-                pass
+        # Market data persists across restarts (backtest needs history).
+        # NEVER wipe bhavcopy_data here — startup wipe destroyed all history
+        # on every Render restart/deploy.
         try:
             self._migrate()
         except Exception:

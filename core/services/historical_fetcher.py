@@ -3,8 +3,9 @@ import requests
 import re
 import json
 from typing import List, Dict
-# Sources: DB -> nselib (NSE) -> jugaad-data (NSE bhavcopy) -> StocksRin -> Google -> TrueData
-# Direct NSE Bhavcopy = Independent Free Pipeline (yfinance removed, in-memory tvDatafeed/nsepython/openchart).
+# Sources: DB -> Stooq -> openchart (marketcalls) -> tvDatafeed (TradingView).
+# NSE-direct fetchers (nselib/jugaad/nsepython/archives) REMOVED — NSE blocks
+# them (empty/archive responses); openchart+tvDatafeed serve instead.
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -31,110 +32,6 @@ def _clean_num(v) -> float:
     s = str(v).replace(",", "").replace("\u20b9", "").strip()
     try: return float(s)
     except: return 0
-
-def _fetch_nselib_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """nselib — reliable for all NSE stocks + indices (free, no API key)."""
-    try:
-        from nselib.capital_market import price_volume_data
-        sd = datetime.datetime.strptime(start_date, "%Y-%m-%d").strftime("%d-%m-%Y")
-        ed = datetime.datetime.strptime(end_date, "%Y-%m-%d").strftime("%d-%m-%Y")
-        df = price_volume_data(symbol, from_date=sd, to_date=ed)
-        if df is None or df.empty:
-            return []
-        out = []
-        for _, row in df.iterrows():
-            td = str(row.get("Date", row.get("Historical Date", "")))
-            for fmt in ("%d-%b-%Y", "%d %b %Y", "%Y-%m-%d", "%d-%m-%Y"):
-                try:
-                    td = datetime.datetime.strptime(td.strip(), fmt).strftime("%Y-%m-%d")
-                    break
-                except Exception:
-                    continue
-            try:
-                o = _clean_num(row.get("OpenPrice", row.get("Open Price", "")))
-                h = _clean_num(row.get("HighPrice", row.get("High Price", "")))
-                l = _clean_num(row.get("LowPrice", row.get("Low Price", "")))
-                cl = _clean_num(row.get("ClosePrice", row.get("LastPrice", row.get("Close", ""))))
-                vol_raw = str(row.get("TotalTradedQuantity", row.get("Total Traded Quantity", "0"))).replace(",", "").strip()
-                try: vol = int(float(vol_raw))
-                except: vol = 0
-                if cl <= 0: continue
-                if td < start_date or td > end_date: continue
-                if o <= 0: o = cl
-                if h <= 0: h = cl
-                if l <= 0: l = cl
-                out.append({"symbol": symbol, "trade_date": td, "open_price": round(o,2), "high_price": round(h,2), "low_price": round(l,2), "close_price": round(cl,2), "volume": vol, "oi": 0})
-            except Exception:
-                continue
-        if len(out) >= 5:
-            return out
-    except Exception:
-        pass
-    return []
-
-def _fetch_jugaad_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """jugaad-data: NSE bhavcopy archives via jugaad_data.nse.bhavcopy_save (free, open-source)."""
-    try:
-        import tempfile, csv, pathlib, time as _t
-        from jugaad_data.nse import bhavcopy_save
-        import datetime as _dt
-        _deadline = _t.time() + 8  # hard budget: one day-download must not stall backtest
-        sd = _dt.datetime.strptime(start_date, "%Y-%m-%d").date()
-        ed = _dt.datetime.strptime(end_date, "%Y-%m-%d").date()
-        tmpdir = tempfile.mkdtemp(prefix="jugaad_")
-        out = []
-        cur = sd
-        while cur <= ed:
-            if _t.time() > _deadline or len(out) >= 60:
-                break
-            if cur.weekday() < 5:
-                try:
-                    p = bhavcopy_save(cur, tmpdir)
-                    if p and pathlib.Path(p).exists():
-                        with open(p, newline='', encoding='utf-8', errors='replace') as f:
-                            reader = csv.DictReader(f)
-                            for row in reader:
-                                sym = (row.get("SYMBOL") or row.get("Symbol") or "").strip().upper()
-                                if sym != symbol.upper():
-                                    continue
-                                td = (row.get(" DATE1") or row.get("DATE1") or row.get("Date1") or row.get("Date") or cur.strftime("%Y-%m-%d")).strip()
-                                for fmt in ("%d-%b-%Y", "%d %b %Y", "%Y-%m-%d", "%d-%m-%Y"):
-                                    try:
-                                        td = _dt.datetime.strptime(td.strip(), fmt).strftime("%Y-%m-%d")
-                                        break
-                                    except:
-                                        continue
-                                o = _clean_num(row.get(" OPEN_PRICE") or row.get("OPEN_PRICE") or row.get("OpenPrice") or "")
-                                h = _clean_num(row.get(" HIGH_PRICE") or row.get("HIGH_PRICE") or row.get("HighPrice") or "")
-                                l = _clean_num(row.get(" LOW_PRICE") or row.get("LOW_PRICE") or row.get("LowPrice") or "")
-                                cl = _clean_num(row.get(" CLOSE_PRICE") or row.get("CLOSE_PRICE") or row.get("ClosePrice") or "")
-                                vol = int(_clean_num(row.get(" TTL_TRD_QNTY") or row.get("TTL_TRD_QNTY") or row.get("TotalTradedQuantity") or "0"))
-                                if cl <= 0: continue
-                                if td < start_date or td > end_date: continue
-                                out.append({"symbol": symbol, "trade_date": td, "open_price": round(o or cl,2), "high_price": round(h or cl,2), "low_price": round(l or cl,2), "close_price": round(cl,2), "volume": vol, "oi": 0})
-                                break  # one row per date per symbol
-                        # cleanup file
-                        try: pathlib.Path(p).unlink()
-                        except: pass
-                except Exception:
-                    pass
-            cur += _dt.timedelta(days=1)
-            if len(out) >= 60: break  # enough samples
-        import shutil
-        try: shutil.rmtree(tmpdir, ignore_errors=True)
-        except: pass
-        if len(out) >= 5:
-            out.sort(key=lambda r: r["trade_date"])
-            return out
-    except Exception:
-        pass
-    return []
-
-def _fetch_nsepy_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """NSEpy: DISABLED — SSL TLSV1_ALERT_INTERNAL_ERROR on www1.nseindia.com
-    on both Windows and Render OpenSSL. Use nselib (price_volume_data)
-    which hits same NSE archives via different endpoint without SSL issue."""
-    return []
 
 def _fetch_truedata_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """TrueData (truedata.in): Authorized NSE/BSE/MCX vendor — requires TRUEDATA_USERNAME/PASSWORD or TRUEDATA_API_KEY."""
@@ -314,38 +211,6 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
         d += datetime.timedelta(days=1)
     return records
 
-def _fetch_nse_archives_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """Direct NSE archives CSV (nseindia.com/content/historical) - free, no key."""
-    try:
-        import csv, io, time as _t
-        sd=datetime.datetime.strptime(start_date,"%Y-%m-%d"); ed=datetime.datetime.strptime(end_date,"%Y-%m-%d")
-        _deadline = _t.time() + 8  # hard budget
-        out=[]
-        cur=sd
-        while cur <= ed:
-            if _t.time() > _deadline or len(out) >= 120:
-                break
-            if cur.weekday() < 5:
-                try:
-                    url=f"https://www.nseindia.com/api/historical/equities?symbol={symbol.upper()}&series=[\"EQ\"]&from={cur.strftime('%d-%m-%Y')}&to={cur.strftime('%d-%m-%Y')}"
-                    # fallback to archives CSV
-                    r=requests.get(f"https://archives.nseindia.com/content/historical/EQUITIES/{cur.strftime('%Y')}/{cur.strftime('%b').upper()}/cm{cur.strftime('%d%b%Y').upper()}bhav.csv", headers=_HEADERS, timeout=4)
-                    if r.status_code==200:
-                        reader=csv.DictReader(io.StringIO(r.text))
-                        for row in reader:
-                            if (row.get("SYMBOL") or "").strip().upper() != symbol.upper(): continue
-                            cl=_clean_num(row.get("CLOSE") or row.get("LAST"))
-                            if cl<=0: continue
-                            td=cur.strftime("%Y-%m-%d")
-                            out.append({"symbol":symbol,"trade_date":td,"open_price":_clean_num(row.get("OPEN")), "high_price":_clean_num(row.get("HIGH")), "low_price":_clean_num(row.get("LOW")), "close_price":round(cl,2),"volume":int(_clean_num(row.get("TOTTRDQTY"))),"oi":0})
-                            break
-                except: pass
-            cur+=datetime.timedelta(days=1)
-            if len(out)>=120: break
-        if len(out)>=5: return out
-    except: pass
-    return []
-
 def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """Instant local cache: bhavcopy_data spot rows (seeded by background refresh). No network."""
     try:
@@ -444,64 +309,54 @@ def _fetch_tvDatafeed_historical(symbol: str, start_date: str, end_date: str) ->
         pass
     return []
 
-def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """nsepython: NSE in-memory DataFrame, no CSV."""
-    try:
-        from nsepython import nsefetch, expiry_list, nse_eq
-        # nsepython provides various fetches, try equity history
-        import datetime as _dt
-        # Try nse_eq history
-        try:
-            df = nse_eq(symbol)
-            # nse_eq returns current quote, not historical - try history endpoint
-            pass
-        except: pass
-        # Try via nsefetch for historical
-        try:
-            # nsepython has function to get historical data via nsefetch
-            url = f"https://www.nseindia.com/api/historical/equities?symbol={symbol}&series=[\"EQ\"]"
-            data = nsefetch(url)
-            if data and isinstance(data, dict) and 'data' in data:
-                rows=data['data']
-                out=[]
-                for r in rows:
-                    td=str(r.get('CH_TIMESTAMP','') or r.get('timestamp',''))[:10]
-                    # Convert timestamp
-                    try:
-                        # NSE timestamp like 2024-07-01
-                        td=_dt.datetime.strptime(td, '%Y-%m-%d').strftime('%Y-%m-%d')
-                    except:
-                        try:
-                            td=_dt.datetime.strptime(td, '%d-%b-%Y').strftime('%Y-%m-%d')
-                        except: continue
-                    if td < start_date or td > end_date: continue
-                    cl=float(r.get('CH_CLOSING_PRICE', r.get('close',0)) or 0)
-                    if cl<=0: continue
-                    out.append({"symbol":symbol,"trade_date":td,"open_price":float(r.get('CH_OPENING_PRICE',cl)),"high_price":float(r.get('CH_TRADE_HIGH_PRICE',cl)),"low_price":float(r.get('CH_TRADE_LOW_PRICE',cl)),"close_price":round(cl,2),"volume":int(r.get('CH_TOT_TRADED_QTY',0) or 0),"oi":0})
-                if len(out)>=5:
-                    return out
-        except: pass
-    except Exception:
-        pass
-    return []
-
 def _fetch_openchart_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """openchart: TradingView in-memory, no CSV."""
+    """openchart (marketcalls/openchart NSEData): NSE charting API via search +
+    historical. Indices -> IDX segment, stocks -> EQ. May return [] where NSE
+    blocks charting API (then tvDatafeed fallback serves)."""
     try:
-        import openchart
-        df = openchart.get_history(symbol, interval='1d')
-        if df is not None and not df.empty:
-            out=[]
-            for idx, row in df.iterrows():
-                td=str(idx)[:10]
-                try: td=idx.strftime('%Y-%m-%d')
-                except: pass
-                if td < start_date or td > end_date: continue
-                cl=float(row.get('close', row.get('Close',0)) or 0)
-                if cl<=0: continue
-                out.append({"symbol":symbol,"trade_date":td,"open_price":float(row.get('open', cl)),"high_price":float(row.get('high', cl)),"low_price":float(row.get('low', cl)),"close_price":round(cl,2),"volume":int(row.get('volume',0) or 0),"oi":0})
-            if len(out)>=5:
-                return out
+        from openchart import NSEData
+        import datetime as _dt
+        from concurrent.futures import ThreadPoolExecutor
+        _IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+        seg = "IDX" if symbol.upper() in _IDX else "EQ"
+        try:
+            sd = _dt.datetime.strptime(start_date, "%Y-%m-%d")
+            ed = _dt.datetime.strptime(end_date, "%Y-%m-%d")
+        except Exception:
+            return []
+        api = NSEData()
+
+        def _do():
+            return api.historical(symbol.upper(), segment=seg, start=sd, end=ed, interval="1d")
+
+        df = None
+        try:
+            with ThreadPoolExecutor(max_workers=1) as _ex:
+                df = _ex.submit(_do).result(timeout=15)
+        except Exception:
+            df = None
+        if df is None or getattr(df, "empty", True):
+            return []
+        out = []
+        for idx, row in df.iterrows():
+            try:
+                td = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10]
+            except Exception:
+                td = str(idx)[:10]
+            if td < start_date or td > end_date:
+                continue
+            cl = float(row.get("close", row.get("Close", 0)) or 0)
+            if cl <= 0:
+                continue
+            out.append({"symbol": symbol.upper(), "trade_date": td,
+                        "open_price": round(float(row.get("open", row.get("Open", cl)) or cl), 2),
+                        "high_price": round(float(row.get("high", row.get("High", cl)) or cl), 2),
+                        "low_price": round(float(row.get("low", row.get("Low", cl)) or cl), 2),
+                        "close_price": round(cl, 2),
+                        "volume": int(row.get("volume", row.get("Volume", 0)) or 0), "oi": 0})
+        out.sort(key=lambda r: r["trade_date"])
+        if len(out) >= 5:
+            return out
     except Exception:
         pass
     return []
@@ -546,7 +401,7 @@ def _last_trading_day():
     return d
 
 def fetch_historical(symbol: str, start_date: str, end_date: str, allow_synthetic: bool = False) -> List[Dict]:
-    """Real NSE 6-month local archive. end_date clamped to last completed trading day. DB -> NSE archives -> nselib -> jugaad."""
+    """Real 6-month local archive. end_date clamped to last completed trading day. DB -> Stooq -> openchart -> tvDatafeed."""
     allow_synthetic=False
     symbol = symbol.upper()
     # Clamp end_date to last completed trading day (avoid today ongoing session)
@@ -562,10 +417,10 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
             return db_data
     except Exception:
         pass
-    # 2) External sources — 8s budget (Yahoo removed): Stooq -> NSE archives -> nselib -> nsepython/openchart/tvDatafeed
+    # 2) External sources — 8s budget (Yahoo removed): Stooq -> openchart -> tvDatafeed
     import time as _t
     _deadline = _t.time() + 8
-    for fetcher in [_fetch_stooq_historical, _fetch_nse_archives_historical, _fetch_nselib_historical, _fetch_nsepython_historical, _fetch_openchart_historical, _fetch_tvDatafeed_historical, _fetch_jugaad_historical]:
+    for fetcher in [_fetch_stooq_historical, _fetch_openchart_historical, _fetch_tvDatafeed_historical]:
         try:
             if _t.time() > _deadline:
                 break

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 from core.services.backtest_engine import BacktestEngine
@@ -383,7 +383,7 @@ def _fetch_google_finance(symbol, start_date, end_date):
 
 
 def _fetch_stocksrin_live(symbol):
-    """Fallback: fetch live spot via 3 fast alternatives (NSE quote + StocksRin + nselib) and expand to 90 days via drift for instant backtest."""
+    """Fallback: fetch live spot via fast alternatives and expand to 90 days via drift for instant backtest."""
     try:
         from core.services.live_market_data import LiveMarketData
         live = LiveMarketData().get_live_spot(symbol)
@@ -434,42 +434,30 @@ def _fetch_stocksrin_live(symbol):
 
 
 def _fetch_and_store_nselib(symbol, start_date, end_date):
-    """Fetch historical OHLC from nselib price_volume_data (NSE, free) and store in DB."""
+    """Fetch historical OHLC (openchart -> tvDatafeed, NSE-direct removed) and store in DB.
+    Name kept for backward-compat callers (backtest_engine live path)."""
     try:
-        from nselib.capital_market import price_volume_data
-        sd = datetime.datetime.strptime(start_date, "%Y-%m-%d").strftime("%d-%m-%Y")
-        ed = datetime.datetime.strptime(end_date, "%Y-%m-%d").strftime("%d-%m-%Y")
-        df = price_volume_data(symbol, from_date=sd, to_date=ed)
-        if df is None or df.empty:
+        from core.services.historical_fetcher import _fetch_openchart_historical, _fetch_tvDatafeed_historical
+        rows = _fetch_openchart_historical(symbol, start_date, end_date)
+        if not rows:
+            rows = _fetch_tvDatafeed_historical(symbol, start_date, end_date)
+        if not rows:
             return 0
         bhav = BhavcopyModel()
         records = []
-        for _, row in df.iterrows():
-            td = str(row.get("Historical Date", row.get("Date", "")))
-            for fmt in ("%d-%b-%Y", "%d %b %Y", "%Y-%m-%d", "%d-%m-%Y"):
-                try:
-                    td = datetime.datetime.strptime(td.strip(), fmt).strftime("%Y-%m-%d")
-                    break
-                except Exception:
-                    continue
-            open_p = float(row.get("Open Price", row.get("OPEN", row.get("Open", 0))) or 0)
-            high_p = float(row.get("High Price", row.get("HIGH", row.get("High", 0))) or 0)
-            low_p = float(row.get("Low Price", row.get("LOW", row.get("Low", 0))) or 0)
-            close_p = float(row.get("Close Price", row.get("CLOSE", row.get("Close", row.get("Last", 0)))) or 0)
-            vol = int(float(row.get("Total Traded Volume", row.get("VOLUME", row.get("Volume", 0))) or 0))
-            if close_p <= 0:
-                continue
+        for r in rows:
             records.append({
-                "symbol": symbol, "trade_date": td, "expiry_date": "",
+                "symbol": symbol, "trade_date": r.get("trade_date"), "expiry_date": "",
                 "strike_price": 0, "option_type": None,
-                "open_price": open_p, "high_price": high_p, "low_price": low_p,
-                "close_price": close_p, "volume": vol, "oi": 0,
+                "open_price": r.get("open_price", 0), "high_price": r.get("high_price", 0),
+                "low_price": r.get("low_price", 0), "close_price": r.get("close_price", 0),
+                "volume": r.get("volume", 0), "oi": 0,
             })
         if records:
             bhav.import_data(records)
         return len(records)
     except Exception as e:
-        print(f"nselib fetch failed for {symbol}: {e}")
+        print(f"history fetch failed for {symbol}: {e}")
         return 0
 
 
@@ -1237,10 +1225,22 @@ def run_master_confluence(req: MasterConfluenceRequest):
 
 @router.post("/seed")
 def seed_backtest_data(symbol: str = "NIFTY", months: int = 12):
-    """Real NSE archives fill — seed 1Y bhavcopy for all 50 F&O so win% 40-60% like Quantman.trade. POST /api/backtest/seed?symbol=ALL&months=12"""
+    """Official NSE F&O bhavcopy auto-fill (nsefin) + per-symbol history.
+    POST /api/backtest/seed?symbol=ALL&months=12 — new dates auto-download,
+    old rows purged (12-month retention)."""
     import datetime as _dt
-    from core.services.historical_fetcher import _fetch_nselib_historical, _fetch_jugaad_historical, _fetch_db_historical
+    from core.services import nsefin_bhav as _fb
+    from core.services.historical_fetcher import _fetch_openchart_historical, _fetch_tvDatafeed_historical, _fetch_db_historical
     from core.models.bhavcopy_model import BhavcopyModel
+    out = {}
+    try:
+        out["fno_backfill"] = _fb.backfill_fno(days=30, per_run=10)
+    except Exception as e:
+        out["fno_backfill"] = {"error": str(e)[:200]}
+    try:
+        out["purged"] = _fb.purge_old_data(12)
+    except Exception as e:
+        out["purged"] = str(e)[:150]
     end = _dt.date.today() - _dt.timedelta(days=1)
     while end.weekday() >= 5:
         end -= _dt.timedelta(days=1)
@@ -1255,16 +1255,114 @@ def seed_backtest_data(symbol: str = "NIFTY", months: int = 12):
         if existing and len(existing) >= 180:
             seeded[sym] = len(existing)
             continue
-        rows = _fetch_nselib_historical(sym, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+        rows = _fetch_openchart_historical(sym, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
         if not rows or len(rows) < 5:
-            rows = _fetch_jugaad_historical(sym, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+            rows = _fetch_tvDatafeed_historical(sym, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
         if rows and len(rows) >= 5:
             try: BhavcopyModel().import_data(rows)
             except: pass
             seeded[sym] = len(rows)
         else:
             seeded[sym] = 0
-    return {"seeded": seeded, "start": start.strftime("%Y-%m-%d"), "end": end.strftime("%Y-%m-%d"), "note": "1Y NSE archives seeded — backtest win% now Quantman-like 40-60%"}
+    out["seeded"] = seeded
+    out["start"] = start.strftime("%Y-%m-%d")
+    out["end"] = end.strftime("%Y-%m-%d")
+    out["note"] = "Official F&O bhavcopy auto-fill + history top-up; old rows purged"
+    return out
+
+
+@router.post("/upload-csv")
+async def upload_history_csv(file: UploadFile = File(...)):
+    """TradingTick / NSE bhavcopy CSV upload -> bhavcopy_data.
+    Flexible headers: SYMBOL/Date/EXPIRY/STRIKE/CE-PE + OHLC + VOL/OI
+    (handles ' SYMBOL' spaced NSE headers and TradingTick exports)."""
+    try:
+        import csv
+        import io as _io
+        raw = await file.read()
+        try:
+            text = raw.decode("utf-8-sig")
+        except Exception:
+            text = raw.decode("latin-1", errors="replace")
+        reader = csv.DictReader(_io.StringIO(text))
+        fields = [(f or "") for f in (reader.fieldnames or [])]
+        norm = {f: f.strip().lower().replace(" ", "").replace("_", "") for f in fields}
+
+        def pick(*names):
+            for f, n in norm.items():
+                if n in names:
+                    return f
+            return None
+
+        f_sym = pick("symbol", "ticker", "tradingsymbol")
+        f_date = pick("date1", "date", "timestamp", "datetime", "tradedate")
+        f_exp = pick("expiry", "expirydate", "expdate", "expiryday")
+        f_strike = pick("strikeprice", "strike", "strikepr")
+        f_opt = pick("optiontype", "opttype", "option", "right", "callput", "instrumenttype")
+        f_o = pick("openprice", "open")
+        f_h = pick("highprice", "high")
+        f_l = pick("lowprice", "low")
+        f_c = pick("closeprice", "close", "last", "ltp", "settle", "settleprice")
+        f_v = pick("ttltrdqnty", "totaltradedquantity", "volume", "vol", "quantity")
+        f_oi = pick("openinterest", "oi")
+        if not f_sym or not f_date or not f_c:
+            return {"error": f"Headers not recognized: {fields[:12]}. Need Symbol/Date/Close (+Strike/Expiry/OptionType for options)."}
+        import datetime as _dt
+
+        def _dtf(v):
+            v = str(v or "").strip()[:19]
+            for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d %b %Y", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    return _dt.datetime.strptime(v, fmt).strftime("%Y-%m-%d")
+                except Exception:
+                    continue
+            return ""
+
+        def _num(v):
+            try:
+                return float(str(v or "0").replace(",", "").replace("₹", "").strip() or 0)
+            except Exception:
+                return 0
+
+        recs = []
+        for row in reader:
+            try:
+                sym = str(row.get(f_sym, "") or "").strip().upper()
+                td = _dtf(row.get(f_date, ""))
+                cl = _num(row.get(f_c, 0))
+                if not sym or not td or cl <= 0:
+                    continue
+                opt = ""
+                if f_opt:
+                    o = str(row.get(f_opt, "") or "").strip().upper()
+                    if o.startswith("CE") or o in ("C", "CALL", "BUY"):
+                        opt = "CE"
+                    elif o.startswith("PE") or o in ("P", "PUT", "SELL"):
+                        opt = "PE"
+                strike = _num(row.get(f_strike, 0)) if f_strike else 0
+                exp = _dtf(row.get(f_exp, "")) if f_exp else ""
+                recs.append({"symbol": sym, "trade_date": td, "expiry_date": exp,
+                             "strike_price": strike or None, "option_type": opt or None,
+                             "open_price": _num(row.get(f_o, cl)) if f_o else cl,
+                             "high_price": _num(row.get(f_h, cl)) if f_h else cl,
+                             "low_price": _num(row.get(f_l, cl)) if f_l else cl,
+                             "close_price": cl,
+                             "volume": int(_num(row.get(f_v, 0))) if f_v else 0,
+                             "oi": int(_num(row.get(f_oi, 0))) if f_oi else 0})
+            except Exception:
+                continue
+        if not recs:
+            return {"error": "No valid rows parsed."}
+        from core.models.bhavcopy_model import BhavcopyModel
+        n = BhavcopyModel().import_data(recs)
+        syms = sorted({r["symbol"] for r in recs})
+        dates = sorted({r["trade_date"] for r in recs})
+        return {"success": True, "imported": n, "symbols": syms,
+                "from": dates[0], "to": dates[-1], "file": file.filename}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)[:300]}
 
 
 @router.post("/monte-carlo")

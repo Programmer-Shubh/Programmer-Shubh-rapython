@@ -1172,7 +1172,7 @@ class BacktestEngine:
                     return float(row2["close_price"])
             except Exception:
                 pass
-        # 4) Try Google Finance / nselib real historical via strategy_builder fetch (no synthetic) - live only
+        # 4) Try openchart/tvDatafeed real historical via strategy_builder fetch (no synthetic) - live only
         if self.is_live:
             try:
                 from routes.strategy_builder import _fetch_google_finance, _fetch_and_store_nselib

@@ -378,3 +378,56 @@ def place_trade(req: TradeRequest):
         import traceback
         traceback.print_exc()
         return {"error": f"Order failed: {str(e)[:250]}"}
+
+
+@router.get("/greeks/{symbol}")
+def option_greeks(symbol: str, date: str = "", expiry: str = ""):
+    """nsefin Greeks (delta/gamma/theta/vega/IV) on latest DB chain snapshot.
+    Optional ?date=YYYY-MM-DD&expiry=YYYY-MM-DD."""
+    try:
+        from core.models.database import Database
+        import pandas as pd
+        sym = (symbol or "").upper()
+        db = Database.get_instance()
+        if not date:
+            r = db.fetch_one("SELECT MAX(trade_date) d FROM bhavcopy_data WHERE symbol=? AND option_type IN ('CE','PE')", [sym])
+            date = (r["d"] if r and r["d"] else "") or ""
+        if not date:
+            return {"error": f"No chain data for {sym}. Run /api/backtest/seed first."}
+        if not expiry:
+            r = db.fetch_one("SELECT expiry_date e, COUNT(*) c FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND option_type IN ('CE','PE') GROUP BY expiry_date ORDER BY c DESC LIMIT 1", [sym, date])
+            expiry = (r["e"] if r and r["e"] else "") or ""
+        rows = db.fetch_all("SELECT strike_price, option_type, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND expiry_date=? AND option_type IN ('CE','PE')", [sym, date, expiry])
+        ce = {float(r["strike_price"]): float(r["close_price"] or 0) for r in rows if r["option_type"] == "CE"}
+        pe = {float(r["strike_price"]): float(r["close_price"] or 0) for r in rows if r["option_type"] == "PE"}
+        strikes = sorted(set(ce) & set(pe))
+        if len(strikes) < 3:
+            return {"error": f"Need 3+ strikes with CE+PE on {sym} {date} (found {len(strikes)})"}
+        spot_r = db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND option_type IS NULL", [sym, date])
+        spot = float(spot_r["close_price"]) if spot_r and spot_r["close_price"] else 0.0
+        import datetime as _dt
+        exp_fmt = _dt.datetime.strptime(expiry, "%Y-%m-%d").strftime("%d-%b-%Y")
+        df = pd.DataFrame({"strike": strikes, "ce_ltp": [ce[s] for s in strikes],
+                           "pe_ltp": [pe[s] for s in strikes], "spot_price": spot, "expiry": exp_fmt})
+        from nsefin import get_nse_instance
+        g = get_nse_instance().compute_greek(df, strike_diff=get_strike_step(sym))
+        keep = {"strike", "ce_ltp", "pe_ltp", "spot_price", "dte"}
+        out = []
+        for _, r2 in g.iterrows():
+            d2 = dict(r2)
+            row = {}
+            for k, v in d2.items():
+                kl = str(k).lower()
+                if k in keep or any(x in kl for x in ("delta", "gamma", "theta", "vega", "iv")):
+                    try:
+                        row[k] = round(float(v), 4)
+                    except Exception:
+                        row[k] = str(v)
+            out.append(row)
+        atm = round(spot / get_strike_step(sym)) * get_strike_step(sym) if spot > 0 else 0
+        return {"symbol": sym, "date": date, "expiry": expiry, "spot": spot, "atm": atm,
+                "count": len(out), "greeks": out[:121]}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)[:300]}
