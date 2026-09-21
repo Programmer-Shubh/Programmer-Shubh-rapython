@@ -121,6 +121,34 @@ def _generate_synthetic_fallback(symbol: str, start_date: str, end_date: str) ->
     return records
 
 
+def _load_db_history(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Real NSE history (Algotest-style): spot OHLC from bhavcopy_data.
+    Option premiums then resolve from the same table (exact/nearest strike).
+    Returns [] when insufficient (<15 bars) -> caller falls back to synthetic."""
+    try:
+        from core.models.database import Database
+        rows = Database.get_instance().fetch_all(
+            "SELECT trade_date,open_price,high_price,low_price,close_price,volume FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL AND trade_date BETWEEN ? AND ? ORDER BY trade_date",
+            [symbol.upper(), start_date, end_date],
+        )
+        out = []
+        for r in rows:
+            try:
+                o = {
+                    "symbol": symbol.upper(), "trade_date": str(r["trade_date"])[:10],
+                    "open_price": float(r["open_price"] or 0), "high_price": float(r["high_price"] or 0),
+                    "low_price": float(r["low_price"] or 0), "close_price": float(r["close_price"] or 0),
+                    "volume": int(r["volume"] or 0), "oi": 0,
+                }
+                if o["close_price"] > 0:
+                    out.append(o)
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return []
+
+
 router = APIRouter()
 
 
@@ -639,13 +667,23 @@ def _run_backtest_core(req: BacktestRequest):
         timeframe = (advanced_in.get("timeframe") or "1d").lower()
         _bar_cap = 40 if len(_syms) > 1 else 60
         for _sym in _syms:
-            _ck = f"{_sym}_{start_date}_{end_date}_{timeframe}"
-            _ce = _BT_CACHE.get(_ck)
-            if _ce and _bt_t.time() - _ce[0] < 300:
-                historical = _ce[1]
+            _use_db = False
+            # Algotest-style: REAL NSE history first (spot + option premiums from DB)
+            try:
+                _db_hist = _load_db_history(_sym, start_date, end_date)
+            except Exception:
+                _db_hist = []
+            if _db_hist and len(_db_hist) >= 15:
+                historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
+                _use_db = True
             else:
-                # Algotest-like instant: synthetic only, no DB/network - <50ms
-                historical = _generate_synthetic_fallback(_sym, start_date, end_date)
+                _ck = f"{_sym}_{start_date}_{end_date}_{timeframe}"
+                _ce = _BT_CACHE.get(_ck)
+                if _ce and _bt_t.time() - _ce[0] < 300:
+                    historical = _ce[1]
+                else:
+                    # Fallback instant: synthetic only, no DB/network - <50ms
+                    historical = _generate_synthetic_fallback(_sym, start_date, end_date)
                 # Cap daily to 60 bars BEFORE intraday expansion (1Y range = 250 bars x 75 = 18750 -> 60s hang)
                 if len(historical) > _bar_cap:
                     historical = historical[-_bar_cap:]
@@ -670,7 +708,8 @@ def _run_backtest_core(req: BacktestRequest):
                 if len(_BT_CACHE) > 20:
                     _BT_CACHE.pop(next(iter(_BT_CACHE)))
             # If too few bars (<30), indicators won't warm up -> force longer synthetic
-            if not historical or len(historical) < 30:
+            # (real DB path keeps its own bars, minimum 15)
+            if not _use_db and (not historical or len(historical) < 30):
                 synth = _generate_synthetic_fallback(_sym, start_date, end_date)
                 if synth and len(synth) >= 30:
                     historical = synth
@@ -699,7 +738,7 @@ def _run_backtest_core(req: BacktestRequest):
             except Exception:
                 pass
             engine = BacktestEngine(is_live=False)
-            engine._skip_db = True  # synthetic-only fast path: no DB roundtrips
+            engine._skip_db = not _use_db  # real DB data => premiums from DB; else fast path
             result = engine.run(
                 historical, _sym, start_date, end_date,
                 indicators, entry_conditions, exit_conditions,
