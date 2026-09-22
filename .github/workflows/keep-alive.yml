@@ -2,7 +2,7 @@ name: Keep Render Awake
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # Every 15 minutes
+    - cron: '*/5 * * * *'  # Every 5 min (Render sleeps after 15 min idle; 5-min ping survives cron delays)
   workflow_dispatch:
 
 jobs:
