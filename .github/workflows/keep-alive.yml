@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Ping RaTrade Health
         run: |
-          echo "Pinging https://ratrade-tjzd.onrender.com/health"
-          curl -fsS --max-time 30 https://ratrade-tjzd.onrender.com/health || echo "health ping failed, trying /"
-          curl -fsS --max-time 30 https://ratrade-tjzd.onrender.com/ || echo "root ping failed"
+          echo "Pinging https://ratrade-iwi2.onrender.com/health"
+          curl -fsS --max-time 30 https://ratrade-iwi2.onrender.com/health || echo "health ping failed, trying /"
+          curl -fsS --max-time 30 https://ratrade-iwi2.onrender.com/ || echo "root ping failed"
           echo "Ping done at $(date -u)"

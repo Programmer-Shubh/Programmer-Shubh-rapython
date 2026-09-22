@@ -437,7 +437,7 @@ async def fyers_auth(req: AuthRequest):
 
 def _default_redirect() -> str:
     import os
-    base = (os.environ.get("SELF_URL") or os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("RENDER_EXTERNAL_HOSTNAME") and f"https://{os.environ['RENDER_EXTERNAL_HOSTNAME']}" or "https://ratrade-tjzd.onrender.com").rstrip("/")
+    base = (os.environ.get("SELF_URL") or os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("RENDER_EXTERNAL_HOSTNAME") and f"https://{os.environ['RENDER_EXTERNAL_HOSTNAME']}" or "https://ratrade-iwi2.onrender.com").rstrip("/")
     return base + "/api/broker/fyers-callback"
 
 
@@ -483,7 +483,7 @@ async def fyers_callback(request: Request, code: str = "", state: str = ""):
         if err_flag:
             detail = f"<p>Fyers said: <code>{err_flag}</code> (access denied or app not approved?)</p>"
         detail += f"<p style='font-size:11px;color:#6c757d'>Debug: received params {dbg_qs}</p>"
-        return HTMLResponse("<h3>Fyers login failed: no auth code received.</h3>" + detail + "<p>Go back and click 'OAuth Login' again. Make sure the Redirect URI in your Fyers app settings EXACTLY matches: <code>https://ratrade-tjzd.onrender.com/api/broker/fyers-callback</code> (no extra / at end). If you see 'blocked' on fyers.in, try mobile hotspot.</p>", status_code=400)
+        return HTMLResponse("<h3>Fyers login failed: no auth code received.</h3>" + detail + "<p>Go back and click 'OAuth Login' again. Make sure the Redirect URI in your Fyers app settings EXACTLY matches: <code>https://ratrade-iwi2.onrender.com/api/broker/fyers-callback</code> (no extra / at end). If you see 'blocked' on fyers.in, try mobile hotspot.</p>", status_code=400)
     if not config:
         return HTMLResponse("<h3>Fyers not configured.</h3><p>Set App ID + Secret in RaTrade Brokers tab first.</p>", status_code=400)
     ruri_cb = (config.get("redirect_uri") or "").strip() or _default_redirect()
@@ -509,8 +509,8 @@ def fyers_auth_url():
     if not config:
         return {"success": False, "error": "Fyers not configured"}
     ruri = (config.get("redirect_uri") or "").strip() or _default_redirect()
-    # use live host if env SELF_URL missing (covers tjzd vs old ratrade host)
-    if "ratrade.onrender.com" in ruri and "ratrade-tjzd.onrender.com" not in ruri:
+    # use live host if env SELF_URL missing (covers old hosts)
+    if "ratrade.onrender.com" in ruri and "ratrade-iwi2.onrender.com" not in ruri:
         try:
             import os
             if os.environ.get("RENDER_EXTERNAL_URL"):

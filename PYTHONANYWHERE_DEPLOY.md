@@ -93,7 +93,7 @@ railway up
 - $5/mo free credit covers small apps
 
 ### Render (Already Working)
-Your app is already deployed at: `https://ratrade-tjzd.onrender.com`
+Your app is already deployed at: `https://ratrade-iwi2.onrender.com`
 
 ### Fly.io (Docker-based)
 ```bash
