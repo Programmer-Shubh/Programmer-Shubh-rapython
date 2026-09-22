@@ -22,6 +22,24 @@ class OptionScanner:
         self.indicators = IndicatorEngine()
         self.db = Database.get_instance()
 
+    def _warm_live_spots(self, symbols):
+        """Batch-fill fresh live spots for symbols missing them (parallel).
+        Without this, scans on empty-DB Render priced signals off fantasy
+        synthetic closes (e.g. NIFTY 20679 vs live 23392) and every dashboard
+        order then died at the ATM-distance guard. Cache-first: no network
+        when _LIVE_CACHE is fresh (dashboard /spot + refresher fill it)."""
+        try:
+            from core.services.live_market_data import _LIVE_CACHE, LiveMarketData
+            import time as _tm
+            missing = [s for s in (symbols or []) if s not in _LIVE_CACHE or _tm.time() - _LIVE_CACHE[s].get("ts", 0) >= 300]
+            if missing:
+                try:
+                    LiveMarketData().get_live_spots_parallel(missing[:52], max_workers=10)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     # Dashboard ST+MACD lists show ONLY high-conviction 80/100 trades:
     # 80 = breakout/breakdown(30) + MACD crossover(30) + volume/EMA confirm(20).
     # Weak one-indicator scores (30-70) stay visible on the single-symbol
@@ -35,6 +53,7 @@ class OptionScanner:
             min_score = int(min_score)
         except Exception:
             min_score = 80
+        self._warm_live_spots(symbols)
         bullish = []
         bearish = []
         for sym in symbols:
@@ -53,6 +72,7 @@ class OptionScanner:
     def scan_vwap(self, symbols=None) -> dict:
         if symbols is None:
             symbols = FNO_SYMBOLS
+        self._warm_live_spots(symbols)
         long_signals = []
         short_signals = []
         for sym in symbols:
@@ -416,6 +436,24 @@ class OptionScanner:
                     r['low_price'] = float(r.get('low_price', 0) or 0)
                     r['close_price'] = float(r.get('close_price', 0) or 0)
                     r['open_price'] = float(r.get('open_price', 0) or 0)
+                # Anchor synthetic LEVEL to fresh live spot (cache-only, no network):
+                # unanchored fantasy closes (NIFTY 20679 vs live 23392) produced
+                # far-away strikes that the order ATM-guard then rejected.
+                try:
+                    from core.services.live_market_data import _LIVE_CACHE as _LC
+                    import time as _tm2
+                    _le = _LC.get(symbol.upper())
+                    if _le and _tm2.time() - _le.get("ts", 0) < 300:
+                        _ls = float((_le.get("data") or {}).get("spot") or 0)
+                        _lc = float(synth[-1].get("close_price") or 0)
+                        if _ls > 0 and _lc > 0:
+                            _f = _ls / _lc
+                            if 0.5 < _f < 2.0:
+                                for r in synth:
+                                    for _k in ("open_price", "high_price", "low_price", "close_price"):
+                                        r[_k] = round(float(r[_k]) * _f, 2)
+                except Exception:
+                    pass
                 synth = synth[-45:]
                 try:
                     self._SYNT_CACHE[ck] = (now, synth)
@@ -484,6 +522,7 @@ class OptionScanner:
         """
         # Live-spot override: CACHE-ONLY (no network). Serial get_live_spot x50 = 600s hang.
         # Background data_refresher fills _LIVE_CACHE every 45s; scan uses it if fresh, else historical spot.
+        _live_px = 0
         try:
             from core.services.live_market_data import _LIVE_CACHE
             import time as _tm
@@ -491,6 +530,7 @@ class OptionScanner:
                 _px = float(_LIVE_CACHE[symbol]["data"].get("spot") or 0)
                 if _px > 0:
                     spot = _px
+                    _live_px = _px
         except Exception:
             pass
         if spot <= 0:
@@ -498,17 +538,19 @@ class OptionScanner:
         # Freshness validation: reject stale spot (>3% away from DB latest
         # close). A stale spot (wrong index feed, old cache) produced far
         # ITM/OTM strikes like NIFTY 20700 / MIDCPNIFTY 17850.
-        try:
-            dbrow = self.db.fetch_one(
-                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
-                [symbol],
-            )
-            ref = float(dbrow["close_price"]) if dbrow and dbrow["close_price"] else 0
-            if ref > 0:
-                if spot <= 0 or abs(spot - ref) / ref > 0.03:
-                    spot = ref
-        except Exception:
-            pass
+        # Never override a FRESH live price with a possibly-stale DB close.
+        if not _live_px:
+            try:
+                dbrow = self.db.fetch_one(
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+                    [symbol],
+                )
+                ref = float(dbrow["close_price"]) if dbrow and dbrow["close_price"] else 0
+                if ref > 0:
+                    if spot <= 0 or abs(spot - ref) / ref > 0.03:
+                        spot = ref
+            except Exception:
+                pass
         if spot <= 0:
             return {'strike': 0, 'premium': 0, 'expiry': ''}
         
