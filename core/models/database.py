@@ -315,14 +315,39 @@ class Database:
                 # fall through to SQLite path below
                 print("Postgres unavailable during init_schema, using SQLite schema")
             except Exception as e:
-                # If postgres init fails for any reason, log and fall through to sqlite
+                # If postgres init fails for any reason, log and fall through to sqlite.
+                # Mark PG failed so ALL later routing (including the SQLite path's
+                # connection below and _migrate) consistently uses SQLite instead
+                # of a mixed PG/SQLite state (which crashed startup with
+                # AttributeError: executescript on a psycopg2 connection).
                 print(f"Postgres init_schema failed ({e}), falling back to SQLite schema")
-                # mark as sqlite for this instance so _migrate etc use sqlite
+                try:
+                    self._mark_pg_failed(e)
+                except Exception:
+                    pass
                 # do not change class flag, just continue to sqlite block
-        # SQLite path (original)
+        # SQLite path (original) — open sqlite3 DIRECTLY, never via _conn()
+        # (_conn() may still route to Postgres when only the PG *schema*
+        # failed, and psycopg2 has no executescript -> exit 1 on Render).
         import sqlite3
-        with self._conn() as conn:
-            conn.executescript("""
+        if not getattr(self, "_path", None):
+            self._path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "ratrade.db"))
+            try:
+                os.makedirs(os.path.dirname(self._path), exist_ok=True)
+            except Exception:
+                pass
+        _sconn = sqlite3.connect(self._path)
+        _sconn.row_factory = sqlite3.Row
+        try:
+            _sconn.execute("PRAGMA journal_mode=WAL")
+        except Exception:
+            pass
+        try:
+            _sconn.execute("PRAGMA foreign_keys=ON")
+        except Exception:
+            pass
+        with _sconn:
+            _sconn.executescript("""
                 CREATE TABLE IF NOT EXISTS bhavcopy_data (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     symbol TEXT NOT NULL,
@@ -411,6 +436,10 @@ class Database:
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
             """)
+        try:
+            _sconn.close()
+        except Exception:
+            pass
         # Market data persists across restarts (backtest needs history).
         # NEVER wipe bhavcopy_data here — startup wipe destroyed all history
         # on every Render restart/deploy.
