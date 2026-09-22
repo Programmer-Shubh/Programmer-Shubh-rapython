@@ -995,6 +995,17 @@ async def place_live_order(req: LiveOrderRequest):
             return {"error": f"{broker} resolution crashed: {str(e)[:150]}"}
         if not _res.get("ok"):
             _msg = str(_res.get("error", "contract not resolved"))
+            # Strip any leaked HTML/block pages so alerts stay readable
+            try:
+                import re as _re2
+                if "<" in _msg:
+                    _msg = _re2.sub(r"<[^>]*>", " ", _msg)
+                    _msg = _re2.sub(r"\s+", " ", _msg).strip()
+                    if not _msg:
+                        _msg = "broker blocked the request (network/WAF) — reconnect and retry"
+                _msg = _msg[:200]
+            except Exception:
+                _msg = _msg[:200]
             _av = _res.get("available_expiries") or []
             if _av:
                 _msg += f" Valid expiries: {', '.join(_av[:8])}"

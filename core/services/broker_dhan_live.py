@@ -74,6 +74,16 @@ class DhanLive:
                     body = resp.json()
                 except Exception:
                     body = {"raw": (resp.text or "")[:500]}
+                # Block pages (Cloudflare/WAF HTML) are not JSON — never leak
+                # raw HTML into errors (frontend alert showed font CSS garbage).
+                try:
+                    _ct = str(resp.headers.get("content-type", "") or "").lower()
+                    _txt = (resp.text or "").lstrip()[:1]
+                    if "html" in _ct or _txt == "<":
+                        return {"success": False, "data": {},
+                                "error": f"Dhan blocked the request (HTTP {resp.status_code}). Token expired or network blocked — reconnect in Brokers tab and retry."}
+                except Exception:
+                    pass
                 if resp.status_code in (200, 201):
                     inner = body if isinstance(body, dict) else {}
                     if str(inner.get("status", "success")).lower() in ("success", "ok", "pending", "transit"):
@@ -148,6 +158,14 @@ class DhanLive:
                 body = resp.json()
             except Exception:
                 body = {"raw": (resp.text or "")[:300]}
+            try:
+                _ct2 = str(resp.headers.get("content-type", "") or "").lower()
+                _tx2 = (resp.text or "").lstrip()[:1]
+                if "html" in _ct2 or _tx2 == "<":
+                    return {"success": False, "data": body,
+                            "error": "Dhan blocked the request (block page). Token expired or network blocked — manual login needed"}
+            except Exception:
+                pass
             if resp.status_code in (200, 201):
                 inner = body if isinstance(body, dict) else {}
                 new_tok = (inner.get("data") or inner).get("accessToken") if isinstance(inner.get("data"), dict) \
