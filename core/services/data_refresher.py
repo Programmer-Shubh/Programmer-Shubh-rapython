@@ -16,7 +16,7 @@ EXTRA_SYMBOLS = ["RELIANCE", "HDFCBANK", "ICICIBANK", "TCS", "INFY", "ITC", "SBI
                  "HINDALCO", "VEDL", "INDUSINDBK", "SHREECEM", "NESTLEIND", "BAJAJFINSV", "HEROMOTOCO",
                  "APOLLOHOSP", "UPL"]
 ALL_SYMBOLS = INDEX_SYMBOLS + EXTRA_SYMBOLS
-_REFRESH_INTERVAL = 45
+_REFRESH_INTERVAL = 300  # 5 min (45s burned GBs of service-initiated egress on Render)
 _RUNNING = False
 
 
