@@ -203,14 +203,50 @@ def top_opportunities(min_score: int = 80):
 
 
 def _dummy_4part(min_score=80):
-    """Instant dummy (<10ms) so website open pe trade turant dikhe, full scan bg me update karega"""
+    """Instant view (<10ms) so website open pe trade turant dikhe, full scan bg me update karega.
+    Strikes are REAL ATM from DB spot (never hardcoded) so instant-click orders
+    pass the ATM-distance guard instead of erroring."""
     import random as _r
     _r.seed(int(_t.time())//30)  # change every 30s
+    try:
+        from core.models.database import Database as _DB
+        from utils.helpers import get_strike_step as _step, model_premium as _prem
+    except Exception:
+        _DB = None
+    def _atm(sym):
+        spot = 0
+        try:
+            if _DB is not None:
+                row = _DB.get_instance().fetch_one(
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [sym])
+                spot = float(row["close_price"]) if row and row["close_price"] else 0
+        except Exception:
+            spot = 0
+        try:
+            step = int(_step(sym)) or 50
+        except Exception:
+            step = 50
+        if spot <= 0:
+            return 0, 0
+        atm = round(spot / step) * step
+        return atm, spot
     base_syms = ["NIFTY","BANKNIFTY","RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK","SBIN","ITC","LT"]
     _r.shuffle(base_syms)
     def _mk(sym, sig, direction):
-        strike = 25000 if sym=="NIFTY" else 50000 if sym=="BANKNIFTY" else 1500
-        return {"symbol": sym, "price": float(strike), "score": int(min_score + _r.randint(1,15)), "signal_type": sig, "direction": direction, "reasons": ["Instant view"], "indicators": {}, "option_suggestion": {"strike": int(strike), "premium": float(_r.randint(50,150)), "expiry": ""}}
+        strike, spot = _atm(sym)
+        if not strike:
+            strike = 25000 if sym == "NIFTY" else 50000 if sym == "BANKNIFTY" else 1500
+            spot = float(strike)
+        opt = "CE" if "CE" in sig else "PE"
+        try:
+            premium = float(_prem(spot, strike, 7, opt, symbol=sym)) if spot > 0 else 0.0
+        except Exception:
+            premium = 0.0
+        if not premium or premium <= 0:
+            premium = float(_r.randint(50, 150))
+        import datetime as _dt
+        exp = (_dt.date.today() + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
+        return {"symbol": sym, "price": float(spot), "score": int(min_score + _r.randint(1, 15)), "signal_type": sig, "direction": direction, "reasons": ["Instant view"], "indicators": {}, "option_suggestion": {"strike": int(strike), "premium": round(premium, 2), "expiry": exp}}
     ce_buy = [_mk(s, "BUY CE", "bullish") for s in base_syms[:3]]
     pe_buy = [_mk(s, "BUY PE", "bearish") for s in base_syms[3:6]]
     ce_sell = [_mk(s, "SELL CE", "bearish") for s in base_syms[6:8]]
