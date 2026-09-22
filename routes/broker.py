@@ -1103,6 +1103,15 @@ async def place_live_order(req: LiveOrderRequest):
             res = await dl.place_order(preview["security_id"], txn, broker_qty,
                                        order_type="MARKET", product=preview.get("product", "INTRADAY"))
             if not res.get("success"):
+                _derr = str(res.get("error") or "")
+                # DH-905 Invalid IP: Dhan needs the server IP whitelisted in Dhan
+                # app/API settings. Render free has no static IP, so guide user.
+                if "DH-905" in _derr or "Invalid IP" in _derr:
+                    return {"error": ("Dhan DH-905 Invalid IP: Dhan ne server ka IP block kiya. "
+                                      "login.dhan.co par API settings me server IP whitelist karo. "
+                                      "Render free ka IP fix nahi hota — Starter plan par static outbound IP milta hai. "
+                                      "Tab tak paper trading use karo."),
+                            "preview": preview, "broker_response": res.get("data", {})}
                 return {"error": f"Dhan rejected order: {res.get('error')}",
                         "preview": preview, "broker_response": res.get("data", {})}
             order_id = str((res.get("data") or {}).get("order_id", ""))
