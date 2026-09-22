@@ -4,11 +4,14 @@ import requests
 import re
 
 # Yahoo Finance symbols (works from cloud - Yahoo does NOT block Render/AWS)
+# VERIFIED Sep 2026 vs NSE-direct: ^NSEI/^NSEBANK match NSE; FINNIFTY must be
+# NIFTY_FIN_SERVICE.NS (^CNXFIN is a different/stale index ~27638 vs ~25570).
+# MIDCPNIFTY (Midcap Select) has NO Yahoo symbol (^NSEMDCP50 is Midcap 50!) -
+# left out so it falls through to NSE/Google/DB, never a wrong index.
 _YAHOO_MAP = {
     "NIFTY": "^NSEI",
     "BANKNIFTY": "^NSEBANK",
-    "FINNIFTY": "^CNXFIN",
-    "MIDCPNIFTY": "^NSEMDCP50",
+    "FINNIFTY": "NIFTY_FIN_SERVICE.NS",
     "SENSEX": "^BSESN",
     "RELIANCE": "RELIANCE.NS",
     "HDFCBANK": "HDFCBANK.NS",

@@ -106,10 +106,10 @@ def refresh_all(light: bool = False):
             for sym, spot_data in batch.items():
                 if spot_data and spot_data.get("spot"):
                     src = spot_data.get("source", "yahoo")
-                    _LIVE_CACHE[sym] = {"ts": time.time(), "data": {
+                    _live_cache_set(sym, {
                         "spot": spot_data["spot"], "formatted": f"INR {spot_data['spot']:,.2f}",
                         "change": spot_data.get("change", 0), "high": spot_data.get("high", spot_data["spot"]), "low": spot_data.get("low", spot_data["spot"]), "source": src,
-                    }}
+                    })
         except Exception:
             pass
         # indices also via Yahoo
@@ -117,7 +117,7 @@ def refresh_all(light: bool = False):
             ibatch = live.get_live_spots_parallel(INDEX_SYMBOLS, max_workers=4)
             for sym, spot_data in ibatch.items():
                 if spot_data and spot_data.get("spot"):
-                    _live_cache_set(sym, {"ts": time.time(), "data": spot_data})
+                    _live_cache_set(sym, spot_data)
         except Exception:
             pass
         # Seed historical spot cache so backtest/option-chain use DB (instant, no 'Network error')

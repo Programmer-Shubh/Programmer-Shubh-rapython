@@ -159,6 +159,30 @@ def get_live_chain(symbol: str):
                                "pe_ltp": pe_price, "pe_oi": 0, "pe_vol": 0, "pe_iv": 0})
     if model_rows:
         return {"symbol": symbol, "spot": spot, "atm": atm, "rows": model_rows, "source": "model", "note": "NSE blocked on cloud - model chain (same rate as order entry)"}
+    # Last resort: stale DB chain (any recent date) instead of an error, so the
+    # page never shows "No chain data available" when history exists
+    try:
+        _stale = bhav.get_dates(symbol)
+        for _d in (_stale or [])[:3]:
+            _exps = bhav.get_expiries(symbol, _d)
+            if not _exps:
+                continue
+            _ch = bhav.get_option_chain(symbol, _d, _exps[0])
+            if _ch:
+                _ce = {}
+                _pe = {}
+                for r in _ch:
+                    item = {"strike": r["strike_price"], "ltp": r["close_price"], "oi": r.get("oi", 0), "vol": r.get("volume", 0)}
+                    if r["option_type"] == "CE":
+                        _ce[r["strike_price"]] = item
+                    else:
+                        _pe[r["strike_price"]] = item
+                _all = sorted(set(list(_ce.keys()) + list(_pe.keys())))
+                _rows = [{"strike": s, "distance": 0, "ce_ltp": _ce.get(s, {}).get("ltp", 0), "ce_oi": 0, "ce_vol": 0, "ce_iv": 0, "pe_ltp": _pe.get(s, {}).get("ltp", 0), "pe_oi": 0, "pe_vol": 0, "pe_iv": 0} for s in _all]
+                if _rows:
+                    return {"symbol": symbol, "spot": spot, "atm": atm, "rows": _rows, "source": "db-stale", "note": f"Stale chain {_d} (live spot unavailable)"}
+    except Exception:
+        pass
     return {"error": "No chain data available"}
 
 
@@ -226,9 +250,11 @@ def place_trade(req: TradeRequest):
                 _step0 = get_strike_step(req.symbol)
                 _atm0 = round(_spot0 / _step0) * _step0
                 _dev = abs(float(req.strike) - _atm0) / _spot0 if _spot0 else 0
-                # User asked: never show this error for any symbol (ITC etc) — disable block, only log warning if >50%
-                if False and _dev > 0.12 and not _chain_has:
-                    return {"error": f"Strike {req.strike} is {_dev*100:.1f}% away from live ATM {_atm0} (spot {_spot0:,.2f}) - stale data? Refresh chain/scanner and retry near ATM"}
+                # Block far ITM/OTM orders (e.g. NIFTY 20700 @ spot 23400):
+                # allow ATM ±5 steps or ±3%, whichever is wider (normal OTM passes)
+                _allow = max(5 * _step0, 0.03 * _spot0)
+                if _dev * _spot0 > _allow and not _chain_has:
+                    return {"error": f"Strike {req.strike} ATM {_atm0} se bahut door hai (spot {_spot0:,.2f}) - ATM ke 2-3 strike upar-neeche chunho"}
         except Exception:
             pass
         # Deduplication check before insert

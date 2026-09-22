@@ -495,6 +495,22 @@ class OptionScanner:
             pass
         if spot <= 0:
             return {'strike': 0, 'premium': 0, 'expiry': ''}
+        # Freshness validation: reject stale spot (>3% away from DB latest
+        # close). A stale spot (wrong index feed, old cache) produced far
+        # ITM/OTM strikes like NIFTY 20700 / MIDCPNIFTY 17850.
+        try:
+            dbrow = self.db.fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+                [symbol],
+            )
+            ref = float(dbrow["close_price"]) if dbrow and dbrow["close_price"] else 0
+            if ref > 0:
+                if spot <= 0 or abs(spot - ref) / ref > 0.03:
+                    spot = ref
+        except Exception:
+            pass
+        if spot <= 0:
+            return {'strike': 0, 'premium': 0, 'expiry': ''}
         
         step = self._get_step(symbol)
         # Calculate ATM strike (nearest step)
@@ -567,9 +583,10 @@ class OptionScanner:
                 import datetime as _dt
                 expiry = (_dt.datetime.now() + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
         
-        # Strict ATM±4 clamp - ensures deep ITM/OTM never suggested from ANY scanner
-        max_strike = atm_strike + 4*step
-        min_strike = atm_strike - 4*step
+        # Strict ATM±3 clamp - only 2-3 strikes up/down suggested, deep
+        # ITM/OTM never suggested from ANY scanner
+        max_strike = atm_strike + 3*step
+        min_strike = atm_strike - 3*step
         strike = max(min_strike, min(max_strike, strike))
         if strike > 0 and abs(strike - spot) / spot > 0.04:
             strike = atm_strike
