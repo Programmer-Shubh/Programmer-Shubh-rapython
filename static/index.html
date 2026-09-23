@@ -902,9 +902,10 @@
             }
         }catch(e){
             console.error('loadDashPositions failed',e);
-            // Do not clear table on error - keep last known trades visible
+            // Do not clear table on error - keep last known trades visible.
+            // Cold-start race (server waking): retry once after 5s when empty.
             if(!document.getElementById('dash-pos').innerHTML.trim() || document.getElementById('dash-pos').innerHTML.includes('No open')){
-                // keep as is
+                if(!window._posRetry){window._posRetry=true;setTimeout(()=>{window._posRetry=false;try{loadDashPositions();loadDashHistory();}catch(_){}},5000);}
             }
         }
     }

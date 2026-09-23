@@ -26,11 +26,11 @@ async def _fno_sync_loop():
     """Official F&O bhavcopy auto-download + old-data purge.
     Runs after startup settles, then every 6h. Best-effort (never crashes app)."""
     import asyncio as _aio
-    await _aio.sleep(180)
+    await _aio.sleep(600)  # 10 min: let cold-start settle (avoid OOM/timeout 502s)
     while True:
         try:
             from core.services import nsefin_bhav as _fb
-            await _aio.to_thread(_fb.backfill_fno, 30, 3)
+            await _aio.to_thread(_fb.backfill_fno, 30, 2)
             await _aio.to_thread(_fb.purge_old_data, 12)
         except Exception:
             pass

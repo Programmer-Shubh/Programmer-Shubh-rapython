@@ -23,20 +23,51 @@ class OptionScanner:
         self.db = Database.get_instance()
 
     def _warm_live_spots(self, symbols):
-        """Batch-fill fresh live spots for symbols missing them (parallel).
+        """Batch-fill fresh live spots for symbols missing them.
+        Yahoo-only (5s timeout, parallel): NSE-direct hangs ~4s per symbol
+        when blocked and made this 40s. Yahoo verified for all key symbols
+        (^NSEI/^NSEBANK/^CNXFIN/^NSEMDCP50 + *.NS).
         Without this, scans on empty-DB Render priced signals off fantasy
         synthetic closes (e.g. NIFTY 20679 vs live 23392) and every dashboard
         order then died at the ATM-distance guard. Cache-first: no network
         when _LIVE_CACHE is fresh (dashboard /spot + refresher fill it)."""
         try:
-            from core.services.live_market_data import _LIVE_CACHE, LiveMarketData
+            from core.services.live_market_data import _LIVE_CACHE, _live_cache_set
+            from core.services.free_data import _yahoo_fallback_quote, _db_prev_close
             import time as _tm
+            from concurrent.futures import ThreadPoolExecutor as _TPE
             missing = [s for s in (symbols or []) if s not in _LIVE_CACHE or _tm.time() - _LIVE_CACHE[s].get("ts", 0) >= 300]
-            if missing:
+            if not missing:
+                return
+
+            def _one(sym):
                 try:
-                    LiveMarketData().get_live_spots_parallel(missing[:52], max_workers=10)
+                    q = _yahoo_fallback_quote(sym)
+                    if q and float(q.get("spot") or 0) > 0:
+                        spot = float(q["spot"])
+                        chg = float(q.get("change") or 0)
+                        if not chg:
+                            try:
+                                prev = _db_prev_close(sym)
+                                chg = round((spot - prev) / prev * 100, 2) if prev > 0 else 0.0
+                            except Exception:
+                                chg = 0.0
+                        _live_cache_set(sym, {"spot": spot,
+                                              "formatted": f"INR {spot:,.2f}",
+                                              "change": chg,
+                                              "high": float(q.get("high") or spot),
+                                              "low": float(q.get("low") or spot),
+                                              "source": "live"})
+                        return True
                 except Exception:
                     pass
+                return False
+
+            try:
+                with _TPE(max_workers=10) as _ex:
+                    list(_ex.map(_one, missing[:52]))
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -142,6 +173,10 @@ class OptionScanner:
         except Exception:
             pass
         ordered = index_priority + [s for s in symbols if s not in index_priority]
+        # Cap universe: nsefin F&O import added 200+ illiquid symbols to DB and
+        # db_sym_list dragged them all into every scan (33s). Dashboard needs
+        # liquid F&O names only — cap at 60.
+        ordered = ordered[:60]
         vwap_result = self.scan_vwap(ordered)
         all_signals = []
         seen = set()
@@ -239,6 +274,61 @@ class OptionScanner:
             pass
         return None
 
+    def _ai_gate(self, symbol: str, kind: str):
+        """AI 4-part filter (VWAP+RSI+candle+volume): blocks false counter-trend
+        signals and option-buying traps. kind in CE_BUY/PE_BUY/CE_SELL/PE_SELL.
+        Returns (passed: bool, note: str). Uses cached history (fast)."""
+        try:
+            data = self._get_historical(symbol)
+            if not data or len(data) < 25:
+                return True, ""
+            closes = [float(d.get("close_price", 0) or 0) for d in data]
+            vols = [float(d.get("volume", 0) or 0) for d in data]
+            rsi_l = self.indicators.calculate_rsi(closes, 14) or []
+            try:
+                vw = self.indicators.calculate_vwap(data, 20, 2.0) or {}
+            except Exception:
+                vw = {}
+            vwap_l = vw.get("vwap", []) if isinstance(vw, dict) else []
+            up2_l = vw.get("upper2", []) if isinstance(vw, dict) else []
+            lo2_l = vw.get("lower2", []) if isinstance(vw, dict) else []
+            i = len(data) - 1
+            price = closes[i]
+            rsi = rsi_l[i] if i < len(rsi_l) and rsi_l[i] is not None else 50
+            vw = vwap_l[i] if i < len(vwap_l) and vwap_l[i] is not None else 0
+            up2 = up2_l[i] if i < len(up2_l) and up2_l[i] is not None else 0
+            lo2 = lo2_l[i] if i < len(lo2_l) and lo2_l[i] is not None else 0
+            if vw <= 0:
+                return True, ""
+            o = float(data[i].get("open_price", 0) or 0)
+            green = price > o
+            red = price < o
+            vsma = sum(vols[max(0, i - 20):i]) / max(1, min(20, i))
+            vol_ok = vols[i] > vsma if vsma > 0 else False
+            if kind == "CE_BUY":
+                if rsi < 30 or (lo2 > 0 and price <= lo2):
+                    return False, "downtrend/panic (RSI<30 ya -2SD ke neeche) — CE Buy trap"
+                if price > vw and 50 <= rsi <= 65:
+                    return True, "price>VWAP + RSI 50-65 momentum"
+                return False, "VWAP/RSI momentum nahi"
+            if kind == "PE_BUY":
+                if rsi > 70 or (up2 > 0 and price >= up2):
+                    return False, "strong uptrend extend ho sakta hai — PE Buy trap"
+                if price < vw and rsi < 50:
+                    return True, "VWAP breakdown + RSI<50"
+                return False, "VWAP breakdown nahi"
+            if kind == "CE_SELL":
+                if up2 > 0 and price >= up2 and rsi > 70 and red:
+                    return True, "overbought + red reversal (tight SL)"
+                return False, "resistance + red reversal nahi"
+            if kind == "PE_SELL":
+                if lo2 > 0 and price <= lo2 and rsi < 30 and green and vol_ok:
+                    return True, "oversold + green reversal + volume"
+                return False, "support reversal confirm nahi"
+        except Exception:
+            pass
+        return True, ""
+
     def get_4_part_opportunities(self, symbols=None, min_score: int = 80, top_n: int = 5) -> dict:
         """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell.
         VWAP scores realistically top out 30-60, so hard-80 base = always empty.
@@ -298,6 +388,28 @@ class OptionScanner:
                     except Exception:
                         _s["combo"] = False
                 _items.sort(key=lambda x: (1 if x.get("combo") else 0, x.get("score", 0)), reverse=True)
+        except Exception:
+            pass
+        # AI gate: false counter-trend signals filtered per part (passes keep
+        # "AI confirm" tag). A part goes blank ONLY if nothing passes — then
+        # the best signal stays so dashboard never empties.
+        try:
+            _kinds = {"ce_buy": "CE_BUY", "pe_buy": "PE_BUY", "ce_sell": "CE_SELL", "pe_sell": "PE_SELL"}
+            _parts = {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell}
+            for _pk, _items in _parts.items():
+                for _s in _items:
+                    try:
+                        _ok, _why = self._ai_gate(_s.get("symbol", ""), _kinds[_pk])
+                    except Exception:
+                        _ok, _why = True, ""
+                    _s["ai"] = bool(_ok)
+                    if _ok and _why:
+                        _rs = _s.get("reasons") or []
+                        _rs.insert(0, "AI confirm: " + _why)
+                        _s["reasons"] = _rs
+                _passed = [x for x in _items if x.get("ai")]
+                if _passed:
+                    _parts[_pk][:] = sorted(_passed, key=lambda x: x.get("score", 0), reverse=True)[:top_n]
         except Exception:
             pass
         return {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell, "min_score": min_score}
@@ -474,7 +586,23 @@ class OptionScanner:
         ck = symbol.upper()
         ce = getattr(self, "_SYNT_CACHE", {}).get(ck)
         if ce and now - ce[0] < self._SYNT_TTL and len(ce[1]) >= 30:
-            return ce[1]
+            # Stale-fantasy guard: cached synthetic anchored to an old level
+            # (or never anchored) while fresh live moved >5% -> regenerate
+            # below instead of serving strikes from fantasy closes.
+            try:
+                from core.services.live_market_data import _LIVE_CACHE as _LC3
+                _le3 = _LC3.get(ck)
+                if _le3 and now - _le3.get("ts", 0) < 300:
+                    _ls3 = float((_le3.get("data") or {}).get("spot") or 0)
+                    _cc3 = float(ce[1][-1].get("close_price") or 0)
+                    if _ls3 > 0 and _cc3 > 0 and abs(_ls3 - _cc3) / _cc3 > 0.05:
+                        ce = None
+                    else:
+                        return ce[1]
+                else:
+                    return ce[1]
+            except Exception:
+                return ce[1]
         # DB only if table exists and has rows
         try:
             rows = self.db.fetch_all(
@@ -522,7 +650,10 @@ class OptionScanner:
                         _lc = float(synth[-1].get("close_price") or 0)
                         if _ls > 0 and _lc > 0:
                             _f = _ls / _lc
-                            if 0.5 < _f < 2.0:
+                            # Wide bounds: rescaling preserves returns (indicators are
+                            # scale-invariant), so even a 500x correction (IDEA 5241
+                            # vs live ~10) is safe. Only rejects absurd/corrupt values.
+                            if 0.001 < _f < 1000.0:
                                 for r in synth:
                                     for _k in ("open_price", "high_price", "low_price", "close_price"):
                                         r[_k] = round(float(r[_k]) * _f, 2)
