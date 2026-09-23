@@ -1538,7 +1538,7 @@ let _lastOpenTrdHTML = null;
             robots.forEach(s=>{
                 const legs=_parseJsonField(s.legs,[]); const leg=legs[0]||{}; const ord=(leg.option_type||'')+'-'+(leg.transaction||'');
                 const rm=_parseJsonField(s.risk_management,{});
-                h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td><td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td><span class="badge ${s.status==='active'?'badge-active':'badge-draft'}">${s.status||'active'}</span></td><td><button class="btn btn-sm btn-outline-primary" onclick="loadRobotToForm(${s.id})">Load</button> <button class="btn btn-sm btn-outline-danger" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
+                h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td><td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td><span class="badge ${s.status==='active'?'badge-active':'badge-draft'}">${s.status||'active'}</span></td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-success" onclick="ptFromStrat(${s.id})">Paper Trade</button> <button class="btn btn-sm btn-outline-danger" onclick="liveFromRobot(${s.id})">Live Trade</button> <button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id})">Backtest</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
             });
             h+='</tbody></table>'; document.getElementById('robot-saved').innerHTML=h;
         }catch(e){ document.getElementById('robot-saved').innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>'; console.error(e); }
@@ -1562,6 +1562,63 @@ let _lastOpenTrdHTML = null;
         }catch(e){ alert('Error: '+e.message); }
     }
     async function delRobotSaved(id){ if(!confirm('Delete this saved robot?')) return; try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadRobotSaved();}catch(e){alert('Error: '+e.message);} }
+    async function backtestFromRobot(id){
+        // Re-run backtest for a saved strategy and show results (no form disturbance alert)
+        try{
+            const s=await A('/api/strategies/'+id);
+            if(s.error){ alert(s.error); return; }
+            document.getElementById('r-name').value=s.name||'';
+            (function(){const b=document.getElementById('r-syms');const v=s.symbol||'BANKNIFTY';if(b){b.querySelectorAll('input').forEach(i=>{i.checked=(i.value===v);});}const s0=document.getElementById('r-sym');if(s0)s0.value=v;})();
+            const legs=_parseJsonField(s.legs,[]);
+            if(legs.length){ try{stratLegs=JSON.parse(JSON.stringify(legs));renderLegs();}catch(e){} }
+            const rm=_parseJsonField(s.risk_management,{});
+            document.getElementById('r-sl').value=rm.daily_stop_loss||1500;
+            document.getElementById('r-tp').value=rm.daily_take_profit||3000;
+            const ao=_parseJsonField(s.advanced_options,{});
+            if(ao.trade_mode) document.getElementById('r-type').value=ao.trade_mode;
+            if(s.start_date) document.getElementById('r-start').value=s.start_date;
+            if(s.end_date) document.getElementById('r-end').value=s.end_date;
+            await runBacktest();
+            try{document.getElementById('bt-results').scrollIntoView({behavior:'smooth'});}catch(e){}
+        }catch(e){ alert('Error: '+e.message); }
+    }
+    async function liveFromRobot(id){
+        // REAL-MONEY live trade from a saved strategy (all legs, preview + confirm per safety)
+        try{
+            const s=await A('/api/strategies/'+id);
+            if(s.error){ alert(s.error); return; }
+            const legs=_parseJsonField(s.legs,[]);
+            if(!legs.length){ alert('No legs in this strategy'); return; }
+            const rm=_parseJsonField(s.risk_management,{});
+            const sl=rm.daily_stop_loss||1500, tp=rm.daily_take_profit||3000;
+            const ao=_parseJsonField(s.advanced_options,{});
+            const ttype=(ao.trade_mode||'intraday').toLowerCase();
+            const today=new Date().toISOString().split('T')[0];
+            const previews=[];
+            for(const leg of legs){
+                const opt=String(leg.option_type||'CE').toUpperCase();
+                const txn=String(leg.transaction||'buy').toUpperCase();
+                const base={symbol:s.symbol,option_type:opt,transaction_type:txn,quantity:parseInt(leg.lots)||1,strike:0,expiry:leg.expiry||'weekly',stop_loss:sl,take_profit:tp,trade_type:ttype};
+                const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:true})});
+                if(pv.error){alert('Live blocked: '+pv.error);return;}
+                previews.push(pv.preview||{});
+            }
+            let msg='REAL MONEY ORDER ('+previews.length+' legs)\n';
+            previews.forEach(p=>{msg+='Broker: '+p.broker+' | '+p.side+' '+(p.symbol||p.security_id||'')+' Qty: '+p.quantity+'\n';});
+            if(!confirm(msg+'\nConfirm to SEND to exchange?'))return;
+            const sent=[];
+            for(let i=0;i<legs.length;i++){
+                const leg=legs[i];
+                const opt=String(leg.option_type||'CE').toUpperCase();
+                const txn=String(leg.transaction||'buy').toUpperCase();
+                const base={symbol:s.symbol,option_type:opt,transaction_type:txn,quantity:parseInt(leg.lots)||1,strike:0,expiry:leg.expiry||'weekly',stop_loss:sl,take_profit:tp,trade_type:ttype};
+                const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:false})});
+                if(r.error){alert('Live error (leg '+(i+1)+'): '+r.error);break;}
+                sent.push('Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id);
+            }
+            alert('LIVE orders sent!\n'+sent.join('\n'));loadDashPositions();loadTrades();
+        }catch(e){ alert('Error: '+e.message); }
+    }
     async function robotPaperTrade(){ await robotStart(); document.getElementById('robot-status').innerHTML+='<br><small class="text-muted">Mode: Paper Trade (default)</small>'; }
     async function robotLiveTrade(){
         const sym=(rSyms()[0]||'NIFTY');
