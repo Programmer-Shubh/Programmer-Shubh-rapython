@@ -36,15 +36,31 @@ def check_stoploss_target():
             continue
         entry = float(trade["entry_price"])
         is_buy = trade["transaction_type"] == "BUY"
-        # Unified SL/TP level calc synced with backtest (pct if >20 else Rs)
-        sl_pct = (sl / max(entry, 0.01)) * 100 if sl > 20 else sl
-        tp_pct = (tp / max(entry, 0.01)) * 100 if tp > 20 else tp
-        if is_buy:
-            sl_level = entry * (1 - sl_pct / 100) if sl_pct > 0 else 0
-            tp_level = entry * (1 + tp_pct / 100) if tp_pct > 0 else 0
-        else:
-            sl_level = entry * (1 + sl_pct / 100) if sl_pct > 0 else 0
-            tp_level = entry * (1 - tp_pct / 100) if tp_pct > 0 else 0
+        # Backtest-parity levels (BacktestEngine._check_sl_tp): rupee SL/TP
+        # (>20) convert to premium points via TOTAL units, NOT percent.
+        # Old code did (sl/entry)*100 -> SL 1500 on 22.84 premium became level
+        # 1523 (never hit), so open positions never exited. Fixed here.
+        units = int(trade.get("quantity", 1) or 1) * int(trade.get("lot_size", 0) or 0)
+        if units <= 0:
+            units = 1
+
+        def _level(amt, is_sl):
+            amt = float(amt or 0)
+            if amt <= 0:
+                return 0
+            if amt > 20:
+                pts = amt / max(units, 1)
+                if is_buy:
+                    lvl = (entry - pts) if is_sl else (entry + pts)
+                else:
+                    lvl = (entry + pts) if is_sl else (entry - pts)
+                return max(0.05, lvl)
+            if is_buy:
+                return entry * (1 - amt / 100) if is_sl else entry * (1 + amt / 100)
+            return entry * (1 + amt / 100) if is_sl else entry * (1 - amt / 100)
+
+        sl_level = _level(sl, True)
+        tp_level = _level(tp, False)
         # Conservative intra-candle: current is proxy for High/Low - hit if breached
         hit_sl = (current <= sl_level) if is_buy else (current >= sl_level) if sl_level > 0 else False
         hit_tp = (current >= tp_level) if is_buy else (current <= tp_level) if tp_level > 0 else False

@@ -185,6 +185,60 @@ class OptionScanner:
         top.sort(key=lambda x: x['score'], reverse=True)
         return top
 
+    def _opp_combo_dir(self, symbol: str, min_score: int = 50):
+        """Strong buy/sell confirmation for dashboard opportunities: same
+        SuperTrend+MACD+EMA+Volume scoring as the backtest Opp Combo.
+        Returns 'bullish' / 'bearish' / None. Uses cached history (fast)."""
+        try:
+            data = self._get_historical(symbol)
+            if not data or len(data) < 25:
+                return None
+            closes = [d["close_price"] for d in data]
+            vols = [float(d.get("volume", 0) or 0) for d in data]
+            st = self.indicators.calculate_supertrend(data, 10, 3.0) or []
+            md = self.indicators.calculate_macd(closes, 12, 26, 9) or {}
+            m = md.get("macd", []) if isinstance(md, dict) else []
+            s = md.get("signal", []) if isinstance(md, dict) else []
+            ep = 50 if len(closes) >= 50 else 20
+            ema = self.indicators.calculate_ema(closes, ep) or []
+            i = len(data) - 1
+            prev = i - 1
+            vsma = sum(vols[max(0, i - 20):i]) / max(1, min(20, i))
+            bs, ss = 0, 0
+            if i < len(st) and st[i]:
+                if closes[i] > st[i]:
+                    bs += 30 if (st[prev] and closes[prev] <= st[prev]) else 10
+                elif closes[i] < st[i]:
+                    ss += 30 if (st[prev] and closes[prev] >= st[prev]) else 10
+            mv = m[i] if i < len(m) else 0
+            sv = s[i] if i < len(s) else 0
+            if mv and sv:
+                if mv > sv:
+                    pmv = m[prev] if prev < len(m) else 0
+                    psv = s[prev] if prev < len(s) else 0
+                    bs += 30 if (pmv and psv and pmv <= psv) else 10
+                elif mv < sv:
+                    pmv = m[prev] if prev < len(m) else 0
+                    psv = s[prev] if prev < len(s) else 0
+                    ss += 30 if (pmv and psv and pmv >= psv) else 10
+            if vsma > 0:
+                if vols[i] > vsma * 1.5:
+                    bs += 20
+                if vols[i] > vsma * 1.2:
+                    ss += 20
+            ev = ema[i] if i < len(ema) else 0
+            if ev and closes[i] > ev:
+                bs += 20
+            elif ev and closes[i] < ev:
+                ss += 20
+            if bs >= min_score and bs >= ss:
+                return "bullish"
+            if ss >= min_score and ss > bs:
+                return "bearish"
+        except Exception:
+            pass
+        return None
+
     def get_4_part_opportunities(self, symbols=None, min_score: int = 80, top_n: int = 5) -> dict:
         """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell.
         VWAP scores realistically top out 30-60, so hard-80 base = always empty.
@@ -226,6 +280,26 @@ class OptionScanner:
                     pe_sell.append(ns)
         ce_sell = sorted(ce_sell, key=lambda x: x['score'], reverse=True)[:top_n]
         pe_sell = sorted(pe_sell, key=lambda x: x['score'], reverse=True)[:top_n]
+        # Strong-confirmation: OppCombo (ST+MACD+EMA+Vol) agreement sorts first
+        # with a "Combo confirm" tag, so dashboard shows the strongest trades up.
+        # Never filters to blank — unconfirmed signals stay below.
+        try:
+            _parts = {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell}
+            for _items in _parts.values():
+                for _s in _items:
+                    try:
+                        _combo = self._opp_combo_dir(_s.get("symbol", ""))
+                        _want = _s.get("direction", "")
+                        _s["combo"] = bool(_combo and _combo == _want)
+                        if _s["combo"]:
+                            _rs = _s.get("reasons") or []
+                            _rs.insert(0, "Combo confirm (ST+MACD+EMA+Vol)")
+                            _s["reasons"] = _rs
+                    except Exception:
+                        _s["combo"] = False
+                _items.sort(key=lambda x: (1 if x.get("combo") else 0, x.get("score", 0)), reverse=True)
+        except Exception:
+            pass
         return {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell, "min_score": min_score}
 
     def _ai_fallback_signal(self, result: dict) -> dict:
