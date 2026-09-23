@@ -878,7 +878,7 @@
         try{
             const p=await A('/api/dashboard/portfolio');
             if(p.positions&&p.positions.length){
-                let h='<table><tr><th>#</th><th>Time</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Expiry</th><th>Qty</th><th>Lot Size</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th><th>Action</th></tr>';
+                let h='<table><tr><th>#</th><th>Time</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Expiry</th><th>Qty</th><th>Lot Size</th><th>Entry</th><th>Current</th><th>P&L</th><th>SL (₹)</th><th>TP (₹)</th><th>Mode</th><th>Action</th></tr>';
                 p.positions.forEach(t=>{
                     const isLive=t.trade_mode==='live';
                     const ep = Number(t.entry_price)||0;
@@ -888,7 +888,7 @@
                     const lot = Number(t.lot_size)||0;
                     const pnl = Number(t.pnl)||0;
                     const sideBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
-                    h+=`<tr><td>${t.id}</td><td class="text-muted small">${t.entry_time||''}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${strike}</td><td>${t.expiry_date||'-'}</td><td>${qty}</td><td>${lot}</td><td>₹${ep.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-info" onclick="openTradeTV('${t.symbol}')">Chart</button> <button class="btn btn-sm btn-outline-secondary" onclick="editTradeSLTP(${t.id},${t.sl||1500},${t.tp||3000})">SL/TP</button> <button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-warning" onclick="closeTrade(${t.id},${curPrice})">Exit</button></td></tr>`;
+                    h+=`<tr><td>${t.id}</td><td class="text-muted small">${t.entry_time||''}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${strike}</td><td>${t.expiry_date||'-'}</td><td>${qty}</td><td>${lot}</td><td>₹${ep.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>₹${t.sl||1500}</td><td>₹${t.tp||3000}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-info" onclick="openTradeTV('${t.symbol}')">Chart</button> <button class="btn btn-sm btn-outline-secondary" onclick="editTradeSLTP(${t.id},${t.sl||1500},${t.tp||3000})">SL/TP</button> <button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-warning" onclick="closeTrade(${t.id},${curPrice})">Exit</button></td></tr>`;
                 });
                 h+='</table>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
             }else{
