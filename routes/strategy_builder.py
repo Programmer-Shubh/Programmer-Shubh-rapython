@@ -812,6 +812,29 @@ def _run_backtest_core(req: BacktestRequest):
         else:
             m = _merge_trade_metrics(_all_trades, _brokerage)
         # Honest results: no fabricated win-rate or P/L — engine output as-is.
+        # Zero-trade diagnosis: never leave the user guessing why nothing traded.
+        _zero_note = ""
+        _zero_tips = []
+        try:
+            if int(m.get("total_trades", 0) or 0) == 0:
+                _err_syms = [k for k, v in (_per_symbol or {}).items() if isinstance(v, dict) and v.get("error")]
+                _ok_syms = [k for k in _syms if k not in _err_syms]
+                _leg_txt = "+".join(sorted({f"{(l.get('transaction') or '').upper()} {(l.get('option_type') or '').upper()}" for l in (legs or [])})) or "no legs"
+                if _err_syms:
+                    _zero_note = f"No data for: {', '.join(_err_syms)}. "
+                    _zero_tips.append("Data wale symbols rakho (NIFTY/BANKNIFTY/RELIANCE me history hai) ya dates 17 Jun-21 Sep 2026 ke andar rakho")
+                if _ok_syms:
+                    _zero_note += (f"{', '.join(_ok_syms)} par is period me '{_leg_txt}' ke entry signals hi nahi bane. "
+                                   "Ye honest zero hai — signal nahi to trade nahi.")
+                    _zero_tips += [
+                        "Opposite side try karo (Buy ke bajaye Sell / CE ke bajaye PE)",
+                        "Indicators kam karo (sirf SuperTrend) ya Min Score ghatao",
+                        "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
+                        "Strategy Target/SL bahut tight to nahi — pehle bina SL/TP chalakar dekho",
+                    ]
+                _zero_tips = _zero_tips[:5]
+        except Exception:
+            pass
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -822,6 +845,8 @@ def _run_backtest_core(req: BacktestRequest):
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
         "symbols": _syms,
         "per_symbol": _per_symbol,
+        "note": _zero_note,
+        "suggestions": _zero_tips,
         "took_ms": int((__import__("time").time() - _t0) * 1000),
         "metrics": {
             "initial_capital": m["initial_capital"],

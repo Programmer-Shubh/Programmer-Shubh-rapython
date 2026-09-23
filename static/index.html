@@ -1150,11 +1150,16 @@ let _lastOpenTrdHTML = null;
             const pnlClass = pnl >= 0 ? 'price-up' : 'price-down';
             let perSymH='';
             if(r.symbols&&r.symbols.length>1&&r.per_symbol){
-                perSymH='<div class="card mb-2"><div class="card-body p-2"><table class="bt-table"><thead><tr><th>Symbol</th><th>Trades</th><th>Win %</th><th>Net P&L</th></tr></thead><tbody>';
-                r.symbols.forEach(sx=>{const pm=r.per_symbol[sx]||{};perSymH+=`<tr><td><strong>${sx}</strong></td><td>${pm.total_trades||0}</td><td>${pm.win_rate||0}%</td><td class="${C(pm.net_pnl||0)}">${F(pm.net_pnl||0)}</td></tr>`;});
+                perSymH='<div class="card mb-2"><div class="card-body p-2"><table class="bt-table"><thead><tr><th>Symbol</th><th>Trades</th><th>Win %</th><th>Net P&L</th><th>Status</th></tr></thead><tbody>';
+                r.symbols.forEach(sx=>{const pm=r.per_symbol[sx]||{};const st=pm.error?`<span class="text-danger small">${pm.error}</span>`:'<span class="text-success small">OK</span>';perSymH+=`<tr><td><strong>${sx}</strong></td><td>${pm.total_trades||0}</td><td>${pm.win_rate||0}%</td><td class="${C(pm.net_pnl||0)}">${F(pm.net_pnl||0)}</td><td>${st}</td></tr>`;});
                 perSymH+='</tbody></table></div></div>';
             }
-            document.getElementById('bt-metrics').innerHTML=perSymH+`
+            let zeroH='';
+            if(m.total_trades===0){
+                const tips=(r.suggestions||[]).map(t=>`<li>${t}</li>`).join('');
+                zeroH=`<div class="alert alert-warning py-2 mb-2 small"><strong><i class="bi bi-exclamation-triangle"></i> 0 trades — wajah:</strong> ${r.note||'Is period/setting me koi entry signal nahi bana (honest zero).'}${tips?`<ul class="mb-0 mt-1">${tips}</ul>`:''}</div>`;
+            }
+            document.getElementById('bt-metrics').innerHTML=perSymH+zeroH+`
 <div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> strategy 4 Key Metrics:</strong><span>Win Prob: <strong>${m.win_rate}%</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${m.expectancy}</strong> ${m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>'}</span><span class="ms-auto badge bg-info">Slippage ${(parseFloat(document.getElementById('s-slippage')?.value)||0.50)}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
 <div class="row g-2 mb-2">
 <div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
