@@ -383,6 +383,8 @@
                             <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('shortcall')"><div class="icon" style="font-size:14px;margin-bottom:2px">🔻</div><div class="title" style="font-size:11px">Short Call</div><div class="desc" style="font-size:9px">Sell CE OTM</div></div></div>
                             <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('shortput')"><div class="icon" style="font-size:14px;margin-bottom:2px">🔺</div><div class="title" style="font-size:11px">Short Put</div><div class="desc" style="font-size:9px">Sell PE OTM</div></div></div>
                             <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('bullspread')"><div class="icon" style="font-size:14px;margin-bottom:2px">⚡</div><div class="title" style="font-size:11px">Bull Call Spread</div><div class="desc" style="font-size:9px">Buy ATM + Sell OTM</div></div></div>
+                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('bearspread')"><div class="icon" style="font-size:14px;margin-bottom:2px">🐻</div><div class="title" style="font-size:11px">Bear Call Spread</div><div class="desc" style="font-size:9px">Sell ATM + Buy OTM</div></div></div>
+                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('bullputspread')"><div class="icon" style="font-size:14px;margin-bottom:2px">🐂</div><div class="title" style="font-size:11px">Bull Put Spread</div><div class="desc" style="font-size:9px">Sell OTM + Buy OTM</div></div></div>
                             <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('bearputspread')"><div class="icon" style="font-size:14px;margin-bottom:2px">🛡️</div><div class="title" style="font-size:11px">Bear Put Spread</div><div class="desc" style="font-size:9px">Buy ATM PE + Sell</div></div></div>
                             <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('straddle')"><div class="icon" style="font-size:14px;margin-bottom:2px">🔄</div><div class="title" style="font-size:11px">Long Straddle</div><div class="desc" style="font-size:9px">Buy CE+PE ATM</div></div></div>
                             <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('strangle')"><div class="icon" style="font-size:14px;margin-bottom:2px">↔️</div><div class="title" style="font-size:11px">Short Strangle</div><div class="desc" style="font-size:9px">Sell OTM CE+PE</div></div></div>
@@ -1231,7 +1233,8 @@ let _lastOpenTrdHTML = null;
     }
     let stratLegs=[];
     let _payoffSpot=24500;
-    async function fetchPayoffSpot(){ try{ const s=document.getElementById('s-index').value||'NIFTY'; const d=await A('/api/chain/live/'+s); if(d.spot) _payoffSpot=d.spot; else if(d.rows) _payoffSpot=d.spot; }catch(e){} }
+    function payoffSym(){ try{ const s=(typeof rSyms==='function'&&rSyms()[0])||''; if(s) return s; }catch(e){} return document.getElementById('s-index').value||'NIFTY'; }
+    async function fetchPayoffSpot(){ try{ const s=payoffSym(); const d=await A('/api/chain/live/'+s); if(d.spot) _payoffSpot=d.spot; else if(d.rows) _payoffSpot=d.spot; }catch(e){} }
     function renderLegs(){
         const card=document.getElementById('legsTableCard'); const tbody=document.querySelector('#legsTable tbody');
         if(!stratLegs.length){card.style.display='none'; tbody.innerHTML=''; document.getElementById('payoffCard').style.display='none'; return;}
@@ -1283,8 +1286,8 @@ let _lastOpenTrdHTML = null;
         document.getElementById('payoffCard').style.display='block';
         await fetchPayoffSpot();
         const spot=_payoffSpot;
-        const lotMap={NIFTY:50,BANKNIFTY:15,FINNIFTY:40,MIDCPNIFTY:75,RELIANCE:250,TCS:150,INFY:300,SBIN:750};
-        const sym=document.getElementById('s-index').value||'NIFTY';
+        const lotMap={NIFTY:75,BANKNIFTY:15,FINNIFTY:60,MIDCPNIFTY:75,RELIANCE:250,TCS:175,INFY:400,SBIN:700};
+        const sym=payoffSym();
         const lot=lotMap[sym]||50;
         const stepMap={NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:25};
         const step=stepMap[sym]||100;
