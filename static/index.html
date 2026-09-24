@@ -273,6 +273,11 @@
                 <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" style="font-size:10px"></button>
             </div>
             <div class="card mb-2" style="overflow:hidden;background:linear-gradient(90deg,#7ec8f7,#1e6fd9,#7ec8f7)"><img src="/static/dashboard-banner.jpg" alt="Stock Exchange" style="width:100%;height:110px;object-fit:contain;display:block"></div>
+            <div class="card mb-2" style="border-left:4px solid #0d6efd"><div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between"><div class="d-flex gap-2 align-items-center"><label class="small fw-bold mb-0">Regime/Sentiment:</label><select id="regime-sym" class="form-select form-select-sm" style="width:160px" onchange="loadRegime()"></select><button class="btn btn-sm btn-outline-primary" onclick="loadRegime()"><i class="bi bi-arrow-clockwise"></i></button></div><small class="text-muted">Option chain wale symbols me se kisi ko bhi select karo</small></div></div>
+            <div class="row g-2 mb-2" id="regime-row">
+                <div class="col-md-6"><div class="card h-100" style="border-left:4px solid #198754"><div class="card-body p-3"><div class="small text-muted">MARKET REGIME</div><h5 id="regime-label" class="fw-bold mb-1">—</h5><div class="small"><span id="regime-conf"></span> <span id="regime-resist" class="text-muted"></span></div><div id="regime-checks" class="mt-2 small"></div></div></div></div>
+                <div class="col-md-6"><div class="card h-100" style="border-left:4px solid #0d6efd"><div class="card-body p-3"><div class="small text-muted">OPTION SENTIMENT</div><div class="d-flex gap-3 flex-wrap"><div><div class="small text-muted">PCR</div><strong id="sent-pcr">—</strong></div><div><div class="small text-muted">Put OI</div><strong id="sent-put">—</strong></div><div><div class="small text-muted">Call OI</div><strong id="sent-call">—</strong></div></div><div class="small mt-2">Put Writing: <span id="sent-pw">—</span> • Call Writing: <span id="sent-cw">—</span></div><div class="mt-2"><span id="sent-overall" class="badge bg-secondary">—</span> <small id="sent-conf" class="text-muted"></small></div></div></div></div>
+            </div>
             <div class="row" id="mkt-cards"></div>
             <div class="card">
                 <div class="card-header">Today — NSE Future & Option Top 5 Bullish & Bearish <small class="text-muted" id="fno-date"></small> <button class="btn btn-sm btn-outline-primary" onclick="loadFnoTop5()"><i class="bi bi-arrow-clockwise"></i></button></div>
@@ -813,10 +818,47 @@
             document.getElementById('fno-top5').innerHTML=h;
         }catch(e){ document.getElementById('fno-top5').innerHTML='<p class="text-danger p-2">Failed to load F&O Top 5</p>';}
     }
+    async function loadRegime(){
+        const sel=document.getElementById('regime-sym');if(!sel||!sel.value) return;
+        const sym=sel.value;
+        try{
+            const r=await A('/api/dashboard/market-regime/'+sym);
+            const rg=r.regime||{}; const st=r.sentiment||{};
+            const isBull=String(rg.label||'').includes('BULLISH');
+            const isBear=String(rg.label||'').includes('BEARISH');
+            const rc=isBull?'#198754':isBear?'#dc3545':'#6c757d';
+            const icon=isBull?'🟢':isBear?'🔴':'🟡';
+            document.getElementById('regime-label').innerHTML=icon+' '+ (rg.label||'—');
+            document.getElementById('regime-label').style.color=rc;
+            document.getElementById('regime-conf').textContent=rg.confidence?`Confidence ${rg.confidence}%`:'';
+            document.getElementById('regime-resist').textContent=rg.resistance||'';
+            document.getElementById('regime-checks').innerHTML=(rg.checks||[]).map(c=>`<div>${c.ok?'✓':'✗'} ${c.label}</div>`).join('');
+            document.getElementById('sent-pcr').textContent=st.pcr||'—';
+            document.getElementById('sent-put').textContent=st.put_oi?Number(st.put_oi).toLocaleString():'—';
+            document.getElementById('sent-call').textContent=st.call_oi?Number(st.call_oi).toLocaleString():'—';
+            document.getElementById('sent-pw').textContent=st.put_writing||'—';
+            document.getElementById('sent-cw').textContent=st.call_writing||'—';
+            const oc=String(st.overall||'').toUpperCase();
+            const ocIcon=oc.includes('BULLISH')?'🟢':oc.includes('BEARISH')?'🔴':'🟡';
+            document.getElementById('sent-overall').textContent=ocIcon+' '+ (st.overall||'—');
+            document.getElementById('sent-conf').textContent=st.confidence?`Confidence: ${st.confidence}%`:'';
+        }catch(e){ /* keep — */ }
+    }
+    async function loadRegimeSyms(){
+        try{
+            const r=await A('/api/chain/symbols');
+            const sel=document.getElementById('regime-sym');if(!sel) return;
+            const cur=sel.value||'NIFTY';
+            const syms=(r.symbols||['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY']);
+            sel.innerHTML=syms.map(s=>`<option value="${s}" ${s===cur?'selected':''}>${s}</option>`).join('');
+            if(!sel.value) sel.value='NIFTY';
+        }catch(e){}
+    }
     async function loadDash(){
         // Instant cached render for refresh perception (0s)
         try{const _c=_getDashCache(); if(_c&&_c.spot){let h='';for(const [sym,d] of Object.entries(_c.spot)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; document.getElementById('status').innerHTML='<span class="live-dot"></span> Cached';}}catch(e){}
         try{const s=await A('/api/dashboard/spot');document.getElementById('status').innerHTML='<span class="live-dot"></span> Connected';let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; try{_setDashCache({spot:s});}catch(e){}}catch(e){document.getElementById('status').innerHTML='Offline';}
+        loadRegimeSyms().then(()=>loadRegime());
         loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();
     }
     function singleBtn(sym,action,type,strike,exp,label,cls){return `<button class="btn btn-sm ${cls}" onclick="quickStrat('${sym}','${action}','${type}',${strike},'${exp}')">${label}</button>`;}

@@ -204,6 +204,134 @@ def get_trade_history():
     }
 
 
+@router.get("/market-regime/{symbol}")
+def market_regime(symbol: str):
+    """MARKET REGIME + OPTION SENTIMENT for any symbol (option-chain selector).
+    Regime: VWAP/EMA/ADX/breadth -> TRENDING BULLISH etc + confidence.
+    Sentiment: PCR = Put OI / Call OI + writing strength. Spot-synced."""
+    sym = (symbol or "NIFTY").upper()
+    try:
+        from core.services.scanner import OptionScanner
+        from core.services.live_market_data import LiveMarketData
+        from core.services.indicator_engine import IndicatorEngine
+        sc = OptionScanner()
+        data = sc._get_historical(sym)
+        spot = 0
+        try:
+            spot = float(LiveMarketData().get_live_spot(sym).get("spot") or 0)
+        except Exception:
+            pass
+        if not spot and data:
+            spot = float(data[-1].get("close_price") or 0)
+        # Regime signals
+        checks = []
+        conf = 0
+        regime = "SIDEWAYS"
+        try:
+            if data and len(data) >= 20:
+                closes = [float(d.get("close_price") or 0) for d in data]
+                ie = IndicatorEngine()
+                vwap_d = ie.calculate_vwap(data, 20, 2.0) or {}
+                vwap = (vwap_d.get("vwap") or [None])[-1]
+                ema20 = (ie.calculate_ema(closes, 20) or [None])[-1]
+                ema50 = (ie.calculate_ema(closes, 50) or [None])[-1]
+                # VWAP
+                if vwap and spot > vwap:
+                    checks.append({"label": f"{sym} above VWAP", "ok": True})
+                    conf += 25
+                else:
+                    checks.append({"label": f"{sym} below VWAP", "ok": False})
+                # EMA
+                if ema20 and ema50 and ema20 > ema50:
+                    checks.append({"label": "EMA20 > EMA50", "ok": True})
+                    conf += 25
+                else:
+                    checks.append({"label": "EMA20 > EMA50", "ok": False})
+                # ADX via supertrend direction as proxy (strong trend if price far from ST)
+                try:
+                    st = ie.calculate_supertrend(data, 10, 3.0) or []
+                    stv = st[-1] if st else 0
+                    adx_strong = abs(spot - stv) / spot > 0.02 if spot and stv else False
+                    checks.append({"label": "ADX strong", "ok": bool(adx_strong)})
+                    if adx_strong:
+                        conf += 25
+                except Exception:
+                    checks.append({"label": "ADX strong", "ok": False})
+                # Breadth proxy: last 5 closes up vs down
+                try:
+                    ups = sum(1 for i in range(max(0, len(closes)-5), len(closes)-1) if closes[i+1] > closes[i])
+                    breadth = ups >= 3
+                    checks.append({"label": "Breadth positive", "ok": breadth})
+                    if breadth:
+                        conf += 25
+                except Exception:
+                    checks.append({"label": "Breadth positive", "ok": False})
+                oks = sum(1 for c in checks if c["ok"])
+                if oks >= 3:
+                    regime = "TRENDING BULLISH"
+                elif oks == 2:
+                    regime = "MILDLY BULLISH"
+                elif oks == 1:
+                    regime = "WEAK BEARISH"
+                else:
+                    regime = "TRENDING BEARISH"
+                conf = min(95, max(35, conf))
+            else:
+                checks = [{"label": "Insufficient data", "ok": False}]
+                conf = 40
+        except Exception:
+            checks = [{"label": "Data unavailable", "ok": False}]
+            conf = 40
+        # Resistance hint: nearest 2% above
+        resist = ""
+        try:
+            if spot > 0:
+                resist = f"Resistance near {round(spot*1.02):,}"
+        except Exception:
+            pass
+        # Option sentiment: PCR from OI
+        pcr = 0
+        put_oi = call_oi = 0
+        put_w = call_w = "—"
+        overall = "NEUTRAL"
+        overall_conf = 50
+        try:
+            from core.models.database import Database as _DB2
+            db2 = _DB2.get_instance()
+            row = db2.fetch_one("SELECT MAX(trade_date) d FROM bhavcopy_data WHERE symbol=? AND option_type IN ('CE','PE')", [sym])
+            dmax = row["d"] if row and row["d"] else ""
+            if dmax:
+                exp_row = db2.fetch_one("SELECT expiry_date e FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND option_type IN ('CE','PE') GROUP BY expiry_date ORDER BY COUNT(*) DESC LIMIT 1", [sym, dmax])
+                exp = exp_row["e"] if exp_row and exp_row["e"] else ""
+                if exp:
+                    rows = db2.fetch_all("SELECT option_type, SUM(oi) s FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND expiry_date=? GROUP BY option_type", [sym, dmax, exp])
+                    for r2 in rows:
+                        if r2["option_type"] == "PE":
+                            put_oi = int(r2["s"] or 0)
+                        elif r2["option_type"] == "CE":
+                            call_oi = int(r2["s"] or 0)
+                    if call_oi > 0:
+                        pcr = round(put_oi / call_oi, 2)
+                    # Writing strength: OI dominance
+                    if pcr > 1.2:
+                        put_w, call_w, overall, overall_conf = "🟢 Strong", "🟡 Moderate", "BULLISH", 76
+                    elif pcr < 0.8:
+                        put_w, call_w, overall, overall_conf = "🟡 Moderate", "🟢 Strong", "BEARISH", 70
+                    else:
+                        put_w, call_w, overall, overall_conf = "🟡 Moderate", "🟡 Moderate", "NEUTRAL", 55
+        except Exception:
+            pass
+        return {
+            "symbol": sym, "spot": spot,
+            "regime": {"label": regime, "confidence": conf, "checks": checks, "resistance": resist},
+            "sentiment": {"pcr": pcr, "put_oi": put_oi, "call_oi": call_oi,
+                          "put_writing": put_w, "call_writing": call_w,
+                          "overall": overall, "confidence": overall_conf},
+        }
+    except Exception as e:
+        return {"symbol": sym, "error": str(e)[:200]}
+
+
 @router.get("/stats")
 def get_stats():
     trade_model = TradeModel()
