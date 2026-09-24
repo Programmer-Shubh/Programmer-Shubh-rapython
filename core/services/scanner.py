@@ -395,7 +395,7 @@ class OptionScanner:
         pe_sell = []
         for s in base:
             score = s.get('score',0)
-            if score < min_score:
+            if score < 25:
                 continue
             # Bearish signals can also be CE Sell (resistance)
             if s.get('direction')=='bearish':
