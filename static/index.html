@@ -2146,11 +2146,17 @@ def run(data):
             _tvChart=LightweightCharts.createChart(el,{width:el.clientWidth||800,height:520,layout:{background:{color:'#fff'},textColor:'#212529'},grid:{vertLines:{color:'#eee'},horzLines:{color:'#eee'}},timeScale:{timeVisible:false}});
             _tvCandle=_tvChart.addCandlestickSeries({upColor:'#198754',downColor:'#dc3545',wickUpColor:'#198754',wickDownColor:'#dc3545'});
             _tvCandle.setData(r.candles);
-            _tvST=_tvChart.addLineSeries({color:'#ff9800',lineWidth:3,title:'SuperTrend'});if(document.getElementById('tv-st').checked)_tvST.setData(r.series.supertrend||[]);else _tvST.setData([]);
+            // SuperTrend green (bullish) / red (bearish) — split series so color per segment
+            let _tvSTBull=null,_tvSTBear=null;
+            try{
+                _tvSTBull=_tvChart.addLineSeries({color:'#198754',lineWidth:3,title:'ST Bull'});_tvSTBear=_tvChart.addLineSeries({color:'#dc3545',lineWidth:3,title:'ST Bear'});
+                if(document.getElementById('tv-st').checked){_tvSTBull.setData(r.series.supertrend_bull||[]);_tvSTBear.setData(r.series.supertrend_bear||[]);}else{_tvSTBull.setData([]);_tvSTBear.setData([]);}
+                _tvST=_tvSTBull;
+            }catch(e){_tvST=_tvChart.addLineSeries({color:'#ff9800',lineWidth:3,title:'SuperTrend'});if(document.getElementById('tv-st').checked)_tvST.setData(r.series.supertrend||[]);else _tvST.setData([]);}
             _tvEF=_tvChart.addLineSeries({color:'#2962ff',lineWidth:1,title:'EMAfast'});_tvEF.setData(document.getElementById('tv-ema').checked?(r.series.ema_fast||[]):[]);
             _tvES=_tvChart.addLineSeries({color:'#6f42c1',lineWidth:1,title:'EMAslow'});if(document.getElementById('tv-ema').checked)_tvES.setData(r.series.ema_slow||[]);else _tvES.setData([]);
             const marks=(document.getElementById('tv-marks').checked)?(r.markers||[]):[];
-            try{_tvCandle.setMarkers(marks);}catch(me){}
+            try{_tvCandle.setMarkers(marks);}catch(me){try{_tvCandle.setMarkers([]);}catch(_){}}
             _tvChart.timeScale().fitContent();
             document.getElementById('tv-info').textContent=sym+' | '+r.candles.length+' candles | '+marks.length+' trade markers (paper+live entries/exits) | ST('+r.params.st_period+','+r.params.st_mult+') EMA('+r.params.ema_fast+'/'+r.params.ema_slow+')';
             if(_tvTimer)clearInterval(_tvTimer);

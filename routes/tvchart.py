@@ -61,9 +61,21 @@ def chart_data(symbol: str = "NIFTY", start: str = "2026-08-01", end: str = "202
             es = ind.calculate_ema(closes, int(ema_slow)) or []
         except Exception:
             es = []
+        # Build SuperTrend color per candle: green when price above ST (bullish), red below
+        st_series = []
+        for i, c in enumerate(candles):
+            if i < len(st) and st[i]:
+                sv = round(st[i], 2)
+                bullish = c["close"] > sv
+                st_series.append({"time": c["time"], "value": sv, "bullish": bullish})
+        # Split into green/red segments for TradingView (single series can't color per point)
+        st_bull = [{"time": p["time"], "value": p["value"]} for p in st_series if p["bullish"]]
+        st_bear = [{"time": p["time"], "value": p["value"]} for p in st_series if not p["bullish"]]
         series = {
             "supertrend": [{"time": c["time"], "value": round(st[i], 2)} for i, c in enumerate(candles)
                            if i < len(st) and st[i]],
+            "supertrend_bull": st_bull,
+            "supertrend_bear": st_bear,
             "ema_fast": [{"time": c["time"], "value": round(ef[i], 2)} for i, c in enumerate(candles)
                          if i < len(ef) and ef[i]],
             "ema_slow": [{"time": c["time"], "value": round(es[i], 2)} for i, c in enumerate(candles)
