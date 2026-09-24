@@ -1739,7 +1739,7 @@ let _lastOpenTrdHTML = null;
                         document.getElementById('status').innerHTML='<span class="live-dot"></span> Live Streaming';
                         // Real-time open position P&L sync via WS (1s throttle) - fixes price streaming lag
                         if(!window._lastPnLWS) window._lastPnLWS=0;
-                        if(Date.now()-window._lastPnLWS>1000){
+                        if(Date.now()-window._lastPnLWS>700){
                             window._lastPnLWS=Date.now();
                             try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); }catch(e){}
                         }
@@ -1763,8 +1763,8 @@ let _lastOpenTrdHTML = null;
     }
     // Fallback HTTP refresh if WS not connected — 8s (was 60s lag), plus WS gives <50ms ticks when live
     setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },15000);
-    // Open positions: 2s streaming (was 10s lag) — real-time P&L sync without UI delay
-    setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 5000);
+    // Open positions: 1.5s streaming — live rate turant (user: live rate delay)
+    setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 1500);
     // chain auto-refresh removed — manual Load only (no flicker)
     // Auto-load saved robots on robot page visit
     document.querySelector('.nav button[onclick*=\"robot\"]')?.addEventListener('click', ()=> setTimeout(loadRobotSaved, 300));
