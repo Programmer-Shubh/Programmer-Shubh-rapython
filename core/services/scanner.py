@@ -361,10 +361,33 @@ class OptionScanner:
             min_score = int(min_score)
         except Exception:
             min_score = 80
-        # Best-available base (min 25 floor); show top honest scores per part
-        # (don't re-filter to 80+ here — that made dashboard empty; header
-        # 80+ is a goal, not a hard gate — real 85/96 scores still sort top)
-        base = self.get_top_opportunities(symbols=symbols, top_n=top_n*4, min_score=25)
+        # SuperTrend + MACD crossover strategy, Score 70+ preferred (user request)
+        # Try 70+ first; if market gives none, show best available (honest score)
+        # so dashboard never goes blank — 70+ badge sorts on top.
+        try:
+            _req70 = int(min_score) if int(min_score) >= 70 else 70
+        except Exception:
+            _req70 = 70
+        st = self.scan(symbols=symbols, min_score=_req70)
+        base = []
+        for _s in st.get('bullish', []):
+            _s = dict(_s); _s['signal_type'] = 'BUY CE'; _s['direction'] = 'bullish'; base.append(_s)
+        for _s in st.get('bearish', []):
+            _s = dict(_s); _s['signal_type'] = 'BUY PE'; _s['direction'] = 'bearish'; base.append(_s)
+        if len(base) < top_n:
+            # Fallback: best available (<70) so dashboard never empty
+            st2 = self.scan(symbols=symbols, min_score=25)
+            seen = {x.get('symbol') for x in base}
+            for _s in (st2.get('bullish', []) + st2.get('bearish', [])):
+                if _s.get('symbol') in seen:
+                    continue
+                _s = dict(_s)
+                _s['signal_type'] = 'BUY CE' if _s.get('type') == 'BUY' else 'BUY PE'
+                _s['direction'] = 'bullish' if _s['signal_type'] == 'BUY CE' else 'bearish'
+                base.append(_s)
+            base.sort(key=lambda x: x.get('score', 0), reverse=True)
+        else:
+            base.sort(key=lambda x: x.get('score', 0), reverse=True)
         ce_buy = [s for s in base if s.get('signal_type')=='BUY CE'][:top_n]
         pe_buy = [s for s in base if s.get('signal_type')=='BUY PE'][:top_n]
         # Derive Sell legs by swapping option type but keeping direction/score (premium decay capture)
@@ -372,7 +395,7 @@ class OptionScanner:
         pe_sell = []
         for s in base:
             score = s.get('score',0)
-            if score < 25:
+            if score < min_score:
                 continue
             # Bearish signals can also be CE Sell (resistance)
             if s.get('direction')=='bearish':
