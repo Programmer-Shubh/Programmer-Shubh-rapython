@@ -294,7 +294,8 @@ def place_trade(req: TradeRequest):
         if premium <= 0:
             live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type)
             premium = live_premium if live_premium and live_premium > 0 else 0
-        # If still no premium, instant model premium via cached spot (no Google 8s scrape - fixes order lag)
+        # If still no premium, instant model premium via LIVE spot (same as
+        # chain's model_rows - live first, then DB - so entry == chain)
         if premium <= 0:
             try:
                 _spot_g = live.get_spot_price(req.symbol) or 0
@@ -302,6 +303,12 @@ def place_trade(req: TradeRequest):
                     try:
                         _ls = live.get_live_spot(req.symbol)
                         _spot_g = float(_ls["spot"]) if _ls and _ls.get("spot") else 0
+                    except: pass
+                # Fallback to DB spot only if live unavailable (same order as chain)
+                if _spot_g <= 0:
+                    try:
+                        _dr = bhav.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [req.symbol])
+                        _spot_g = float(_dr["close_price"]) if _dr and _dr["close_price"] else 0
                     except: pass
                 if _spot_g > 0 and req.strike > 0:
                     try:
