@@ -880,8 +880,11 @@ class OptionScanner:
                 row = None
         
         premium = float(row['close_price']) if row and row['close_price'] else None
-        expiry = row['expiry_date'] if row and row.get('expiry_date') else ''
-        
+        # Always use weekly expiry for dashboard (chain's weekly premium ~471,
+        # not far 2027-03-30 which inflates to 3362). Keeps suggestion == entry.
+        import datetime as _dt2
+        weekly_exp = (_dt2.datetime.now() + _dt2.timedelta(days=7)).strftime("%Y-%m-%d")
+        expiry = weekly_exp
         # Mirror order entry exactly: DB premium below 10 for an ATM strike is
         # treated as stale -> shared unified model (IV 25%, floor 1.5).
         # Same model as entry and open-position LTP, so the shown rate is the
@@ -894,9 +897,6 @@ class OptionScanner:
                 premium = 0
             if not premium or premium <= 0:
                 premium = 0
-            if not expiry:
-                import datetime as _dt
-                expiry = (_dt.datetime.now() + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
         
         # Strict ATM±3 clamp - only 2-3 strikes up/down suggested, deep
         # ITM/OTM never suggested from ANY scanner

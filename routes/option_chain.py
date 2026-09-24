@@ -313,8 +313,19 @@ def place_trade(req: TradeRequest):
                 if _spot_g > 0 and req.strike > 0:
                     try:
                         expiry_days = 7
-                        if req.expiry and "monthly" in req.expiry.lower():
-                            expiry_days = 28
+                        # Far expiry (2027-03-30) from stale suggestion would inflate
+                        # premium to 3362 vs chain 471 — force weekly for paper
+                        try:
+                            if req.expiry and "-" in str(req.expiry):
+                                import datetime as _ed
+                                ed = _ed.datetime.strptime(str(req.expiry)[:10], "%Y-%m-%d")
+                                diff = (ed - _ed.datetime.now()).days
+                                if diff > 30:
+                                    expiry_days = 7
+                                elif "monthly" in str(req.expiry).lower():
+                                    expiry_days = 28
+                        except Exception:
+                            pass
                         premium = model_premium(_spot_g, req.strike, expiry_days, req.option_type, symbol=req.symbol)
                     except Exception:
                         premium = max(round(_spot_g * 0.015, 2), 1.5)
