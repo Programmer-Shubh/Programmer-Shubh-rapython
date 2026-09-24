@@ -48,6 +48,22 @@ _STOOQ_MAP = {
 
 _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
+_YAHOO_SESS = None
+
+
+def _yahoo_session():
+    """Shared keep-alive session: a fresh TLS handshake per quote (~1s+) made
+    batch warms crawl. Reuse cuts per-call to ~0.3s."""
+    global _YAHOO_SESS
+    try:
+        if _YAHOO_SESS is None:
+            import requests as _rq
+            _YAHOO_SESS = _rq.Session()
+            _YAHOO_SESS.headers.update(_UA)
+        return _YAHOO_SESS
+    except Exception:
+        return None
+
 
 def _db_prev_close(symbol: str) -> float:
     """Previous DB close for change% calc (free, local)."""
@@ -64,14 +80,18 @@ def _db_prev_close(symbol: str) -> float:
     return 0
 
 
-def _yahoo_fallback_quote(symbol: str) -> dict:
+def _yahoo_fallback_quote(symbol: str, timeout: float = 5) -> dict:
     """Private Yahoo v8 fallback - last resort only (NSE blocked on cloud, Stooq JS-blocked).
     Returns source='live' so frontend never shows 'yahoo'. yfinance lib NOT used."""
     try:
         ysym = _YAHOO_MAP.get(symbol.upper(), f"{symbol}.NS" if "." not in symbol and not symbol.startswith("^") else symbol)
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=1d&range=5d"
-        r = requests.get(url, headers=_UA, timeout=5)
-        if r.status_code == 200:
+        _sess = _yahoo_session()
+        try:
+            r = _sess.get(url, timeout=timeout) if _sess is not None else requests.get(url, headers=_UA, timeout=timeout)
+        except Exception:
+            r = None
+        if r is not None and r.status_code == 200:
             j = r.json()
             res = (j.get("chart", {}).get("result") or [{}])[0]
             meta = res.get("meta", {})

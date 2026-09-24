@@ -835,7 +835,7 @@
                 const ivTxt=s.indicators?`RSI ${s.indicators.rsi||'-'} | VWAP ${s.indicators.vwap||'-'}`:'';
                 const volTxt=s.reasons? s.reasons.slice(0,2).join(' \u2022 '):'';
                 const btns=stratBtns({symbol:s.symbol, direction:s.direction, signal_type:s.signal_type, option_suggestion:opt});
-                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol} <small class="text-muted">\u20B9${(s.price||0).toFixed(0)}</small></span><span class="d-flex gap-1 align-items-center"><span class="badge ${badgeCls}">Score ${score}</span>${btns}</span></div><div class="meta">${s.signal_type} ${opt.strike||''} | Prem \u20B9${(opt.premium||0).toFixed(2)} | ${ivTxt}</div><div class="meta" style="font-size:10px">${volTxt}</div><div style="margin-top:4px">${R(s.reasons||[])}</div></div>`;
+                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol} <small class="text-muted">\u20B9${(s.price||0).toFixed(0)}</small></span><span class="d-flex gap-1 align-items-center"><span class="badge ${badgeCls}">Score ${score}</span>${s.primary?'<span class="badge bg-warning text-dark">Primary</span>':''}${s.ai?'<span class="badge bg-info">AI</span>':''}${btns}</span></div><div class="meta">${s.signal_type} ${opt.strike||''} | Prem \u20B9${(opt.premium||0).toFixed(2)} | ${ivTxt}</div><div class="meta" style="font-size:10px">${volTxt}</div><div style="margin-top:4px">${R((s.reasons||[]).slice(2))}</div></div>`;
             });
             h+='</div>';
             el.innerHTML=h;

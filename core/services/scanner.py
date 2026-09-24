@@ -42,7 +42,7 @@ class OptionScanner:
 
             def _one(sym):
                 try:
-                    q = _yahoo_fallback_quote(sym)
+                    q = _yahoo_fallback_quote(sym, timeout=2)
                     if q and float(q.get("spot") or 0) > 0:
                         spot = float(q["spot"])
                         chg = float(q.get("change") or 0)
@@ -64,8 +64,27 @@ class OptionScanner:
                 return False
 
             try:
-                with _TPE(max_workers=10) as _ex:
-                    list(_ex.map(_one, missing[:52]))
+                import time as _tw
+                from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed as _ac
+                _deadline = _tw.time() + 10  # hard budget: warm never stalls a scan
+                _ex = _TPE(max_workers=8)
+                try:
+                    _futs = { _ex.submit(_one, _s): _s for _s in missing[:52] }
+                    try:
+                        for _f in _ac(_futs, timeout=10):
+                            try:
+                                _f.result()
+                            except Exception:
+                                pass
+                            if _tw.time() >= _deadline:
+                                break
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        _ex.shutdown(wait=False, cancel_futures=True)
+                    except Exception:
+                        pass
             except Exception:
                 pass
         except Exception:
@@ -301,8 +320,12 @@ class OptionScanner:
             if vw <= 0:
                 return True, ""
             o = float(data[i].get("open_price", 0) or 0)
+            po = float(data[i - 1].get("open_price", 0) or 0) if i > 0 else 0
+            pc = closes[i - 1] if i > 0 else price
             green = price > o
             red = price < o
+            prev_green = pc > po
+            prev_red = pc < po
             vsma = sum(vols[max(0, i - 20):i]) / max(1, min(20, i))
             vol_ok = vols[i] > vsma if vsma > 0 else False
             if kind == "CE_BUY":
@@ -318,11 +341,11 @@ class OptionScanner:
                     return True, "VWAP breakdown + RSI<50"
                 return False, "VWAP breakdown nahi"
             if kind == "CE_SELL":
-                if up2 > 0 and price >= up2 and rsi > 70 and red:
+                if up2 > 0 and price >= up2 and rsi > 70 and red and prev_green:
                     return True, "overbought + red reversal (tight SL)"
                 return False, "resistance + red reversal nahi"
             if kind == "PE_SELL":
-                if lo2 > 0 and price <= lo2 and rsi < 30 and green and vol_ok:
+                if lo2 > 0 and price <= lo2 and rsi < 30 and green and prev_red and vol_ok:
                     return True, "oversold + green reversal + volume"
                 return False, "support reversal confirm nahi"
         except Exception:
@@ -331,40 +354,35 @@ class OptionScanner:
 
     def get_4_part_opportunities(self, symbols=None, min_score: int = 80, top_n: int = 5) -> dict:
         """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell.
-        VWAP scores realistically top out 30-60, so hard-80 base = always empty.
-        Fix: fetch best-available (min 25) then split; 80+ badge shown when achieved."""
+        Scores are HONEST (sum of satisfied conditions, never inflated).
+        Each part keeps only real min_score+ setups; empty part shows the
+        honest empty message on UI."""
         try:
             min_score = int(min_score)
         except Exception:
             min_score = 80
-        # Use 25 floor to get best signals, then boost to 80+ for dashboard label (never blank)
+        # Best-available base (min 25 floor); honesty filter applied per part below
         base = self.get_top_opportunities(symbols=symbols, top_n=top_n*4, min_score=25)
-        # Scale 32-70 -> 81-95 so "Score 80+ only" header matches; keep rank order, add variance
-        for _s in base:
-            try:
-                _raw = int(_s.get('score',0) or 0)
-                if _raw < 80:
-                    _s['score'] = min(96, 80 + int((_raw - 25) * 0.45) + (_s['symbol'].__hash__() % 3))
-                if _s['score'] < 81: _s['score'] = 81 + (_s['symbol'].__hash__() % 5)
-            except: pass
-        ce_buy = [s for s in base if s.get('signal_type')=='BUY CE'][:top_n]
-        pe_buy = [s for s in base if s.get('signal_type')=='BUY PE'][:top_n]
+        ce_buy = [s for s in base if s.get('signal_type')=='BUY CE' and int(s.get('score', 0) or 0) >= min_score][:top_n]
+        pe_buy = [s for s in base if s.get('signal_type')=='BUY PE' and int(s.get('score', 0) or 0) >= min_score][:top_n]
         # Derive Sell legs by swapping option type but keeping direction/score (premium decay capture)
         ce_sell = []
         pe_sell = []
         for s in base:
             score = s.get('score',0)
-            if score < 25:
+            if score < min_score:
                 continue
             # Bearish signals can also be CE Sell (resistance)
             if s.get('direction')=='bearish':
                 ns=dict(s); ns['signal_type']='SELL CE'; ns['direction']='bearish'; ns['transaction_type']='SELL'
+                ns['reasons']=list(s.get('reasons') or [])
                 ns['option_suggestion']=self._suggest_option(s['symbol'], s['price'], 'CE')
                 if ns['option_suggestion'].get('strike'):
                     ce_sell.append(ns)
             # Bullish signals can be PE Sell (support)
             if s.get('direction')=='bullish':
                 ns=dict(s); ns['signal_type']='SELL PE'; ns['direction']='bullish'; ns['transaction_type']='SELL'
+                ns['reasons']=list(s.get('reasons') or [])
                 ns['option_suggestion']=self._suggest_option(s['symbol'], s['price'], 'PE')
                 if ns['option_suggestion'].get('strike'):
                     pe_sell.append(ns)
@@ -410,6 +428,31 @@ class OptionScanner:
                 _passed = [x for x in _items if x.get("ai")]
                 if _passed:
                     _parts[_pk][:] = sorted(_passed, key=lambda x: x.get("score", 0), reverse=True)[:top_n]
+        except Exception:
+            pass
+        # Primary setup per symbol: highest (ai, combo, score) across the 4
+        # parts. Same underlying never auto-fires duplicates — UI/API consumer
+        # executes only the primary (others stay visible for choice).
+        try:
+            _best = {}
+            for _pk, _items in _parts.items():
+                for _x in _items:
+                    _k = _x.get("symbol", "")
+                    _key = (1 if _x.get("ai") else 0, 1 if _x.get("combo") else 0, int(_x.get("score", 0) or 0))
+                    if _k and (_k not in _best or _key > _best[_k][0]):
+                        _best[_k] = (_key, _x)
+            _primaries = {id(_v[1]) for _v in _best.values()}
+            for _items in _parts.values():
+                for _x in _items:
+                    _x["primary"] = id(_x) in _primaries
+                    # Displayed price always equals the spot its strike was built
+                    # from (backend/UI sync — no more 4311 vs 1300 mismatch)
+                    try:
+                        _osp = float((_x.get("option_suggestion") or {}).get("spot") or 0)
+                        if _osp > 0:
+                            _x["price"] = _osp
+                    except Exception:
+                        pass
         except Exception:
             pass
         return {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell, "min_score": min_score}
@@ -739,7 +782,7 @@ class OptionScanner:
         except Exception:
             pass
         if spot <= 0:
-            return {'strike': 0, 'premium': 0, 'expiry': ''}
+            return {'strike': 0, 'premium': 0, 'expiry': '', 'spot': 0}
         # Freshness validation: reject stale spot (>3% away from DB latest
         # close). A stale spot (wrong index feed, old cache) produced far
         # ITM/OTM strikes like NIFTY 20700 / MIDCPNIFTY 17850.
@@ -757,7 +800,7 @@ class OptionScanner:
             except Exception:
                 pass
         if spot <= 0:
-            return {'strike': 0, 'premium': 0, 'expiry': ''}
+            return {'strike': 0, 'premium': 0, 'expiry': '', 'spot': 0}
         
         step = self._get_step(symbol)
         # Calculate ATM strike (nearest step)
@@ -838,7 +881,7 @@ class OptionScanner:
         if strike > 0 and abs(strike - spot) / spot > 0.04:
             strike = atm_strike
         
-        return {'strike': strike, 'premium': premium, 'expiry': expiry}
+        return {'strike': strike, 'premium': premium, 'expiry': expiry, 'spot': spot}
 
     def _row_live_spot(self, symbol: str, fallback: float):
         """Live spot for scanner ROWS (CACHE-ONLY, no network - serial live x50 hung scanner).
@@ -944,13 +987,14 @@ class OptionScanner:
                     'date': _row_date, 'live': _row_live, 'reasons': sell_reasons, 'indicators': indicators,
                     'option_suggestion': opt}
         # Bearish/Bullish fallback using real RSI vs 50 so both sides populate
+        # (honest score, never inflated — dashboard filters min_score+ itself)
         if buy_score > sell_score and buy_score > 0:
             opt = self._suggest_option(symbol, spot, 'CE')
-            return {'symbol': symbol, 'type': 'BUY', 'score': max(30, buy_score), 'price': spot,
+            return {'symbol': symbol, 'type': 'BUY', 'score': buy_score, 'price': spot,
                     'date': _row_date, 'live': _row_live, 'reasons': buy_reasons or ['Uptrend bias'], 'indicators': indicators, 'option_suggestion': opt}
         if sell_score > 0:
             opt = self._suggest_option(symbol, spot, 'PE')
-            return {'symbol': symbol, 'type': 'SELL', 'score': max(30, sell_score), 'price': spot,
+            return {'symbol': symbol, 'type': 'SELL', 'score': sell_score, 'price': spot,
                     'date': _row_date, 'live': _row_live, 'reasons': sell_reasons or ['Downtrend bias'], 'indicators': indicators, 'option_suggestion': opt}
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': _row_date if data else '', 'live': _row_live, 'reasons': [], 'indicators': indicators}
@@ -1049,13 +1093,13 @@ class OptionScanner:
             return {'symbol': symbol, 'type': 'SHORT', 'score': short_score, 'price': spot,
                     'date': _row_date, 'live': _row_live, 'reasons': short_reasons, 'indicators': indicators,
                     'option_suggestion': opt}
-        # Fallback so scanner always shows trades realtime (like Top5)
+        # Fallback so scanner always shows trades realtime (honest score kept)
         if long_score > short_score and long_score > 0:
             opt=self._suggest_option(symbol, spot, 'CE')
-            return {'symbol': symbol, 'type': 'LONG', 'score': max(32,long_score), 'price': spot,'date': _row_date if data else '', 'live': _row_live, 'reasons': long_reasons or ['Uptrend bias'], 'indicators': indicators,'option_suggestion': opt}
+            return {'symbol': symbol, 'type': 'LONG', 'score': long_score, 'price': spot,'date': _row_date if data else '', 'live': _row_live, 'reasons': long_reasons or ['Uptrend bias'], 'indicators': indicators,'option_suggestion': opt}
         if short_score > 0:
             opt=self._suggest_option(symbol, spot, 'PE')
-            return {'symbol': symbol, 'type': 'SHORT', 'score': max(32,short_score), 'price': spot,'date': _row_date if data else '', 'live': _row_live, 'reasons': short_reasons or ['Downtrend bias'], 'indicators': indicators,'option_suggestion': opt}
+            return {'symbol': symbol, 'type': 'SHORT', 'score': short_score, 'price': spot,'date': _row_date if data else '', 'live': _row_live, 'reasons': short_reasons or ['Downtrend bias'], 'indicators': indicators,'option_suggestion': opt}
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': _row_date if data else '', 'live': _row_live, 'reasons': [], 'indicators': indicators}
 
