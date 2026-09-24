@@ -278,15 +278,16 @@ def opportunities_4part(min_score: int = 80):
             _th.Thread(target=_bg, daemon=True).start()
         except: pass
         return cached_val
-    # Cache miss -> return dummy instantly (<10ms), trigger real scan in bg
-    dummy = _dummy_4part(min_score)
-    _cache_set(k,dummy)
+    # Cache miss -> compute real scan instantly (no dummy) — user wants
+    # SuperTrend+MACD real conditions, not Instant view. 8-10s first load
+    # is okay; next loads are cached (<10ms).
     try:
-        def _bg2():
-            try:
-                s = OptionScanner()
-                _cache_set(k, s.get_4_part_opportunities(min_score=min_score))
-            except: pass
-        _th.Thread(target=_bg2, daemon=True).start()
-    except: pass
-    return dummy
+        s = OptionScanner()
+        real = s.get_4_part_opportunities(min_score=min_score)
+        _cache_set(k, real)
+        return real
+    except Exception as e:
+        # Fallback to dummy only if real fails
+        dummy = _dummy_4part(min_score)
+        _cache_set(k, dummy)
+        return dummy
