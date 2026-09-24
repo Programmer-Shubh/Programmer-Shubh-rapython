@@ -450,17 +450,17 @@ class Database:
 
     def _migrate(self):
         if self._is_postgres():
-            # Postgres: check information_schema
+            # Postgres: check information_schema — normalize to lowercase (PG returns lowercase)
             try:
                 rows = self.fetch_all("SELECT column_name FROM information_schema.columns WHERE table_name='strategies'")
-                cols = {r["column_name"] for r in rows}
+                cols = {str(r["column_name"]).lower() for r in rows}
                 if "status" not in cols:
                     self.execute("ALTER TABLE strategies ADD COLUMN status TEXT DEFAULT 'active'")
             except Exception:
                 pass
             try:
                 rows = self.fetch_all("SELECT column_name FROM information_schema.columns WHERE table_name='paper_trades'")
-                cols = {r["column_name"] for r in rows}
+                cols = {str(r["column_name"]).lower() for r in rows}
                 if "entry_iv" not in cols:
                     self.execute("ALTER TABLE paper_trades ADD COLUMN entry_iv DOUBLE PRECISION DEFAULT NULL")
                 if "trade_type" not in cols:

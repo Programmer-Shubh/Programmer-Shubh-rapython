@@ -224,7 +224,8 @@ def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict
     gross_win = sum(p for p in pnls if p > 0)
     gross_loss = abs(sum(p for p in pnls if p <= 0))
     max_win = round(max(pnls), 2) if pnls else 0.0
-    max_loss = round(min(pnls), 2) if pnls else 0.0
+    _neg = [p for p in pnls if p < 0]
+    max_loss = round(min(_neg), 2) if _neg else 0.0
     # Streaks + drawdown on exit-date order
     ws = ls = mws = mls = 0
     peak = cap = 0.0

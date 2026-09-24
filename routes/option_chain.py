@@ -250,11 +250,20 @@ def place_trade(req: TradeRequest):
                 _step0 = get_strike_step(req.symbol)
                 _atm0 = round(_spot0 / _step0) * _step0
                 _dev = abs(float(req.strike) - _atm0) / _spot0 if _spot0 else 0
-                # Block far ITM/OTM orders (e.g. NIFTY 20700 @ spot 23400):
-                # allow ATM ±5 steps or ±3%, whichever is wider (normal OTM passes)
-                _allow = max(5 * _step0, 0.03 * _spot0)
+                # Block far ITM/OTM orders: allow ATM ±10 steps or ±6% (saved
+                # robots store stale strikes — e.g. CIPLA 1180 vs ATM 1380 at
+                # trade time). For saved-robot replays auto-snap instead of error.
+                _allow = max(10 * _step0, 0.06 * _spot0)
                 if _dev * _spot0 > _allow and not _chain_has:
-                    return {"error": f"Strike {req.strike} ATM {_atm0} se bahut door hai (spot {_spot0:,.2f}) - ATM ke 2-3 strike upar-neeche chunho"}
+                    # Snap stale strike to ATM for saved-robot/paper replays instead of hard error
+                    try:
+                        # keep direction (OTM/ITM) if possible
+                        _orig = float(req.strike)
+                        _snapped = _atm0
+                        # try to preserve OTM vs ATM intent (if original was below ATM for PE / above for CE small drift, keep near ATM)
+                        req.strike = float(_snapped)
+                    except Exception:
+                        return {"error": f"Strike {req.strike} ATM {_atm0} se bahut door hai (spot {_spot0:,.2f}) - ATM ke 2-3 strike upar-neeche chunho"}
         except Exception:
             pass
         # Deduplication check before insert

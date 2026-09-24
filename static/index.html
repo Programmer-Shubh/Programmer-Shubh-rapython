@@ -1363,7 +1363,7 @@ let _lastOpenTrdHTML = null;
         const rm=_parseJsonField(s.risk_management,{});const sl=rm.daily_stop_loss||1500,tp=rm.daily_take_profit||3000;
         let autoDir=null;
         if(legs.some(l=>String(l.option_type||'').toUpperCase()==='AUTO')){try{const sig=await A('/api/scanner/st-macd/'+s.symbol);autoDir=(sig&&sig.type==='SELL')?'PE':'CE';}catch(e){autoDir='CE';}}
-        const step=(s.symbol==='BANKNIFTY'?100:50);
+        const step=(s.symbol==='BANKNIFTY'?100:s.symbol==='FINNIFTY'?50:s.symbol==='MIDCPNIFTY'?25:20);
         const today=new Date().toISOString().split('T')[0];
         const placed=[];
         for(const leg of legs){
