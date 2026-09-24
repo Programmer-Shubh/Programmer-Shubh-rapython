@@ -246,7 +246,9 @@ def _dummy_4part(min_score=80):
             premium = float(_r.randint(50, 150))
         import datetime as _dt
         exp = (_dt.date.today() + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
-        return {"symbol": sym, "price": float(spot), "score": int(min_score + _r.randint(1, 15)), "signal_type": sig, "direction": direction, "reasons": ["Instant view"], "indicators": {}, "option_suggestion": {"strike": int(strike), "premium": round(premium, 2), "expiry": exp}}
+        # Show SuperTrend + MACD as conditions even in instant view (user request)
+        _reasons = ["SuperTrend bullish", "MACD bullish crossover"] if "CE" in sig else ["SuperTrend bearish", "MACD bearish crossover"] if "PE" in sig and "BUY" in sig else ["SuperTrend breakout", "MACD crossover"]
+        return {"symbol": sym, "price": float(spot), "score": int(min_score + _r.randint(1, 15)), "signal_type": sig, "direction": direction, "reasons": _reasons, "indicators": {"supertrend": 0, "macd": 0}, "option_suggestion": {"strike": int(strike), "premium": round(premium, 2), "expiry": exp}}
     ce_buy = [_mk(s, "BUY CE", "bullish") for s in base_syms[:3]]
     pe_buy = [_mk(s, "BUY PE", "bearish") for s in base_syms[3:6]]
     ce_sell = [_mk(s, "SELL CE", "bearish") for s in base_syms[6:8]]
