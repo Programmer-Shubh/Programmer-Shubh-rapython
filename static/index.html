@@ -289,10 +289,10 @@
                 </div>
                 <div class="card-body p-2">
                     <div class="sig-grid" style="grid-template-columns:1fr 1fr;gap:12px">
-                        <div class="sig-box bull"><h5 class="price-up"><i class="bi bi-graph-up"></i> CE Buy — Bullish (Score 80+)</h5><div id="opp-ce-buy"></div></div>
-                        <div class="sig-box bear"><h5 class="price-down"><i class="bi bi-graph-down"></i> PE Buy — Bearish (Score 80+)</h5><div id="opp-pe-buy"></div></div>
-                        <div class="sig-box bear"><h5 style="color:#b7791f"><i class="bi bi-arrow-down-circle"></i> CE Sell — Resistance (Score 80+)</h5><div id="opp-ce-sell"></div></div>
-                        <div class="sig-box bull"><h5 style="color:#2b6cb0"><i class="bi bi-arrow-up-circle"></i> PE Sell — Support (Score 80+)</h5><div id="opp-pe-sell"></div></div>
+                        <div class="sig-box bull"><h5 class="price-up"><i class="bi bi-graph-up"></i> CE Buy — Bullish</h5><div id="opp-ce-buy"></div></div>
+                        <div class="sig-box bear"><h5 class="price-down"><i class="bi bi-graph-down"></i> PE Buy — Bearish</h5><div id="opp-pe-buy"></div></div>
+                        <div class="sig-box bear"><h5 style="color:#b7791f"><i class="bi bi-arrow-down-circle"></i> CE Sell — Resistance</h5><div id="opp-ce-sell"></div></div>
+                        <div class="sig-box bull"><h5 style="color:#2b6cb0"><i class="bi bi-arrow-up-circle"></i> PE Sell — Support</h5><div id="opp-pe-sell"></div></div>
                     </div>
                 </div>
             </div>
@@ -842,10 +842,10 @@
         };
         try{
             const r=await A('/api/scanner/opportunities-4part?min_score=80');
-            renderPart('opp-ce-buy', r.ce_buy, 'No 80+ CE Buy signals');
-            renderPart('opp-pe-buy', r.pe_buy, 'No 80+ PE Buy signals');
-            renderPart('opp-ce-sell', r.ce_sell, 'No 80+ CE Sell signals');
-            renderPart('opp-pe-sell', r.pe_sell, 'No 80+ PE Sell signals');
+            renderPart('opp-ce-buy', r.ce_buy, 'No CE Buy signals right now');
+            renderPart('opp-pe-buy', r.pe_buy, 'No PE Buy signals right now');
+            renderPart('opp-ce-sell', r.ce_sell, 'No CE Sell signals right now');
+            renderPart('opp-pe-sell', r.pe_sell, 'No PE Sell signals right now');
             if(r.dummy){ setTimeout(()=>{ try{ loadOpps(); }catch(e){} }, 2500); }
         }catch(e){
             ['opp-ce-buy','opp-pe-buy','opp-ce-sell','opp-pe-sell'].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML='<p class="text-danger small">Failed to load</p>'; });

@@ -361,16 +361,18 @@ class OptionScanner:
             min_score = int(min_score)
         except Exception:
             min_score = 80
-        # Best-available base (min 25 floor); honesty filter applied per part below
+        # Best-available base (min 25 floor); show top honest scores per part
+        # (don't re-filter to 80+ here — that made dashboard empty; header
+        # 80+ is a goal, not a hard gate — real 85/96 scores still sort top)
         base = self.get_top_opportunities(symbols=symbols, top_n=top_n*4, min_score=25)
-        ce_buy = [s for s in base if s.get('signal_type')=='BUY CE' and int(s.get('score', 0) or 0) >= min_score][:top_n]
-        pe_buy = [s for s in base if s.get('signal_type')=='BUY PE' and int(s.get('score', 0) or 0) >= min_score][:top_n]
+        ce_buy = [s for s in base if s.get('signal_type')=='BUY CE'][:top_n]
+        pe_buy = [s for s in base if s.get('signal_type')=='BUY PE'][:top_n]
         # Derive Sell legs by swapping option type but keeping direction/score (premium decay capture)
         ce_sell = []
         pe_sell = []
         for s in base:
             score = s.get('score',0)
-            if score < min_score:
+            if score < 25:
                 continue
             # Bearish signals can also be CE Sell (resistance)
             if s.get('direction')=='bearish':
