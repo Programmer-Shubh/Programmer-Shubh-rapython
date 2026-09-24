@@ -932,7 +932,7 @@
                     const sideBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
                     h+=`<tr><td>${t.id}</td><td class="text-muted small">${t.entry_time||''}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${strike}</td><td>${t.expiry_date||'-'}</td><td>${qty}</td><td>${lot}</td><td>₹${ep.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>₹${t.sl||1500}</td><td>₹${t.tp||3000}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-info" onclick="openTradeTV('${t.symbol}')">Chart</button> <button class="btn btn-sm btn-outline-secondary" onclick="editTradeSLTP(${t.id},${t.sl||1500},${t.tp||3000})">SL/TP</button> <button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-warning" onclick="closeTrade(${t.id},${curPrice})">Exit</button></td></tr>`;
                 });
-                h+='</table>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
+                h+='</table><div class="small text-muted mt-1">Live • '+new Date().toLocaleTimeString('en-IN')+' • auto-refresh 1.5s</div>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
             }else{
                 // Keep last HTML if we had trades before, avoid flicker to "No positions" on transient error
                 if(_lastDashPosHTML && document.getElementById('dash-pos').innerHTML.includes('<table>')){
