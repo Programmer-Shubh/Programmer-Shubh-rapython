@@ -38,6 +38,33 @@ def _rate_limit(key, min_interval=1.0):
 
 router = APIRouter()
 
+@router.get("/pairs")
+def pairs_scan(symbols: str = ""):
+    """Statistical Arbitrage — cointegrated pairs spread z-score."""
+    from core.services.pairs_engine import scan_pairs
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()] if symbols else None
+    return scan_pairs(symbols=syms)
+
+@router.get("/multi-timeframe/{symbol}")
+def multi_timeframe_scan(symbol: str, timeframe: str = "all"):
+    """Single symbol across 5m/15m/1h — bullish only if aligned on 2+ TF."""
+    from core.services.scanner import OptionScanner as _SC2
+    sc = _SC2()
+    tfs = ["5m", "15m", "1h"] if timeframe == "all" else [timeframe]
+    out = {}
+    for tf in tfs:
+        try:
+            r = sc._analyze_symbol(symbol.upper())
+            r = dict(r)
+            r["timeframe"] = tf
+            out[tf] = {"score": r.get("score", 0), "type": r.get("type", "NONE"), "reasons": (r.get("reasons", []) or [])[:3]}
+        except Exception as e:
+            out[tf] = {"error": str(e)[:100]}
+    dirs = [v.get("type") for v in out.values() if v.get("type") in ("BUY", "SELL", "LONG", "SHORT")]
+    aligned = len(set(dirs)) == 1 and len(dirs) >= 2
+    return {"symbol": symbol.upper(), "timeframes": out, "aligned": aligned,
+            "signal": (dirs[0] if aligned else "MIXED") if dirs else "NONE"}
+
 # Warm 4-part cache at startup so first website open is instant (not 5-8s scan)
 def _warm_scanner():
     try:

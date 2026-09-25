@@ -278,6 +278,10 @@
                 <div class="col-6"><div class="card h-100" style="border-left:4px solid #198754"><div class="card-body p-3"><div class="small text-muted">MARKET REGIME</div><h5 id="regime-label" class="fw-bold mb-1">—</h5><div class="small"><span id="regime-conf"></span> <span id="regime-resist" class="text-muted"></span></div><div id="regime-checks" class="mt-2 small"></div></div></div></div>
                 <div class="col-6"><div class="card h-100" style="border-left:4px solid #0d6efd"><div class="card-body p-3"><div class="small text-muted">OPTION SENTIMENT</div><div class="d-flex gap-3 flex-wrap"><div><div class="small text-muted">PCR</div><strong id="sent-pcr">—</strong></div><div><div class="small text-muted">Put OI</div><strong id="sent-put">—</strong></div><div><div class="small text-muted">Call OI</div><strong id="sent-call">—</strong></div></div><div class="small mt-2">Put Writing: <span id="sent-pw">—</span> • Call Writing: <span id="sent-cw">—</span></div><div class="mt-2"><span id="sent-overall" class="badge bg-secondary">—</span> <small id="sent-conf" class="text-muted"></small></div></div></div></div>
             </div>
+            <div class="row g-2 mb-2">
+                <div class="col-6"><div class="card h-100"><div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small">Pairs Arbitrage (Stat Arb)</strong><button class="btn btn-sm btn-outline-primary" onclick="loadPairs()">Refresh</button></div><div class="card-body p-2 small" id="pairs-box"><span class="text-muted">Loading...</span></div></div></div>
+                <div class="col-6"><div class="card h-100"><div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small">Multi-Timeframe (5m/15m/1h)</strong><select id="mtf-sym" class="form-select form-select-sm" style="width:120px" onchange="loadMTF()"></select><button class="btn btn-sm btn-outline-primary" onclick="loadMTF()">Check</button></div><div class="card-body p-2 small" id="mtf-box"><span class="text-muted">Select symbol</span></div></div></div>
+            </div>
             <div class="row" id="mkt-cards"></div>
             <div class="card">
                 <div class="card-header">Today — NSE Future & Option Top 5 Bullish & Bearish <small class="text-muted" id="fno-date"></small> <button class="btn btn-sm btn-outline-primary" onclick="loadFnoTop5()"><i class="bi bi-arrow-clockwise"></i></button></div>
@@ -361,8 +365,10 @@
                 <div class="card-body">
                     <div class="row g-2">
                         <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 5)</label><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><label><input type="checkbox" value="NIFTY" checked> NIFTY</label><label><input type="checkbox" value="BANKNIFTY"> BANKNIFTY</label><label><input type="checkbox" value="FINNIFTY"> FINNIFTY</label><label><input type="checkbox" value="MIDCPNIFTY"> MIDCPNIFTY</label><label><input type="checkbox" value="SENSEX"> SENSEX</label><label><input type="checkbox" value="BANKEX"> BANKEX</label><label><input type="checkbox" value="RELIANCE"> RELIANCE</label><label><input type="checkbox" value="HDFCBANK"> HDFCBANK</label><label><input type="checkbox" value="ICICIBANK"> ICICIBANK</label><label><input type="checkbox" value="TCS"> TCS</label><label><input type="checkbox" value="INFY"> INFY</label></div></div>
-                        <!-- Order / Strike / OTM Dist / Lots hidden per user request — replaced by Strategy Templates below -->
-                        <input type="hidden" id="r-order" value="CE-BUY"><input type="hidden" id="r-strike" value="ATM"><input type="hidden" id="r-otm" value="1"><input type="hidden" id="r-lots" value="1">
+                        <div class="col-md-2"><label class="form-label small">Order</label><select id="r-order" class="form-select form-select-sm"><option value="CE-BUY" selected>CE Buy</option><option value="PE-BUY">PE Buy</option><option value="CE-SELL">CE Sell</option><option value="PE-SELL">PE Sell</option><option value="AUTO">AUTO</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Strike</label><select id="r-strike" class="form-select form-select-sm"><option value="ATM" selected>ATM</option><option value="OTM">OTM</option><option value="ITM">ITM</option></select></div>
+                        <div class="col-md-1"><label class="form-label small">OTM</label><input type="number" id="r-otm" class="form-control form-control-sm" value="1" min="1" max="6"></div>
+                        <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="r-lots" class="form-control form-control-sm" value="1" min="1" max="10"></div>
                     </div>
                     </div>
                     <div class="slab-sec"><div class="slab-sec-title">Schedule & Risk</div>
@@ -854,12 +860,43 @@
             if(!sel.value) sel.value='NIFTY';
         }catch(e){}
     }
+    async function loadMTFSyms(){
+        try{
+            const r=await A('/api/chain/symbols');
+            const sel=document.getElementById('mtf-sym');if(!sel) return;
+            const cur=sel.value||'NIFTY';
+            const syms=(r.symbols||['NIFTY','BANKNIFTY']);
+            sel.innerHTML=syms.map(s=>`<option value="${s}" ${s===cur?'selected':''}>${s}</option>`).join('');
+            if(!sel.value) sel.value='NIFTY';
+        }catch(e){}
+    }
+    async function loadPairs(){
+        try{
+            const r=await A('/api/scanner/pairs');
+            const el=document.getElementById('pairs-box');if(!el) return;
+            if(!r.pairs||!r.pairs.length){el.innerHTML='<span class="text-muted">No pairs</span>';return;}
+            let h='<table class="table table-sm mb-0"><tr><th>Pair</th><th>Corr</th><th>Z</th><th>Signal</th></tr>';
+            r.pairs.slice(0,5).forEach(p=>{const z=Number(p.zscore||0);const col=Math.abs(z)>2?'price-up':Math.abs(z)>1?'price-down':'';h+=`<tr><td>${p.pair}</td><td>${p.correlation}</td><td class="${col}">${p.zscore}</td><td class="small">${p.signal}</td></tr>`;});
+            h+='</table>';el.innerHTML=h;
+        }catch(e){try{document.getElementById('pairs-box').innerHTML='<span class="text-danger small">Failed</span>';}catch(_){}}
+    }
+    async function loadMTF(){
+        const sel=document.getElementById('mtf-sym');const sym=(sel&&sel.value)||'NIFTY';
+        try{
+            const r=await A('/api/scanner/multi-timeframe/'+sym);
+            const el=document.getElementById('mtf-box');if(!el) return;
+            let h=`<div class="small mb-1">Symbol: <strong>${r.symbol}</strong> — <span class="${r.aligned?'price-up':'price-down'}">${r.aligned?'✅ Aligned ('+r.signal+')':'⚠️ Mixed'}</span></div>`;
+            h+='<table class="table table-sm mb-0"><tr><th>TF</th><th>Score</th><th>Type</th></tr>';
+            for(const tf of ['5m','15m','1h']){const v=r.timeframes[tf]||{};h+=`<tr><td>${tf}</td><td>${v.score||0}</td><td>${v.type||'-'}</td></tr>`;}
+            h+='</table>';el.innerHTML=h;
+        }catch(e){try{document.getElementById('mtf-box').innerHTML='<span class="text-danger small">Failed</span>';}catch(_){}}
+    }
     async function loadDash(){
         // Instant cached render for refresh perception (0s)
         try{const _c=_getDashCache(); if(_c&&_c.spot){let h='';for(const [sym,d] of Object.entries(_c.spot)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; document.getElementById('status').innerHTML='<span class="live-dot"></span> Cached';}}catch(e){}
         try{const s=await A('/api/dashboard/spot');document.getElementById('status').innerHTML='<span class="live-dot"></span> Connected';let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; try{_setDashCache({spot:s});}catch(e){}}catch(e){document.getElementById('status').innerHTML='Offline';}
-        loadRegimeSyms().then(()=>loadRegime());
-        loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();
+        loadRegimeSyms().then(()=>{loadRegime();loadMTFSyms();});
+        loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();loadPairs();loadMTF();
     }
     function singleBtn(sym,action,type,strike,exp,label,cls){return `<button class="btn btn-sm ${cls}" onclick="quickStrat('${sym}','${action}','${type}',${strike},'${exp}')">${label}</button>`;}
     function stratBtns(x){const sig=(x.signal_type||x.type||'').toUpperCase();const opt=x.option_suggestion||{};const sym=x.symbol,strike=opt.strike||0,exp=opt.expiry||''; if(sig.includes('SELL')&&sig.includes('CE')) return singleBtn(sym,'SELL','CE',strike,exp,'Sell CE','btn-sell'); if(sig.includes('SELL')&&sig.includes('PE')) return singleBtn(sym,'SELL','PE',strike,exp,'Sell PE','btn-sell'); if(sig.includes('CE')) return singleBtn(sym,'BUY','CE',strike,exp,'Buy CE','btn-buy'); if(sig.includes('PE')) return singleBtn(sym,'BUY','PE',strike,exp,'Buy PE','btn-buy'); const bull=(x.direction==='bullish')||(!x.direction&&sig.includes('CE')); return bull?singleBtn(sym,'BUY','CE',strike,exp,'Buy CE','btn-buy'):singleBtn(sym,'BUY','PE',strike,exp,'Buy PE','btn-buy');}
@@ -1051,6 +1088,8 @@ let _lastOpenTrdHTML = null;
         {id:'dynamic_bollinger',name:'Bollinger Bands',params:[{key:'period',label:'Period',def:20}]},
         {id:'volume_indicator',name:'Volume SMA',params:[{key:'period',label:'Period',def:20}]},
         {id:'neural_network',name:'Neural Network',params:[{key:'period',label:'Period',def:14}]},
+        {id:'comboA_ema_st_rsi',name:'Combo A — EMA9/21 + SuperTrend + RSI (55-65 / <45)',params:[{key:'ema_fast',label:'EMA Fast',def:9},{key:'ema_slow',label:'EMA Slow',def:21},{key:'st_period',label:'ST Period',def:10},{key:'st_mult',label:'ST Mult',def:3},{key:'rsi_period',label:'RSI Period',def:14}]},
+        {id:'comboB_bb_vol',name:'Combo B — BB Squeeze + Vol 2x Breakout',params:[{key:'period',label:'Period',def:20},{key:'mult',label:'Mult',def:2}]},
     ];
     const QUANT_CANDLES=[['1','1 minute'],['3','3 minutes'],['5','5 minutes'],['15','15 minutes'],['30','30 minutes'],['45','45 minutes'],['60','1 hour']];
     let quantIndicators=[

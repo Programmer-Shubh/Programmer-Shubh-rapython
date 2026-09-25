@@ -566,3 +566,51 @@ class IndicatorEngine:
             elif closes[i] < ll:
                 sig[i] = -1
         return {"upper": upper, "lower": lower, "signal": sig}
+
+    def calculate_ema_cross(self, closes: List[float], fast: int = 9, slow: int = 21) -> Dict:
+        ef = self.calculate_ema(closes, fast) or []
+        es = self.calculate_ema(closes, slow) or []
+        n = len(closes)
+        sig = [0]*n; cross_up = [False]*n; cross_dn = [False]*n
+        for i in range(1, n):
+            efv = ef[i] if i < len(ef) else None; esv = es[i] if i < len(es) else None
+            prv_ef = ef[i-1] if i-1 < len(ef) else None; prv_es = es[i-1] if i-1 < len(es) else None
+            if efv is not None and esv is not None:
+                if efv > esv:
+                    sig[i] = 1
+                elif efv < esv:
+                    sig[i] = -1
+                if prv_ef is not None and prv_es is not None:
+                    if prv_ef <= prv_es and efv > esv:
+                        cross_up[i] = True
+                    if prv_ef >= prv_es and efv < esv:
+                        cross_dn[i] = True
+        return {"signal": sig, "cross_up": cross_up, "cross_down": cross_dn, "ema_fast": ef, "ema_slow": es}
+
+    def calculate_bollinger_squeeze(self, data: List[Dict], period: int = 20, mult: float = 2.0) -> Dict:
+        hist = [{"close_price": d.get("close_price", 0)} for d in data]
+        closes = [float(d.get("close_price", 0) or 0) for d in data]
+        vols = [float(d.get("volume", 0) or 0) for d in data]
+        n = len(data)
+        squeeze = [False]*n; vol_spike = [False]*n
+        upper = [None]*n; lower = [None]*n
+        for i in range(period, n):
+            window = closes[i-period+1:i+1]
+            mean = sum(window)/period
+            var = sum((x-mean)**2 for x in window)/period
+            sd = math.sqrt(var) if var > 0 else 0
+            up = mean + mult*sd; lo = mean - mult*sd
+            upper[i] = up; lower[i] = lo
+            width = (up - lo) / mean if mean else 1
+            # Squeeze: width in lowest 20% of last 20 widths
+            widths = []
+            for j in range(max(period, i-20), i+1):
+                w2 = closes[j-period+1:j+1]
+                m2 = sum(w2)/period; v2 = sum((x-m2)**2 for x in w2)/period; s2 = math.sqrt(v2) if v2>0 else 0
+                widths.append((2*mult*s2)/m2 if m2 else 1)
+            if widths and width <= sorted(widths)[max(0, len(widths)//5)]:
+                squeeze[i] = True
+            avg5 = sum(vols[max(0,i-5):i]) / max(1, min(5, i))
+            if vols[i] >= 2 * avg5 and avg5 > 0:
+                vol_spike[i] = True
+        return {"upper": upper, "lower": lower, "squeeze": squeeze, "vol_spike": vol_spike, "signal": [1 if squeeze[i] and vol_spike[i] and closes[i] > upper[i] else -1 if squeeze[i] and vol_spike[i] and closes[i] < lower[i] else 0 for i in range(n)]}

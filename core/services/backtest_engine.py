@@ -443,6 +443,26 @@ class BacktestEngine:
                     result["robot_conf"] = self._calc_robot_confluence(historical, closes, params)
                 except Exception:
                     result["robot_conf"] = {"buy": [], "sell": []}
+            elif iid == "ema_cross":
+                try:
+                    result["ema_cross"] = self.indicators.calculate_ema_cross(closes, int(params.get("fast", 9)), int(params.get("slow", 21)))
+                except Exception:
+                    result["ema_cross"] = {"signal": []}
+            elif iid == "bb_squeeze":
+                try:
+                    result["bb_squeeze"] = self.indicators.calculate_bollinger_squeeze(historical, int(params.get("period", 20)), float(params.get("mult", 2.0)))
+                except Exception:
+                    result["bb_squeeze"] = {"signal": []}
+            elif iid == "comboA_ema_st_rsi":
+                try:
+                    result["comboA"] = self._calc_comboA_ema_st_rsi(historical, closes, highs, lows, params)
+                except Exception:
+                    result["comboA"] = {"buy": [], "sell": []}
+            elif iid == "comboB_bb_vol":
+                try:
+                    result["comboB"] = self._calc_comboB_bb_vol(historical, closes, highs, lows, params)
+                except Exception:
+                    result["comboB"] = {"buy": [], "sell": []}
             elif iid == "opp_combo":
                 # Dashboard Opportunity Combo: SuperTrend + MACD + EMA + Volume
                 # scoring (same rules as scanner opportunity), min_score gate.
@@ -506,6 +526,59 @@ class BacktestEngine:
                     sell[i] = ss >= ms
                 except Exception:
                     continue
+        except Exception:
+            pass
+        return {"buy": buy, "sell": sell}
+
+    def _calc_comboA_ema_st_rsi(self, historical, closes, highs, lows, params):
+        """Combo A: EMA9/21 + SuperTrend + RSI Momentum (user spec).
+        CE Buy: close > 9EMA & 21EMA, 9 crossed above 21, ST Green, RSI 55-65.
+        PE Buy: close < 9EMA & 21EMA, 9 crossed below 21, ST Red, RSI <45."""
+        ef = int(params.get("ema_fast", 9) or 9); es = int(params.get("ema_slow", 21) or 21)
+        sp = int(params.get("st_period", 10) or 10); sm = float(params.get("st_mult", 3.0) or 3.0)
+        rp = int(params.get("rsi_period", 14) or 14)
+        n = len(closes)
+        buy = [False]*n; sell = [False]*n
+        try:
+            ema_f = self.indicators.calculate_ema(closes, ef) or []
+            ema_s = self.indicators.calculate_ema(closes, es) or []
+            st = self.indicators.calculate_supertrend(historical, sp, sm) or []
+            rsi = self.indicators.calculate_rsi(closes, rp) or []
+            for i in range(max(ef, es, sp, rp)+1, n):
+                c = closes[i]; efv = ema_f[i] if i < len(ema_f) else None; esv = ema_s[i] if i < len(ema_s) else None
+                stv = st[i] if i < len(st) else None; rsi_v = rsi[i] if i < len(rsi) else None
+                if efv is None or esv is None or stv is None or rsi_v is None:
+                    continue
+                prev_ef = ema_f[i-1] if i-1 < len(ema_f) else None; prev_es = ema_s[i-1] if i-1 < len(ema_s) else None
+                cross_up = prev_ef is not None and prev_es is not None and prev_ef <= prev_es and efv > esv
+                cross_dn = prev_ef is not None and prev_es is not None and prev_ef >= prev_es and efv < esv
+                st_green = c > stv; st_red = c < stv
+                if c > efv and c > esv and cross_up and st_green and 55 <= rsi_v <= 65:
+                    buy[i] = True
+                if c < efv and c < esv and cross_dn and st_red and rsi_v < 45:
+                    sell[i] = True
+        except Exception:
+            pass
+        return {"buy": buy, "sell": sell}
+
+    def _calc_comboB_bb_vol(self, historical, closes, highs, lows, params):
+        """Combo B: Bollinger Squeeze + Volume Spike breakout."""
+        per = int(params.get("period", 20) or 20); mult = float(params.get("mult", 2.0) or 2.0)
+        n = len(closes)
+        buy = [False]*n; sell = [False]*n
+        try:
+            bb = self.indicators.calculate_bollinger_squeeze(historical, per, mult) or {}
+            vols = [float(d.get("volume", 0) or 0) for d in historical]
+            up = bb.get("upper", []) or []; lo = bb.get("lower", []) or []
+            sq = bb.get("squeeze", []) or []; vs = bb.get("vol_spike", []) or []
+            for i in range(per+1, n):
+                if not sq[i] or not vs[i]:
+                    continue
+                c = closes[i]
+                if c > (up[i] or 0) and up[i]:
+                    buy[i] = True
+                if c < (lo[i] or 0) and lo[i]:
+                    sell[i] = True
         except Exception:
             pass
         return {"buy": buy, "sell": sell}
@@ -625,6 +698,27 @@ class BacktestEngine:
         modes = getattr(self, "ind_modes", {})
         if not pre_calc:
             return True
+        # New combo gates (standalone, before generic score)
+        if "ema_cross" in pre_calc:
+            ec = pre_calc["ema_cross"]
+            if modes.get("ema_cross","both") != "bearish" and effective_idx < len(ec.get("cross_up", [])) and ec["cross_up"][effective_idx]:
+                # Also need SuperTrend green + RSI 55-65 (combo A CE Buy)
+                # but _get_buy_signal is generic BUY; combo signal already validated in pairs
+                # Here just gate EMA cross; SuperTrend/RSI checked via their own ids if selected
+                return True
+            # For PE Buy (sell side) the cross_down will be handled in _get_sell_signal
+        if "bb_squeeze" in pre_calc:
+            bs = pre_calc["bb_squeeze"]
+            if modes.get("bb_squeeze","both") != "bearish" and effective_idx < len(bs.get("signal", [])) and bs["signal"][effective_idx] == 1:
+                return True
+        if "comboA" in pre_calc:
+            ca = pre_calc["comboA"]
+            if modes.get("comboA_ema_st_rsi","both") != "bearish" and effective_idx < len(ca.get("buy", [])) and ca["buy"][effective_idx]:
+                return True
+        if "comboB" in pre_calc:
+            cb = pre_calc["comboB"]
+            if modes.get("comboB_bb_vol","both") != "bearish" and effective_idx < len(cb.get("buy", [])) and cb["buy"][effective_idx]:
+                return True
         # Dashboard Opportunity Combo: standalone gate (its own min_score)
         if "opp_combo" in pre_calc:
             oc = pre_calc["opp_combo"]
@@ -774,6 +868,22 @@ class BacktestEngine:
 
         # PRIORITY 2: Selected indicator-based signals - composite Score >=80
         modes = getattr(self, "ind_modes", {})
+        if "ema_cross" in pre_calc:
+            ec = pre_calc["ema_cross"]
+            if modes.get("ema_cross","both") != "bullish" and effective_idx < len(ec.get("cross_down", [])) and ec["cross_down"][effective_idx]:
+                return True
+        if "bb_squeeze" in pre_calc:
+            bs = pre_calc["bb_squeeze"]
+            if modes.get("bb_squeeze","both") != "bullish" and effective_idx < len(bs.get("signal", [])) and bs["signal"][effective_idx] == -1:
+                return True
+        if "comboA" in pre_calc:
+            ca = pre_calc["comboA"]
+            if modes.get("comboA_ema_st_rsi","both") != "bullish" and effective_idx < len(ca.get("sell", [])) and ca["sell"][effective_idx]:
+                return True
+        if "comboB" in pre_calc:
+            cb = pre_calc["comboB"]
+            if modes.get("comboB_bb_vol","both") != "bullish" and effective_idx < len(cb.get("sell", [])) and cb["sell"][effective_idx]:
+                return True
         # Dashboard Opportunity Combo: standalone gate (its own min_score)
         if "opp_combo" in pre_calc:
             oc = pre_calc["opp_combo"]
