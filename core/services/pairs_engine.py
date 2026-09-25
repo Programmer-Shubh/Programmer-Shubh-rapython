@@ -86,23 +86,44 @@ def scan_pairs(symbols=None, pairs=None) -> Dict:
             ha = sc._get_historical(a)
             hb = sc._get_historical(b)
             r = analyze_pair(ha, hb, a, b)
-            # Live price diff (cross-market arb check)
+            # Cross-market: NSE vs BSE price diff (same symbol, two exchanges)
+            # For pairs, keep inter-symbol diff too — show both
             try:
+                # NSE/BSE for symbol A (cross-market arb)
+                import requests as _rq2
+                from core.services.free_data import _YAHOO_MAP
+                def _bse(sym):
+                    try:
+                        yb = f"{sym}.BO"
+                        # Yahoo BSE via same helper with .BO
+                        from core.services.free_data import _yahoo_fallback_quote
+                        q = _yahoo_fallback_quote(yb, timeout=2)
+                        return float((q or {}).get("spot") or 0)
+                    except Exception:
+                        return 0
                 pa = float((live.get_live_spot(a) or {}).get("spot") or 0)
                 pb = float((live.get_live_spot(b) or {}).get("spot") or 0)
+                # Fallback DB
                 if not pa:
                     ra = sc.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [a])
                     pa = float(ra["close_price"]) if ra and ra["close_price"] else 0
                 if not pb:
                     rb = sc.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [b])
                     pb = float(rb["close_price"]) if rb and rb["close_price"] else 0
+                # NSE vs BSE for first symbol of pair (true cross-market)
+                nse_a = pa
+                bse_a = _bse(a)
                 r["price_a"] = round(pa, 2); r["price_b"] = round(pb, 2)
+                r["nse_price"] = round(nse_a, 2) if nse_a else round(pa, 2)
+                r["bse_price"] = round(bse_a, 2) if bse_a else 0
+                r["nse_bse_diff"] = round(nse_a - bse_a, 2) if nse_a and bse_a else 0
+                r["nse_bse_pct"] = round((nse_a - bse_a)/bse_a*100, 2) if nse_a and bse_a and bse_a else 0
                 r["price_diff"] = round(pa - pb, 2) if pa and pb else 0
                 r["price_diff_pct"] = round((pa - pb)/pb*100, 2) if pa and pb and pb else 0
-                # Arb opportunity: Z>1.5 + price diff >1% + high corr
-                r["arb"] = bool(abs(r.get("zscore",0))>1.5 and abs(r["price_diff_pct"])>1.0 and r.get("correlation",0)>0.6)
+                r["arb"] = bool(abs(r.get("zscore",0))>1.5 and (abs(r["price_diff_pct"])>1.0 or abs(r["nse_bse_pct"])>0.5) and r.get("correlation",0)>0.5)
             except Exception:
-                r["price_a"] = 0; r["price_b"] = 0; r["price_diff"] = 0; r["price_diff_pct"] = 0; r["arb"] = False
+                r["price_a"] = 0; r["price_b"] = 0; r["price_diff"] = 0; r["price_diff_pct"] = 0
+                r["nse_price"] = 0; r["bse_price"] = 0; r["nse_bse_diff"] = 0; r["nse_bse_pct"] = 0; r["arb"] = False
             results.append(r)
         except Exception as e:
             results.append({"pair": f"{a}/{b}", "error": str(e)[:100]})

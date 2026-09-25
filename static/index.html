@@ -360,8 +360,9 @@
                     </div>
                 </div>
             </div>
-<div class="card mb-3 slab-card">
-                <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols</small></div>
+ <div class="card mb-3 slab-card" style="border:2px solid #0d6efd">
+                <div class="card-header bg-primary text-white"><span class="slab-num" style="background:#fff;color:#0d6efd">1</span><i class="bi bi-robot"></i> Call/Put Robot — Buy/Sell kisi bhi Symbol par <small class="text-white-50">CE Buy / PE Buy / CE Sell / PE Sell</small></div>
+                <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols + Order</small></div>
                 <div class="card-body">
                     <div class="row g-2">
                         <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 5)</label><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><label><input type="checkbox" value="NIFTY" checked> NIFTY</label><label><input type="checkbox" value="BANKNIFTY"> BANKNIFTY</label><label><input type="checkbox" value="FINNIFTY"> FINNIFTY</label><label><input type="checkbox" value="MIDCPNIFTY"> MIDCPNIFTY</label><label><input type="checkbox" value="SENSEX"> SENSEX</label><label><input type="checkbox" value="BANKEX"> BANKEX</label><label><input type="checkbox" value="RELIANCE"> RELIANCE</label><label><input type="checkbox" value="HDFCBANK"> HDFCBANK</label><label><input type="checkbox" value="ICICIBANK"> ICICIBANK</label><label><input type="checkbox" value="TCS"> TCS</label><label><input type="checkbox" value="INFY"> INFY</label></div></div>
@@ -877,12 +878,12 @@
             const r=await A('/api/scanner/pairs');
             const el=document.getElementById('pairs-box');if(!el) return;
             if(!r.pairs||!r.pairs.length){el.innerHTML='<span class="text-muted">No pairs</span>';return;}
-            let h='<table class="table table-sm mb-0"><tr><th>Pair</th><th>Price Diff</th><th>Corr</th><th>Z</th><th>Signal</th><th>Action</th></tr>';
+            let h='<table class="table table-sm mb-0"><tr><th>Pair</th><th>NSE</th><th>BSE</th><th>Diff</th><th>Corr</th><th>Z</th><th>Signal</th><th>Action</th></tr>';
             r.pairs.slice(0,5).forEach(p=>{
                 const z=Number(p.zscore||0);const col=Math.abs(z)>2?'price-up':Math.abs(z)>1?'price-down':'';
                 const arb=p.arb?'<span class="badge bg-warning text-dark">ARB</span>':'';
-                const diff=p.price_diff!=null?`${p.price_a?.toFixed(0)}/${p.price_b?.toFixed(0)} <span class="${p.price_diff>=0?'price-up':'price-down'}">${p.price_diff>0?'+':''}${p.price_diff} (${p.price_diff_pct}%)</span>`:'—';
-                // Buttons: if signal is SHORT A / LONG B, offer both legs
+                const nse=p.nse_price||p.price_a||0, bse=p.bse_price||0;
+                const diff=p.nse_bse_diff!=null&&bse?`${nse.toFixed(0)}/${bse.toFixed(0)} <span class="${p.nse_bse_diff>=0?'price-up':'price-down'}">${p.nse_bse_diff>0?'+':''}${p.nse_bse_diff} (${p.nse_bse_pct}%)</span>`:(p.price_diff!=null?`${p.price_a?.toFixed(0)}/${p.price_b?.toFixed(0)} <span class="${p.price_diff>=0?'price-up':'price-down'}">${p.price_diff>0?'+':''}${p.price_diff} (${p.price_diff_pct}%)</span>`:'—');
                 let btns='';
                 if(p.signal&&p.signal!=='HOLD'&&!p.signal.includes('HOLD')){
                     const m=p.signal.match(/(SHORT|LONG)\s+(\w+)\s*\/\s*(SHORT|LONG)\s+(\w+)/);
@@ -890,12 +891,21 @@
                     else if(p.signal.includes('SHORT')){const sym=p.pair.split('/')[0];btns=`<button class="btn btn-sm btn-danger py-0" onclick="quickStrat('${sym}','SELL','CE',0,'')">Short ${sym}</button>`;}
                     else if(p.signal.includes('LONG')){const sym=p.pair.split('/')[0];btns=`<button class="btn btn-sm btn-success py-0" onclick="quickStrat('${sym}','BUY','CE',0,'')">Long ${sym}</button>`;}
                 } else {
-                    // Even on HOLD, allow paper test of both legs
                     const [a,b]=p.pair.split('/');btns=`<button class="btn btn-sm btn-outline-primary py-0" onclick="quickStrat('${a}','BUY','CE',0,'')">Paper ${a}</button> <button class="btn btn-sm btn-outline-primary py-0" onclick="quickStrat('${b}','BUY','CE',0,'')">Paper ${b}</button>`;
                 }
-                h+=`<tr><td>${p.pair} ${arb}</td><td class="small">${diff}</td><td>${p.correlation}</td><td class="${col}">${p.zscore}</td><td class="small">${p.signal}</td><td style="white-space:nowrap">${btns}</td></tr>`;
+                h+=`<tr><td>${p.pair} ${arb}</td><td>${nse?`₹${nse.toFixed(0)}`:'—'}</td><td>${bse?`₹${bse.toFixed(0)}`:'—'}</td><td class="small">${diff}</td><td>${p.correlation}</td><td class="${col}">${p.zscore}</td><td class="small">${p.signal}</td><td style="white-space:nowrap">${btns}</td></tr>`;
             });
-            h+='</table>';el.innerHTML=h;
+            h+='</table>';
+            // Payoff diagram for top ARB pair spread
+            try{
+                const top=r.pairs[0];
+                if(top&&top.arb){
+                    const spA=top.nse_price||top.price_a||100, spB=top.bse_price||top.price_b||top.nse_price||100;
+                    const diff=top.nse_bse_diff||top.price_diff||0;
+                    h+=`<div class="mt-2 p-2" style="background:#f8f9fa;border-radius:6px"><div class="small fw-bold">Payoff — ${top.pair} Spread (ARB)</div><div class="small text-muted">NSE ₹${spA} vs BSE ₹${spB} → Diff ₹${diff} (${top.nse_bse_pct||top.price_diff_pct}%) | Z ${top.zscore} | ${top.signal}</div><div class="small">Long low / Short high — profit if spread reverts to 0</div></div>`;
+                }
+            }catch(e){}
+            el.innerHTML=h;
         }catch(e){try{document.getElementById('pairs-box').innerHTML='<span class="text-danger small">Failed</span>';}catch(_){}}
     }
     async function loadMTF(){
