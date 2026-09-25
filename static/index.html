@@ -848,6 +848,8 @@
             const ocIcon=oc.includes('BULLISH')?'🟢':oc.includes('BEARISH')?'🔴':'🟡';
             document.getElementById('sent-overall').textContent=ocIcon+' '+ (st.overall||'—');
             document.getElementById('sent-conf').textContent=st.confidence?`Confidence: ${st.confidence}%`:'';
+            const vd=r.verdict||{};let ve=document.getElementById('verdict-bar');if(!ve){ve=document.createElement('div');ve.id='verdict-bar';ve.className='small mt-2 p-2 rounded';document.getElementById('regime-row').insertAdjacentHTML('afterend',`<div id="verdict-bar" class="small mt-2 p-2 rounded"></div>`);ve=document.getElementById('verdict-bar');}
+            if(vd.text){ve.textContent=vd.text;ve.style.background=vd.color+'15';ve.style.borderLeft='4px solid '+vd.color;ve.style.color=vd.color;ve.style.display='block';}else if(ve){ve.style.display='none';}
         }catch(e){ /* keep — */ }
     }
     async function loadRegimeSyms(){

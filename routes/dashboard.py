@@ -275,6 +275,9 @@ def market_regime(symbol: str):
                     regime = "WEAK BEARISH"
                 else:
                     regime = "TRENDING BEARISH"
+                # Low confidence (50%) = mixed signals, not strong trend — downgrade
+                if conf == 50:
+                    regime = "SIDEWAYS / MIXED"
                 conf = min(95, max(35, conf))
             else:
                 checks = [{"label": "Insufficient data", "ok": False}]
@@ -321,12 +324,37 @@ def market_regime(symbol: str):
                         put_w, call_w, overall, overall_conf = "🟡 Moderate", "🟡 Moderate", "NEUTRAL", 55
         except Exception:
             pass
+        # Combined verdict to resolve bullish vs bearish confusion
+        verdict = ""
+        verdict_color = "#6c757d"
+        try:
+            is_reg_bull = "BULLISH" in regime
+            is_sent_bull = overall == "BULLISH"
+            is_sent_bear = overall == "BEARISH"
+            if conf <= 50 and overall == "NEUTRAL":
+                verdict = "⚠️ Mixed / Sideways — dono weak, wait karo"
+                verdict_color = "#856404"
+            elif is_reg_bull and is_sent_bull:
+                verdict = "✅ Confirmed Bullish — trend + OI both bullish"
+                verdict_color = "#198754"
+            elif not is_reg_bull and is_sent_bear:
+                verdict = "🔴 Confirmed Bearish — trend + OI both bearish"
+                verdict_color = "#dc3545"
+            elif is_reg_bull and is_sent_bear:
+                verdict = "⚠️ Mixed — price mildly bullish par OI bearish, caution"
+                verdict_color = "#856404"
+            elif not is_reg_bull and is_sent_bull:
+                verdict = "⚠️ Mixed — price weak par OI bullish, bounce possible"
+                verdict_color = "#856404"
+        except Exception:
+            pass
         return {
             "symbol": sym, "spot": spot,
             "regime": {"label": regime, "confidence": conf, "checks": checks, "resistance": resist},
             "sentiment": {"pcr": pcr, "put_oi": put_oi, "call_oi": call_oi,
                           "put_writing": put_w, "call_writing": call_w,
                           "overall": overall, "confidence": overall_conf},
+            "verdict": {"text": verdict, "color": verdict_color},
         }
     except Exception as e:
         return {"symbol": sym, "error": str(e)[:200]}
