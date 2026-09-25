@@ -279,7 +279,7 @@
                 <div class="col-6"><div class="card h-100" style="border-left:4px solid #0d6efd"><div class="card-body p-3"><div class="small text-muted">OPTION SENTIMENT</div><div class="d-flex gap-3 flex-wrap"><div><div class="small text-muted">PCR</div><strong id="sent-pcr">—</strong></div><div><div class="small text-muted">Put OI</div><strong id="sent-put">—</strong></div><div><div class="small text-muted">Call OI</div><strong id="sent-call">—</strong></div></div><div class="small mt-2">Put Writing: <span id="sent-pw">—</span> • Call Writing: <span id="sent-cw">—</span></div><div class="mt-2"><span id="sent-overall" class="badge bg-secondary">—</span> <small id="sent-conf" class="text-muted"></small></div></div></div></div>
             </div>
             <div class="row g-2 mb-2">
-                <div class="col-6"><div class="card h-100"><div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small">Pairs Arbitrage (Stat Arb)</strong><button class="btn btn-sm btn-outline-primary" onclick="loadPairs()">Refresh</button></div><div class="card-body p-2 small" id="pairs-box"><span class="text-muted">Loading...</span></div></div></div>
+                <div class="col-6"><div class="card h-100"><div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small">Arbitrage (Stat Arb)</strong><button class="btn btn-sm btn-outline-primary" onclick="loadPairs()">Refresh</button></div><div class="card-body p-2 small" id="pairs-box"><span class="text-muted">Loading...</span></div></div></div>
                 <div class="col-6"><div class="card h-100"><div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small">Multi-Timeframe (5m/15m/1h)</strong><select id="mtf-sym" class="form-select form-select-sm" style="width:120px" onchange="loadMTF()"></select><button class="btn btn-sm btn-outline-primary" onclick="loadMTF()">Check</button></div><div class="card-body p-2 small" id="mtf-box"><span class="text-muted">Select symbol</span></div></div></div>
             </div>
             <div class="row" id="mkt-cards"></div>
@@ -876,12 +876,14 @@
             const r=await A('/api/scanner/pairs');
             const el=document.getElementById('pairs-box');if(!el) return;
             if(!r.pairs||!r.pairs.length){el.innerHTML='<span class="text-muted">No pairs</span>';return;}
-            let h='<table class="table table-sm mb-0"><tr><th>Pair</th><th>NSE</th><th>BSE</th><th>Diff</th><th>Corr</th><th>Z</th><th>Signal</th><th>Action</th></tr>';
+            let h='<table class="table table-sm mb-0"><tr><th>Stock</th><th>NSE</th><th>BSE</th><th>Diff</th><th>Corr</th><th>Z</th><th>Signal</th><th>Arbitrage</th></tr>';
             r.pairs.slice(0,5).forEach(p=>{
                 const z=Number(p.zscore||0);const col=Math.abs(z)>2?'price-up':Math.abs(z)>1?'price-down':'';
                 const arb=p.arb?'<span class="badge bg-warning text-dark">ARB</span>':'';
+                // Single name: first symbol of pair (e.g. HDFCBANK) — show NSE/BSE for that stock
+                const stock=(p.pair||'').split('/')[0]||p.pair;
                 const nse=p.nse_price||p.price_a||0, bse=p.bse_price||0;
-                const diff=p.nse_bse_diff!=null&&bse?`${nse.toFixed(0)}/${bse.toFixed(0)} <span class="${p.nse_bse_diff>=0?'price-up':'price-down'}">${p.nse_bse_diff>0?'+':''}${p.nse_bse_diff} (${p.nse_bse_pct}%)</span>`:(p.price_diff!=null?`${p.price_a?.toFixed(0)}/${p.price_b?.toFixed(0)} <span class="${p.price_diff>=0?'price-up':'price-down'}">${p.price_diff>0?'+':''}${p.price_diff} (${p.price_diff_pct}%)</span>`:'—');
+                const diff=p.nse_bse_diff!=null&&bse?`₹${nse.toFixed(0)} / ₹${bse.toFixed(0)} <span class="${p.nse_bse_diff>=0?'price-up':'price-down'}">${p.nse_bse_diff>0?'+':''}${p.nse_bse_diff} (${p.nse_bse_pct}%)</span>`:(p.price_diff!=null?`₹${p.price_a?.toFixed(0)}/${p.price_b?.toFixed(0)} <span class="${p.price_diff>=0?'price-up':'price-down'}">${p.price_diff>0?'+':''}${p.price_diff}</span>`:'—');
                 let btns='';
                 if(p.signal&&p.signal!=='HOLD'&&!p.signal.includes('HOLD')){
                     const m=p.signal.match(/(SHORT|LONG)\s+(\w+)\s*\/\s*(SHORT|LONG)\s+(\w+)/);
@@ -891,7 +893,7 @@
                 } else {
                     const [a,b]=p.pair.split('/');btns=`<button class="btn btn-sm btn-outline-primary py-0" onclick="quickStrat('${a}','BUY','CE',0,'')">Paper ${a}</button> <button class="btn btn-sm btn-outline-primary py-0" onclick="quickStrat('${b}','BUY','CE',0,'')">Paper ${b}</button>`;
                 }
-                h+=`<tr><td>${p.pair} ${arb}</td><td>${nse?`₹${nse.toFixed(0)}`:'—'}</td><td>${bse?`₹${bse.toFixed(0)}`:'—'}</td><td class="small">${diff}</td><td>${p.correlation}</td><td class="${col}">${p.zscore}</td><td class="small">${p.signal}</td><td style="white-space:nowrap">${btns}</td></tr>`;
+                h+=`<tr><td><strong>${stock}</strong> ${arb}</td><td>${nse?`₹${nse.toFixed(0)}`:'—'}</td><td>${bse?`₹${bse.toFixed(0)}`:'—'}</td><td class="small">${diff}</td><td>${p.correlation}</td><td class="${col}">${p.zscore}</td><td class="small">${p.signal}</td><td style="white-space:nowrap">${btns}</td></tr>`;
             });
             h+='</table>';
             // Payoff diagram for top ARB pair spread
