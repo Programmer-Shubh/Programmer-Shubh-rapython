@@ -916,7 +916,7 @@
             const r=await A('/api/scanner/pairs');
             const el=document.getElementById('pairs-box');if(!el) return;
             if(!r.pairs||!r.pairs.length){el.innerHTML='<span class="text-muted">No pairs</span>';return;}
-            let h='<table class="table table-sm mb-0"><tr><th>Stock</th><th>NSE</th><th>BSE</th><th>Diff</th><th>Signal</th><th>Action</th></tr>';
+            let h='<table class="table table-sm mb-0"><tr><th>Stock</th><th>NSE</th><th>BSE</th><th>Diff</th><th>Signal</th><th>Trade</th></tr>';
             r.pairs.slice(0,5).forEach(p=>{
                 const arb=p.arb?'<span class="badge bg-warning text-dark">ARB</span>':'';
                 const stock=(p.pair||'').split('/')[0]||p.pair;
