@@ -877,8 +877,24 @@
             const r=await A('/api/scanner/pairs');
             const el=document.getElementById('pairs-box');if(!el) return;
             if(!r.pairs||!r.pairs.length){el.innerHTML='<span class="text-muted">No pairs</span>';return;}
-            let h='<table class="table table-sm mb-0"><tr><th>Pair</th><th>Corr</th><th>Z</th><th>Signal</th></tr>';
-            r.pairs.slice(0,5).forEach(p=>{const z=Number(p.zscore||0);const col=Math.abs(z)>2?'price-up':Math.abs(z)>1?'price-down':'';h+=`<tr><td>${p.pair}</td><td>${p.correlation}</td><td class="${col}">${p.zscore}</td><td class="small">${p.signal}</td></tr>`;});
+            let h='<table class="table table-sm mb-0"><tr><th>Pair</th><th>Price Diff</th><th>Corr</th><th>Z</th><th>Signal</th><th>Action</th></tr>';
+            r.pairs.slice(0,5).forEach(p=>{
+                const z=Number(p.zscore||0);const col=Math.abs(z)>2?'price-up':Math.abs(z)>1?'price-down':'';
+                const arb=p.arb?'<span class="badge bg-warning text-dark">ARB</span>':'';
+                const diff=p.price_diff!=null?`${p.price_a?.toFixed(0)}/${p.price_b?.toFixed(0)} <span class="${p.price_diff>=0?'price-up':'price-down'}">${p.price_diff>0?'+':''}${p.price_diff} (${p.price_diff_pct}%)</span>`:'—';
+                // Buttons: if signal is SHORT A / LONG B, offer both legs
+                let btns='';
+                if(p.signal&&p.signal!=='HOLD'&&!p.signal.includes('HOLD')){
+                    const m=p.signal.match(/(SHORT|LONG)\s+(\w+)\s*\/\s*(SHORT|LONG)\s+(\w+)/);
+                    if(m){btns=`<button class="btn btn-sm btn-danger py-0" onclick="quickStrat('${m[2]}','${m[1]==='SHORT'?'SELL':'BUY'}','CE',0,'')">${m[1]} ${m[2]}</button> <button class="btn btn-sm btn-success py-0" onclick="quickStrat('${m[4]}','${m[3]==='SHORT'?'SELL':'BUY'}','CE',0,'')">${m[3]} ${m[4]}</button>`;}
+                    else if(p.signal.includes('SHORT')){const sym=p.pair.split('/')[0];btns=`<button class="btn btn-sm btn-danger py-0" onclick="quickStrat('${sym}','SELL','CE',0,'')">Short ${sym}</button>`;}
+                    else if(p.signal.includes('LONG')){const sym=p.pair.split('/')[0];btns=`<button class="btn btn-sm btn-success py-0" onclick="quickStrat('${sym}','BUY','CE',0,'')">Long ${sym}</button>`;}
+                } else {
+                    // Even on HOLD, allow paper test of both legs
+                    const [a,b]=p.pair.split('/');btns=`<button class="btn btn-sm btn-outline-primary py-0" onclick="quickStrat('${a}','BUY','CE',0,'')">Paper ${a}</button> <button class="btn btn-sm btn-outline-primary py-0" onclick="quickStrat('${b}','BUY','CE',0,'')">Paper ${b}</button>`;
+                }
+                h+=`<tr><td>${p.pair} ${arb}</td><td class="small">${diff}</td><td>${p.correlation}</td><td class="${col}">${p.zscore}</td><td class="small">${p.signal}</td><td style="white-space:nowrap">${btns}</td></tr>`;
+            });
             h+='</table>';el.innerHTML=h;
         }catch(e){try{document.getElementById('pairs-box').innerHTML='<span class="text-danger small">Failed</span>';}catch(_){}}
     }

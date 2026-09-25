@@ -73,11 +73,12 @@ def analyze_pair(hist_a: List[Dict], hist_b: List[Dict], sym_a: str, sym_b: str)
 
 def scan_pairs(symbols=None, pairs=None) -> Dict:
     from core.services.scanner import OptionScanner
+    from core.services.live_market_data import LiveMarketData
     sc = OptionScanner()
+    live = LiveMarketData()
     if pairs is None:
         pairs = DEFAULT_PAIRS
     if symbols:
-        # filter pairs to requested symbols
         pairs = [p for p in pairs if p[0] in symbols or p[1] in symbols]
     results = []
     for a, b in pairs:
@@ -85,8 +86,25 @@ def scan_pairs(symbols=None, pairs=None) -> Dict:
             ha = sc._get_historical(a)
             hb = sc._get_historical(b)
             r = analyze_pair(ha, hb, a, b)
+            # Live price diff (cross-market arb check)
+            try:
+                pa = float((live.get_live_spot(a) or {}).get("spot") or 0)
+                pb = float((live.get_live_spot(b) or {}).get("spot") or 0)
+                if not pa:
+                    ra = sc.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [a])
+                    pa = float(ra["close_price"]) if ra and ra["close_price"] else 0
+                if not pb:
+                    rb = sc.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [b])
+                    pb = float(rb["close_price"]) if rb and rb["close_price"] else 0
+                r["price_a"] = round(pa, 2); r["price_b"] = round(pb, 2)
+                r["price_diff"] = round(pa - pb, 2) if pa and pb else 0
+                r["price_diff_pct"] = round((pa - pb)/pb*100, 2) if pa and pb and pb else 0
+                # Arb opportunity: Z>1.5 + price diff >1% + high corr
+                r["arb"] = bool(abs(r.get("zscore",0))>1.5 and abs(r["price_diff_pct"])>1.0 and r.get("correlation",0)>0.6)
+            except Exception:
+                r["price_a"] = 0; r["price_b"] = 0; r["price_diff"] = 0; r["price_diff_pct"] = 0; r["arb"] = False
             results.append(r)
         except Exception as e:
             results.append({"pair": f"{a}/{b}", "error": str(e)[:100]})
-    results.sort(key=lambda x: abs(x.get("zscore", 0)), reverse=True)
+    results.sort(key=lambda x: (1 if x.get("arb") else 0, abs(x.get("zscore", 0))), reverse=True)
     return {"pairs": results, "count": len(results)}
