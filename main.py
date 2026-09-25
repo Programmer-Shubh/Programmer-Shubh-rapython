@@ -39,21 +39,31 @@ async def _fno_sync_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Health must be instant — do NOT block startup with DB work.
+    # Yield immediately so /health passes, then do migrations in background.
+    yield
+    # Background post-start work (non-blocking)
     try:
-        from utils.helpers import get_lot_size
-        _db = Database.get_instance()
-        for sym in ["NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","ADANIENT","BAJFINANCE","RELIANCE","HDFCBANK","ICICIBANK","TCS","INFY","SBIN","KOTAKBANK","LT","M&M","MARUTI"]:
-            try:
-                correct = get_lot_size(sym)
-                _db.execute("UPDATE paper_trades SET lot_size=? WHERE symbol=? AND lot_size!=?", [correct, sym, correct])
-            except: pass
-    except: pass
-    try: await _start_background_refresh()
+        await _start_background_refresh()
     except: pass
     try:
         asyncio.get_running_loop().create_task(_fno_sync_loop())
     except: pass
-    yield
+    try:
+        # Lot-size backfill in background thread (16 updates, could be slow on Postgres)
+        def _lot_backfill():
+            try:
+                from utils.helpers import get_lot_size
+                _db = Database.get_instance()
+                for sym in ["NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","ADANIENT","BAJFINANCE","RELIANCE","HDFCBANK","ICICIBANK","TCS","INFY","SBIN","KOTAKBANK","LT","M&M","MARUTI"]:
+                    try:
+                        correct = get_lot_size(sym)
+                        _db.execute("UPDATE paper_trades SET lot_size=? WHERE symbol=? AND lot_size!=?", [correct, sym, correct])
+                    except: pass
+            except: pass
+        import threading as _th
+        _th.Thread(target=_lot_backfill, daemon=True).start()
+    except: pass
 
 
 app = FastAPI(title="RaTrade API", version="1.0.0", lifespan=lifespan)
