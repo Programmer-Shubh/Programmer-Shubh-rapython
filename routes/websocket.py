@@ -38,11 +38,11 @@ async def ws_live(websocket: WebSocket):
                     ticks[sym] = {"spot": spot, "change": 0, "ts": int(time.time()*1000), "source": "db" if spot > 0 else "na"}
                 if prev.get(sym) != ticks[sym].get("spot"):
                     changed = True
-            # Push on change or at least every 5s heartbeat (keeps connection alive)
-            if changed or int(time.time()) % 5 == 0:
-                await websocket.send_text(json.dumps({"type":"tick","ticks": ticks, "interval_ms": 800}))
+            # Push on change or at least every 2s heartbeat (keeps connection alive)
+            if changed or int(time.time()*10) % 20 == 0:
+                await websocket.send_text(json.dumps({"type":"tick","ticks": ticks, "interval_ms": 400}))
                 prev = {k: v.get("spot") for k,v in ticks.items()}
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.4)
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -70,7 +70,7 @@ async def ws_chain(websocket: WebSocket, symbol: str):
                     if expiries:
                         chain = bhav.get_option_chain(symbol, dates[0], expiries[0])
                         await websocket.send_text(json.dumps({"symbol": symbol, "source":"db", "rows": [{"strike": r["strike_price"], "ce_ltp": r["close_price"] if r["option_type"]=="CE" else 0, "pe_ltp": r["close_price"] if r["option_type"]=="PE" else 0} for r in chain[:20]]}))
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.6)
     except WebSocketDisconnect:
         pass
     finally:
@@ -78,4 +78,4 @@ async def ws_chain(websocket: WebSocket, symbol: str):
 
 @router.get("/stats")
 def ws_stats():
-    return {"connections": len(_connections), "interval_ms": 800, "source": "batch parallel + change-only push", "latency": "0.8s"}
+    return {"connections": len(_connections), "interval_ms": 400, "source": "batch parallel + change-only push + rAF", "latency": "0.4s"}

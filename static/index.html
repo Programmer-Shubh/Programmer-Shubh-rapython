@@ -1870,11 +1870,18 @@ let _lastOpenTrdHTML = null;
                         }
                         if(h) document.getElementById('mkt-cards').innerHTML=h;
                         document.getElementById('status').innerHTML='<span class="live-dot"></span> Live Streaming';
-                        // Real-time open position P&L sync via WS (1s throttle) - fixes price streaming lag
-                        if(!window._lastPnLWS) window._lastPnLWS=0;
-                        if(Date.now()-window._lastPnLWS>700){
-                            window._lastPnLWS=Date.now();
-                            try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); }catch(e){}
+                        // Real-time P&L sync — rAF batch: coalesce ticks, update once per frame
+                        if(!window._wsPending) window._wsPending=false;
+                        if(!window._wsRaf) window._wsRaf=null;
+                        window._wsPending=true;
+                        if(!window._wsRaf){
+                            window._wsRaf=requestAnimationFrame(()=>{
+                                window._wsRaf=null;
+                                if(window._wsPending){
+                                    window._wsPending=false;
+                                    try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); }catch(e){}
+                                }
+                            });
                         }
                     }
                 }catch(err){}
@@ -1896,8 +1903,8 @@ let _lastOpenTrdHTML = null;
     }
     // Fallback HTTP refresh if WS not connected — 8s (was 60s lag), plus WS gives <50ms ticks when live
     setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },15000);
-    // Open positions: 1.5s streaming — live rate turant (user: live rate delay)
-    setInterval(()=>{ try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); if(!document.getElementById('pg-trades').classList.contains('hidden')) loadTrades(); }catch(e){} }, 1500);
+    // No polling — WebSocket is primary (0.4s change-only). HTTP fallback only when WS dead.
+    // Polling was the main latency source (1.5s) — now updates are push-driven via rAF.
     // chain auto-refresh removed — manual Load only (no flicker)
     // Auto-load saved robots on robot page visit
     document.querySelector('.nav button[onclick*=\"robot\"]')?.addEventListener('click', ()=> setTimeout(loadRobotSaved, 300));
