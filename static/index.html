@@ -261,9 +261,9 @@
         <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Lab</button>
+        <button onclick="go('robot',this)"><i class="bi bi-cpu"></i> Call/Put Robot</button>
         <button onclick="go('tvchart',this)"><i class="bi bi-candlestick"></i> TV Chart</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
-        <button onclick="go('strategy',this)"><i class="bi bi-cpu"></i> Call/Put Robot</button>
         <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
     </div>
     <div class="wrap">
@@ -566,6 +566,36 @@
             </div>
         </div>
 
+        <!-- CALL/PUT ROBOT (separate page) -->
+        <div id="pg-robot" class="pg hidden">
+            <div class="card mb-3" style="border:2px solid #0d6efd">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center"><span><i class="bi bi-cpu"></i> Call/Put Robot — kisi bhi Symbol par Backtest / Paper / Live</span><span class="badge bg-white text-primary">PRO</span></div>
+                <div class="card-body">
+                    <div class="row g-2">
+                        <div class="col-md-4"><label class="form-label small">Symbol</label><select id="rb-sym" class="form-select form-select-sm"></select></div>
+                        <div class="col-md-2"><label class="form-label small">Order</label><select id="rb-order" class="form-select form-select-sm"><option value="CE-BUY" selected>CE Buy</option><option value="PE-BUY">PE Buy</option><option value="CE-SELL">CE Sell</option><option value="PE-SELL">PE Sell</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Strike</label><select id="rb-strike" class="form-select form-select-sm"><option value="ATM" selected>ATM</option><option value="OTM">OTM</option><option value="ITM">ITM</option></select></div>
+                        <div class="col-md-1"><label class="form-label small">OTM</label><input type="number" id="rb-otm" class="form-control form-control-sm" value="1" min="1" max="6"></div>
+                        <div class="col-md-1"><label class="form-label small">Lots</label><input type="number" id="rb-lots" class="form-control form-control-sm" value="1" min="1" max="10"></div>
+                        <div class="col-md-2"><label class="form-label small">Expiry</label><select id="rb-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-2"><label class="form-label small">Stop Loss (₹)</label><input type="number" id="rb-sl" class="form-control form-control-sm" value="1500"></div>
+                        <div class="col-md-2"><label class="form-label small">Target (₹)</label><input type="number" id="rb-tp" class="form-control form-control-sm" value="3000"></div>
+                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="rb-mtd" class="form-control form-control-sm" value="5"></div>
+                        <div class="col-md-6 d-flex gap-2 align-items-end">
+                            <button class="btn btn-success btn-sm" onclick="rbBacktest()"><i class="bi bi-play-circle"></i> Backtest</button>
+                            <button class="btn btn-primary btn-sm" onclick="rbPaper()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
+                            <button class="btn btn-danger btn-sm" onclick="rbLive()"><i class="bi bi-lightning"></i> Live Trade</button>
+                            <button class="btn btn-outline-primary btn-sm" onclick="rbSave()"><i class="bi bi-save"></i> Save Robot</button>
+                        </div>
+                    </div>
+                    <div id="rb-result" class="mt-3 small text-muted">Kisi bhi symbol + Order chun kar Backtest / Paper / Live chalao — Combo indicators (EMA+ST+RSI, BB Squeeze) Strategy Lab se aate hain.</div>
+                </div>
+            </div>
+            <div class="card mt-3"><div class="card-header py-2"><strong class="small">Saved Robots</strong></div><div class="card-body p-0" id="rb-saved"><span class="text-muted small p-2">Loading...</span></div></div>
+        </div>
+
         <!-- BROKERS -->
         <div id="pg-brokers" class="pg hidden">
             <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -765,8 +795,8 @@
     function _getDashCache(){try{const v=localStorage.getItem(_dashCacheKey); if(v){const j=JSON.parse(v); if(Date.now()-j.ts<120000) return j.data;}}catch(e){} return null;}
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
-    function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));document.getElementById('pg-'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+    function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='robot'){loadRbSyms();loadRobotSaved();}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -1538,7 +1568,13 @@ let _lastOpenTrdHTML = null;
     (function(){document.getElementById('alert-url').value=location.origin+'/api/webhook/email';})();
     function initWebhook(){ try{ loadAlerts(); }catch(e){} try{ loadAlertTrades(); }catch(e){} try{ loadRiskStatus(); }catch(e){} }
     // Robot: auto-fill dates
-    (function(){const e=new Date(); const fmt=d=>d.toISOString().split('T')[0]; try{if(document.getElementById('r-start')){document.getElementById('r-start').value='2026-08-02'; document.getElementById('r-end').value=fmt(e);}}catch(e){}})();
+    (function(){const e=new Date(); const fmt=d=>d.toISOString().split('T')[0]; try{if(document.getElementById('r-start')){document.getElementById('r-start').value='2026-08-02'; document.getElementById('r-end').value=fmt(e);} if(document.getElementById('rb-sym')){loadRbSyms();}}catch(e){}})();
+    async function loadRbSyms(){ try{const r=await A('/api/chain/symbols');const sel=document.getElementById('rb-sym');if(!sel||!r.symbols) return;const cur=sel.value;const master=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY','HDFCBANK'];let syms=[...new Set([...(r.symbols||[]),...master])].sort();sel.innerHTML=syms.map(s=>`<option value="${s}" ${s===cur?'selected':''}>${s}</option>`).join(''); if(!sel.value) sel.value='NIFTY';}catch(e){} }
+    function rbBody(){ const sym=document.getElementById('rb-sym').value||'NIFTY';const order=document.getElementById('rb-order').value;const p=order.split('-');const lots=parseInt(document.getElementById('rb-lots').value)||1;const sl=parseFloat(document.getElementById('rb-sl').value)||1500;const tp=parseFloat(document.getElementById('rb-tp').value)||3000;const mtd=parseInt(document.getElementById('rb-mtd').value)||5;const strikeType=document.getElementById('rb-strike').value.toLowerCase();const otm=Math.min(6,Math.max(1,parseInt(document.getElementById('rb-otm').value)||1));const otmDist=(strikeType==='otm'||strikeType==='itm')?otm:0;const legs=[{option_type:p[0],transaction:p[1].toLowerCase(),lots:lots,strike_selection:strikeType,otm_distance:otmDist,expiry:document.getElementById('rb-expiry').value.toLowerCase()}];return {symbol:sym,symbols:[sym],start_date:document.getElementById('r-start').value,end_date:document.getElementById('r-end').value,indicators:[{id:'comboA_ema_st_rsi',params:{}}],legs:legs,advanced:{trade_mode:'intraday',timeframe:'1d'},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}}; }
+    async function rbBacktest(){ const b=rbBody();if(!b.start_date||!b.end_date){alert('Dates select karo');return;}document.getElementById('rb-result').innerHTML='<span class="spinner"></span> Backtest...';try{const r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.error){document.getElementById('rb-result').innerHTML='<span class="text-danger">'+r.error+'</span>';return;}const m=r.metrics||{};document.getElementById('rb-result').innerHTML=`Trades ${m.total_trades} | Win ${m.win_rate}% | Net ${m.net_pnl} | ${r.took_ms||0}ms`;document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML=`<div class="alert alert-info">Robot Backtest: ${b.symbol} ${b.legs[0].option_type}-${b.legs[0].transaction}</div>`;}catch(e){document.getElementById('rb-result').textContent='Error: '+e.message;}}
+    async function rbPaper(){ const s=document.getElementById('rb-sym').value||'NIFTY';const b=rbBody().legs[0];const sl=document.getElementById('rb-sl').value,tp=document.getElementById('rb-tp').value;let atm=0;try{const d=await A('/api/chain/live/'+s);atm=d.atm||0;}catch(e){}if(!atm){alert('Live ATM nahi mila');return;}const step=s==='BANKNIFTY'?100:50;let strike=atm;if(b.strike_selection==='otm')strike=atm+(b.option_type==='CE'?b.otm_distance*step:-b.otm_distance*step);else if(b.strike_selection==='itm')strike=atm+(b.option_type==='CE'?-b.otm_distance*step:b.otm_distance*step);const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s,option_type:b.option_type,strike:strike,expiry:'',date:new Date().toISOString().split('T')[0],transaction_type:b.transaction,quantity:b.lots,stop_loss:parseFloat(sl),take_profit:parseFloat(tp)})}); if(r.error)alert(r.error);else{alert('Paper Trade #'+r.trade_id);loadDashPositions();}}
+    async function rbLive(){ const s=document.getElementById('rb-sym').value||'NIFTY';const b=rbBody().legs[0];const sl=document.getElementById('rb-sl').value,tp=document.getElementById('rb-tp').value;let atm=0;try{const d=await A('/api/chain/live/'+s);atm=d.atm||0;}catch(e){}if(!atm){alert('Live ATM nahi mila');return;}const step=s==='BANKNIFTY'?100:50;let strike=atm;if(b.strike_selection==='otm')strike=atm+(b.option_type==='CE'?b.otm_distance*step:-b.otm_distance*step);else if(b.strike_selection==='itm')strike=atm+(b.option_type==='CE'?-b.otm_distance*step:b.otm_distance*step);const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s,option_type:b.option_type,strike:strike,expiry:'',date:new Date().toISOString().split('T')[0],transaction_type:b.transaction,quantity:b.lots,stop_loss:parseFloat(sl),take_profit:parseFloat(tp),dry_run:true})}); if(pv.error){alert(pv.error);return;}if(!confirm('Live confirm? '+JSON.stringify(pv.preview)))return;const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s,option_type:b.option_type,strike:strike,expiry:'',date:new Date().toISOString().split('T')[0],transaction_type:b.transaction,quantity:b.lots,stop_loss:parseFloat(sl),take_profit:parseFloat(tp),dry_run:false})}); if(r.error)alert(r.error);else alert('Live #'+r.trade_id);}
+    async function rbSave(){ const b=rbBody();const name=prompt('Robot name:',b.symbol+'_Robot_'+b.legs[0].option_type+'-'+b.legs[0].transaction);if(!name) return;const body={name,symbol:b.symbol,description:'robot',start_date:b.start_date,end_date:b.end_date,indicators:b.indicators,legs:b.legs,advanced_options:b.advanced,risk_management:b.risk};const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id)alert('Saved '+r.id);else alert(JSON.stringify(r)); loadRobotSaved(); }
     function updateRunSummary(){try{
             const el=document.getElementById('run-summary');if(!el)return;
             const syms=rSyms();const symTxt=syms.join('+')||'NIFTY';
