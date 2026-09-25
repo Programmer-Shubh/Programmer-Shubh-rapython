@@ -911,12 +911,18 @@
             if(!sel.value) sel.value='NIFTY';
         }catch(e){}
     }
+    async function equityArb(stock, buyEx, sellEx, buyPx, sellPx){
+        const qty=prompt('Quantity (shares):','1');if(!qty) return;
+        if(!confirm(`Equity Arb: Buy ${stock} on ${buyEx} @ ₹${buyPx} and Sell on ${sellEx} @ ₹${sellPx} x${qty}?`)) return;
+        const r=await P('/api/scanner/equity-arb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:stock,buy_exchange:buyEx,sell_exchange:sellEx,buy_price:buyPx,sell_price:sellPx,quantity:parseInt(qty)||1})});
+        if(r.error) alert('Error: '+r.error); else {alert(`Equity Arb placed! Buy #${r.buy_id} Sell #${r.sell_id} Spread ₹${r.spread}`);loadDashPositions();}
+    }
     async function loadPairs(){
         try{
             const r=await A('/api/scanner/pairs');
             const el=document.getElementById('pairs-box');if(!el) return;
             if(!r.pairs||!r.pairs.length){el.innerHTML='<span class="text-muted">No pairs</span>';return;}
-            let h='<table class="table table-sm mb-0"><tr><th>Stock</th><th>NSE</th><th>BSE</th><th>Diff</th><th>Signal</th><th>Trade</th></tr>';
+            let h='<table class="table table-sm mb-0"><tr><th>Stock</th><th>NSE</th><th>BSE</th><th>Diff</th><th>Signal</th><th>Equity Arb</th></tr>';
             r.pairs.slice(0,5).forEach(p=>{
                 const arb=p.arb?'<span class="badge bg-warning text-dark">ARB</span>':'';
                 const stock=(p.pair||'').split('/')[0]||p.pair;
@@ -931,17 +937,21 @@
                     } else sigShort=p.signal;
                 } else sigShort='<span class="badge bg-secondary">HOLD</span>';
                 let btns='';
+                // Equity Arb: Buy low / Sell high on NSE vs BSE
+                const cheapEx = (nse && bse && nse < bse) ? 'NSE' : (bse? 'BSE' : 'NSE');
+                const expEx = cheapEx==='NSE' ? 'BSE' : 'NSE';
+                const cheapPx = cheapEx==='NSE'? nse : bse;
+                const expPx = cheapEx==='NSE'? bse : nse;
                 if(p.signal&&p.signal!=='HOLD'&&!p.signal.includes('HOLD')){
                     const m=p.signal.match(/(SHORT|LONG)\s+(\w+)\s*\/\s*(SHORT|LONG)\s+(\w+)/);
                     if(m){
-                        const aAct=m[1]==='SHORT'?'SELL':'BUY', bAct=m[3]==='SHORT'?'SELL':'BUY';
-                        btns=`<button class="btn btn-sm btn-success py-0" onclick="quickStrat('${stock}','${aAct}','CE',0,'')">Paper Trade</button> <button class="btn btn-sm btn-danger py-0" onclick="quickStrat('${stock}','${aAct}','CE',0,'')">${aAct==='SELL'?'Live Sell':'Live Buy'}</button>`;
+                        const aAct=m[1]==='SHORT'?'SELL':'BUY';
+                        btns=`<button class="btn btn-sm btn-success py-0" onclick="equityArb('${stock}','${cheapEx}','${expEx}',${cheapPx},${expPx})">Buy ${cheapEx} / Sell ${expEx}</button>`;
                     } else {
-                        const isShort=p.signal.includes('SHORT');
-                        btns=`<button class="btn btn-sm btn-success py-0" onclick="quickStrat('${stock}','${isShort?'SELL':'BUY'}','CE',0,'')">Paper Trade</button> <button class="btn btn-sm btn-danger py-0" onclick="quickStrat('${stock}','${isShort?'SELL':'BUY'}','CE',0,'')">Live Trade</button>`;
+                        btns=`<button class="btn btn-sm btn-success py-0" onclick="equityArb('${stock}','${cheapEx}','${expEx}',${cheapPx},${expPx})">Buy ${cheapEx} / Sell ${expEx}</button>`;
                     }
                 } else {
-                    btns=`<button class="btn btn-sm btn-success py-0" onclick="quickStrat('${stock}','BUY','CE',0,'')">Paper Trade</button> <button class="btn btn-sm btn-danger py-0" onclick="quickStrat('${stock}','SELL','CE',0,'')">Live Trade</button>`;
+                    btns=`<button class="btn btn-sm btn-success py-0" onclick="equityArb('${stock}','${cheapEx}','${expEx}',${cheapPx},${expPx})">Buy ${cheapEx} / Sell ${expEx}</button>`;
                 }
                 h+=`<tr><td><strong>${stock}</strong> ${arb}</td><td>${nse?`₹${nse.toFixed(0)}`:'—'}</td><td>${bse?`₹${bse.toFixed(0)}`:'—'}</td><td class="small">${diff}</td><td>${sigShort}</td><td style="white-space:nowrap">${btns}</td></tr>`;
             });
