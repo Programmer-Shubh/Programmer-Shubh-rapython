@@ -361,35 +361,59 @@ class OptionScanner:
             min_score = int(min_score)
         except Exception:
             min_score = 80
-        # SuperTrend + MACD crossover strategy, Score 70+ preferred (user request)
-        # Try 70+ first; if market gives none, show best available (honest score)
-        # so dashboard never goes blank — 70+ badge sorts on top.
+        # SuperTrend + MACD crossover strategy — ensure 4 boxes always filled
+        # (user: 4 boxes na dikhe → single line). Force at least 2 per direction
+        # even if score <70, so CE/PE Buy/Sell each have trades.
         try:
             _req70 = int(min_score) if int(min_score) >= 70 else 70
         except Exception:
             _req70 = 70
-        st = self.scan(symbols=symbols, min_score=_req70)
+        st70 = self.scan(symbols=symbols, min_score=_req70)
+        st25 = self.scan(symbols=symbols, min_score=25) if len(st70.get('bullish',[]))+len(st70.get('bearish',[])) < 8 else {"bullish":[],"bearish":[]}
+        # Build base with 70+ first, then fill missing direction from 25
         base = []
-        for _s in st.get('bullish', []):
+        for _s in st70.get('bullish', []):
             _s = dict(_s); _s['signal_type'] = 'BUY CE'; _s['direction'] = 'bullish'; base.append(_s)
-        for _s in st.get('bearish', []):
+        for _s in st70.get('bearish', []):
             _s = dict(_s); _s['signal_type'] = 'BUY PE'; _s['direction'] = 'bearish'; base.append(_s)
-        if len(base) < top_n:
-            # Fallback: best available (<70) so dashboard never empty
-            st2 = self.scan(symbols=symbols, min_score=25)
+        # If any direction has <2, fill from 25
+        ce70 = sum(1 for s in base if s['signal_type']=='BUY CE')
+        pe70 = sum(1 for s in base if s['signal_type']=='BUY PE')
+        if ce70 < 2 or pe70 < 2:
             seen = {x.get('symbol') for x in base}
-            for _s in (st2.get('bullish', []) + st2.get('bearish', [])):
+            for _s in (st25.get('bullish', []) + st25.get('bearish', [])):
                 if _s.get('symbol') in seen:
                     continue
+                # Only add missing direction
+                is_bull = _s.get('type') == 'BUY'
+                if is_bull and ce70 >= 2:
+                    continue
+                if not is_bull and pe70 >= 2:
+                    continue
                 _s = dict(_s)
-                _s['signal_type'] = 'BUY CE' if _s.get('type') == 'BUY' else 'BUY PE'
-                _s['direction'] = 'bullish' if _s['signal_type'] == 'BUY CE' else 'bearish'
+                _s['signal_type'] = 'BUY CE' if is_bull else 'BUY PE'
+                _s['direction'] = 'bullish' if is_bull else 'bearish'
                 base.append(_s)
-            base.sort(key=lambda x: x.get('score', 0), reverse=True)
-        else:
-            base.sort(key=lambda x: x.get('score', 0), reverse=True)
+                if _s['signal_type']=='BUY CE': ce70+=1
+                else: pe70+=1
+                if ce70>=2 and pe70>=2:
+                    break
+        base.sort(key=lambda x: x.get('score', 0), reverse=True)
         ce_buy = [s for s in base if s.get('signal_type')=='BUY CE'][:top_n]
         pe_buy = [s for s in base if s.get('signal_type')=='BUY PE'][:top_n]
+        # If still empty (extreme), force at least 2 each from 25
+        if len(ce_buy) < 2:
+            extra = [s for s in base if s.get('signal_type')=='BUY CE']
+            if not extra:
+                st0 = self.scan(symbols=symbols, min_score=0)
+                for _s in st0.get('bullish', [])[:2]:
+                    _s=dict(_s); _s['signal_type']='BUY CE'; _s['direction']='bullish'; ce_buy.append(_s)
+        if len(pe_buy) < 2:
+            extra = [s for s in base if s.get('signal_type')=='BUY PE']
+            if not extra:
+                st0 = self.scan(symbols=symbols, min_score=0)
+                for _s in st0.get('bearish', [])[:2]:
+                    _s=dict(_s); _s['signal_type']='BUY PE'; _s['direction']='bearish'; pe_buy.append(_s)
         # Derive Sell legs by swapping option type but keeping direction/score (premium decay capture)
         ce_sell = []
         pe_sell = []
