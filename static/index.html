@@ -1286,13 +1286,25 @@ let _lastOpenTrdHTML = null;
             const _dummy={metrics:{net_pnl: 4200 + Math.floor(Math.random()*3000), total_trades: 10 + Math.floor(Math.random()*6), win_rate: (52+Math.random()*10).toFixed(1)}, symbol: body.symbol||'NIFTY'};
             document.getElementById('bt-metrics').innerHTML=`<div class="row"><div class="col"><div class="card stat-card" style="opacity:0.7;border:1px dashed #0d6efd"><div class="label">Instant Preview</div><div class="value">₹${_dummy.metrics.net_pnl.toLocaleString()}</div><small>Est. — live 1-2s...</small></div></div><div class="col"><div class="card stat-card" style="opacity:0.7"><div class="label">Est. Trades</div><div class="value">${_dummy.metrics.total_trades}</div></div></div><div class="col"><div class="card stat-card" style="opacity:0.7"><div class="label">Est. Win%</div><div class="value">${_dummy.metrics.win_rate}%</div></div></div></div>`;
         }catch(e){}
+        // Fast path: try sync first (cached 10-symbol ~1.7s), fallback to async only if sync times out
         try{
-            const sub=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-            if(sub && sub.job_id){
-                _usedAsync=true;
-                let _netFails=0;
-                for(let p=0;p<100;p++){
-                    await new Promise(res=>setTimeout(res,900));
+            // Try sync with 8s timeout — most backtests finish in <2s
+            const ctrl=new AbortController(); const tmo=setTimeout(()=>ctrl.abort(),8000);
+            try{
+                r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
+                clearTimeout(tmo);
+                if(r && !r.error){ _usedAsync=true; }
+                else throw new Error(r.error||'sync failed');
+            }catch(se){
+                clearTimeout(tmo);
+                if(String(se.message).includes('abort')) throw se;
+                // Sync failed or slow — fallback to async
+                const sub=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+                if(sub && sub.job_id){
+                    _usedAsync=true;
+                    let _netFails=0;
+                    for(let p=0;p<100;p++){
+                        await new Promise(res=>setTimeout(res,700));
                     _btSpin();
                     let st=null;
                     try{ st=await A('/api/backtest/result/'+sub.job_id); _netFails=0; }
