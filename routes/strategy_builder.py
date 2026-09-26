@@ -643,15 +643,14 @@ def _run_backtest_core(req: BacktestRequest):
             pass
         if not _syms:
             _syms = [symbol]
-        _syms = _syms[:5]
+        _syms = _syms[:10]
         _all_trades = []
         _per_symbol = {}
         _brokerage = 0.0
         _first_m = None
         _engine_name = "engine"
         # Multi-symbol support: always allow all symbols (user selected them)
-        # Previously this truncated to 1 symbol for >2 symbols, causing "single stock history" bug
-        if len(_syms) > 5:
+        if len(_syms) > 10:
             _syms = _syms[:5]
         timeframe = (advanced_in.get("timeframe") or "1d").lower()
         _syms = _syms[:10]
