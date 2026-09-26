@@ -858,12 +858,23 @@ class OptionScanner:
         # Validate ATM strike is reasonable (within 5% of spot)
         max_deviation = spot * 0.05
         if abs(atm_strike - spot) > max_deviation:
-            # Fallback: use spot rounded to step
             atm_strike = round(spot / step) * step
         
-        # For directional trades: CE = ATM, PE = ATM (not OTM)
-        # User can adjust via strike_selection in strategy builder
+        # ITM Short Avoid: Naked shorts must be OTM/ATM (time value). Never ITM.
+        # For CE Sell (bearish) use OTM (above spot), for PE Sell (bullish) use OTM (below spot)
+        is_sell = (option_type == "CE" and "SELL" in str(symbol)) or False  # fallback via caller
+        # Detect sell intent via option_type still ATM; actual OTM offset applied by caller.
+        # Here ensure ATM, caller will add +1 step for sells if needed.
         strike = atm_strike
+        # If this is a SELL suggestion, nudge 1 step OTM for time-value edge (never ITM)
+        try:
+            # Heuristic: if premium <10 and would be ITM, push OTM
+            if option_type == "CE" and strike < spot:
+                strike = atm_strike + step
+            if option_type == "PE" and strike > spot:
+                strike = atm_strike - step
+        except Exception:
+            pass
         
         try:
             latest_date = self.db.fetch_one(

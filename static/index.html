@@ -97,9 +97,13 @@
         #pg-dashboard .card{margin-bottom:10px}
         #pg-dashboard .card-body{padding:10px}
         #pg-dashboard .card-header{padding:8px 12px;font-size:13px}
-        #pg-dashboard .stat-card{padding:8px}
-        #pg-dashboard .stat-card .value{font-size:18px}
+        #pg-dashboard .stat-card{padding:8px;transition:all 0.3s}
+        #pg-dashboard .stat-card .value{font-size:18px;transition:color 0.3s}
         #pg-dashboard .stat-card .label{font-size:12px}
+        .price-flash-up{animation:flashUp 0.6s}
+        .price-flash-down{animation:flashDown 0.6s}
+        @keyframes flashUp{0%{background:#d1e7dd}100%{background:transparent}}
+        @keyframes flashDown{0%{background:#f8d7da}100%{background:transparent}}
         #mkt-cards{flex-wrap:nowrap}
         #mkt-cards .col{min-width:0;flex:1 1 0}
         #mkt-cards .stat-card{padding:4px}
@@ -112,6 +116,18 @@
         #pg-dashboard .sig-box h5{font-size:12px;margin-bottom:6px}
         #pg-strategy .indicator-card{padding:6px;margin-bottom:4px}
         #pg-strategy .indicator-card h6{font-size:12px;margin-bottom:2px}
+        @media (max-width: 768px){
+            .topbar h1{font-size:16px}
+            .topbar small{font-size:10px}
+            .nav{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+            .nav button{flex:0 0 auto;font-size:12px;padding:6px 10px}
+            #mkt-cards{flex-wrap:wrap}
+            #mkt-cards .col{flex:1 1 48%;min-width:48%}
+            .sig-grid{grid-template-columns:1fr !important}
+            .wrap{padding:8px}
+            table{font-size:11px}
+            .card-body{padding:8px}
+        }
         #pg-strategy .section-title{margin:4px 0 2px}
         #pg-strategy .card{margin-bottom:8px}
         #pg-strategy .quant-card{padding:8px}
