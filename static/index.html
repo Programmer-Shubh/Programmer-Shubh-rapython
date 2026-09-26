@@ -491,6 +491,7 @@
                         <div class="alert alert-info py-1 px-2 mb-2 small" id="run-summary">Loading...</div>
                         <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
                             <button class="btn btn-success slab-cta" id="r-run" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button>
+                            <label class="small ms-2"><input type="checkbox" id="r-auto" onchange="toggleAutoBacktest(this.checked)"> Auto</label>
                             <button class="btn btn-sm btn-primary" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button>
                         </div>
 <div class="slab-sec"><div class="slab-sec-title">Run & Robot</div>
@@ -1446,8 +1447,10 @@ let _lastOpenTrdHTML = null;
         updatePayoff();
         try{if(typeof renderQuantTable==='function')renderQuantTable();}catch(e){}
     }
-    function updLeg(i,f,v){ if(f==='lots') stratLegs[i][f]=parseInt(v)||1; else stratLegs[i][f]=v; renderLegs(); try{updateRunSummary();}catch(e){} }
-    function updLegStrike(i,val){ if(val==='atm'){stratLegs[i].strike_selection='atm'; stratLegs[i].otm_distance=0;} else if(val.startsWith('otm')){stratLegs[i].strike_selection='otm'; stratLegs[i].otm_distance=parseInt(val.slice(3))||1;} else if(val.startsWith('itm')){stratLegs[i].strike_selection='itm'; stratLegs[i].otm_distance=parseInt(val.slice(3))||1;} renderLegs(); try{updateRunSummary();}catch(e){} }
+    let _autoBT=null; function toggleAutoBacktest(on){ if(on){ if(!_autoBT) _autoBT=setTimeout(()=>{try{if(document.getElementById('r-auto')?.checked) runBacktest();}catch(e){}},800); } else { if(_autoBT) clearTimeout(_autoBT); _autoBT=null; } }
+    function scheduleAutoBT(){ if(!document.getElementById('r-auto')?.checked) return; if(_autoBT) clearTimeout(_autoBT); _autoBT=setTimeout(()=>{try{runBacktest();}catch(e){}},900); }
+    function updLeg(i,f,v){ if(f==='lots') stratLegs[i][f]=parseInt(v)||1; else stratLegs[i][f]=v; renderLegs(); try{updateRunSummary();}catch(e){} scheduleAutoBT(); }
+    function updLegStrike(i,val){ if(val==='atm'){stratLegs[i].strike_selection='atm'; stratLegs[i].otm_distance=0;} else if(val.startsWith('otm')){stratLegs[i].strike_selection='otm'; stratLegs[i].otm_distance=parseInt(val.slice(3))||1;} else if(val.startsWith('itm')){stratLegs[i].strike_selection='itm'; stratLegs[i].otm_distance=parseInt(val.slice(3))||1;} renderLegs(); try{updateRunSummary();}catch(e){} scheduleAutoBT(); }
     function addLeg(){
         // Single source: Trade Setup (r-*) form.
         const lots=parseInt(document.getElementById('r-lots').value)||1;
@@ -1521,10 +1524,13 @@ let _lastOpenTrdHTML = null;
         // highlight quant cards
         document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
     }
-    document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta');});
-    document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); });
-    ['r-order','r-strike','r-lots','r-expiry','r-type'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){}});});
-    document.getElementById('r-syms')?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){}});
+     document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta'); scheduleAutoBT();});
+    document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); scheduleAutoBT(); });
+    ['r-order','r-strike','r-lots','r-expiry','r-type','r-sl','r-tp','r-mtd','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
+    document.getElementById('r-syms')?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();});
+    // Indicator inputs auto
+    document.addEventListener('change',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-ind-')||e.target.id.startsWith('r-p-')) scheduleAutoBT(); });
+    document.addEventListener('input',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-p-')) scheduleAutoBT(); });
     // Sync: Overall settings (s-sl/s-tp) <-> Strategy risk (r-sl/r-tp) — dono me se jo bhi bhare, wahi chalega
     function _syncRisk(fromSl,fromTp,toSl,toTp){try{const a=document.getElementById(fromSl),b=document.getElementById(fromTp),c=document.getElementById(toSl),d=document.getElementById(toTp);if(a&&c&&a.value!=='')c.value=a.value;if(b&&d&&b.value!=='')d.value=b.value;}catch(e){}}
     document.getElementById('s-sl')?.addEventListener('change',()=>_syncRisk('s-sl','s-tp','r-sl','r-tp'));
