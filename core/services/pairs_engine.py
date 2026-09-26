@@ -101,8 +101,8 @@ def scan_cross_market(symbols=None) -> Dict:
             if pa and pb:
                 diff = pa - pb
                 pct = diff / pb * 100 if pb else 0
-                # Show even small diffs (user: khali na dikhe) — arb flag still >0.5%
-                # so HOLD vs ARB badge distinguishes
+                if abs(diff) < 10:
+                    continue
                 results.append({
                     "pair": sym, "symbol": sym,
                     "nse_price": round(pa,2), "bse_price": round(pb,2),
