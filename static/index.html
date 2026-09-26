@@ -836,7 +836,7 @@
                 let keep=cur.length?cur:['NIFTY'];
                 try{const saved=JSON.parse(localStorage.getItem('rSyms')||'[]');if(saved.length)keep=saved.filter(x=>syms.includes(x));if(!keep.length)keep=['NIFTY'];}catch(e){}
                 rbox.innerHTML=syms.map(x=>`<label><input type="checkbox" value="${x}" ${keep.includes(x)?'checked':''}> ${x}</label>`).join('');
-                rbox.onchange=()=>{try{const v=[...rbox.querySelectorAll('input:checked')].map(o=>o.value);if(v.length>5){rbox.querySelectorAll('input:checked')[4].checked=false;}rSymsRefresh();updateRunSummary();}catch(e){}};
+                rbox.onchange=()=>{try{const v=[...rbox.querySelectorAll('input:checked')].map(o=>o.value);if(v.length>10){[...rbox.querySelectorAll('input:checked')].slice(10).forEach(el=>el.checked=false);}rSymsRefresh();updateRunSummary();}catch(e){}};
                 rSymsRefresh();
             }
             const psel=document.getElementById('py-sym');
