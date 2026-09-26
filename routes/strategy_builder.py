@@ -654,6 +654,7 @@ def _run_backtest_core(req: BacktestRequest):
         if len(_syms) > 5:
             _syms = _syms[:5]
         timeframe = (advanced_in.get("timeframe") or "1d").lower()
+        _syms = _syms[:10]
         _bar_cap = 40 if len(_syms) > 1 else 60
         for _sym in _syms:
             _use_db = False

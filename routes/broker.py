@@ -12,7 +12,7 @@ router = APIRouter()
 BROKER_DEFAULTS = {
     "dhan": {"name": "Dhan", "icon": "bi-bank", "color": "text-primary", "fields": ["client_id", "access_token", "refresh_token"], "desc": "Client ID + Access Token + Refresh Token"},
     "angel": {"name": "Angel One", "icon": "bi-graph-up-arrow", "color": "text-success", "fields": ["client_code", "password", "api_key", "totp_secret"], "desc": "Client Code + Password + API Key"},
-    "bigul": {"name": "Bigul", "icon": "bi-bullseye", "color": "text-warning", "fields": ["client_id", "password", "api_key", "totp_secret"], "desc": "Client ID + Password + API Key + TOTP"},
+    "bigul": {"name": "Bigul", "icon": "bi-bullseye", "color": "text-warning", "fields": ["client_id", "password", "api_key", "totp_secret"], "desc": "Mobile se login — OTP auto-fetch, token auto-connect"},
 }
 
 BROKER_FIELD_LABELS = {
@@ -258,6 +258,25 @@ def dhan_auth_url():
     # Dhan uses direct API key auth — just open login page
     return {"success": True, "url": "https://login.dhan.co/"}
 
+
+@router.get("/bigul-auth-url")
+def bigul_auth_url():
+    return {"success": True, "url": "https://bigul.co/login"}
+
+@router.get("/bigul-callback")
+async def bigul_callback(request: Request):
+    from fastapi.responses import HTMLResponse
+    try:
+        qp = dict(request.query_params)
+    except Exception:
+        qp = {}
+    tok = (qp.get("access_token") or qp.get("code") or qp.get("token") or "").strip()
+    if tok:
+        cfg = _get_config("bigul") or {}
+        cfg["access_token"] = tok
+        _save_config("bigul", cfg)
+        return HTMLResponse("<h3 style='color:green'>Bigul connected! Token auto-saved.</h3><p>Close this tab and return to RaTrade.</p>")
+    return HTMLResponse("<h3>Bigul login — mobile OTP se login karo, phir token auto-fetch hoga. Agar token URL me aaye to wapas yahan redirect hoga.</h3><p>Manual: Bigul app se API token copy karke RaTrade Bigul Setup me paste karo, Auto-connect dabao.</p>")
 
 @router.get("/angel-auth-url")
 def angel_auth_url():

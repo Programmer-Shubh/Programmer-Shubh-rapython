@@ -278,7 +278,6 @@
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Lab</button>
         <button onclick="go('robot',this)"><i class="bi bi-cpu"></i> Call/Put Robot</button>
-        <button onclick="go('pylab',this)"><i class="bi bi-code-slash"></i> Python Lab</button>
         <button onclick="go('tvchart',this)"><i class="bi bi-candlestick"></i> TV Chart</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
         <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
@@ -383,7 +382,7 @@
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols + Order</small></div>
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 5)</label><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><label><input type="checkbox" value="NIFTY" checked> NIFTY</label><label><input type="checkbox" value="BANKNIFTY"> BANKNIFTY</label><label><input type="checkbox" value="FINNIFTY"> FINNIFTY</label><label><input type="checkbox" value="MIDCPNIFTY"> MIDCPNIFTY</label><label><input type="checkbox" value="SENSEX"> SENSEX</label><label><input type="checkbox" value="BANKEX"> BANKEX</label><label><input type="checkbox" value="RELIANCE"> RELIANCE</label><label><input type="checkbox" value="HDFCBANK"> HDFCBANK</label><label><input type="checkbox" value="ICICIBANK"> ICICIBANK</label><label><input type="checkbox" value="TCS"> TCS</label><label><input type="checkbox" value="INFY"> INFY</label></div></div>
+                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 10)</label><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><label><input type="checkbox" value="NIFTY" checked> NIFTY</label><label><input type="checkbox" value="BANKNIFTY"> BANKNIFTY</label><label><input type="checkbox" value="FINNIFTY"> FINNIFTY</label><label><input type="checkbox" value="MIDCPNIFTY"> MIDCPNIFTY</label><label><input type="checkbox" value="SENSEX"> SENSEX</label><label><input type="checkbox" value="BANKEX"> BANKEX</label><label><input type="checkbox" value="RELIANCE"> RELIANCE</label><label><input type="checkbox" value="HDFCBANK"> HDFCBANK</label><label><input type="checkbox" value="ICICIBANK"> ICICIBANK</label><label><input type="checkbox" value="TCS"> TCS</label><label><input type="checkbox" value="INFY"> INFY</label></div></div>
                         <input type="hidden" id="r-order" value="CE-BUY"><input type="hidden" id="r-strike" value="ATM"><input type="hidden" id="r-otm" value="1"><input type="hidden" id="r-lots" value="1">
                         <div class="col-md-8 d-flex align-items-center"><small class="text-muted">Order/Strike/Lots — Template se auto (Strategy Templates neeche)</small></div>
                     </div>
@@ -754,32 +753,6 @@
         </div>
         
             </div><!-- end custom-form -->
-        <!-- PYTHON LAB (Custom Code Backtest) — yfinance SMA + your code -->
-        <div id="pg-pylab" class="pg hidden">
-            <div class="card mb-3"><div class="card-header d-flex justify-content-between align-items-center"><strong><i class="bi bi-code-slash"></i> Python Lab — yfinance SMA + Custom Code</strong><span class="badge bg-success">yfinance ready</span></div>
-                <div class="card-body">
-                    <div class="d-flex gap-2 flex-wrap mb-2">
-                        <button class="btn btn-sm btn-outline-primary" onclick="pyLoadSMA()"><i class="bi bi-lightning"></i> Load SMA (yfinance) Template</button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="pyLoadTemplate()">Load Default</button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="pyLoadPremium()">Load Premium</button>
-                    </div>
-                    <div class="row g-2">
-                        <div class="col-md-3"><label class="form-label small">Symbol</label><input type="text" class="form-control form-control-sm" id="py-sym" value="NIFTY"></div>
-                        <div class="col-md-2"><label class="form-label small">Start</label><input type="date" class="form-control form-control-sm" id="py-start"></div>
-                        <div class="col-md-2"><label class="form-label small">End</label><input type="date" class="form-control form-control-sm" id="py-end"></div>
-                        <div class="col-md-2"><label class="form-label small">Capital</label><input type="number" class="form-control form-control-sm" id="py-cap" value="20000"></div>
-                        <div class="col-md-3 d-flex align-items-end"><button class="btn btn-success btn-sm w-100" id="py-run" onclick="pyRunBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button></div>
-                    </div>
-                    <textarea id="py-code" class="form-control mt-2" rows="12" style="font-family:monospace;font-size:12px" placeholder="Paste Python code here..."></textarea>
-                    <div id="py-results" class="hidden mt-3">
-                        <div class="row g-2 mb-2" id="py-metrics"></div>
-                        <div id="py-eq" style="height:200px"></div>
-                        <div class="card mt-2"><div class="card-body p-0" id="py-tl"></div></div>
-                        <pre id="py-logs" class="small text-muted mt-2" style="max-height:120px;overflow:auto"></pre>
-                    </div>
-                </div>
-            </div>
-        </div>
         <!-- TV CHART (TradingView Lightweight Charts + trade markers) -->
         <div id="pg-tvchart" class="pg hidden">
             <div class="card mb-2" style="border-left:4px solid #2962ff">
@@ -1238,7 +1211,7 @@ let _lastOpenTrdHTML = null;
         const autoDir=autoMode();
         return quantIndicators.map(q=>{const p={};(q.params||[]).forEach(pr=>{const v=parseFloat(pr.val);p[pr.key]=isNaN(v)?0:v;});p.mode=autoDir;p.candle=q.candle||'5';p.field=q.field||'equity';return {id:q.id,params:p};});
     }
-    function rSyms(){const b=document.getElementById('r-syms');if(b){const v=[...b.querySelectorAll('input:checked')].map(o=>o.value).filter(Boolean).slice(0,5);if(v.length)return v;}const s=document.getElementById('r-sym');if(s)return [...s.selectedOptions].map(o=>o.value).filter(Boolean).slice(0,5);return ['NIFTY'];}
+    function rSyms(){const b=document.getElementById('r-syms');if(b){const v=[...b.querySelectorAll('input:checked')].map(o=>o.value).filter(Boolean).slice(0,10);if(v.length)return v;}const s=document.getElementById('r-sym');if(s)return [...s.selectedOptions].map(o=>o.value).filter(Boolean).slice(0,10);return ['NIFTY'];}
     function rSymsRefresh(){try{const c=document.getElementById('r-sym-count');if(c)c.textContent=rSyms().length;try{localStorage.setItem('rSyms',JSON.stringify(rSyms()));}catch(e){}}catch(e){}}
     function rSymsRestore(){try{const saved=JSON.parse(localStorage.getItem('rSyms')||'[]');if(!saved.length)return false;const b=document.getElementById('r-syms');if(!b)return false;let hit=false;b.querySelectorAll('input').forEach(i=>{i.checked=saved.includes(i.value);if(i.checked)hit=true;});return hit;}catch(e){return false;}}
     function _unifiedBody(){
@@ -1961,8 +1934,9 @@ let _lastOpenTrdHTML = null;
     const FALLBACK_BROKERS=[
         {key:'dhan',name:'Dhan',icon:'bi-bank',color:'text-primary',desc:'Client ID + Access Token + Refresh Token',fields:['client_id','access_token','refresh_token'],configured:false,config:{},login_url:'https://login.dhan.co/',token_hint:'login.dhan.co par login karke Profile → API Access se Client ID + Access Token copy karo, phir setup me paste karo — token auto-save ho jaega.'},
         {key:'angel',name:'Angel One',icon:'bi-graph-up-arrow',color:'text-success',desc:'Client Code + Password + API Key',fields:['client_code','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://www.angelone.in/login/',token_hint:'angelone.in par login karke SmartAPI se Client Code + API Key + TOTP Secret copy karo — Auto-connect dabao token save hoga.'},
-        {key:'bigul',name:'Bigul',icon:'bi-bullseye',color:'text-warning',desc:'Client ID + Password + API Key + TOTP',fields:['client_id','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://bigul.co/login',token_hint:'bigul.co par login karke API section se Client ID + API Key + TOTP copy karo — Auto-connect dabao.'}
+        {key:'bigul',name:'Bigul',icon:'bi-bullseye',color:'text-warning',desc:'Mobile se login — OTP auto-fetch, token auto-connect',fields:['client_id','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://bigul.co/login',token_hint:'Mobile number se login karo — OTP dalte hi token auto-fetch ho jayega. Ya API token paste karke Auto-connect dabao.'}
     ];
+    function bigulOAuth(){ P('/api/broker/bigul-auth-url').then(r=>{ if(r.success&&r.url) window.open(r.url,'_blank'); else alert(r.error||'Bigul auth failed'); }); }
     function brokerLoginUrl(key){
         const b=(brokerData||[]).find(x=>x.key===key)||FALLBACK_BROKERS.find(x=>x.key===key);
         return (b&&b.login_url)||({dhan:'https://login.dhan.co/',angel:'https://www.angelone.in/login/',bigul:'https://bigul.co/login'})[key]||'';
@@ -1990,7 +1964,7 @@ let _lastOpenTrdHTML = null;
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                     <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('${b.key}')"><i class="bi bi-gear"></i> Setup</button>
                     <button class="btn btn-sm btn-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
-                    ${b.key==='dhan'?`<button class="btn btn-sm btn-primary" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='angel'?`<button class="btn btn-sm btn-danger" onclick="angelOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
+                    ${b.key==='dhan'?`<button class="btn btn-sm btn-primary" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='angel'?`<button class="btn btn-sm btn-danger" onclick="angelOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='bigul'?`<button class="btn btn-sm btn-warning" onclick="bigulOAuth()"><i class="bi bi-phone"></i> Mobile Login</button>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
                     <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('${b.key}')"><i class="bi bi-wallet2"></i> Account</button>
                 </div>
             </div></div></div>`;
