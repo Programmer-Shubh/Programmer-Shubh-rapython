@@ -101,8 +101,8 @@ def scan_cross_market(symbols=None) -> Dict:
             if pa and pb:
                 diff = pa - pb
                 pct = diff / pb * 100 if pb else 0
-                if abs(pct) < 0.3:
-                    continue
+                # Show even small diffs (user: khali na dikhe) — arb flag still >0.5%
+                # so HOLD vs ARB badge distinguishes
                 results.append({
                     "pair": sym, "symbol": sym,
                     "nse_price": round(pa,2), "bse_price": round(pb,2),
@@ -117,14 +117,33 @@ def scan_cross_market(symbols=None) -> Dict:
     return {"pairs": results[:5], "count": len(results)}
 
 def scan_pairs(symbols=None, pairs=None) -> Dict:
-    # Equity NSE/BSE cross-market is the primary arb — pairs are secondary.
-    # Return cross-market high-diff only; if none, return empty (honest) instead
-    # of HOLD spam with 0.19% diffs.
+    # Cross-market NSE/BSE is primary; always return top 3 even if diff small
+    # so dashboard never looks empty (user: khali na dikhe)
     cm = scan_cross_market(symbols=symbols)
     if cm["pairs"]:
         return cm
-    # No high-diff cross-market now — return empty, not pair HOLD spam
-    return {"pairs": [], "count": 0}
+    # Fallback: show top 3 cross-market even with small diff (HOLD) so card not empty
+    # Re-run without diff filter
+    from core.services.live_market_data import LiveMarketData
+    from core.services.free_data import _yahoo_fallback_quote
+    from core.services.scanner import OptionScanner as _SC
+    sc2 = _SC(); live2 = LiveMarketData()
+    syms2 = ["RELIANCE","HDFCBANK","TCS","INFY","SBIN"][:5]
+    out2 = []
+    for sym in syms2:
+        try:
+            pa = float((live2.get_live_spot(sym) or {}).get("spot") or 0)
+            q = _yahoo_fallback_quote(f"{sym}.BO", timeout=1)
+            pb = float((q or {}).get("spot") or 0)
+            if pa and pb:
+                diff = pa - pb; pct = diff/pb*100 if pb else 0
+                out2.append({"pair": sym, "symbol": sym, "nse_price": round(pa,2), "bse_price": round(pb,2),
+                             "nse_bse_diff": round(diff,2), "nse_bse_pct": round(pct,2),
+                             "price_a": round(pa,2), "price_b": round(pb,2),
+                             "signal": "HOLD", "arb": False, "zscore": 0, "correlation": 0.99})
+        except Exception:
+            continue
+    return {"pairs": out2[:3], "count": len(out2)}
     from core.services.scanner import OptionScanner
     from core.services.live_market_data import LiveMarketData
     sc = OptionScanner()
