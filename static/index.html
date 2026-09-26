@@ -1267,8 +1267,8 @@ let _lastOpenTrdHTML = null;
             document.getElementById('bt-results').classList.remove('hidden');
             const pb=document.getElementById('bt-progress'); if(pb) pb.classList.remove('hidden');
             const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width=pct+'%'; bar.textContent=pct+'%'; }
-            const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Backtest chal raha hai... '+s+'s — algotest jaisa cache se turant';
-            // Algotest-like instant skeleton: show last cached result instantly as estimate
+            const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Backtest chal raha hai... '+s+'s';
+            // Instant skeleton: show last cached result instantly as estimate
             try{
                 const cached=localStorage.getItem('lastBacktestResult');
                 if(cached && s<15){
