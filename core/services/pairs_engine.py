@@ -73,25 +73,26 @@ def analyze_pair(hist_a: List[Dict], hist_b: List[Dict], sym_a: str, sym_b: str)
 
 def scan_cross_market(symbols=None) -> Dict:
     """Cross-market NSE vs BSE for SAME stock — true equity arbitrage.
-    Shows only high-diff (>0.4%) so HOLD spam is hidden."""
+    Shows only stocks (indices have no BSE), high-diff (>0.4%) so HOLD spam hidden."""
     from core.services.scanner import OptionScanner
     from core.services.live_market_data import LiveMarketData
     from core.services.free_data import _yahoo_fallback_quote
     sc = OptionScanner()
     live = LiveMarketData()
-    # Liquid stocks where NSE/BSE both trade
+    # Only stocks have both NSE+BSE; indices (NIFTY etc) have no meaningful BSE cross
+    _INDICES = {"NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","SENSEX","BANKEX"}
     if not symbols:
-        symbols = ["RELIANCE","HDFCBANK","ICICIBANK","TCS","INFY","SBIN","AXISBANK","KOTAKBANK","LT","BHARTIARTL","ITC","BAJFINANCE","SBIN","HDFCBANK","RELIANCE"]
-        symbols = list(dict.fromkeys(symbols))[:12]
+        symbols = ["RELIANCE","HDFCBANK","ICICIBANK","TCS","INFY","SBIN","AXISBANK","KOTAKBANK","LT","BHARTIARTL","ITC","BAJFINANCE"]
+        symbols = [s for s in symbols if s not in _INDICES][:10]
+    else:
+        symbols = [s for s in symbols if s not in _INDICES]
     results = []
     for sym in symbols:
         try:
-            # NSE
             pa = float((live.get_live_spot(sym) or {}).get("spot") or 0)
             if not pa:
                 ra = sc.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [sym])
                 pa = float(ra["close_price"]) if ra and ra["close_price"] else 0
-            # BSE via .BO
             try:
                 q = _yahoo_fallback_quote(f"{sym}.BO", timeout=2)
                 pb = float((q or {}).get("spot") or 0)
@@ -100,7 +101,6 @@ def scan_cross_market(symbols=None) -> Dict:
             if pa and pb:
                 diff = pa - pb
                 pct = diff / pb * 100 if pb else 0
-                # Only show meaningful diff
                 if abs(pct) < 0.3:
                     continue
                 results.append({
