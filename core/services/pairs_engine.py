@@ -117,14 +117,14 @@ def scan_cross_market(symbols=None) -> Dict:
     return {"pairs": results[:5], "count": len(results)}
 
 def scan_pairs(symbols=None, pairs=None) -> Dict:
-    # For backwards compat: if called for cross-market, use dedicated scanner
-    # Check if caller wants single-stock NSE/BSE (no pair) — detect via symbols being single list and pairs is None
-    # Heuristic: if symbols provided and pairs is None and len(symbols) >3 and no pair logic needed, use cross-market
-    # But keep original pair logic for /pairs endpoint (which is now cross-market first, fallback to pairs)
-    # Try cross-market first for high-diff display, fallback to pair stats if no cross-market found
+    # Equity NSE/BSE cross-market is the primary arb — pairs are secondary.
+    # Return cross-market high-diff only; if none, return empty (honest) instead
+    # of HOLD spam with 0.19% diffs.
     cm = scan_cross_market(symbols=symbols)
     if cm["pairs"]:
         return cm
+    # No high-diff cross-market now — return empty, not pair HOLD spam
+    return {"pairs": [], "count": 0}
     from core.services.scanner import OptionScanner
     from core.services.live_market_data import LiveMarketData
     sc = OptionScanner()
