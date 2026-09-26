@@ -2331,9 +2331,9 @@ def run(data):
     return {"trades": trades}
 `;
     function pyLoadConf(){if(confirm('Editor me jo code hai wo replace ho jayega. Continue?')===false)return;document.getElementById('py-code').value=PY_CONF_CODE;document.getElementById('py-code').scrollIntoView({block:'center'});}
-    const PY_SMA_YFINANCE = `"""SMA Crossover — yfinance style, aapka diya hua logic.
-# yfinance SMA20 / SMA50 cross par Buy/Sell. NSE symbols: RELIANCE.NS etc.
-# Website me iska data bhavcopy_data se aata hai (yfinance fallback nahi).
+    const PY_SMA_YFINANCE = `"""SMA 20/50 Crossover — yfinance style (aapka logic, NSE-ready)
+Data: bhavcopy_data (yfinance fallback nahi). NSE: RELIANCE.NS etc.
+"""
 import pandas as pd
 SHORT, LONG = 20, 50
 def run(data):
@@ -2344,9 +2344,10 @@ def run(data):
     data['Position'] = data['Signal'].diff()
     trades = []
     for i in range(LONG, len(data)):
-        if data['Position'].iloc[i] == 1:  # Buy
-            trades.append({"entry_date": str(data['date'].iloc[i]), "exit_date": str(data['date'].iloc[min(i+5, len(data)-1)]),
-                           "entry_price": float(data['close'].iloc[i]), "exit_price": float(data['close'].iloc[min(i+5, len(data)-1)]), "qty": 1})
+        if data['Position'].iloc[i] == 1:
+            j = min(i+5, len(data)-1)
+            trades.append({"entry_date": str(data['date'].iloc[i]), "exit_date": str(data['date'].iloc[j]),
+                           "entry_price": float(data['close'].iloc[i]), "exit_price": float(data['close'].iloc[j]), "qty": 1})
     return {"trades": trades}
 `;
     function pyLoadSMA(){if(confirm('Editor me jo code hai wo replace ho jayega. Continue?')===false)return;document.getElementById('py-code').value=PY_SMA_YFINANCE;document.getElementById('py-code').scrollIntoView({block:'center'});}
