@@ -278,6 +278,7 @@
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Lab</button>
         <button onclick="go('robot',this)"><i class="bi bi-cpu"></i> Call/Put Robot</button>
+        <button onclick="go('pylab',this)"><i class="bi bi-code-slash"></i> Python Lab</button>
         <button onclick="go('tvchart',this)"><i class="bi bi-candlestick"></i> TV Chart</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
         <button onclick="go('alerts',this)"><i class="bi bi-envelope-at"></i> Email Alerts</button>
@@ -627,7 +628,7 @@
             <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
                 <div>
                     <h4 class="fw-bold"><i class="bi bi-plug"></i> Broker Integration</h4>
-                    <p class="text-muted small mb-0">Auto-connect Dhan, Angel One - No daily login required</p>
+                    <p class="text-muted small mb-0">Auto-connect Dhan, Angel One, Bigul - No daily login required</p>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
                     <span id="live-status" class="small text-muted"></span>
@@ -753,7 +754,32 @@
         </div>
         
             </div><!-- end custom-form -->
-        <!-- PYTHON LAB (Custom Code Backtest) -->
+        <!-- PYTHON LAB (Custom Code Backtest) — yfinance SMA + your code -->
+        <div id="pg-pylab" class="pg hidden">
+            <div class="card mb-3"><div class="card-header d-flex justify-content-between align-items-center"><strong><i class="bi bi-code-slash"></i> Python Lab — yfinance SMA + Custom Code</strong><span class="badge bg-success">yfinance ready</span></div>
+                <div class="card-body">
+                    <div class="d-flex gap-2 flex-wrap mb-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="pyLoadSMA()"><i class="bi bi-lightning"></i> Load SMA (yfinance) Template</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="pyLoadTemplate()">Load Default</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="pyLoadPremium()">Load Premium</button>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-md-3"><label class="form-label small">Symbol</label><input type="text" class="form-control form-control-sm" id="py-sym" value="NIFTY"></div>
+                        <div class="col-md-2"><label class="form-label small">Start</label><input type="date" class="form-control form-control-sm" id="py-start"></div>
+                        <div class="col-md-2"><label class="form-label small">End</label><input type="date" class="form-control form-control-sm" id="py-end"></div>
+                        <div class="col-md-2"><label class="form-label small">Capital</label><input type="number" class="form-control form-control-sm" id="py-cap" value="20000"></div>
+                        <div class="col-md-3 d-flex align-items-end"><button class="btn btn-success btn-sm w-100" id="py-run" onclick="pyRunBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button></div>
+                    </div>
+                    <textarea id="py-code" class="form-control mt-2" rows="12" style="font-family:monospace;font-size:12px" placeholder="Paste Python code here..."></textarea>
+                    <div id="py-results" class="hidden mt-3">
+                        <div class="row g-2 mb-2" id="py-metrics"></div>
+                        <div id="py-eq" style="height:200px"></div>
+                        <div class="card mt-2"><div class="card-body p-0" id="py-tl"></div></div>
+                        <pre id="py-logs" class="small text-muted mt-2" style="max-height:120px;overflow:auto"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
         <!-- TV CHART (TradingView Lightweight Charts + trade markers) -->
         <div id="pg-tvchart" class="pg hidden">
             <div class="card mb-2" style="border-left:4px solid #2962ff">
@@ -1984,7 +2010,12 @@ let _lastOpenTrdHTML = null;
                 const resp=await fetch('/api/broker/list',{signal:ctrl.signal});
                 const r=await resp.json();
                 if(r.brokers&&r.brokers.length){
-                    brokerData=r.brokers;
+                    // Merge API list with FALLBACK so Bigul (or any new broker) never disappears
+                    // even if backend cache is stale — always show all 3
+                    const apiMap=new Map(r.brokers.map(x=>[x.key,x]));
+                    brokerData=FALLBACK_BROKERS.map(fb=>apiMap.get(fb.key)||fb);
+                    // include any extra brokers API may have that fallback doesn't
+                    for(const b of r.brokers) if(!FALLBACK_BROKERS.some(f=>f.key===b.key)) brokerData.push(b);
                     renderBrokerCards(brokerData, false);
                 } else if(!isFirstLoad){
                     renderBrokerCards(brokerData, false);
@@ -2300,6 +2331,25 @@ def run(data):
     return {"trades": trades}
 `;
     function pyLoadConf(){if(confirm('Editor me jo code hai wo replace ho jayega. Continue?')===false)return;document.getElementById('py-code').value=PY_CONF_CODE;document.getElementById('py-code').scrollIntoView({block:'center'});}
+    const PY_SMA_YFINANCE = `"""SMA Crossover — yfinance style, aapka diya hua logic.
+# yfinance SMA20 / SMA50 cross par Buy/Sell. NSE symbols: RELIANCE.NS etc.
+# Website me iska data bhavcopy_data se aata hai (yfinance fallback nahi).
+import pandas as pd
+SHORT, LONG = 20, 50
+def run(data):
+    data = data.copy()
+    data['SMA_Short'] = data['close'].rolling(SHORT).mean()
+    data['SMA_Long'] = data['close'].rolling(LONG).mean()
+    data['Signal'] = (data['SMA_Short'] > data['SMA_Long']).astype(int)
+    data['Position'] = data['Signal'].diff()
+    trades = []
+    for i in range(LONG, len(data)):
+        if data['Position'].iloc[i] == 1:  # Buy
+            trades.append({"entry_date": str(data['date'].iloc[i]), "exit_date": str(data['date'].iloc[min(i+5, len(data)-1)]),
+                           "entry_price": float(data['close'].iloc[i]), "exit_price": float(data['close'].iloc[min(i+5, len(data)-1)]), "qty": 1})
+    return {"trades": trades}
+`;
+    function pyLoadSMA(){if(confirm('Editor me jo code hai wo replace ho jayega. Continue?')===false)return;document.getElementById('py-code').value=PY_SMA_YFINANCE;document.getElementById('py-code').scrollIntoView({block:'center'});}
     function pyLoadPremium(){if(confirm('Editor me jo code hai wo replace ho jayega. Continue?')===false)return;document.getElementById('py-code').value=PY_PREMIUM_CODE;document.getElementById('py-code').scrollIntoView({block:'center'});}
     async function pyRunBacktest(){
         const btn=document.getElementById('py-run');const orig=btn.innerHTML;btn.innerHTML='<span class="spinner"></span> Running...';

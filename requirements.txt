@@ -16,3 +16,5 @@ vectorbt>=0.26.0
 backtesting>=0.3.3
 dhanhq>=2.0.0
 psycopg2-binary>=2.9.9
+yfinance>=0.2.40
+matplotlib>=3.8.0
