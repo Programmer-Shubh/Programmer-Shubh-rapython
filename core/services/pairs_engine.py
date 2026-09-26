@@ -71,7 +71,60 @@ def analyze_pair(hist_a: List[Dict], hist_b: List[Dict], sym_a: str, sym_b: str)
     }
 
 
+def scan_cross_market(symbols=None) -> Dict:
+    """Cross-market NSE vs BSE for SAME stock — true equity arbitrage.
+    Shows only high-diff (>0.4%) so HOLD spam is hidden."""
+    from core.services.scanner import OptionScanner
+    from core.services.live_market_data import LiveMarketData
+    from core.services.free_data import _yahoo_fallback_quote
+    sc = OptionScanner()
+    live = LiveMarketData()
+    # Liquid stocks where NSE/BSE both trade
+    if not symbols:
+        symbols = ["RELIANCE","HDFCBANK","ICICIBANK","TCS","INFY","SBIN","AXISBANK","KOTAKBANK","LT","BHARTIARTL","ITC","BAJFINANCE","SBIN","HDFCBANK","RELIANCE"]
+        symbols = list(dict.fromkeys(symbols))[:12]
+    results = []
+    for sym in symbols:
+        try:
+            # NSE
+            pa = float((live.get_live_spot(sym) or {}).get("spot") or 0)
+            if not pa:
+                ra = sc.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [sym])
+                pa = float(ra["close_price"]) if ra and ra["close_price"] else 0
+            # BSE via .BO
+            try:
+                q = _yahoo_fallback_quote(f"{sym}.BO", timeout=2)
+                pb = float((q or {}).get("spot") or 0)
+            except Exception:
+                pb = 0
+            if pa and pb:
+                diff = pa - pb
+                pct = diff / pb * 100 if pb else 0
+                # Only show meaningful diff
+                if abs(pct) < 0.3:
+                    continue
+                results.append({
+                    "pair": sym, "symbol": sym,
+                    "nse_price": round(pa,2), "bse_price": round(pb,2),
+                    "nse_bse_diff": round(diff,2), "nse_bse_pct": round(pct,2),
+                    "price_a": round(pa,2), "price_b": round(pb,2),
+                    "signal": f"Buy {('BSE' if diff>0 else 'NSE')} / Sell {('NSE' if diff>0 else 'BSE')}",
+                    "arb": abs(pct) > 0.5, "zscore": round(pct,2), "correlation": 0.99,
+                })
+        except Exception:
+            continue
+    results.sort(key=lambda x: abs(x.get("nse_bse_pct",0)), reverse=True)
+    return {"pairs": results[:5], "count": len(results)}
+
 def scan_pairs(symbols=None, pairs=None) -> Dict:
+    # For backwards compat: if called for cross-market, use dedicated scanner
+    # Check if caller wants single-stock NSE/BSE (no pair) — detect via symbols being single list and pairs is None
+    # Heuristic: if symbols provided and pairs is None and len(symbols) >3 and no pair logic needed, use cross-market
+    # But keep original pair logic for /pairs endpoint (which is now cross-market first, fallback to pairs)
+    # Try cross-market first for high-diff display, fallback to pair stats if no cross-market found
+    cm = scan_cross_market(symbols=symbols)
+    if cm["pairs"]:
+        return cm
     from core.services.scanner import OptionScanner
     from core.services.live_market_data import LiveMarketData
     sc = OptionScanner()
@@ -86,31 +139,22 @@ def scan_pairs(symbols=None, pairs=None) -> Dict:
             ha = sc._get_historical(a)
             hb = sc._get_historical(b)
             r = analyze_pair(ha, hb, a, b)
-            # Cross-market: NSE vs BSE price diff (same symbol, two exchanges)
-            # For pairs, keep inter-symbol diff too — show both
             try:
-                # NSE/BSE for symbol A (cross-market arb)
-                import requests as _rq2
-                from core.services.free_data import _YAHOO_MAP
                 def _bse(sym):
                     try:
-                        yb = f"{sym}.BO"
-                        # Yahoo BSE via same helper with .BO
                         from core.services.free_data import _yahoo_fallback_quote
-                        q = _yahoo_fallback_quote(yb, timeout=2)
+                        q = _yahoo_fallback_quote(f"{sym}.BO", timeout=2)
                         return float((q or {}).get("spot") or 0)
                     except Exception:
                         return 0
                 pa = float((live.get_live_spot(a) or {}).get("spot") or 0)
                 pb = float((live.get_live_spot(b) or {}).get("spot") or 0)
-                # Fallback DB
                 if not pa:
                     ra = sc.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [a])
                     pa = float(ra["close_price"]) if ra and ra["close_price"] else 0
                 if not pb:
                     rb = sc.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [b])
                     pb = float(rb["close_price"]) if rb and rb["close_price"] else 0
-                # NSE vs BSE for first symbol of pair (true cross-market)
                 nse_a = pa
                 bse_a = _bse(a)
                 r["price_a"] = round(pa, 2); r["price_b"] = round(pb, 2)

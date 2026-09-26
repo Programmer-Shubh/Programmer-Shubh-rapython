@@ -12,11 +12,13 @@ router = APIRouter()
 BROKER_DEFAULTS = {
     "dhan": {"name": "Dhan", "icon": "bi-bank", "color": "text-primary", "fields": ["client_id", "access_token", "refresh_token"], "desc": "Client ID + Access Token + Refresh Token"},
     "angel": {"name": "Angel One", "icon": "bi-graph-up-arrow", "color": "text-success", "fields": ["client_code", "password", "api_key", "totp_secret"], "desc": "Client Code + Password + API Key"},
+    "bigul": {"name": "Bigul", "icon": "bi-bullseye", "color": "text-warning", "fields": ["client_id", "password", "api_key", "totp_secret"], "desc": "Client ID + Password + API Key + TOTP"},
 }
 
 BROKER_FIELD_LABELS = {
     "dhan": {"client_id": "Client ID", "access_token": "Access Token", "refresh_token": "Refresh Token"},
     "angel": {"client_code": "Client Code", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
+    "bigul": {"client_id": "Client ID", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
 }
 
 
@@ -622,9 +624,9 @@ async def connect_broker(req: ConnectRequest):
 
 @router.post("/auto-connect")
 async def auto_connect_all():
-    """Auto-connect Dhan+Angel Only (Fyers/Shoonya hidden per user request)."""
+    """Auto-connect Dhan+Angel+Bigul."""
     results = []
-    for key in ("dhan", "angel"):
+    for key in ("dhan", "angel", "bigul"):
         config = _get_config(key)
         if not config:
             results.append({"broker": key, "status": "not_configured"})
@@ -674,6 +676,17 @@ async def auto_connect_all():
                         results.append({"broker": key, "status": "connected"})
                     else:
                         results.append({"broker": key, "status": "failed", "error": result.get("error","")})
+            elif key == "bigul":
+                # Bigul uses same Angel-like API (client_id + password + api_key + totp)
+                from core.services.broker_angel_live import AngelLive
+                an = AngelLive(api_key=config.get("api_key",""), client_code=config.get("client_id",""), password=config.get("password",""), totp_secret=config.get("totp_secret",""))
+                result = await an.login()
+                if result.get("success"):
+                    config["access_token"] = an.jwt
+                    _save_config("bigul", config)
+                    results.append({"broker": key, "status": "connected"})
+                else:
+                    results.append({"broker": key, "status": "failed", "error": result.get("error","")})
         except Exception as e:
             results.append({"broker": key, "status": "error", "error": str(e)[:150]})
     return {"success": True, "results": results}
@@ -682,7 +695,7 @@ async def auto_connect_all():
 @router.post("/refresh-tokens")
 async def refresh_tokens():
     results = {}
-    for key in ("dhan", "angel"):
+    for key in ("dhan", "angel", "bigul"):
         config = _get_config(key)
         if not config:
             results[key] = {"success": False, "error": "Not configured"}
