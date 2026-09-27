@@ -1314,8 +1314,9 @@ let _lastOpenTrdHTML = null;
                     if(st.status==='done'){ r=st.result||null; lastErr=''; try{ const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width='100%'; bar.textContent='100%'; } const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Done!'; setTimeout(()=>{ const pb=document.getElementById('bt-progress'); if(pb) pb.classList.add('hidden'); },2000);}catch(e){} break; }
                     if(st.status==='error'){ lastErr=st.error||'worker failed'; break; }
                     if(st.status==='unknown'){ lastErr='server restart ho gaya, job wipe — dobara Run Backtest dabao'; break; }
+                    }
+                    if(!r && !lastErr) lastErr='timeout (10 min) — chhota period/symbol try karo';
                 }
-                if(!r && !lastErr) lastErr='timeout (10 min) — chhota period/symbol try karo';
             }
         }catch(ae){ lastErr=ae.message||''; }
         if(!_usedAsync){
@@ -1448,7 +1449,7 @@ let _lastOpenTrdHTML = null;
         try{if(typeof renderQuantTable==='function')renderQuantTable();}catch(e){}
     }
     let _autoBT=null; function toggleAutoBacktest(on){ if(on){ if(!_autoBT) _autoBT=setTimeout(()=>{try{if(document.getElementById('r-auto')?.checked) runBacktest();}catch(e){}},800); } else { if(_autoBT) clearTimeout(_autoBT); _autoBT=null; } }
-    function scheduleAutoBT(){ if(!document.getElementById('r-auto')?.checked) return; if(_autoBT) clearTimeout(_autoBT); _autoBT=setTimeout(()=>{try{runBacktest();}catch(e){}},900); }
+    function scheduleAutoBT(){ if(!document.getElementById('r-auto')?.checked) return; if(_autoBT) clearTimeout(_autoBT); _autoBT=setTimeout(()=>{try{runBacktest();}catch(e){}},80); }
     function updLeg(i,f,v){ if(f==='lots') stratLegs[i][f]=parseInt(v)||1; else stratLegs[i][f]=v; renderLegs(); try{updateRunSummary();}catch(e){} scheduleAutoBT(); }
     function updLegStrike(i,val){ if(val==='atm'){stratLegs[i].strike_selection='atm'; stratLegs[i].otm_distance=0;} else if(val.startsWith('otm')){stratLegs[i].strike_selection='otm'; stratLegs[i].otm_distance=parseInt(val.slice(3))||1;} else if(val.startsWith('itm')){stratLegs[i].strike_selection='itm'; stratLegs[i].otm_distance=parseInt(val.slice(3))||1;} renderLegs(); try{updateRunSummary();}catch(e){} scheduleAutoBT(); }
     function addLeg(){
