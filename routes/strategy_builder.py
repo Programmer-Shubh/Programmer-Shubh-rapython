@@ -718,6 +718,23 @@ def _run_backtest_core(req: BacktestRequest):
                 continue
             if len(historical) > _bar_cap:
                 historical = historical[-_bar_cap:]
+            # Warmup: prepend up to 30 REAL pre-start bars so EMA21/ST
+            # indicators are valid on day 1. Engine takes entries only
+            # inside [start_date, end_date], so trade dates never leak
+            # outside the requested range.
+            if _use_db:
+                try:
+                    import datetime as _wu
+                    _s = _wu.datetime.strptime(str(start_date)[:10], "%Y-%m-%d")
+                    _w0 = (_s - _wu.timedelta(days=60)).strftime("%Y-%m-%d")
+                    _w1 = (_s - _wu.timedelta(days=1)).strftime("%Y-%m-%d")
+                    _warm = _load_db_history(_sym, _w0, _w1)
+                    if _warm:
+                        _seen = set(h.get("trade_date") for h in historical)
+                        _warm = [h for h in _warm if h.get("trade_date") not in _seen][-30:]
+                        historical = _warm + historical
+                except Exception:
+                    pass
             # Overall strategy MTM split per symbol: engine runs per symbol, so
             # the STRATEGY-level cap is divided by symbol count to keep the
             # combined MTM correct. Per-leg SL/TP keeps FULL values so every
@@ -773,13 +790,22 @@ def _run_backtest_core(req: BacktestRequest):
             if errs:
                 return {"error": errs}
             # No trades due to strict indicator thresholds -> SuperTrend-only retry
-            # for EVERY symbol (not just first) so multi-symbol never shows 1 symbol
+            # for EVERY symbol (not just first) so multi-symbol never shows 1 symbol.
+            # Retry data is clamped to the requested range (no out-of-range
+            # trades) and disclosed in the response note.
+            _retry_used = False
             try:
                 from core.services.backtest_engine import BacktestEngine as _BE2
                 for _sym0 in (_syms if _syms else [symbol]):
                     _hist0 = _generate_synthetic_fallback(_sym0, start_date, end_date)
+                    try:
+                        _hist0 = [h for h in (_hist0 or [])
+                                  if str(start_date)[:10] <= str(h.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+                    except Exception:
+                        pass
                     if not _hist0 or len(_hist0) < 30:
                         continue
+                    _retry_used = True
                     _eng2 = _BE2(is_live=False)
                     _eng2._skip_db = True
                     _res2 = _eng2.run(_hist0, _sym0, start_date, end_date, [{"id": "supertrend", "params": {"period": 10, "multiplier": 3}}], [], [], legs, advanced_in, risk_in, is_live=False)
@@ -810,6 +836,10 @@ def _run_backtest_core(req: BacktestRequest):
         _zero_note = ""
         _zero_tips = []
         try:
+            _retry_used
+        except NameError:
+            _retry_used = False
+        try:
             if int(m.get("total_trades", 0) or 0) == 0:
                 _err_syms = [k for k, v in (_per_symbol or {}).items() if isinstance(v, dict) and v.get("error")]
                 _ok_syms = [k for k in _syms if k not in _err_syms]
@@ -833,6 +863,15 @@ def _run_backtest_core(req: BacktestRequest):
         import traceback
         traceback.print_exc()
         return {"error": f"Internal error: {str(e)}"}
+    # Disclose the SuperTrend-only retry: results below came from relaxed
+    # indicators, not the user's exact setup.
+    try:
+        if _retry_used and int(m.get("total_trades", 0) or 0) > 0:
+            _rt = ("Note: aapke strict indicators par is period me signals nahi bane, "
+                   "isliye SuperTrend-only retry ke trades dikhaye gaye hain. ")
+            _zero_note = _rt + (_zero_note or "")
+    except Exception:
+        pass
     _final_res = {
         "success": True,
         "engine": _engine_name,

@@ -159,7 +159,14 @@ class BacktestEngine:
                 continue
 
             has_open = len(entries) > len(exits)
-            can_enter = not has_open and daily_trades < max_trades_day
+            # Warmup bars (dated before start_date) feed indicators only -
+            # entries strictly inside the requested range, so trade dates
+            # can never leak outside [start_date, end_date].
+            try:
+                _in_range = str(cur_date) >= str(start_date)[:10]
+            except Exception:
+                _in_range = True
+            can_enter = not has_open and daily_trades < max_trades_day and _in_range
 
             # Execute pending entry from PREVIOUS bar's signal (no look-ahead)
             if pending_entry is not None and can_enter:
