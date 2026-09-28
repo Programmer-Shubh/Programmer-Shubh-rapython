@@ -21,6 +21,7 @@ class PlaceTradeRequest(BaseModel):
     take_profit: float = 3000.0
     date: str = ""
     trade_type: str = "intraday"
+    strategy_id: int = 0
 
 
 class CloseTradeRequest(BaseModel):
@@ -77,6 +78,7 @@ def get_open_trades():
                 "entry_date": t["trade"].get("entry_date", ""),
                 "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
                 "expiry_date": t["trade"].get("expiry_date", ""),
+                "strategy_id": t["trade"].get("strategy_id", 0) or 0,
             }
             for t in positions
         ],
@@ -162,6 +164,7 @@ def place_trade(req: PlaceTradeRequest):
         "total_cost": costs["total"],
         "entry_date": req.date,
         "trade_type": req.trade_type,
+        "strategy_id": req.strategy_id,
     })
     return {"trade_id": tid, "entry_price": round(adj_premium, 2), "costs": costs}
 

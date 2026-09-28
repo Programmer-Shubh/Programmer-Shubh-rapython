@@ -165,6 +165,7 @@ def get_portfolio():
                 "entry_date": t["trade"].get("entry_date", ""),
                 "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
                 "expiry_date": t["trade"].get("expiry_date", ""),
+                "strategy_id": t["trade"].get("strategy_id", 0) or 0,
             }
             for t in positions
         ],

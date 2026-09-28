@@ -101,7 +101,8 @@ def scan_cross_market(symbols=None) -> Dict:
             if pa and pb:
                 diff = pa - pb
                 pct = diff / pb * 100 if pb else 0
-                if abs(diff) < 10:
+                # Only ₹12+ diffs (user: chhote diff hide) — arb badge still >0.5%
+                if abs(diff) < 12:
                     continue
                 results.append({
                     "pair": sym, "symbol": sym,
@@ -117,78 +118,6 @@ def scan_cross_market(symbols=None) -> Dict:
     return {"pairs": results[:5], "count": len(results)}
 
 def scan_pairs(symbols=None, pairs=None) -> Dict:
-    # Cross-market NSE/BSE is primary; always return top 3 even if diff small
-    # so dashboard never looks empty (user: khali na dikhe)
-    cm = scan_cross_market(symbols=symbols)
-    if cm["pairs"]:
-        return cm
-    # Fallback: show top 3 cross-market even with small diff (HOLD) so card not empty
-    # Re-run without diff filter
-    from core.services.live_market_data import LiveMarketData
-    from core.services.free_data import _yahoo_fallback_quote
-    from core.services.scanner import OptionScanner as _SC
-    sc2 = _SC(); live2 = LiveMarketData()
-    syms2 = ["RELIANCE","HDFCBANK","TCS","INFY","SBIN"][:5]
-    out2 = []
-    for sym in syms2:
-        try:
-            pa = float((live2.get_live_spot(sym) or {}).get("spot") or 0)
-            q = _yahoo_fallback_quote(f"{sym}.BO", timeout=1)
-            pb = float((q or {}).get("spot") or 0)
-            if pa and pb:
-                diff = pa - pb; pct = diff/pb*100 if pb else 0
-                out2.append({"pair": sym, "symbol": sym, "nse_price": round(pa,2), "bse_price": round(pb,2),
-                             "nse_bse_diff": round(diff,2), "nse_bse_pct": round(pct,2),
-                             "price_a": round(pa,2), "price_b": round(pb,2),
-                             "signal": "HOLD", "arb": False, "zscore": 0, "correlation": 0.99})
-        except Exception:
-            continue
-    return {"pairs": out2[:3], "count": len(out2)}
-    from core.services.scanner import OptionScanner
-    from core.services.live_market_data import LiveMarketData
-    sc = OptionScanner()
-    live = LiveMarketData()
-    if pairs is None:
-        pairs = DEFAULT_PAIRS
-    if symbols:
-        pairs = [p for p in pairs if p[0] in symbols or p[1] in symbols]
-    results = []
-    for a, b in pairs:
-        try:
-            ha = sc._get_historical(a)
-            hb = sc._get_historical(b)
-            r = analyze_pair(ha, hb, a, b)
-            try:
-                def _bse(sym):
-                    try:
-                        from core.services.free_data import _yahoo_fallback_quote
-                        q = _yahoo_fallback_quote(f"{sym}.BO", timeout=2)
-                        return float((q or {}).get("spot") or 0)
-                    except Exception:
-                        return 0
-                pa = float((live.get_live_spot(a) or {}).get("spot") or 0)
-                pb = float((live.get_live_spot(b) or {}).get("spot") or 0)
-                if not pa:
-                    ra = sc.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [a])
-                    pa = float(ra["close_price"]) if ra and ra["close_price"] else 0
-                if not pb:
-                    rb = sc.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [b])
-                    pb = float(rb["close_price"]) if rb and rb["close_price"] else 0
-                nse_a = pa
-                bse_a = _bse(a)
-                r["price_a"] = round(pa, 2); r["price_b"] = round(pb, 2)
-                r["nse_price"] = round(nse_a, 2) if nse_a else round(pa, 2)
-                r["bse_price"] = round(bse_a, 2) if bse_a else 0
-                r["nse_bse_diff"] = round(nse_a - bse_a, 2) if nse_a and bse_a else 0
-                r["nse_bse_pct"] = round((nse_a - bse_a)/bse_a*100, 2) if nse_a and bse_a and bse_a else 0
-                r["price_diff"] = round(pa - pb, 2) if pa and pb else 0
-                r["price_diff_pct"] = round((pa - pb)/pb*100, 2) if pa and pb and pb else 0
-                r["arb"] = bool(abs(r.get("zscore",0))>1.5 and (abs(r["price_diff_pct"])>1.0 or abs(r["nse_bse_pct"])>0.5) and r.get("correlation",0)>0.5)
-            except Exception:
-                r["price_a"] = 0; r["price_b"] = 0; r["price_diff"] = 0; r["price_diff_pct"] = 0
-                r["nse_price"] = 0; r["bse_price"] = 0; r["nse_bse_diff"] = 0; r["nse_bse_pct"] = 0; r["arb"] = False
-            results.append(r)
-        except Exception as e:
-            results.append({"pair": f"{a}/{b}", "error": str(e)[:100]})
-    results.sort(key=lambda x: (1 if x.get("arb") else 0, abs(x.get("zscore", 0))), reverse=True)
-    return {"pairs": results, "count": len(results)}
+    # Cross-market NSE/BSE, only >=₹12 diff (user: chhote diff hide).
+    # Honest empty when nothing qualifies (UI shows "No ₹12+ arb now").
+    return scan_cross_market(symbols=symbols)

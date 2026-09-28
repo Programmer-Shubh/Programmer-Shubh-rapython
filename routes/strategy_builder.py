@@ -34,6 +34,7 @@ def _generate_synthetic_fallback(symbol: str, start_date: str, end_date: str) ->
         'HINDALCO': 620, 'VEDL': 450, 'INDUSINDBK': 1450, 'NESTLEIND': 25000,
         'BAJAJFINSV': 1750, 'HEROMOTOCO': 4900, 'APOLLOHOSP': 6300, 'UPL': 550,
         'SHREECEM': 28000, 'TITAN': 3200, 'BAJAJFINSV': 1750,
+        'GOLDBEES': 85, 'SILVERBEES': 300,
     }
     
     # Ensure at least 60 trading days for indicator warmup (SuperTrend/EMA need 20+ bars)

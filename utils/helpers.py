@@ -77,6 +77,7 @@ def get_lot_size(symbol: str) -> int:
         "BRITANNIA": 140, "HINDALCO": 900, "VEDL": 1650, "INDUSINDBK": 900,
         "SHREECEM": 30, "NESTLEIND": 40, "BAJAJFINSV": 125, "HEROMOTOCO": 300,
         "APOLLOHOSP": 75, "UPL": 1100,
+        "GOLDBEES": 100, "SILVERBEES": 100,
     }
     # Correct exchange lots override (Aug 2026)
     _override={"FINNIFTY":60,"ADANIENT":309,"NIFTY":75}
@@ -111,6 +112,7 @@ def get_strike_step(symbol: str) -> float:
         "GRASIM": 20, "TECHM": 20, "DIVISLAB": 20, "EICHERMOT": 20, "BRITANNIA": 20,
         "HINDALCO": 10, "VEDL": 10, "INDUSINDBK": 10, "HEROMOTOCO": 20,
         "APOLLOHOSP": 20, "UPL": 10,
+        "GOLDBEES": 1, "SILVERBEES": 5,
     }
     return steps.get(symbol.upper(), 50)
 

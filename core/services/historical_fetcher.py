@@ -176,6 +176,7 @@ def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> Lis
         "EICHERMOT": 4800, "BRITANNIA": 5200, "HINDALCO": 620, "VEDL": 450,
         "INDUSINDBK": 1450, "NESTLEIND": 25000, "BAJAJFINSV": 1750, "HEROMOTOCO": 4900,
         "APOLLOHOSP": 6300, "UPL": 550, "ULTRACEMCO": 11000, "SHREECEM": 28000,
+        "GOLDBEES": 85, "SILVERBEES": 300,
     }
     import random, hashlib
     s = _SPOTS.get(symbol.upper(), 5000)

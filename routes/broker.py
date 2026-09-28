@@ -48,6 +48,7 @@ class LiveOrderRequest(BaseModel):
     broker: str = ""
     dry_run: bool = False
     trade_type: str = "intraday"
+    strategy_id: int = 0
 
 
 class LiveToggleRequest(BaseModel):
@@ -1197,6 +1198,7 @@ async def place_live_order(req: LiveOrderRequest):
             "total_cost": costs["total"],
             "entry_date": _dt.datetime.now().strftime("%Y-%m-%d"),
             "trade_mode": "live", "broker_order_id": order_id,
+            "strategy_id": req.strategy_id,
         })
         return {"success": True, "trade_id": tid, "broker_order_id": order_id,
                 "broker": broker, "broker_symbol": broker_ref, "quantity": broker_qty,
