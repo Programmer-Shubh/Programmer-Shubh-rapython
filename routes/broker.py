@@ -354,6 +354,34 @@ async def dhan_feed_check(symbol: str = "MIDCPNIFTY"):
     return out
 
 
+@router.get("/dhan-feed")
+async def dhan_feed_status():
+    """WebSocket streaming status: connection, subscriptions, tick freshness
+    (no secrets exposed). Start the feed with ?start=1 when token is saved."""
+    try:
+        from core.services.dhan_feed import ensure_feed_from_config, get_feed
+        from core.services.broker_dhan_live import UNDERLYING
+        import time as _tt
+        feed = ensure_feed_from_config() or get_feed()
+        try:
+            for _s, (_sc, _sg) in UNDERLYING.items():
+                feed.subscribe(_sg, str(_sc), 15)
+        except Exception:
+            pass
+        st = feed.state()
+        try:
+            _ticks = []
+            for (seg, secid), t in list(feed._ticks.items())[:12]:
+                _ticks.append({"seg": seg, "secid": secid, "ltp": t.get("ltp"),
+                               "age_s": round(_tt.time() - t.get("ts", 0), 1)})
+            st["sample_ticks"] = _ticks
+        except Exception:
+            pass
+        return st
+    except Exception as e:
+        return {"running": False, "connected": False, "error": str(e)[:150]}
+
+
 @router.post("/dhan-callback")
 async def dhan_callback_post(req: dict):
     """POST version for frontend P() call — saves Dhan token directly."""
@@ -822,6 +850,17 @@ async def token_status():
                 res = {"valid": bool(v.get("success")),
                        "expires_at": "",
                        "detail": str(v.get("message") or v.get("error", ""))[:150]}
+                try:
+                    from core.services.dhan_feed import ensure_feed_from_config as _eff2
+                    _fdf = _eff2()
+                    if _fdf:
+                        from core.services.broker_dhan_live import UNDERLYING as _UL2
+                        for _s2, (_sc2, _sg2) in _UL2.items():
+                            _fdf.subscribe(_sg2, str(_sc2), 15)
+                    from core.services.dhan_feed import get_feed as _gf
+                    res["feed"] = _gf().state()
+                except Exception:
+                    pass
                 _TOKEN_CHECK_TS[key] = _tt.time()
                 _TOKEN_CHECK_RES[key] = res
                 status[key] = res

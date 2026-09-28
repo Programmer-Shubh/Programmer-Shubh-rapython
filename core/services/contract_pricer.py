@@ -384,12 +384,30 @@ def get_contract_ltps(symbol, contracts, expiry_ymd=""):
                         live[key] = _nmap[key]
         except Exception:
             pass
-        # Tier 1a: Dhan token batch (index underlyings)
+        # Tier 1a: Dhan token batch (index underlyings).
+        # Streaming first: subscribe contracts on the WS feed and read live
+        # ticks; REST quote only covers contracts with no fresh tick.
         try:
             tmap = _dhan_tokens(sym, expiry_ymd) if expiry_ymd else {}
             if tmap:
                 want = {k: tmap[k] for k in missing if k in tmap}
-                live.update(_dhan_batch_ltp(sym, want))
+                try:
+                    from core.services.dhan_feed import get_feed, ensure_feed_from_config
+                    _fd = ensure_feed_from_config() or get_feed()
+                    _seg = "BSE_FNO" if sym in ("SENSEX", "BANKEX") else "NSE_FNO"
+                    for _k, _sid in want.items():
+                        _fd.subscribe(_seg, _sid)
+                    for _k, _sid in want.items():
+                        try:
+                            _fl = _fd.get_ltp(_seg, _sid)
+                        except Exception:
+                            _fl = 0
+                        if _fl and float(_fl) > 0:
+                            live[_k] = round(float(_fl), 2)
+                except Exception:
+                    pass
+                want_rest = {k: v for k, v in want.items() if k not in live}
+                live.update(_dhan_batch_ltp(sym, want_rest))
         except Exception:
             pass
         # Tier 1b: Angel token batch (anything with NFO symbol)

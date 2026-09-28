@@ -183,7 +183,21 @@ def fetch_cloud_spot(symbol: str) -> dict:
     except Exception:
         pass
     # 1b) Dhan marketfeed (user's connected broker) — ONLY live source for
-    # MIDCPNIFTY (no Yahoo/Google/Stooq symbol exists for Midcap Select)
+    # MIDCPNIFTY (no Yahoo/Google/Stooq symbol exists for Midcap Select).
+    # WS streaming tick first, REST quote as backup.
+    if not spot and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"):
+        try:
+            from core.services.dhan_feed import ensure_feed_from_config as _effc
+            from core.services.broker_dhan_live import UNDERLYING as _UL
+            _uinfo = _UL.get(symbol.upper())
+            _udf = _effc()
+            if _udf and _uinfo:
+                _udf.subscribe(_uinfo[1], str(_uinfo[0]), 15)
+                _wpx = _udf.get_ltp(_uinfo[1], str(_uinfo[0])) or 0
+                if _wpx and float(_wpx) > 0:
+                    spot, source = float(_wpx), "dhan-ws"
+        except Exception:
+            pass
     if not spot and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"):
         try:
             import json as _js
