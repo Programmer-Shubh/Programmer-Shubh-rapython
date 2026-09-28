@@ -794,13 +794,41 @@ async def refresh_tokens():
     return {"success": True, "results": results}
 
 
+_TOKEN_CHECK_TS = {}
+_TOKEN_CHECK_RES = {}
+
+
 @router.get("/token-status")
-def token_status():
+async def token_status():
+    """Real validity: Dhan token is pinged (holdings read-only, 60s cache)
+    so the UI never shows 'Connected' for an expired token while the feed
+    is actually dead."""
+    import time as _tt
     status = {}
     for key in ("dhan", "angel"):
         config = _get_config(key)
-        valid = bool(config.get("access_token"))
-        status[key] = {"valid": valid, "expires_at": ""}
+        tok = str(config.get("access_token", "") or "")
+        if not (tok and not tok.startswith(("SIM-", "ANG-"))):
+            status[key] = {"valid": False, "expires_at": "", "detail": "not connected"}
+            continue
+        if key == "dhan":
+            try:
+                if _tt.time() - _TOKEN_CHECK_TS.get(key, 0) < 60 and key in _TOKEN_CHECK_RES:
+                    status[key] = _TOKEN_CHECK_RES[key]
+                    continue
+                from core.services.broker_dhan_live import DhanLive
+                dl = DhanLive(client_id=config.get("client_id", ""), access_token=tok)
+                v = await dl.validate()
+                res = {"valid": bool(v.get("success")),
+                       "expires_at": "",
+                       "detail": str(v.get("message") or v.get("error", ""))[:150]}
+                _TOKEN_CHECK_TS[key] = _tt.time()
+                _TOKEN_CHECK_RES[key] = res
+                status[key] = res
+            except Exception as e:
+                status[key] = {"valid": False, "expires_at": "", "detail": str(e)[:120]}
+        else:
+            status[key] = {"valid": True, "expires_at": "", "detail": "saved (OAuth mode)"}
     return {"success": True, "status": status}
 
 

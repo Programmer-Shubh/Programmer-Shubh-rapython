@@ -1572,9 +1572,9 @@ let _lastOpenTrdHTML = null;
         loadTrades();try{loadDashPositions();}catch(e){}try{loadStrats();loadRobotSaved();}catch(e){}
     }catch(e){alert('Error: '+e.message);}}
     async function stratDetail(id,name){try{const d=await A('/api/strategies/'+id+'/trades');if(d.error){alert(d.error);return;}
-        let h='<div style=\"position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center\" onclick=\"if(event.target===this)this.remove()\">';
-        h+='<div style=\"background:#fff;border-radius:10px;max-width:720px;width:92%;max-height:84vh;overflow:auto;padding:14px\">';
-        h+='<div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:8px\"><strong>Paper Detail — '+(name||('#'+id))+'</strong><button class=\"btn btn-sm btn-outline-dark\" onclick=\"this.closest(\\'div[style*=fixed]\\').remove()\">Close</button></div>';
+        let h='<div id="stratModal" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">';
+        h+='<div style="background:#fff;border-radius:10px;max-width:720px;width:92%;max-height:84vh;overflow:auto;padding:14px">';
+        h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong>Paper Detail - '+(name||('#'+id))+'</strong><button class="btn btn-sm btn-outline-dark" onclick="document.getElementById(&apos;stratModal&apos;).remove()">Close</button></div>';
         const o=d.open||[];
         h+='<div class=\"small fw-bold mb-1\">Open ('+o.length+')</div>';
         if(o.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th></tr></thead><tbody>';
