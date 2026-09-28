@@ -556,11 +556,11 @@
                 <div class="card mt-2" id="bt-charts"><div class="card-body p-2"><div id="eq-chart" style="height:200px"></div><div id="mo-chart" style="height:200px;margin-top:8px"></div></div></div>
                 <div class="card mt-2" id="bt-trades"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="bt-tl"></div></div>
             </div>
-<div class="card mt-3">
+<div class="card mt-3" style="display:none">
                 <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-info-circle"></i> Live Strategy Status</span><button class="btn btn-sm btn-outline-secondary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect Brokers</button></div>
                 <div class="card-body" id="robot-status"><p class="text-muted small">Strategy stopped. Select symbol + order + SL/Target then Start Strategy for paper trading. Market hours: Mon-Fri 9:15-15:30 IST — Paper trades can queue outside hours.</p></div>
             </div>
-            <div class="card mt-3" id="robot-saved-card">
+            <div class="card mt-3" id="robot-saved-card" style="display:none">
                 <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Strategies</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
                 <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p></div>
             </div>
