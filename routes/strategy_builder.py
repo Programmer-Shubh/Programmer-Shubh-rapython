@@ -695,7 +695,10 @@ def _run_backtest_core(req: BacktestRequest):
                                 # Small random drift per intraday bar
                                 drift = (i - bars_per_day/2) * 0.0001
                                 c = base_price * (1 + drift + (i%3-1)*0.001)
-                                intraday.append({**d, "trade_date": d["trade_date"], "close_price": round(c,2), "open_price": round(c*0.999,2), "high_price": round(c*1.002,2), "low_price": round(c*0.998,2)})
+                                # Real clock time for this bar: 09:15 + i*mins (signal-time accuracy)
+                                _mm = 9 * 60 + 15 + i * mins
+                                _bt = f"{_mm // 60:02d}:{_mm % 60:02d}"
+                                intraday.append({**d, "trade_date": d["trade_date"], "close_price": round(c,2), "open_price": round(c*0.999,2), "high_price": round(c*1.002,2), "low_price": round(c*0.998,2), "bar_time": _bt})
                         historical = intraday[-150:] if len(intraday)>150 else intraday
                     except: pass
                 _BT_CACHE[_ck] = (_bt_t.time(), historical)

@@ -125,6 +125,12 @@ class BacktestEngine:
                 self._cur_close = float(cur.get("close_price", 0) or 0)
             except Exception:
                 pass
+            # Actual execution-bar clock time (intraday bars carry bar_time;
+            # daily bars have none -> session-time fallback in enter/close).
+            try:
+                self._cur_bar_time = str(cur.get("bar_time") or "")
+            except Exception:
+                self._cur_bar_time = ""
             cur_date = cur["trade_date"]
             nxt = historical[i + 1] if i + 1 < len(historical) else None
             is_last = nxt is None or nxt["trade_date"] != cur_date
@@ -1008,9 +1014,12 @@ class BacktestEngine:
         premium = max(premium, 1.5)
         costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
         entry_time = getattr(self, '_entry_time', '09:35')
+        # Real signal-bar time when known (intraday); daily bars honestly
+        # keep the configured session entry time.
+        entry_clock = getattr(self, '_cur_bar_time', '') or entry_time
         return {
             "date": date, "strike": str(strike), "price": round(premium, 2),
-            "quantity": qty, "costs": costs, "time": entry_time,
+            "quantity": qty, "costs": costs, "time": entry_clock,
             "total_cost": round(premium * qty + costs["total"], 2),
             "type": txn_type, "legs": [{"option_type": option_type, "strike": strike, "type": txn_type, "lots": lots}],
         }
@@ -1066,12 +1075,13 @@ class BacktestEngine:
                 "costs": costs, "signed_value": round(signed, 2),
             })
         net_premium = abs(total_cost)
+        entry_clock = getattr(self, '_cur_bar_time', '') or getattr(self, '_entry_time', '09:35')
         return {
             "date": date, "strike": str(leg_details[0]["strike"]), "price": round(net_premium, 2),
             "quantity": qty, "costs": {"total": sum(l["costs"]["total"] for l in leg_details), **leg_details[0]["costs"]},
             "total_cost": round(total_cost + sum(l["costs"]["total"] for l in leg_details), 2),
             "type": "spread", "legs": leg_details,
-            "is_spread": True,
+            "is_spread": True, "time": entry_clock,
         }
 
     def _find_delta_strike(self, spot, symbol, option_type, target_delta):
@@ -1262,7 +1272,7 @@ class BacktestEngine:
         if self.is_live:
             try:
                 from core.services.live_market_data import LiveMarketData
-                live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type)
+                live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type, getattr(self, 'bt_expiry', '') or '')
                 if live and float(live) > 0:
                     val = float(live)
                     self.premium_cache[key] = val
@@ -1349,7 +1359,7 @@ class BacktestEngine:
         if self.is_live:
             try:
                 from core.services.live_market_data import LiveMarketData
-                live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type)
+                live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type, getattr(self, 'bt_expiry', '') or '')
                 if live and float(live) > 0:
                     val = float(live)
                     self.premium_cache[key] = val
@@ -1461,10 +1471,15 @@ class BacktestEngine:
             pnl = (exit_prem * qty - exit_costs["total"]) - entry["total_cost"]
         else:
             pnl = (entry["price"] * entry["quantity"] - entry["costs"]["total"]) - (exit_prem * qty + exit_costs["total"])
+        exit_clock = (
+            getattr(self, '_cur_bar_time', '')
+            or getattr(self, '_early_exit_time', None)
+            or getattr(self, '_exit_time', '15:14')
+        )
         exits.append({
             "date": exit_date, "strike": entry["strike"], "price": round(exit_prem, 2),
             "quantity": qty, "exit_costs": exit_costs, "reason": reason, "pnl": round(pnl, 2),
-            "time": getattr(self, '_early_exit_time', None) or getattr(self, '_exit_time', '15:14'),
+            "time": exit_clock,
         })
 
     def _close_spread(self, entries, exits, entry, reason, exit_date):
@@ -1488,10 +1503,16 @@ class BacktestEngine:
         entry_costs = entry["total_cost"] - entry_cash
         # Net PnL = entry_cash (credit + / debit -) + exit_value (reverse legs) - brokerage both sides
         pnl = entry_cash + exit_value - entry_costs - exit_costs_total
+        exit_clock = (
+            getattr(self, '_cur_bar_time', '')
+            or getattr(self, '_early_exit_time', None)
+            or getattr(self, '_exit_time', '15:14')
+        )
         exits.append({
             "date": exit_date, "strike": entry["strike"], "price": round(abs(exit_value), 2),
             "quantity": entry["quantity"], "exit_costs": {"total": round(exit_costs_total, 2)},
             "reason": reason, "pnl": round(pnl, 2), "is_spread": True,
+            "time": exit_clock,
         })
 
     def _close_spot_for_date(self, bar_date):

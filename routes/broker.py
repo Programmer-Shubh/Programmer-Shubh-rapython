@@ -1014,6 +1014,21 @@ async def place_live_order(req: LiveOrderRequest):
         symbol = (req.symbol or "").upper()
         if not symbol:
             return {"error": "Symbol required"}
+        # Strategy expiry guard: never execute from an expired strategy
+        if req.strategy_id:
+            try:
+                from core.models.database import Database as _DB2
+                from datetime import datetime as _dt2, timedelta as _td2, timezone as _tz2
+                _srow = _DB2.get_instance().fetch_one(
+                    "SELECT name, end_date FROM strategies WHERE id=?", [req.strategy_id]
+                )
+                if _srow:
+                    _end = str(_srow.get("end_date") or "")[:10]
+                    _today = _dt2.now(_tz2(_td2(hours=5, minutes=30))).strftime("%Y-%m-%d")
+                    if _end and _end < _today:
+                        return {"error": f"Strategy '{_srow.get('name','')}' expired on {_end} - execution blocked"}
+            except Exception:
+                pass
         lots = max(1, int(req.quantity or 1))
         lot = get_lot_size(symbol)
         broker_qty = lots * lot

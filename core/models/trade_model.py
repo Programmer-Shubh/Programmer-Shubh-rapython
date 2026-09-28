@@ -426,6 +426,10 @@ class TradeModel:
                 del d[k]
 
     def get_option_premium(self, symbol, option_type, strike, expiry, iv=None) -> float:
+        # ONE shared pricer with the chain table (contract_pricer): broker
+        # token-quote -> fresh-today DB -> model(current IV, real DTE).
+        # Removed divergences: stale MAX(date) DB, neighbour-strike fallback,
+        # entry-IV pin, hardcoded dte=7 model. Bad-tick + display clamps stay.
         self._trim_cache(self._last_premiums, self._last_premiums_max)
         self._trim_cache(self._last_spots, self._last_spots_max)
         if strike is None or float(strike or 0) <= 0:
@@ -433,16 +437,13 @@ class TradeModel:
         strike = float(strike)
         # Key WITH expiry: same strike, different expiry must not share premium (value-mix bug)
         cache_key = f"{symbol}_{option_type}_{strike}_{expiry or ''}"
-        # 1) Try live LTP first (real market, 2s cache)
         try:
-            from core.services.live_market_data import LiveMarketData as _LMD
-            live = _LMD().get_option_ltp(symbol, strike, option_type)
+            from core.services.contract_pricer import get_contract_ltp
+            live = get_contract_ltp(symbol, strike, option_type, expiry)
             if live and float(live) > 0:
                 val = float(live)
-                # Bad-tick filter: reject >60% premium jump in <1min unless the
-                # UNDERLYING really moved. Compare spot-vs-spot (same units):
-                # the old code compared spot level (~24000) to premium (~130),
-                # which is always "huge", so the filter never fired.
+                # Bad-tick filter: reject >60% premium jump unless the
+                # UNDERLYING really moved (spot-vs-spot, same units).
                 last = self._last_premiums.get(cache_key)
                 if last and last > 5:
                     change = abs(val - last) / last
@@ -467,79 +468,6 @@ class TradeModel:
                 else:
                     self._last_premiums[cache_key] = val
                 return val
-        except Exception:
-            pass
-        # 2) Exact strike on latest date (most accurate historical)
-        row = self.db.fetch_one(
-            "SELECT close_price, trade_date FROM bhavcopy_data WHERE symbol=? AND option_type=? AND strike_price=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?)",
-            [symbol, option_type, strike, symbol],
-        )
-        if row and row["close_price"] and float(row["close_price"]) > 0:
-            val = float(row["close_price"])
-            # No jitter - use exact DB value for realistic simulation; Bid/Ask spread applied on execution via TransactionCosts
-            self._last_premiums[cache_key] = val
-            return val
-        # 3) Nearest strike within 2 steps (avoid far OTM wrong premium - previous bug caused 523->67 jump)
-        try:
-            from utils.helpers import get_strike_step
-            step = get_strike_step(symbol)
-            row = self.db.fetch_one(
-                "SELECT close_price, strike_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 ORDER BY ABS(strike_price-?) ASC LIMIT 1",
-                [symbol, option_type, strike, step, strike],
-            )
-            if row and row["close_price"] and float(row["close_price"]) > 0:
-                val = float(row["close_price"])
-                # Only use if reasonably close (e.g., M&M 523 strike vs 67 premium far strike would be rejected via step check)
-                self._last_premiums[cache_key] = val
-                return val
-        except Exception:
-            pass
-        # 4) Unified model with live spot (SAME model_premium as order entry:
-        # per-symbol IV pinned at entry (entry_iv) so old positions never
-        # reprice when the IV map is tuned - Current matches Entry, no fake P&L)
-        try:
-            from core.services.live_market_data import LiveMarketData
-            from utils.helpers import get_strike_step, model_premium, model_iv
-            pin_iv = float(iv) if iv and float(iv) > 0 else model_iv(symbol)
-            # Get live spot for realistic pricing (Yahoo-first, NSE blocked on cloud)
-            spot = 0
-            try:
-                lm = LiveMarketData()
-                sp = lm.get_live_spot(symbol)
-                if sp and sp.get("spot"):
-                    spot = float(sp["spot"])
-            except Exception:
-                pass
-            if spot <= 0:
-                sr = self.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [symbol])
-                if sr and sr["close_price"]:
-                    spot = float(sr["close_price"])
-            if spot > 0:
-                # Remember spot for the bad-tick filter (step 1)
-                try:
-                    self._last_spots[symbol] = float(spot)
-                except Exception:
-                    pass
-                # Use expiry to compute DTE, else 7 days weekly
-                import datetime as _dt
-                dte = 7
-                if expiry:
-                    try:
-                        exp_dt = _dt.datetime.strptime(str(expiry), "%Y-%m-%d")
-                        dte = max(1, (exp_dt - _dt.datetime.now()).days)
-                    except Exception:
-                        dte = 7
-                bs = model_premium(spot, float(strike), dte, option_type, symbol=symbol, iv=pin_iv)
-                if bs and bs > 0:
-                    # Ensure premium not unrealistic vs last: limit change to 30% per check
-                    last = self._last_premiums.get(cache_key)
-                    if last and last > 5:
-                        max_change = 0.30  # max 30% move per tick to prevent 523->67 jump
-                        if abs(bs - last) / last > max_change:
-                            # Clamp to max_change in direction of move
-                            bs = last * (1 + max_change if bs > last else (1 - max_change))
-                    self._last_premiums[cache_key] = bs
-                    return round(bs, 2)
         except Exception:
             pass
         return None

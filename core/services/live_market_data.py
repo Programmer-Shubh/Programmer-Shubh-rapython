@@ -68,12 +68,22 @@ class LiveMarketData:
             pass
         return 0.0
 
-    def get_option_ltp(self, symbol: str, strike: float, option_type: str) -> float:
-        row = self.db.fetch_one(
-            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?)",
-            [symbol, strike, option_type, symbol],
-        )
-        return float(row["close_price"]) if row else None
+    def get_option_ltp(self, symbol: str, strike: float, option_type: str, expiry: str = "") -> float:
+        # Delegates to the shared contract pricer (broker token-quote ->
+        # fresh DB -> model) so every caller sees the chain's price.
+        try:
+            from core.services.contract_pricer import get_contract_ltp
+            return get_contract_ltp(symbol, strike, option_type, expiry)
+        except Exception:
+            pass
+        try:
+            row = self.db.fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?)",
+                [symbol, strike, option_type, symbol],
+            )
+            return float(row["close_price"]) if row else None
+        except Exception:
+            return None
 
     # _fetch_chain_page and fetch_live_from_nse REMOVED - NSE blocked on cloud
     # Use DB chain → Google Finance → synthetic Black-Scholes instead

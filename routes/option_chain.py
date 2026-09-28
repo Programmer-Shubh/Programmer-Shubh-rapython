@@ -22,6 +22,7 @@ class TradeRequest(BaseModel):
     stop_loss: float = 500.0
     take_profit: float = 1000.0
     trade_type: str = "intraday"
+    strategy_id: int = 0
 
 
 @router.get("/dates/{symbol}")
@@ -125,40 +126,71 @@ def get_live_chain(symbol: str):
     spot = live.get_spot_price(symbol)
     step = get_strike_step(symbol)
     atm = round(spot / step) * step if spot > 0 else 0
-    ce = {}
-    pe = {}
+    # 2b) ONE shared pricer for every contract (same function the positions
+    # table uses): broker token-quote -> fresh DB -> model. Chain vs positions
+    # can no longer diverge by source.
+    expiry_use = ""
+    try:
+        if chain:
+            _exps = bhav.get_expiries(symbol, dates[0])
+            if _exps:
+                expiry_use = str(_exps[0])[:10]
+    except Exception:
+        pass
+    if not expiry_use:
+        try:
+            expiry_use = (_dt.datetime.strptime(_today, "%Y-%m-%d") + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
+        except Exception:
+            expiry_use = ""
+    oi_map = {}
     if chain:
         for r in chain:
-            strike = r["strike_price"]
-            item = {"strike": strike, "ltp": r["close_price"], "oi": r.get("oi", 0), "vol": r.get("volume", 0), "open": r.get("open_price", 0), "high": r.get("high_price", 0), "low": r.get("low_price", 0)}
-            if r["option_type"] == "CE":
-                ce[strike] = item
-            else:
-                pe[strike] = item
-    all_strikes = sorted(set(list(ce.keys()) + list(pe.keys())))
-    rows = []
-    for s in all_strikes:
-        rows.append({"strike": s, "distance": int(s - atm),
-                     "ce_ltp": ce.get(s, {}).get("ltp", 0), "ce_oi": ce.get(s, {}).get("oi", 0), "ce_vol": ce.get(s, {}).get("volume", 0), "ce_iv": 0,
-                     "pe_ltp": pe.get(s, {}).get("ltp", 0), "pe_oi": pe.get(s, {}).get("oi", 0), "pe_vol": pe.get(s, {}).get("volume", 0), "pe_iv": 0})
-    if rows:
-        return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": "db"}
-    # 3) Fallback: ATM-centered model chain (same model_premium as order entry,
-    # so chain premium == trade entry; no random IVs). NSE itself is blocked on cloud.
-    from utils.helpers import model_premium
-    model_rows = []
-    if spot > 0 and atm > 0:
-        for i in range(-7, 8):
-            strike = atm + i * step
-            if strike <= 0:
+            try:
+                oi_map[(float(r["strike_price"]), r["option_type"])] = {
+                    "oi": r.get("oi", 0), "vol": r.get("volume", 0),
+                    "open": r.get("open_price", 0), "high": r.get("high_price", 0), "low": r.get("low_price", 0)}
+            except Exception:
                 continue
-            ce_price = model_premium(spot, strike, 7, "CE", symbol=sym)
-            pe_price = model_premium(spot, strike, 7, "PE", symbol=sym)
-            model_rows.append({"strike": strike, "distance": int(strike - atm),
-                               "ce_ltp": ce_price, "ce_oi": 0, "ce_vol": 0, "ce_iv": 0,
-                               "pe_ltp": pe_price, "pe_oi": 0, "pe_vol": 0, "pe_iv": 0})
-    if model_rows:
-        return {"symbol": symbol, "spot": spot, "atm": atm, "rows": model_rows, "source": "model", "note": "NSE blocked on cloud - model chain (same rate as order entry)"}
+    db_strikes = sorted(set(k[0] for k in oi_map)) if oi_map else []
+    if db_strikes:
+        all_strikes = db_strikes
+        src = "db"
+    elif spot > 0 and atm > 0:
+        all_strikes = [atm + i * step for i in range(-7, 8) if atm + i * step > 0]
+        src = "model"
+    else:
+        all_strikes = []
+        src = "none"
+    rows = []
+    if all_strikes:
+        try:
+            from core.services.contract_pricer import get_contract_ltps
+            contracts = [(s, "CE") for s in all_strikes] + [(s, "PE") for s in all_strikes]
+            px = get_contract_ltps(sym, contracts, expiry_use)
+        except Exception:
+            px = {}
+        # Source label: broker token-quote active when a real token is saved
+        try:
+            from core.services.contract_pricer import _broker_cfg as _bcfg, _real_token as _rtok
+            _dc = _bcfg("dhan")
+            _ac = _bcfg("angel")
+            if _rtok(_dc.get("access_token", "")) or _rtok(_ac.get("access_token", "") or _ac.get("jwt", "")):
+                src = "broker"
+        except Exception:
+            pass
+        for s in all_strikes:
+            ce_ltp = px.get((float(s), "CE"), 0) or 0
+            pe_ltp = px.get((float(s), "PE"), 0) or 0
+            ce_oi = oi_map.get((float(s), "CE"), {})
+            pe_oi = oi_map.get((float(s), "PE"), {})
+            rows.append({"strike": s, "distance": int(s - atm),
+                         "ce_ltp": ce_ltp, "ce_oi": ce_oi.get("oi", 0), "ce_vol": ce_oi.get("vol", ce_oi.get("volume", 0)), "ce_iv": 0,
+                         "pe_ltp": pe_ltp, "pe_oi": pe_oi.get("oi", 0), "pe_vol": pe_oi.get("vol", pe_oi.get("volume", 0)), "pe_iv": 0})
+    if rows:
+        return {"symbol": symbol, "spot": spot, "atm": atm, "rows": rows, "source": src, "expiry": expiry_use}
+    # 3) Removed: the old hardcoded-dte=7 model chain diverged from positions.
+    # The unified block above already serves the model tier (real DTE, current
+    # IV) through the same pricer the positions table uses.
     # Last resort: stale DB chain (any recent date) instead of an error, so the
     # page never shows "No chain data available" when history exists
     try:
@@ -189,6 +221,21 @@ def get_live_chain(symbol: str):
 @router.post("/place-trade")
 def place_trade(req: TradeRequest):
     try:
+        # Strategy expiry guard: never execute from an expired strategy
+        if req.strategy_id:
+            try:
+                from core.models.database import Database as _DB
+                from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+                _srow = _DB.get_instance().fetch_one(
+                    "SELECT name, end_date FROM strategies WHERE id=?", [req.strategy_id]
+                )
+                if _srow:
+                    _end = str(_srow.get("end_date") or "")[:10]
+                    _today = _dt.now(_tz(_td(hours=5, minutes=30))).strftime("%Y-%m-%d")
+                    if _end and _end < _today:
+                        return {"error": f"Strategy '{_srow.get('name','')}' expired on {_end} - execution blocked"}
+            except Exception:
+                pass
         # Mandatory SL/Target validation
         if req.stop_loss is None or req.take_profit is None:
             return {"error": "Stop-Loss and Target are mandatory - cannot be blank (SELL requires SL to prevent unmanaged risk)"}
@@ -290,9 +337,10 @@ def place_trade(req: TradeRequest):
             _ist = ""
         if premium <= 0 and req.date and _ist and str(req.date) < _ist:
             return {"error": f"No {req.option_type} {req.strike} premium on {req.date} for {req.symbol} - pick a strike visible in that date's chain (live rate not applied to past dates)"}
-        # If no DB premium, try live (may fail on Render - NSE blocked)
+        # If no DB premium, try live (shared pricer: broker token-quote ->
+        # fresh DB -> model; same rate the chain table shows)
         if premium <= 0:
-            live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type)
+            live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type, req.expiry)
             premium = live_premium if live_premium and live_premium > 0 else 0
         # If still no premium, instant model premium via LIVE spot (same as
         # chain's model_rows - live first, then DB - so entry == chain)

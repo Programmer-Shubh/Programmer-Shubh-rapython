@@ -120,6 +120,10 @@ class HistoricalReplayEngine:
         
         for i in range(min_bars, len(self.historical_data)):
             cur = self.historical_data[i]
+            try:
+                self.bt_engine._cur_bar_time = str(cur.get("bar_time") or "")
+            except Exception:
+                self.bt_engine._cur_bar_time = ""
             cur_date = cur["trade_date"]
             nxt = self.historical_data[i + 1] if i + 1 < len(self.historical_data) else None
             is_last = nxt is None or nxt["trade_date"] != cur_date

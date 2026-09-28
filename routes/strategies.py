@@ -23,6 +23,31 @@ class StrategyRequest(BaseModel):
     status: str = "active"
 
 
+def _ist_today():
+    from datetime import datetime, timedelta, timezone
+    ist = timezone(timedelta(hours=5, minutes=30))
+    return datetime.now(ist).strftime("%Y-%m-%d")
+
+
+def _apply_expiry_status(r):
+    """Backend source of truth: end_date < today (IST) => display expired.
+
+    Stored `status` is left untouched; frontend uses `display_status` /
+    `expired` so a past end_date can never render as runnable Active."""
+    try:
+        end = str(r.get("end_date") or "")[:10]
+        if end and end < _ist_today():
+            r["expired"] = True
+            r["display_status"] = "expired"
+        else:
+            r["expired"] = False
+            r["display_status"] = r.get("status") or "active"
+    except Exception:
+        r["expired"] = False
+        r["display_status"] = r.get("status") or "active"
+    return r
+
+
 @router.get("/list")
 def list_strategies():
     db = Database.get_instance()
@@ -37,6 +62,7 @@ def list_strategies():
         r["exit_conditions"] = json.loads(r.get("exit_conditions") or "[]")
         r["advanced_options"] = json.loads(r.get("advanced_options") or "{}")
         r["risk_management"] = json.loads(r.get("risk_management") or "{}")
+        _apply_expiry_status(r)
     return {"strategies": rows, "count": len(rows)}
 
 
@@ -53,6 +79,7 @@ def get_strategy(strat_id: int):
     row["exit_conditions"] = json.loads(row.get("exit_conditions") or "[]")
     row["advanced_options"] = json.loads(row.get("advanced_options") or "{}")
     row["risk_management"] = json.loads(row.get("risk_management") or "{}")
+    _apply_expiry_status(row)
     return row
 
 
