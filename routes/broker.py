@@ -321,6 +321,39 @@ async def angel_callback(request: Request):
         return HTMLResponse(f"<h3 style='color:red'>Angel One login failed.</h3><p>{str(e)[:200]}</p>", status_code=400)
 
 
+@router.get("/dhan-feed-check")
+async def dhan_feed_check(symbol: str = "MIDCPNIFTY"):
+    """Diagnose Dhan marketfeed (no secrets exposed): tries quote + LTP shapes,
+    returns which worked + spot. Helps debug Render IP blocks on weekends."""
+    from core.services.broker_dhan_live import DhanLive, UNDERLYING
+    out = {"symbol": symbol.upper(), "quote": {}, "ltp": {}}
+    try:
+        cfg = _get_config("dhan") or {}
+        if not cfg.get("access_token"):
+            return {"error": "Dhan not connected"}
+        dl = DhanLive(client_id=cfg.get("client_id", ""), access_token=cfg.get("access_token", ""))
+        info = UNDERLYING.get(symbol.upper(), (261, "IDX_I"))
+        scrip, seg = info
+        for name, path in (("quote", "/marketfeed/quote"), ("ltp", "/marketfeed/ltp")):
+            try:
+                res = await dl._request("POST", path, data={seg: [scrip]})
+                data = res.get("data") or {}
+                keys: list = []
+                try:
+                    import json as _js
+                    keys = list(data.keys()) if isinstance(data, dict) else [type(data).__name__]
+                except Exception:
+                    pass
+                out[name] = {"success": res.get("success"), "keys": keys[:6],
+                             "error": str(res.get("error", ""))[:150],
+                             "spot": await dl.get_index_spot(symbol) if name == "quote" else 0}
+            except Exception as e:
+                out[name] = {"error": str(e)[:150]}
+    except Exception as e:
+        out["error"] = str(e)[:200]
+    return out
+
+
 @router.post("/dhan-callback")
 async def dhan_callback_post(req: dict):
     """POST version for frontend P() call — saves Dhan token directly."""
