@@ -1,5 +1,8 @@
 fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
+# NOTE: plain uvicorn (no [standard]) - watchfiles/uvloop have no wheels on
+# newer Pythons and break Render builds with ResolutionImpossible. Nothing in
+# the codebase imports uvloop/httptools/watchfiles (verified).
+uvicorn>=0.27.0
 pandas>=2.1.0
 requests>=2.31.0
 numpy>=1.24.0
