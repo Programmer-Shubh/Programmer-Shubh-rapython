@@ -1014,7 +1014,9 @@ async def place_live_order(req: LiveOrderRequest):
         symbol = (req.symbol or "").upper()
         if not symbol:
             return {"error": "Symbol required"}
-        # Strategy expiry guard: never execute from an expired strategy
+        # Strategy expiry: auto-rollover to next weekly expiry by default so
+        # live trading keeps running instead of blocking on a past end_date.
+        _rolled_to = ""
         if req.strategy_id:
             try:
                 from core.models.database import Database as _DB2
@@ -1026,7 +1028,8 @@ async def place_live_order(req: LiveOrderRequest):
                     _end = str(_srow.get("end_date") or "")[:10]
                     _today = _dt2.now(_tz2(_td2(hours=5, minutes=30))).strftime("%Y-%m-%d")
                     if _end and _end < _today:
-                        return {"error": f"Strategy '{_srow.get('name','')}' expired on {_end} - execution blocked"}
+                        from routes.strategies import rollover_strategy as _roll2
+                        _rolled_to = _roll2(req.strategy_id) or ""
             except Exception:
                 pass
         lots = max(1, int(req.quantity or 1))
@@ -1248,9 +1251,12 @@ async def place_live_order(req: LiveOrderRequest):
             "trade_mode": "live", "broker_order_id": order_id,
             "strategy_id": req.strategy_id,
         })
-        return {"success": True, "trade_id": tid, "broker_order_id": order_id,
+        _lresp = {"success": True, "trade_id": tid, "broker_order_id": order_id,
                 "broker": broker, "broker_symbol": broker_ref, "quantity": broker_qty,
                 "entry_price": round(adj, 2), "mode": "live"}
+        if _rolled_to:
+            _lresp["rolled_to"] = _rolled_to
+        return _lresp
     except Exception as e:
         import traceback
         traceback.print_exc()

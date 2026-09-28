@@ -239,7 +239,9 @@ def get_live_chain(symbol: str, expiry: str = ""):
 @router.post("/place-trade")
 def place_trade(req: TradeRequest):
     try:
-        # Strategy expiry guard: never execute from an expired strategy
+        # Strategy expiry: auto-rollover to next weekly expiry by default so
+        # paper trading keeps running instead of blocking on a past end_date.
+        _rolled_to = ""
         if req.strategy_id:
             try:
                 from core.models.database import Database as _DB
@@ -251,7 +253,8 @@ def place_trade(req: TradeRequest):
                     _end = str(_srow.get("end_date") or "")[:10]
                     _today = _dt.now(_tz(_td(hours=5, minutes=30))).strftime("%Y-%m-%d")
                     if _end and _end < _today:
-                        return {"error": f"Strategy '{_srow.get('name','')}' expired on {_end} - execution blocked"}
+                        from routes.strategies import rollover_strategy as _roll
+                        _rolled_to = _roll(req.strategy_id) or ""
             except Exception:
                 pass
         # Expiry normalize: dashboard forms send today/''/'Live' - a same-day
@@ -268,6 +271,11 @@ def place_trade(req: TradeRequest):
                 try:
                     from core.services.contract_pricer import _nse_map as _nxmap
                     _ne, _nm = _nxmap(req.symbol)
+                    try:
+                        from routes.strategies import _norm_exp as _nxnorm
+                        _ne = _nxnorm(_ne)
+                    except Exception:
+                        pass
                     if _ne and _ne >= _ist_t:
                         _weekly = _ne
                 except Exception:
@@ -514,8 +522,12 @@ def place_trade(req: TradeRequest):
             "entry_date": req.date,
             "entry_iv": _model_iv(req.symbol),
             "trade_type": req.trade_type,
+            "strategy_id": req.strategy_id or 0,
         })
-        return {"trade_id": trade_id, "entry_price": round(adj_premium, 2), "costs": costs}
+        _resp = {"trade_id": trade_id, "entry_price": round(adj_premium, 2), "costs": costs}
+        if _rolled_to:
+            _resp["rolled_to"] = _rolled_to
+        return _resp
     except Exception as e:
         import traceback
         traceback.print_exc()

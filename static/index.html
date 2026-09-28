@@ -324,6 +324,10 @@
                 <div class="card-header">Open Positions</div>
                 <div class="card-body p-0"><div id="dash-pos"></div></div>
             </div>
+            <div class="card">
+                <div class="card-header">Recent Trades</div>
+                <div class="card-body p-0"><div id="dash-hist"></div></div>
+            </div>
         </div>
 
         <div id="pg-trades" class="pg hidden">
@@ -1539,9 +1543,9 @@ let _lastOpenTrdHTML = null;
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3"><div class="text-center p-4"><i class="bi bi-lightbulb" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">No strategies yet</p><small class="text-muted">Create your first strategy to get started</small></div></p>';return;}
     // Running status per strategy: count open paper/live trades by strategy_id
     let runMap={};try{const o=await A('/api/trades/open');(o.positions||[]).forEach(t=>{const sid=t.strategy_id||0;if(!sid)return;runMap[sid]=runMap[sid]||{paper:0,live:0};if((t.trade_mode||'paper')==='live')runMap[sid].live++;else runMap[sid].paper++;});}catch(e){}
-    let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const disp=s.display_status||s.status||'active';const isExp=(s.expired===true||disp==='expired');const statusCls=isExp?'expired':s.status==='active'?'active':s.status==='draft'?'draft':'paused';const statusLbl=isExp?'expired':(s.status||'active');const run=runMap[s.id]||{paper:0,live:0};const runH=(run.paper?`<span class="badge bg-success ms-1">● PAPER (${run.paper})</span>`:'')+(run.live?`<span class="badge bg-danger ms-1">● LIVE (${run.live})</span>`:'');const dis=isExp?'disabled title="Strategy expired - execution blocked"':'';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px;${isExp?'opacity:0.65':''}"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span><span class="badge badge-${statusCls}">${statusLbl}</span>${runH}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-sm btn-success" ${dis} onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" ${dis} onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-info" onclick="backtestStrat(${s.id})">Backtest Detail</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
+    let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const disp=s.display_status||s.status||'active';const isExp=(s.expired===true||disp==='expired');const statusCls=isExp?'expired':s.status==='active'?'active':s.status==='draft'?'draft':'paused';const statusLbl=isExp?'expired':(s.status||'active');const run=runMap[s.id]||{paper:0,live:0};const runH=(run.paper?`<span class="badge bg-success ms-1">● PAPER (${run.paper})</span>`:'')+(run.live?`<span class="badge bg-danger ms-1">● LIVE (${run.live})</span>`:'');const dis=isExp?'title="Expired - trade lagane par next expiry par auto-shift hoga"':'';h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px;${isExp?'opacity:0.65':''}"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span><span class="badge badge-${statusCls}">${statusLbl}</span>${runH}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div><div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-sm btn-success" ${dis} onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm btn-warning" ${dis} onclick="atFromStrat(${s.id},'${s.status}')">Auto Trade</button><button class="btn btn-sm btn-info" onclick="backtestStrat(${s.id})">Backtest Detail</button><button class="btn btn-sm btn-outline-primary" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
 
-    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}if(s.expired===true||s.display_status==='expired'){alert('Strategy expired on '+(s.end_date||'')+' - execution blocked. Extend the end date first.');return;}const legs=Array.isArray(s.legs)?s.legs:[];if(!legs.length){alert('No legs in this strategy');return;}
+    async function ptFromStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}if(s.expired===true||s.display_status==='expired'){if(!confirm('Strategy '+(s.end_date||'')+' ko expired hai - next expiry par auto-shift karke Paper Trade lagau?'))return;}const legs=Array.isArray(s.legs)?s.legs:[];if(!legs.length){alert('No legs in this strategy');return;}
         let live=null;try{live=await A('/api/chain/live/'+s.symbol);}catch(e){}
         const atm=live&&live.atm?live.atm:0;
         if(!atm){alert('Live ATM unavailable - open Option Chain once, then retry');return;}
@@ -1562,9 +1566,27 @@ let _lastOpenTrdHTML = null;
             const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s.symbol,option_type:opt,strike:strike,expiry:today,date:today,transaction_type:txn,quantity:leg.lots||1,stop_loss:sl,take_profit:tp,strategy_id:id})});
             if(r.error){alert('Error: '+r.error);return;}
             placed.push('Trade #'+r.trade_id+' '+txn+' '+opt+' '+strike+' @ Rs'+r.entry_price);
+            if(r.rolled_to)placed.push('(Strategy next expiry '+r.rolled_to+' par shift hui)');
         }
         alert('Paper trade lag gaya!\n'+placed.join('\n')+'\n\nOpen Positions me dikhega.');
-        loadTrades();try{loadDashPositions();}catch(e){}
+        loadTrades();try{loadDashPositions();}catch(e){}try{loadStrats();loadRobotSaved();}catch(e){}
+    }catch(e){alert('Error: '+e.message);}}
+    async function stratDetail(id,name){try{const d=await A('/api/strategies/'+id+'/trades');if(d.error){alert(d.error);return;}
+        let h='<div style=\"position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center\" onclick=\"if(event.target===this)this.remove()\">';
+        h+='<div style=\"background:#fff;border-radius:10px;max-width:720px;width:92%;max-height:84vh;overflow:auto;padding:14px\">';
+        h+='<div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:8px\"><strong>Paper Detail — '+(name||('#'+id))+'</strong><button class=\"btn btn-sm btn-outline-dark\" onclick=\"this.closest(\\'div[style*=fixed]\\').remove()\">Close</button></div>';
+        const o=d.open||[];
+        h+='<div class=\"small fw-bold mb-1\">Open ('+o.length+')</div>';
+        if(o.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th></tr></thead><tbody>';
+        o.forEach(t=>{h+='<tr><td>'+t.id+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>₹'+Number(t.entry_price||0).toFixed(2)+'</td><td>₹'+Number(t.current_price||0).toFixed(2)+'</td><td>'+Number(t.unrealized_pnl||0).toFixed(2)+'</td><td>'+(t.trade_mode||'paper')+'</td></tr>';});
+        h+='</tbody></table>';}else{h+='<p class=\"text-muted small\">Koi open trade nahi.</p>';}
+        const c=d.closed||[];
+        h+='<div class=\"small fw-bold mb-1 mt-2\">Closed ('+c.length+')</div>';
+        if(c.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Exit</th></tr></thead><tbody>';
+        c.forEach(t=>{h+='<tr><td>'+t.id+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>₹'+Number(t.entry_price||0).toFixed(2)+'</td><td>₹'+Number(t.exit_price||0).toFixed(2)+'</td><td>'+Number(t.pnl||0).toFixed(2)+'</td><td class=\"small text-muted\">'+(t.exit_reason||'')+'</td></tr>';});
+        h+='</tbody></table>';}else{h+='<p class=\"text-muted small\">Koi closed trade nahi.</p>';}
+        h+='</div></div>';
+        const w=document.createElement('div');w.innerHTML=h;document.body.appendChild(w.firstChild);
     }catch(e){alert('Error: '+e.message);}}
     async function atFromStrat(id,status){const newStatus=status==='active'?'paused':'active';try{const s=await A('/api/strategies/'+id);if(s&&!s.error){const keep={id:s.id,name:s.name,symbol:s.symbol,start_date:s.start_date,end_date:s.end_date,timeframe:s.timeframe,description:s.description,indicators:s.indicators,entry_conditions:s.entry_conditions,exit_conditions:s.exit_conditions,legs:s.legs,advanced_options:s.advanced_options,risk_management:s.risk_management,status:newStatus};await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(keep)});}else{await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:newStatus})});}}catch(e){}loadStrats();loadTrades();}
     async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);document.getElementById('s-name').value=s.name||'';document.getElementById('s-sym').value=s.symbol||'BANKNIFTY';document.getElementById('s-start').value=s.start_date||'';document.getElementById('s-end').value=s.end_date||'';document.getElementById('s-tf').value=s.timeframe||'daily';}catch(e){alert('Error');}}
@@ -1729,7 +1751,7 @@ let _lastOpenTrdHTML = null;
             robots.forEach(s=>{
                 const legs=_parseJsonField(s.legs,[]); const leg=legs[0]||{}; const ord=(leg.option_type||'')+'-'+(leg.transaction||'');
                 const rm=_parseJsonField(s.risk_management,{});
-                h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td><td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-success" ${(s.expired===true||s.display_status==='expired')?'disabled title="Strategy expired"':''} onclick="ptFromStrat(${s.id})">Paper Trade</button> <button class="btn btn-sm btn-outline-danger" ${(s.expired===true||s.display_status==='expired')?'disabled title="Strategy expired"':''} onclick="liveFromRobot(${s.id})">Live Trade</button> <button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id})">Backtest</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
+                h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td><td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-success" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="ptFromStrat(${s.id})">Paper Trade</button> <button class="btn btn-sm btn-outline-danger" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="liveFromRobot(${s.id})">Live Trade</button> <button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id})">Backtest</button> <button class="btn btn-sm btn-outline-info" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
             });
             h+='</tbody></table>'; document.getElementById('robot-saved').innerHTML=h;
         }catch(e){ document.getElementById('robot-saved').innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>'; console.error(e); }
@@ -1778,7 +1800,7 @@ let _lastOpenTrdHTML = null;
         try{
             const s=await A('/api/strategies/'+id);
             if(s.error){ alert(s.error); return; }
-            if(s.expired===true||s.display_status==='expired'){ alert('Strategy expired on '+(s.end_date||'')+' - execution blocked. Extend the end date first.'); return; }
+            if(s.expired===true||s.display_status==='expired'){ if(!confirm('Strategy '+(s.end_date||'')+' ko expired hai - next expiry par auto-shift karke Live Trade lagau?'))return; }
             const legs=_parseJsonField(s.legs,[]);
             if(!legs.length){ alert('No legs in this strategy'); return; }
             const rm=_parseJsonField(s.risk_management,{});
@@ -1798,17 +1820,19 @@ let _lastOpenTrdHTML = null;
             let msg='REAL MONEY ORDER ('+previews.length+' legs)\n';
             previews.forEach(p=>{msg+='Broker: '+p.broker+' | '+p.side+' '+(p.symbol||p.security_id||'')+' Qty: '+p.quantity+'\n';});
             if(!confirm(msg+'\nConfirm to SEND to exchange?'))return;
-            const sent=[];
+            const sent=[];let rolledMsg='';
             for(let i=0;i<legs.length;i++){
                 const leg=legs[i];
                 const opt=String(leg.option_type||'CE').toUpperCase();
                 const txn=String(leg.transaction||'buy').toUpperCase();
-                const base={symbol:s.symbol,option_type:opt,transaction_type:txn,quantity:parseInt(leg.lots)||1,strike:0,expiry:leg.expiry||'weekly',stop_loss:sl,take_profit:tp,trade_type:ttype};
+                const base={symbol:s.symbol,option_type:opt,transaction_type:txn,quantity:parseInt(leg.lots)||1,strike:0,expiry:leg.expiry||'weekly',stop_loss:sl,take_profit:tp,trade_type:ttype,strategy_id:id};
                 const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:false})});
                 if(r.error){alert('Live error (leg '+(i+1)+'): '+r.error);break;}
                 sent.push('Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id);
+                if(r.rolled_to)rolledMsg='Strategy next expiry '+r.rolled_to+' par shift hui';
             }
-            alert('LIVE orders sent!\n'+sent.join('\n'));loadDashPositions();loadTrades();
+            if(rolledMsg)sent.push(rolledMsg);
+            alert('LIVE orders sent!\n'+sent.join('\n'));loadDashPositions();loadTrades();try{loadStrats();loadRobotSaved();}catch(e){}
         }catch(e){ alert('Error: '+e.message); }
     }
     async function robotPaperTrade(){ await robotStart(); document.getElementById('robot-status').innerHTML+='<br><small class="text-muted">Mode: Paper Trade (default)</small>'; }

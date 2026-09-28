@@ -123,3 +123,122 @@ def delete_strategy(strat_id: int):
     db = Database.get_instance()
     db.execute("DELETE FROM strategies WHERE id=?", [strat_id])
     return {"status": "deleted", "id": strat_id}
+
+
+def _norm_exp(exp: str) -> str:
+    """Normalize expiry to YYYY-MM-DD (NSE gives '29-Sep-2026')."""
+    exp = str(exp or "").strip()
+    if len(exp) == 10 and exp[4] == "-" and exp[7] == "-":
+        return exp[:10]
+    try:
+        from datetime import datetime as _dt
+        for fmt in ("%d-%b-%Y", "%d-%b-%y", "%d %b %Y", "%Y/%m/%d", "%d/%m/%Y"):
+            try:
+                return _dt.strptime(exp[:11], fmt).strftime("%Y-%m-%d")
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return ""
+
+
+def next_weekly_expiry(symbol: str = "") -> str:
+    """Next live weekly expiry (NSE when reachable, else today+7 IST)."""
+    try:
+        from core.services.contract_pricer import _nse_map
+        exp, _m = _nse_map((symbol or "").upper())
+        exp = _norm_exp(exp)
+        if exp and exp >= _ist_today():
+            return exp
+    except Exception:
+        pass
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        return (_dt.strptime(_ist_today(), "%Y-%m-%d") + _td(days=7)).strftime("%Y-%m-%d")
+    except Exception:
+        return ""
+
+
+def rollover_strategy(strat_id: int):
+    """Shift an expired strategy to the next weekly expiry so paper/live
+    trading keeps running. Returns new end_date or ''."""
+    try:
+        db = Database.get_instance()
+        row = db.fetch_one("SELECT symbol, end_date FROM strategies WHERE id=?", [strat_id])
+        if not row:
+            return ""
+        new_end = next_weekly_expiry(row.get("symbol") or "")
+        if not new_end:
+            return ""
+        db.execute(
+            "UPDATE strategies SET end_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            [new_end, strat_id],
+        )
+        return new_end
+    except Exception:
+        return ""
+
+
+@router.get("/{strat_id}/trades")
+def strategy_trades(strat_id: int):
+    """Paper-trade detail for a saved strategy: open positions (live LTP +
+    unrealized P&L) + closed trade history."""
+    try:
+        from core.models.trade_model import TradeModel
+        tm = TradeModel()
+        opens = []
+        try:
+            for p in tm.get_open_positions_with_pnl():
+                t = p.get("trade", {}) or {}
+                try:
+                    if int(t.get("strategy_id") or 0) != int(strat_id):
+                        continue
+                except Exception:
+                    continue
+                opens.append({
+                    "id": t.get("id"), "symbol": t.get("symbol"),
+                    "transaction_type": t.get("transaction_type"),
+                    "option_type": t.get("option_type"),
+                    "strike": t.get("strike_price"),
+                    "expiry_date": t.get("expiry_date"),
+                    "quantity": t.get("quantity"),
+                    "entry_price": t.get("entry_price"),
+                    "current_price": p.get("current_price"),
+                    "unrealized_pnl": p.get("unrealized_pnl"),
+                    "trade_mode": t.get("trade_mode"),
+                    "status": t.get("status"),
+                })
+        except Exception:
+            pass
+        closed = []
+        try:
+            rows = tm.db.fetch_all(
+                "SELECT * FROM paper_trades WHERE strategy_id=? AND status<>'open' ORDER BY id DESC LIMIT 50",
+                [strat_id],
+            )
+            for t in rows or []:
+                closed.append({
+                    "id": t.get("id"), "symbol": t.get("symbol"),
+                    "transaction_type": t.get("transaction_type"),
+                    "option_type": t.get("option_type"),
+                    "strike": t.get("strike_price"),
+                    "entry_price": t.get("entry_price"),
+                    "exit_price": t.get("exit_price"),
+                    "pnl": t.get("pnl"),
+                    "exit_reason": t.get("exit_status") or t.get("exit_reason"),
+                    "trade_mode": t.get("trade_mode"),
+                })
+        except Exception:
+            pass
+        return {"strategy_id": strat_id, "open": opens, "closed": closed,
+                "open_count": len(opens), "closed_count": len(closed)}
+    except Exception as e:
+        return {"error": f"Detail failed: {e}"}
+
+
+@router.post("/{strat_id}/rollover")
+def rollover_endpoint(strat_id: int):
+    new_end = rollover_strategy(strat_id)
+    if not new_end:
+        return {"error": "Rollover failed"}
+    return {"strategy_id": strat_id, "end_date": new_end, "status": "rolled"}
