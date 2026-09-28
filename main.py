@@ -124,6 +124,13 @@ async def health():
     return {"status": "healthy", "timestamp": __import__("time").time()}
 
 
+@app.head("/health")
+async def health_head():
+    # UptimeRobot free plan sends HEAD (not GET) - 405 hota tha, ab 200
+    from fastapi import Response as _Resp
+    return _Resp(status_code=200)
+
+
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
