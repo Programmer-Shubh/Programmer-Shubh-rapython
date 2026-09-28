@@ -182,6 +182,35 @@ def fetch_cloud_spot(symbol: str) -> dict:
             chg = float(d.get("change") or 0)
     except Exception:
         pass
+    # 1b) Dhan marketfeed (user's connected broker) — ONLY live source for
+    # MIDCPNIFTY (no Yahoo/Google/Stooq symbol exists for Midcap Select)
+    if not spot and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"):
+        try:
+            import json as _js
+            from core.models.database import Database as _DB
+            from core.services.broker_dhan_live import DhanLive as _DL
+            _row = _DB.get_instance().fetch_one(
+                "SELECT setting_value FROM settings WHERE setting_key='broker_dhan'")
+            _cfg = _js.loads(_row["setting_value"]) if _row and _row.get("setting_value") else {}
+            if _cfg.get("client_id") and _cfg.get("access_token"):
+                import asyncio as _aio
+                import concurrent.futures as _cf
+                _dl = _DL(client_id=_cfg["client_id"], access_token=_cfg["access_token"])
+                # Own thread+loop so it works in sync AND async (server) contexts
+                _ex = _cf.ThreadPoolExecutor(max_workers=1)
+                try:
+                    _px = _ex.submit(lambda: _aio.run(_dl.get_index_spot(symbol))).result(timeout=6)
+                except Exception:
+                    _px = 0
+                finally:
+                    try:
+                        _ex.shutdown(wait=False, cancel_futures=True)
+                    except Exception:
+                        pass
+                if _px and _px > 0:
+                    spot, source = float(_px), "dhan"
+        except Exception:
+            pass
     # 2) Yahoo v8 API (works on cloud, indices included) - labelled 'live', never 'yahoo'
     if not spot:
         q = _yahoo_fallback_quote(symbol)

@@ -213,6 +213,35 @@ class DhanLive:
     async def get_order(self, order_id: str) -> dict:
         return await self._request("GET", f"/orders/{order_id}")
 
+    async def get_index_spot(self, symbol: str) -> float:
+        """Live index spot via DhanHQ v2 marketfeed quote (works for MIDCPNIFTY
+        where Yahoo/Google/Stooq have no symbol). Returns 0 on any failure."""
+        try:
+            info = UNDERLYING.get((symbol or "").upper())
+            if not info:
+                return 0.0
+            scrip, seg = info
+            res = await self._request("POST", "/marketfeed/quote", data={seg: [scrip]})
+            if not res.get("success"):
+                return 0.0
+            data = res.get("data") or {}
+            # Shape: {SEG: {scrip: {...}}} or {scrip: {...}} — search defensively
+            node = data.get(seg, data) if isinstance(data, dict) else {}
+            entry = node.get(str(scrip), node.get(scrip)) if isinstance(node, dict) else None
+            if not isinstance(entry, dict):
+                # scan any nested dict for a price
+                entry = data
+            for key in ("last_price", "LTP", "ltp", "lastPrice", "close", "price"):
+                try:
+                    v = float(entry.get(key, 0) or 0)
+                except Exception:
+                    v = 0
+                if v > 0:
+                    return v
+            return 0.0
+        except Exception:
+            return 0.0
+
     # ---------- securityId resolution ----------
     async def resolve_fo(self, underlying: str, expiry_ymd: str,
                          strike: float, option_type: str, exact: bool = True) -> dict:

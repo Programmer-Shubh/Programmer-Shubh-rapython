@@ -396,28 +396,7 @@
                         
                     </div>
                     </div>
-                <!-- Strategy Templates — Click to Build (compact, above Indicators per user) -->
-                <div class="card mt-2" style="border:1px dashed #0d6efd">
-                    <div class="card-header py-1 d-flex justify-content-between align-items-center" style="font-size:13px"><strong class="small"><i class="bi bi-grid-3x3-gap"></i> Strategy Templates — Click to Build</strong></div>
-                    <div class="card-body p-1">
-                        <div class="row g-1">
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('longcall')"><div class="icon" style="font-size:14px;margin-bottom:2px">📈</div><div class="title" style="font-size:11px">Long Call</div><div class="desc" style="font-size:9px">Buy CE ATM</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('longput')"><div class="icon" style="font-size:14px;margin-bottom:2px">📉</div><div class="title" style="font-size:11px">Long Put</div><div class="desc" style="font-size:9px">Buy PE ATM</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('shortcall')"><div class="icon" style="font-size:14px;margin-bottom:2px">🔻</div><div class="title" style="font-size:11px">Short Call</div><div class="desc" style="font-size:9px">Sell CE OTM</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('shortput')"><div class="icon" style="font-size:14px;margin-bottom:2px">🔺</div><div class="title" style="font-size:11px">Short Put</div><div class="desc" style="font-size:9px">Sell PE OTM</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('bullspread')"><div class="icon" style="font-size:14px;margin-bottom:2px">⚡</div><div class="title" style="font-size:11px">Bull Call Spread</div><div class="desc" style="font-size:9px">Buy ATM + Sell OTM</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('bearspread')"><div class="icon" style="font-size:14px;margin-bottom:2px">🐻</div><div class="title" style="font-size:11px">Bear Call Spread</div><div class="desc" style="font-size:9px">Sell ATM + Buy OTM</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('bullputspread')"><div class="icon" style="font-size:14px;margin-bottom:2px">🐂</div><div class="title" style="font-size:11px">Bull Put Spread</div><div class="desc" style="font-size:9px">Sell OTM + Buy OTM</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('bearputspread')"><div class="icon" style="font-size:14px;margin-bottom:2px">🛡️</div><div class="title" style="font-size:11px">Bear Put Spread</div><div class="desc" style="font-size:9px">Buy ATM PE + Sell</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('straddle')"><div class="icon" style="font-size:14px;margin-bottom:2px">🔄</div><div class="title" style="font-size:11px">Long Straddle</div><div class="desc" style="font-size:9px">Buy CE+PE ATM</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('strangle')"><div class="icon" style="font-size:14px;margin-bottom:2px">↔️</div><div class="title" style="font-size:11px">Short Strangle</div><div class="desc" style="font-size:9px">Sell OTM CE+PE</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('ironcondor')"><div class="icon" style="font-size:14px;margin-bottom:2px">🏛️</div><div class="title" style="font-size:11px">Iron Condor</div><div class="desc" style="font-size:9px">Sell 1 + Buy 3</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('ironbutterfly')"><div class="icon" style="font-size:14px;margin-bottom:2px">🦋</div><div class="title" style="font-size:11px">Iron Butterfly</div><div class="desc" style="font-size:9px">ATM + OTM Wings</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('butterfly')"><div class="icon" style="font-size:14px;margin-bottom:2px">✈️</div><div class="title" style="font-size:11px">Long Butterfly</div><div class="desc" style="font-size:9px">1-2-1 CE</div></div></div>
-                            <div class="col-4 col-md-2"><div class="quant-card" style="padding:6px" onclick="applyTemplate('calendar')"><div class="icon" style="font-size:14px;margin-bottom:2px">📅</div><div class="title" style="font-size:11px">Calendar Spread</div><div class="desc" style="font-size:9px">Weekly + Monthly</div></div></div>
-                        </div>
-                    </div>
-                </div>
+
                     <div class="slab-sec" style="background:linear-gradient(135deg,#f0f7ff 0%,#ffffff 100%); border:1px solid #dbeafe"><div class="slab-sec-title"><i class="bi bi-cpu"></i> Indicators — signal <span id="autoDirBadge" class="badge bg-success ms-2" style="font-size:11px">Auto: Bullish</span></div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
@@ -475,6 +454,13 @@
                     <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('bearputspread')">Bear Put Spread</button>
                     <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('bullputspread')">Bull Put Spread</button>
                     <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironcondor')">Iron Condor</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('longcall')">Long Call</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('longput')">Long Put</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('shortcall')">Short Call</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('shortput')">Short Put</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironbutterfly')">Iron Butterfly</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('butterfly')">Butterfly</button>
+                    <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('calendar')">Calendar</button>
                     <button class="btn btn-sm btn-outline-secondary" onclick="clearLegs()">Clear</button>
                 </div>
                 <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
