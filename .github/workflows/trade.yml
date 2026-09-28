@@ -35,11 +35,13 @@ jobs:
         run: python scripts/auto_scan.py
 
       - name: Run Auto Trade Logic (SL/TP checks)
-        env:
-          MARKET_MODE: auto
-          DB_PATH: ./data/ratrade.db
-          PYTHONPATH: .
-        run: python scripts/auto_trade.py
+        # NOTE: scripts/auto_trade.py on a fresh checkout sees an EMPTY local
+        # DB, so it can never close production trades. The in-app SL monitor
+        # (core/services/sl_monitor.py) owns production exits; this step just
+        # wakes it via the idempotent monitor endpoint (cron backup).
+        run: |
+          URL="${RATRADE_URL:-https://ratrade-iwi2.onrender.com}/api/trades/monitor"
+          curl -sf -X POST "$URL" && echo "MONITOR OK" || echo "monitor unreachable (in-app thread still covers it)"
 
       - name: Smoke-test API Server
         env:

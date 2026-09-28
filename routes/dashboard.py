@@ -138,6 +138,13 @@ def get_portfolio():
         trade_model.close_intraday_trades()
     except Exception:
         pass
+    try:
+        # SL/TP auto-exit (throttled 20s): breached trades close BEFORE the
+        # list is built, so the dashboard never shows a dead TP/SL trade.
+        from core.services.sl_monitor import run_once as _sl_once
+        _sl_once()
+    except Exception:
+        pass
     positions = trade_model.get_open_positions_with_pnl()
     total_pnl = sum(p["unrealized_pnl"] for p in positions)
     return {

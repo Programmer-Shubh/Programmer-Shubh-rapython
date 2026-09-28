@@ -50,6 +50,17 @@ async def lifespan(app: FastAPI):
         asyncio.get_running_loop().create_task(_fno_sync_loop())
     except: pass
     try:
+        # In-process SL/TP monitor: auto-exit breached paper/live trades
+        # against the REAL db (the GitHub cron only sees an empty checkout).
+        def _sl_mon():
+            try:
+                from core.services.sl_monitor import start_background
+                start_background(30)
+            except: pass
+        import threading as _th2
+        _th2.Thread(target=_sl_mon, daemon=True).start()
+    except: pass
+    try:
         # Lot-size backfill in background thread (16 updates, could be slow on Postgres)
         def _lot_backfill():
             try:

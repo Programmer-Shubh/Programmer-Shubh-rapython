@@ -53,6 +53,12 @@ def get_open_trades():
         trade_model.close_intraday_trades()
     except Exception:
         pass
+    try:
+        # SL/TP auto-exit (throttled 20s) before listing
+        from core.services.sl_monitor import run_once as _sl_once
+        _sl_once()
+    except Exception:
+        pass
     positions = trade_model.get_open_positions_with_pnl(auto_exit=False)
     total_pnl = sum(p["unrealized_pnl"] for p in positions)
     return {
@@ -83,6 +89,21 @@ def get_open_trades():
             for t in positions
         ],
     }
+
+
+@router.post("/monitor")
+def run_monitor(key: str = ""):
+    """External trigger for SL/TP auto-exit (cron backup). Idempotent: only
+    closes genuinely breached open trades. Optional MONITOR_KEY guard."""
+    try:
+        import os as _os
+        _need = _os.environ.get("MONITOR_KEY", "")
+        if _need and key != _need:
+            return {"error": "forbidden"}
+        from core.services.sl_monitor import run_once as _sl_once
+        return {"success": True, **_sl_once(min_interval=0, market_hours=True)}
+    except Exception as e:
+        return {"error": str(e)[:200]}
 
 
 @router.post("/place")
