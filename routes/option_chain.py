@@ -85,9 +85,12 @@ def get_chain(symbol: str, date: str, expiry: str):
 
 
 @router.get("/live/{symbol}")
-def get_live_chain(symbol: str):
+def get_live_chain(symbol: str, expiry: str = ""):
     live = LiveMarketData()
     sym = symbol.upper()
+    req_expiry = str(expiry or "").strip()[:10]
+    if req_expiry.lower() in ("live", "live data", ""):
+        req_expiry = ""
     # 0) Real NSE chain when NOT on cloud (local/home IP - exact NSE match).
     # On Render/cloud NSE blocks the IP, so this is skipped (fast, no timeouts).
     try:
@@ -129,12 +132,19 @@ def get_live_chain(symbol: str):
     # 2b) ONE shared pricer for every contract (same function the positions
     # table uses): broker token-quote -> fresh DB -> model. Chain vs positions
     # can no longer diverge by source.
+    # Requested expiry wins (the order form sends the same value, so chain
+    # LTP == entry price by construction). Validated against DB expiries;
+    # any future date is accepted for model DTE.
     expiry_use = ""
     try:
-        if chain:
-            _exps = bhav.get_expiries(symbol, dates[0])
-            if _exps:
-                expiry_use = str(_exps[0])[:10]
+        _exps = bhav.get_expiries(symbol, dates[0]) if dates else []
+        if req_expiry:
+            if _exps and req_expiry in [str(e)[:10] for e in _exps]:
+                expiry_use = req_expiry
+            elif req_expiry >= _today:
+                expiry_use = req_expiry
+        if not expiry_use and chain and _exps:
+            expiry_use = str(_exps[0])[:10]
     except Exception:
         pass
     if not expiry_use:
@@ -142,6 +152,14 @@ def get_live_chain(symbol: str):
             expiry_use = (_dt.datetime.strptime(_today, "%Y-%m-%d") + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
         except Exception:
             expiry_use = ""
+    # Fresh DB strikes only for the priced expiry (never another expiry's)
+    if expiry_use:
+        try:
+            _exp_chain = bhav.get_option_chain(symbol, dates[0], expiry_use) if dates else []
+            chain = _exp_chain or ([] if req_expiry else chain)
+        except Exception:
+            if req_expiry:
+                chain = []
     oi_map = {}
     if chain:
         for r in chain:
@@ -236,6 +254,29 @@ def place_trade(req: TradeRequest):
                         return {"error": f"Strategy '{_srow.get('name','')}' expired on {_end} - execution blocked"}
             except Exception:
                 pass
+        # Expiry normalize: dashboard forms send today/''/'Live' - a same-day
+        # expiry collapses model DTE to 1 while the chain shows weekly, so
+        # entry price never matches chain LTP. Normalize to the live weekly
+        # expiry (NSE when reachable, else today+7) for pricing AND storage,
+        # so positions keep pricing with the same DTE as the chain.
+        try:
+            import datetime as _nx
+            _ist_t = (_nx.datetime.utcnow() + _nx.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
+            _exp = str(req.expiry or "").strip()[:10]
+            if (not _exp) or (_exp.lower() in ("live", "live data")) or (_exp < _ist_t and "-" in _exp) or (_exp == _ist_t):
+                _weekly = ""
+                try:
+                    from core.services.contract_pricer import _nse_map as _nxmap
+                    _ne, _nm = _nxmap(req.symbol)
+                    if _ne and _ne >= _ist_t:
+                        _weekly = _ne
+                except Exception:
+                    pass
+                if not _weekly:
+                    _weekly = (_nx.datetime.strptime(_ist_t, "%Y-%m-%d") + _nx.timedelta(days=7)).strftime("%Y-%m-%d")
+                req.expiry = _weekly
+        except Exception:
+            pass
         # Mandatory SL/Target validation
         if req.stop_loss is None or req.take_profit is None:
             return {"error": "Stop-Loss and Target are mandatory - cannot be blank (SELL requires SL to prevent unmanaged risk)"}
@@ -360,18 +401,18 @@ def place_trade(req: TradeRequest):
                     except: pass
                 if _spot_g > 0 and req.strike > 0:
                     try:
+                        # Real DTE from (normalized) expiry - same formula the
+                        # chain pricer uses, so entry == chain LTP.
+                        import datetime as _ed
                         expiry_days = 7
-                        # Far expiry (2027-03-30) from stale suggestion would inflate
-                        # premium to 3362 vs chain 471 — force weekly for paper
                         try:
                             if req.expiry and "-" in str(req.expiry):
-                                import datetime as _ed
                                 ed = _ed.datetime.strptime(str(req.expiry)[:10], "%Y-%m-%d")
                                 diff = (ed - _ed.datetime.now()).days
                                 if diff > 30:
                                     expiry_days = 7
-                                elif "monthly" in str(req.expiry).lower():
-                                    expiry_days = 28
+                                else:
+                                    expiry_days = max(1, diff)
                         except Exception:
                             pass
                         premium = model_premium(_spot_g, req.strike, expiry_days, req.option_type, symbol=req.symbol)
