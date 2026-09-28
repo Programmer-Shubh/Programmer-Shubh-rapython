@@ -375,7 +375,7 @@
                 </div>
             </div>
  <div class="card mb-3 slab-card" style="border:2px solid #0d6efd">
-                <div class="card-header bg-primary text-white"><span class="slab-num" style="background:#fff;color:#0d6efd">1</span><i class="bi bi-robot"></i> Call/Put Robot — Buy/Sell kisi bhi Symbol par <small class="text-white-50">CE Buy / PE Buy / CE Sell / PE Sell</small></div>
+                <div class="card-header bg-primary text-white"><span class="slab-num" style="background:#fff;color:#0d6efd">1</span><i class="bi bi-robot"></i> Call/Put Strategy — Buy/Sell kisi bhi Symbol par <small class="text-white-50">CE Buy / PE Buy / CE Sell / PE Sell</small></div>
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols + Order</small></div>
                 <div class="card-body">
                     <div class="row g-2">
@@ -434,7 +434,7 @@
                     
                     </div>
                 </div>
-            <div class="step-indicator mb-2 slab"><div class="step active">1 Setup</div><div class="step">2 Indicators</div><div class="step">3 Backtest</div><div class="step">4 Robot</div></div>
+            <div class="step-indicator mb-2 slab"><div class="step active">1 Setup</div><div class="step">2 Indicators</div><div class="step">3 Backtest</div><div class="step">4 Strategy</div></div>
             <div class="card mb-2" style="display:none"><div class="card-body p-2">
             <div class="d-flex gap-1 mb-2 flex-wrap" id="q-instruments"></div>
             </div></div>
@@ -492,13 +492,13 @@
                         <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
                             <button class="btn btn-success slab-cta" id="r-run" onclick="robotBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button>
                             <label class="small ms-2"><input type="checkbox" id="r-auto" onchange="toggleAutoBacktest(this.checked)"> Auto</label>
-                            <button class="btn btn-sm btn-primary" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Robot</button>
+                            <button class="btn btn-sm btn-primary" onclick="robotStart()"><i class="bi bi-rocket"></i> Start Strategy</button>
                         </div>
-<div class="slab-sec"><div class="slab-sec-title">Run & Robot</div>
+<div class="slab-sec"><div class="slab-sec-title">Run & Strategy</div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-12 d-flex gap-2 flex-wrap">
-                            <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Robot</button>
-                            <input type="text" id="r-name" class="form-control form-control-sm" style="width:200px" placeholder="Robot name (optional)">
+                            <button class="btn btn-sm btn-outline-primary" onclick="robotSave()"><i class="bi bi-save"></i> Save Strategy</button>
+                            <input type="text" id="r-name" class="form-control form-control-sm" style="width:200px" placeholder="Strategy name (optional)">
                             <button class="btn btn-sm btn-outline-success" onclick="robotPaperTrade()"><i class="bi bi-file-earmark"></i> Paper Trade</button>
                             <button class="btn btn-sm btn-outline-danger" onclick="robotLiveTrade()"><i class="bi bi-lightning"></i> Live Trade</button>
                             <button class="btn btn-sm btn-outline-dark" onclick="runBacktestMonteCarlo()" title="Monte Carlo"><i class="bi bi-shuffle"></i> MC</button>
@@ -571,12 +571,12 @@
                 <div class="card mt-2" id="bt-trades"><div class="card-header py-1"><strong class="small">Trade List</strong></div><div class="card-body p-0" id="bt-tl"></div></div>
             </div>
 <div class="card mt-3">
-                <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-info-circle"></i> Live Robot Status</span><button class="btn btn-sm btn-outline-secondary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect Brokers</button></div>
-                <div class="card-body" id="robot-status"><p class="text-muted small">Robot stopped. Select symbol + order + SL/Target then Start Robot for paper trading. Market hours: Mon-Fri 9:15-15:30 IST — Paper trades can queue outside hours.</p></div>
+                <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-info-circle"></i> Live Strategy Status</span><button class="btn btn-sm btn-outline-secondary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect Brokers</button></div>
+                <div class="card-body" id="robot-status"><p class="text-muted small">Strategy stopped. Select symbol + order + SL/Target then Start Strategy for paper trading. Market hours: Mon-Fri 9:15-15:30 IST — Paper trades can queue outside hours.</p></div>
             </div>
             <div class="card mt-3" id="robot-saved-card">
-                <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Robots</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
-                <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved robots yet — click Save Robot.</p></div>
+                <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Strategies</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
+                <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p></div>
             </div>
         </div>
 
@@ -1694,7 +1694,7 @@ let _lastOpenTrdHTML = null;
         try{
             const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym, option_type:optR, strike:strikeVal, expiry:expiry, date:new Date().toISOString().split('T')[0], transaction_type:txnR, quantity:lots, stop_loss:sl, take_profit:tp, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()})});
             if(r.error) document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+r.error+'</p>';
-            else document.getElementById('robot-status').innerHTML='<p class="text-success">Robot started! Trade #'+(r.trade_id||'')+' '+sym+' '+order+' @ ₹'+(r.entry_price||'')+' (Strike '+strikeVal+') SL ₹'+sl+' Target ₹'+tp+' — check Trading Center</p>';
+            else document.getElementById('robot-status').innerHTML='<p class="text-success">Strategy started! Trade #'+(r.trade_id||'')+' '+sym+' '+order+' @ ₹'+(r.entry_price||'')+' (Strike '+strikeVal+') SL ₹'+sl+' Target ₹'+tp+' — check Trading Center</p>';
         }catch(e){document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+e.message+'</p>'; console.error(e);}
     }
     function robotTypeChange(){
@@ -1734,17 +1734,17 @@ let _lastOpenTrdHTML = null;
         const _leg0=legs[0]||{};
         const _ordTxt=((_leg0.option_type||'CE')+'-'+(_leg0.transaction||'buy')).toUpperCase();
         const customName=(document.getElementById('r-name')?.value||'').trim();
-        const finalName=customName||(sym+'_Robot_'+_ordTxt);
+        const finalName=customName||(sym+'_Strategy_'+_ordTxt);
         const rType=(document.getElementById('r-type')?.value||'intraday').toLowerCase();
         const body={name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:robotCollectIndicators(), legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:sl, daily_take_profit:tp, max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5}};
-        try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ alert('Robot "'+finalName+'" saved! ID: '+r.id); document.getElementById('r-name').value=''; loadRobotSaved(); } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
+        try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ alert('Strategy "'+finalName+'" saved! ID: '+r.id); document.getElementById('r-name').value=''; loadRobotSaved(); } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
     }
      function _parseJsonField(v, fallback){ if(!v) return fallback; if(typeof v==='string'){ try{return JSON.parse(v);}catch(e){return fallback;} } return v; }
       async function loadRobotSaved(){
         try{
             const r=await A('/api/strategies/list');
-            const robots=(r.strategies||[]).filter(s=> (s.description==='robot') || (s.name||'').includes('_Robot_'));
-            if(!robots.length){ document.getElementById('robot-saved').innerHTML='<p class="text-muted p-3 small">No saved robots yet — click Save Robot.</p>'; return; }
+            const robots=(r.strategies||[]).filter(s=> (s.description==='robot') || (s.name||'').includes('_Robot_') || (s.name||'').includes('_Strategy_'));
+            if(!robots.length){ document.getElementById('robot-saved').innerHTML='<p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p>'; return; }
             let h='<table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Symbol</th><th>Order</th><th>SL/TP</th><th>Status</th><th>Action</th></tr></thead><tbody>';
             robots.forEach(s=>{
                 const legs=_parseJsonField(s.legs,[]); const leg=legs[0]||{}; const ord=(leg.option_type||'')+'-'+(leg.transaction||'');
@@ -1769,10 +1769,10 @@ let _lastOpenTrdHTML = null;
             if(ao.otm_distance!=null) document.getElementById('r-otm').value=ao.otm_distance;
             if(s.start_date) document.getElementById('r-start').value=s.start_date; if(s.end_date) document.getElementById('r-end').value=s.end_date;
             try{robotTypeChange();}catch(e){}
-            alert('Robot ID '+id+' loaded to form');
+            alert('Strategy ID '+id+' loaded to form');
         }catch(e){ alert('Error: '+e.message); }
     }
-    async function delRobotSaved(id){ if(!confirm('Delete this saved robot?')) return; try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadRobotSaved();}catch(e){alert('Error: '+e.message);} }
+    async function delRobotSaved(id){ if(!confirm('Delete this saved strategy?')) return; try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadRobotSaved();}catch(e){alert('Error: '+e.message);} }
     async function backtestFromRobot(id){
         // Re-run backtest for a saved strategy and show results (no form disturbance alert)
         try{
