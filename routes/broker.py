@@ -370,6 +370,12 @@ async def dhan_feed_status():
             pass
         st = feed.state()
         try:
+            from core.services import tick_engine as _te
+            st["tick_engine"] = _te.state()
+            st["tick_signals"] = _te.get_signals()
+        except Exception:
+            pass
+        try:
             _ticks = []
             for (seg, secid), t in list(feed._ticks.items())[:12]:
                 _ticks.append({"seg": seg, "secid": secid, "ltp": t.get("ltp"),

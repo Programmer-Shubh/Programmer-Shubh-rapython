@@ -466,6 +466,43 @@ class OptionScanner:
                         continue
         except Exception:
             pass
+        # TICK breakout (1m LIVE): Dhan WS velocity ignition. Idle without a
+        # connected feed - never blank-fills. Score 75, clearly tagged.
+        try:
+            _mkt_open2 = True
+            try:
+                from core.services.sl_monitor import market_open_ist as _mkt2
+                _mkt_open2 = bool(_mkt2())
+            except Exception:
+                pass
+            if _mkt_open2:
+                from core.services import tick_engine as _te
+                for _sig in (_te.get_signals() or []):
+                    try:
+                        _sym = _sig.get("symbol", "")
+                        _side = _sig.get("side", "")
+                        if _side == "bullish":
+                            _st, _dn, _ot = "BUY CE", "bullish", "CE"
+                        elif _side == "bearish":
+                            _st, _dn, _ot = "BUY PE", "bearish", "PE"
+                        else:
+                            continue
+                        _sp = _te._spot_for(_sym) or float(_sig.get("ltp") or 0)
+                        _opt = self._suggest_option(_sym, _sp, _ot)
+                        if not _opt.get("strike"):
+                            continue
+                        base.append({
+                            "symbol": _sym, "type": "BUY" if _side == "bullish" else "SELL",
+                            "score": 75, "price": _sp, "date": "", "live": True,
+                            "reasons": [_sig.get("reason", "(1m LIVE) Tick breakout")],
+                            "indicators": {"tick_move_pct": _sig.get("move_pct", 0)},
+                            "option_suggestion": _opt,
+                            "signal_type": _st, "direction": _dn, "tf": "1m",
+                        })
+                    except Exception:
+                        continue
+        except Exception:
+            pass
         base.sort(key=lambda x: x.get('score', 0), reverse=True)
         ce_buy = [s for s in base if s.get('signal_type')=='BUY CE'][:top_n]
         pe_buy = [s for s in base if s.get('signal_type')=='BUY PE'][:top_n]
