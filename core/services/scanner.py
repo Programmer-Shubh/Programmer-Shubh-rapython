@@ -28,6 +28,12 @@ class OptionScanner:
     # inside/outside zone edge, 1.5x volume confirm.
     SD_CFG = {"swing_lookback": 20, "exclude_last": 3,
               "zone_pct": 0.005, "max_touches": 2, "vol_mult": 1.5}
+    # Intraday universe (15 liquid names; per-symbol TV fetch is the cost).
+    INTRA_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",
+                     "SENSEX", "BANKEX", "RELIANCE", "HDFCBANK", "ICICIBANK",
+                     "TCS", "INFY", "ITC", "SBIN", "POWERGRID", "TATAMOTORS"]
+    _INTRA_CACHE = {}
+    _INTRA_TTL = 120
 
     def __init__(self):
         self.indicators = IndicatorEngine()
@@ -431,6 +437,33 @@ class OptionScanner:
                     _s['signal_type'] = 'BUY PE'
                     _s['direction'] = 'bearish'
                     base.append(_s)
+        except Exception:
+            pass
+        # LIVE intraday (15m TradingView bars): conditions matching RIGHT NOW
+        # score on fresh bars and merge with a (15m) tag. Market-hours only;
+        # any failure/staleness silently keeps the daily backbone.
+        try:
+            _mkt_open = True
+            try:
+                from core.services.sl_monitor import market_open_ist as _mkt
+                _mkt_open = bool(_mkt())
+            except Exception:
+                pass
+            if _mkt_open:
+                for _r in (self.scan_intraday(symbols=self.INTRA_SYMBOLS, tf="15m", min_score=60) or []):
+                    try:
+                        _t = _r.get("type")
+                        if _t == "BUY":
+                            _r["signal_type"] = "BUY CE"
+                            _r["direction"] = "bullish"
+                        elif _t == "SELL":
+                            _r["signal_type"] = "BUY PE"
+                            _r["direction"] = "bearish"
+                        else:
+                            continue
+                        base.append(_r)
+                    except Exception:
+                        continue
         except Exception:
             pass
         base.sort(key=lambda x: x.get('score', 0), reverse=True)
@@ -994,8 +1027,9 @@ class OptionScanner:
             pass
         return fallback, None, False
 
-    def _analyze_symbol(self, symbol: str) -> dict:
-        data = self._get_historical(symbol)
+    def _analyze_symbol(self, symbol: str, data=None) -> dict:
+        if data is None:
+            data = self._get_historical(symbol)
         # Realistic: DB/nse real data only - if <30 real bars, show No signals (no synthetic fake)
         if len(data) < 30:
             return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'reasons': [], 'indicators': {}}
@@ -1094,14 +1128,15 @@ class OptionScanner:
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': _row_date if data else '', 'live': _row_live, 'reasons': [], 'indicators': indicators}
 
-    def _score_price_action(self, symbol: str, cfg=None) -> dict:
+    def _score_price_action(self, symbol: str, cfg=None, data=None) -> dict:
         """Pure price-action scoring (no lagging-indicator dependency except
         EMA20 trend + volume). 0-100 honest scale, same result shape as
         _analyze_symbol so the 4-part pipeline consumes it directly.
         Bullish: engulfing 25 + 20-bar breakout 25 + EMA20 trend 20 +
         strong-body close 10 + volume 20. Bearish mirror."""
         cfg = cfg or self.PA_CFG
-        data = self._get_historical(symbol)
+        if data is None:
+            data = self._get_historical(symbol)
         if len(data) < 30:
             return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'reasons': [], 'indicators': {}}
         closes = [float(d.get('close_price', 0) or 0) for d in data]
@@ -1187,13 +1222,14 @@ class OptionScanner:
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': _row_date, 'live': _row_live, 'reasons': [], 'indicators': indicators}
 
-    def _score_supply_demand(self, symbol: str, cfg=None) -> dict:
+    def _score_supply_demand(self, symbol: str, cfg=None, data=None) -> dict:
         """Supply/Demand zone reaction scoring. Swing high/low of last N bars
         (recent bars excluded) form zones; a pullback INTO the zone + reversal
         close + fresh zone (<=max touches) + volume + SuperTrend alignment
         scores up to 100. Same result shape as _analyze_symbol."""
         cfg = cfg or self.SD_CFG
-        data = self._get_historical(symbol)
+        if data is None:
+            data = self._get_historical(symbol)
         if len(data) < 30:
             return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'reasons': [], 'indicators': {}}
         closes = [float(d.get('close_price', 0) or 0) for d in data]
@@ -1286,6 +1322,136 @@ class OptionScanner:
                     'indicators': indicators, 'option_suggestion': opt}
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': _row_date, 'live': _row_live, 'reasons': [], 'indicators': indicators}
+
+    def _fetch_intraday_bars(self, symbol: str, tf: str = "15m", n_bars: int = 80) -> list:
+        """Live 15m/5m bars via TradingView (tvDatafeed), 120s cache.
+        Returns [] when stale (>90min old in market hours), short (<35),
+        or fetch fails - caller falls back to daily signals. Never raises."""
+        import time as _tm
+        ck = (symbol.upper(), tf)
+        try:
+            ce = self._INTRA_CACHE.get(ck)
+            if ce and _tm.time() - ce[0] < self._INTRA_TTL and len(ce[1]) >= 35:
+                return ce[1]
+        except Exception:
+            pass
+        bars = []
+        try:
+            from tvDatafeed import TvDatafeed, Interval
+            _iv = {"5m": Interval.in_5_minute, "15m": Interval.in_15_minute}.get(tf, Interval.in_15_minute)
+            tv = TvDatafeed()
+            df = tv.get_hist(symbol=symbol.upper(), exchange="NSE", interval=_iv, n_bars=n_bars)
+            if df is None or len(df) < 35:
+                return []
+            import datetime as _dt
+            import pandas as _pd
+            idx = _pd.to_datetime(df.index)
+            # TV stamps may be UTC or IST-naive: accept whichever is fresh.
+            try:
+                now_ist = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+            except Exception:
+                now_ist = _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
+            _now_naive = now_ist.replace(tzinfo=None)
+            cand_utc = idx.tz_localize("UTC").tz_convert("Asia/Kolkata") if idx.tz is None else idx.tz_convert("Asia/Kolkata")
+            try:
+                age_utc = (_now_naive - cand_utc[-1].replace(tzinfo=None).to_pydatetime()).total_seconds() / 60
+            except Exception:
+                try:
+                    age_utc = (_now_naive - cand_utc[-1].replace(tzinfo=None)).total_seconds() / 60
+                except Exception:
+                    age_utc = 9999
+            try:
+                _naive_idx = idx.tz_localize(None)
+                _last_n = _naive_idx[-1].to_pydatetime() if hasattr(_naive_idx[-1], "to_pydatetime") else _naive_idx[-1]
+                age_naive = (_now_naive - _last_n).total_seconds() / 60
+            except Exception:
+                age_naive = 9999
+            if min(age_utc, age_naive) > 90:
+                return []  # stale session (weekend/holiday/closed) - daily backbone stays
+            use_utc = age_utc <= age_naive
+            try:
+                _naive_idx
+            except NameError:
+                _naive_idx = idx
+            for k in range(len(df)):
+                try:
+                    _ts = cand_utc[k] if use_utc else _naive_idx[k]
+                    _py = _ts.to_pydatetime() if hasattr(_ts, "to_pydatetime") else _ts
+                    _py = _py.replace(tzinfo=None)
+                    bars.append({
+                        "trade_date": _py.strftime("%Y-%m-%d"),
+                        "bar_time": _py.strftime("%H:%M"),
+                        "open_price": round(float(df["open"].iloc[k]), 2),
+                        "high_price": round(float(df["high"].iloc[k]), 2),
+                        "low_price": round(float(df["low"].iloc[k]), 2),
+                        "close_price": round(float(df["close"].iloc[k]), 2),
+                        "volume": int(float(df["volume"].iloc[k] or 0)),
+                    })
+                except Exception:
+                    continue
+            bars = [b for b in bars if b["close_price"] > 0][-n_bars:]
+            if len(bars) >= 35:
+                try:
+                    self._INTRA_CACHE[ck] = (_tm.time(), bars)
+                    if len(self._INTRA_CACHE) > 30:
+                        self._INTRA_CACHE.pop(next(iter(self._INTRA_CACHE)))
+                except Exception:
+                    pass
+                return bars
+        except Exception:
+            pass
+        return []
+
+    def scan_intraday(self, symbols=None, tf: str = "15m", min_score: int = 60) -> list:
+        """Fresh-15m PA + S/D + ST/MACD signals (flat list). Parallel fetch,
+        25s total budget; symbols that miss it simply contribute nothing."""
+        import time as _tm
+        from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed as _ac
+        if symbols is None:
+            symbols = self.INTRA_SYMBOLS
+        try:
+            min_score = int(min_score)
+        except Exception:
+            min_score = 60
+        out = []
+        try:
+            _deadline = _tm.time() + 25
+            _ex = _TPE(max_workers=6)
+            try:
+                _futs = {_ex.submit(self._fetch_intraday_bars, s, tf): s for s in (symbols or [])[:15]}
+                for _f in _ac(_futs, timeout=26):
+                    if _tm.time() >= _deadline:
+                        break
+                    sym = _futs[_f]
+                    try:
+                        bars = _f.result()
+                    except Exception:
+                        continue
+                    if not bars or len(bars) < 35:
+                        continue
+                    for _fn, _tag in ((self._score_price_action, "PA"),
+                                      (self._score_supply_demand, "S/D"),
+                                      (self._analyze_symbol, "ST")):
+                        try:
+                            r = _fn(sym, data=bars) if _tag != "ST" else _fn(sym, bars)
+                        except Exception:
+                            continue
+                        if not r or r.get("score", 0) < min_score:
+                            continue
+                        if r.get("type") not in ("BUY", "SELL"):
+                            continue
+                        r = dict(r)
+                        r["tf"] = tf
+                        r["reasons"] = [f"({tf}) {_t}" for _t in (r.get("reasons") or [])]
+                        out.append(r)
+            finally:
+                try:
+                    _ex.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return out
 
     def scan_pa(self, symbols=None, min_score: int = 70) -> dict:
         """Price-action scan (no spot warm-up; relies on scan() having run)."""

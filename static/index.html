@@ -999,7 +999,7 @@
                 const ivTxt=s.indicators?`RSI ${s.indicators.rsi||'-'} | VWAP ${s.indicators.vwap||'-'}`:'';
                 const volTxt=s.reasons? s.reasons.slice(0,2).join(' \u2022 '):'';
                 const btns=stratBtns({symbol:s.symbol, direction:s.direction, signal_type:s.signal_type, option_suggestion:opt});
-                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol} <small class="text-muted">\u20B9${(s.price||0).toFixed(0)}</small></span><span class="d-flex gap-1 align-items-center"><span class="badge ${badgeCls}">Score ${score}</span>${s.primary?'<span class="badge bg-warning text-dark">Primary</span>':''}${s.ai?'<span class="badge bg-info">AI</span>':''}${btns}</span></div><div class="meta">${s.signal_type} ${opt.strike||''} | Prem \u20B9${(opt.premium||0).toFixed(2)} | ${ivTxt}</div><div class="meta" style="font-size:10px">${volTxt}</div><div style="margin-top:4px">${R((s.reasons||[]).slice(2))}</div></div>`;
+                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol} <small class="text-muted">\u20B9${(s.price||0).toFixed(0)}</small></span><span class="d-flex gap-1 align-items-center"><span class="badge ${badgeCls}">Score ${score}</span>${s.tf&&s.tf!=='1d'?'<span class="badge bg-dark">LIVE '+s.tf+'</span>':''}${s.primary?'<span class="badge bg-warning text-dark">Primary</span>':''}${s.ai?'<span class="badge bg-info">AI</span>':''}${btns}</span></div><div class="meta">${s.signal_type} ${opt.strike||''} | Prem \u20B9${(opt.premium||0).toFixed(2)} | ${ivTxt}</div><div class="meta" style="font-size:10px">${volTxt}</div><div style="margin-top:4px">${R((s.reasons||[]).slice(2))}</div></div>`;
             });
             h+='</div>';
             el.innerHTML=h;
@@ -1891,6 +1891,19 @@ let _lastOpenTrdHTML = null;
     loadStrategySymbols();
     // FIX: no bar-bar refresh — dashboard scanner/opportunities manual refresh only (like strategy), avoid flicker + 429
     // setInterval(loadDash,30000) removed — use manual Refresh buttons + WS ticks
+    // LIVE opportunities: refresh every 150s in market hours so fresh 15m
+    // conditions appear turant; server caches 120s so this is cheap. Skipped
+    // off-hours / hidden tab / non-dashboard page (no flicker, no 429).
+    setInterval(()=>{try{
+        if(document.hidden) return;
+        const pg=document.getElementById('pg-dashboard');
+        if(!pg||pg.classList.contains('hidden')) return;
+        const ist=new Date(Date.now()+(330+new Date().getTimezoneOffset())*60000);
+        if(ist.getDay()===0||ist.getDay()===6) return;
+        const mins=ist.getHours()*60+ist.getMinutes();
+        if(mins<555||mins>945) return; // 9:15-15:45 IST
+        if(typeof loadOpps==='function') loadOpps();
+    }catch(e){}},150000);
     let _dashWS=null, _dashWSRetry=0;
     function connectDashWS(){
         try{
