@@ -18,6 +18,17 @@ FNO_SYMBOLS = [
 
 
 class OptionScanner:
+    # Price Action best settings (daily bars): 20-bar breakout lookback,
+    # engulfing + trend (EMA20) + body strength + 1.5x volume confirm.
+    PA_CFG = {"breakout_lookback": 20, "trend_ema": 20,
+              "vol_mult": 1.5, "vol_sma": 20}
+    # Supply/Demand best settings: 20-bar swing lookback (last 3 bars
+    # excluded so zones are established), zone half-width 0.5% of price,
+    # max 2 prior touches (fresh zones only), reaction must close back
+    # inside/outside zone edge, 1.5x volume confirm.
+    SD_CFG = {"swing_lookback": 20, "exclude_last": 3,
+              "zone_pct": 0.005, "max_touches": 2, "vol_mult": 1.5}
+
     def __init__(self):
         self.indicators = IndicatorEngine()
         self.db = Database.get_instance()
@@ -398,6 +409,30 @@ class OptionScanner:
                 else: pe70+=1
                 if ce70>=2 and pe70>=2:
                     break
+        # Price Action + Supply/Demand (best-setting defaults), merged into
+        # the same base. Existing ST/MACD entries are untouched - PA/S-D only
+        # ADD trades (tagged reasons). PA/S-D bar is 60 (a 60 PA/S-D setup =
+        # engulf+breakout+trend, as selective as ST 70+; volume spikes are
+        # rare on EOD bars so 70+ would hide them all).
+        try:
+            _pa_min = min(_req70, 60)
+            for _fn in (self.scan_pa, self.scan_sd):
+                try:
+                    _extra = _fn(symbols=symbols, min_score=_pa_min)
+                except Exception:
+                    continue
+                for _s in (_extra.get('bullish', []) or []):
+                    _s = dict(_s)
+                    _s['signal_type'] = 'BUY CE'
+                    _s['direction'] = 'bullish'
+                    base.append(_s)
+                for _s in (_extra.get('bearish', []) or []):
+                    _s = dict(_s)
+                    _s['signal_type'] = 'BUY PE'
+                    _s['direction'] = 'bearish'
+                    base.append(_s)
+        except Exception:
+            pass
         base.sort(key=lambda x: x.get('score', 0), reverse=True)
         ce_buy = [s for s in base if s.get('signal_type')=='BUY CE'][:top_n]
         pe_buy = [s for s in base if s.get('signal_type')=='BUY PE'][:top_n]
@@ -1058,6 +1093,249 @@ class OptionScanner:
                     'date': _row_date, 'live': _row_live, 'reasons': sell_reasons or ['Downtrend bias'], 'indicators': indicators, 'option_suggestion': opt}
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': _row_date if data else '', 'live': _row_live, 'reasons': [], 'indicators': indicators}
+
+    def _score_price_action(self, symbol: str, cfg=None) -> dict:
+        """Pure price-action scoring (no lagging-indicator dependency except
+        EMA20 trend + volume). 0-100 honest scale, same result shape as
+        _analyze_symbol so the 4-part pipeline consumes it directly.
+        Bullish: engulfing 25 + 20-bar breakout 25 + EMA20 trend 20 +
+        strong-body close 10 + volume 20. Bearish mirror."""
+        cfg = cfg or self.PA_CFG
+        data = self._get_historical(symbol)
+        if len(data) < 30:
+            return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'reasons': [], 'indicators': {}}
+        closes = [float(d.get('close_price', 0) or 0) for d in data]
+        opens = [float(d.get('open_price', 0) or 0) for d in data]
+        highs = [float(d.get('high_price', 0) or 0) for d in data]
+        lows = [float(d.get('low_price', 0) or 0) for d in data]
+        vols = [float(d.get('volume', 0) or 0) for d in data]
+        spot = closes[-1]
+        _row_date = data[-1].get('trade_date', '')
+        _row_live = False
+        try:
+            _lv, _ld, _ok = self._row_live_spot(symbol, spot)
+            if _ok:
+                spot, _row_date, _row_live = _lv, _ld, True
+        except Exception:
+            pass
+        lb = int(cfg.get("breakout_lookback", 20) or 20)
+        ema_p = int(cfg.get("trend_ema", 20) or 20)
+        vol_mult = float(cfg.get("vol_mult", 1.5) or 1.5)
+        i, prev = len(data) - 1, len(data) - 2
+        ema = self.indicators.calculate_ema(closes, ema_p) or []
+        ema_v = ema[i] if i < len(ema) and ema[i] else 0
+        vsma = sum(vols[max(0, i - 20):i]) / max(1, min(20, i))
+        vol_ok = vsma > 0 and vols[i] >= vsma * vol_mult
+        rng = highs[i] - lows[i]
+        body = abs(closes[i] - opens[i])
+        buy_score, sell_score = 0, 0
+        buy_reasons, sell_reasons = [], []
+        bull_eng = opens[prev] > closes[prev] and closes[i] > opens[i] and closes[i] >= opens[prev] and opens[i] <= closes[prev]
+        bear_eng = opens[prev] < closes[prev] and closes[i] < opens[i] and closes[i] <= opens[prev] and opens[i] >= closes[prev]
+        hi_n = max(highs[max(0, i - lb):i]) if i - lb < i else 0
+        lo_n = min(lows[max(0, i - lb):i]) if i - lb < i else 0
+        # Bullish leg
+        if bull_eng:
+            buy_score += 25
+            buy_reasons.append('PA: Bullish engulfing')
+        if hi_n > 0 and closes[i] > hi_n:
+            buy_score += 25
+            buy_reasons.append(f'PA: {lb}-bar high breakout')
+        if ema_v and closes[i] > ema_v and lows[i - 1] > lows[i - 2] if i >= 2 else False:
+            buy_score += 20
+            buy_reasons.append(f'PA: Uptrend (EMA{ema_p} + rising lows)')
+        elif ema_v and closes[i] > ema_v:
+            buy_score += 10
+            buy_reasons.append(f'PA: Above EMA{ema_p}')
+        if rng > 0 and body >= rng * 0.5 and closes[i] >= lows[i] + rng * 0.75:
+            buy_score += 10
+            buy_reasons.append('PA: Strong-body upper close')
+        if vol_ok:
+            buy_score += 20
+            buy_reasons.append('PA: Volume confirm')
+        # Bearish leg (mirror)
+        if bear_eng:
+            sell_score += 25
+            sell_reasons.append('PA: Bearish engulfing')
+        if lo_n > 0 and closes[i] < lo_n:
+            sell_score += 25
+            sell_reasons.append(f'PA: {lb}-bar low breakdown')
+        if ema_v and closes[i] < ema_v and highs[i - 1] < highs[i - 2] if i >= 2 else False:
+            sell_score += 20
+            sell_reasons.append(f'PA: Downtrend (EMA{ema_p} + falling highs)')
+        elif ema_v and closes[i] < ema_v:
+            sell_score += 10
+            sell_reasons.append(f'PA: Below EMA{ema_p}')
+        if rng > 0 and body >= rng * 0.5 and closes[i] <= highs[i] - rng * 0.75:
+            sell_score += 10
+            sell_reasons.append('PA: Strong-body lower close')
+        if vol_ok:
+            sell_score += 20
+            sell_reasons.append('PA: Volume confirm')
+        indicators = {'pa_ema': round(ema_v, 2) if ema_v else 0,
+                      'pa_vol': vols[i], 'pa_vol_sma': round(vsma, 0)}
+        if buy_score >= sell_score and buy_score > 0:
+            opt = self._suggest_option(symbol, spot, 'CE')
+            return {'symbol': symbol, 'type': 'BUY', 'score': buy_score, 'price': spot,
+                    'date': _row_date, 'live': _row_live, 'reasons': buy_reasons,
+                    'indicators': indicators, 'option_suggestion': opt}
+        if sell_score > 0:
+            opt = self._suggest_option(symbol, spot, 'PE')
+            return {'symbol': symbol, 'type': 'SELL', 'score': sell_score, 'price': spot,
+                    'date': _row_date, 'live': _row_live, 'reasons': sell_reasons,
+                    'indicators': indicators, 'option_suggestion': opt}
+        return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
+                'date': _row_date, 'live': _row_live, 'reasons': [], 'indicators': indicators}
+
+    def _score_supply_demand(self, symbol: str, cfg=None) -> dict:
+        """Supply/Demand zone reaction scoring. Swing high/low of last N bars
+        (recent bars excluded) form zones; a pullback INTO the zone + reversal
+        close + fresh zone (<=max touches) + volume + SuperTrend alignment
+        scores up to 100. Same result shape as _analyze_symbol."""
+        cfg = cfg or self.SD_CFG
+        data = self._get_historical(symbol)
+        if len(data) < 30:
+            return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'reasons': [], 'indicators': {}}
+        closes = [float(d.get('close_price', 0) or 0) for d in data]
+        opens = [float(d.get('open_price', 0) or 0) for d in data]
+        highs = [float(d.get('high_price', 0) or 0) for d in data]
+        lows = [float(d.get('low_price', 0) or 0) for d in data]
+        vols = [float(d.get('volume', 0) or 0) for d in data]
+        spot = closes[-1]
+        _row_date = data[-1].get('trade_date', '')
+        _row_live = False
+        try:
+            _lv, _ld, _ok = self._row_live_spot(symbol, spot)
+            if _ok:
+                spot, _row_date, _row_live = _lv, _ld, True
+        except Exception:
+            pass
+        lb = int(cfg.get("swing_lookback", 20) or 20)
+        excl = int(cfg.get("exclude_last", 3) or 3)
+        zpct = float(cfg.get("zone_pct", 0.005) or 0.005)
+        max_touch = int(cfg.get("max_touches", 2) or 2)
+        vol_mult = float(cfg.get("vol_mult", 1.5) or 1.5)
+        i = len(data) - 1
+        # Established swing window (excludes the most recent bars)
+        w0, w1 = max(0, i - excl - lb), max(0, i - excl)
+        if w1 - w0 < 5:
+            w0, w1 = max(0, i - lb), i
+        win_hi = max(highs[w0:w1]) if w1 > w0 else 0
+        win_lo = min(lows[w0:w1]) if w1 > w0 else 0
+        zh = spot * zpct
+        # Touch count: bars since window dipping into each zone (freshness)
+        dem_touch = sum(1 for k in range(w1, i + 1) if lows[k] <= win_lo + zh) if win_lo else 99
+        sup_touch = sum(1 for k in range(w1, i + 1) if highs[k] >= win_hi - zh) if win_hi else 99
+        vsma = sum(vols[max(0, i - 20):i]) / max(1, min(20, i))
+        vol_ok = vsma > 0 and vols[i] >= vsma * vol_mult
+        try:
+            st = self.indicators.calculate_supertrend(data, 10, 3.0) or []
+            st_v = st[i] if i < len(st) and st[i] else 0
+        except Exception:
+            st_v = 0
+        buy_score, sell_score = 0, 0
+        buy_reasons, sell_reasons = [], []
+        # Demand: price came from above, wicked into the zone, closed back up
+        in_demand = win_lo > 0 and lows[i] <= win_lo + zh and closes[i] > win_lo
+        demand_react = in_demand and closes[i] > opens[i]
+        if in_demand:
+            buy_score += 25
+            buy_reasons.append(f'S/D: Demand zone touch ({win_lo:.0f})')
+        if demand_react:
+            buy_score += 15
+            buy_reasons.append('S/D: Bullish reaction off demand')
+        if dem_touch <= max_touch and (in_demand or demand_react):
+            buy_score += 20
+            buy_reasons.append(f'S/D: Fresh zone ({dem_touch} touch)')
+        if vol_ok and (in_demand or demand_react):
+            buy_score += 20
+            buy_reasons.append('S/D: Volume confirm')
+        if st_v and closes[i] > st_v and (in_demand or demand_react):
+            buy_score += 20
+            buy_reasons.append('S/D: Trend-aligned (SuperTrend)')
+        # Supply mirror
+        in_supply = win_hi > 0 and highs[i] >= win_hi - zh and closes[i] < win_hi
+        supply_react = in_supply and closes[i] < opens[i]
+        if in_supply:
+            sell_score += 25
+            sell_reasons.append(f'S/D: Supply zone touch ({win_hi:.0f})')
+        if supply_react:
+            sell_score += 15
+            sell_reasons.append('S/D: Bearish reaction off supply')
+        if sup_touch <= max_touch and (in_supply or supply_react):
+            sell_score += 20
+            sell_reasons.append(f'S/D: Fresh zone ({sup_touch} touch)')
+        if vol_ok and (in_supply or supply_react):
+            sell_score += 20
+            sell_reasons.append('S/D: Volume confirm')
+        if st_v and closes[i] < st_v and (in_supply or supply_react):
+            sell_score += 20
+            sell_reasons.append('S/D: Trend-aligned (SuperTrend)')
+        indicators = {'sd_demand': round(win_lo, 2) if win_lo else 0,
+                      'sd_supply': round(win_hi, 2) if win_hi else 0,
+                      'sd_dem_touch': dem_touch, 'sd_sup_touch': sup_touch}
+        if buy_score >= sell_score and buy_score > 0:
+            opt = self._suggest_option(symbol, spot, 'CE')
+            return {'symbol': symbol, 'type': 'BUY', 'score': buy_score, 'price': spot,
+                    'date': _row_date, 'live': _row_live, 'reasons': buy_reasons,
+                    'indicators': indicators, 'option_suggestion': opt}
+        if sell_score > 0:
+            opt = self._suggest_option(symbol, spot, 'PE')
+            return {'symbol': symbol, 'type': 'SELL', 'score': sell_score, 'price': spot,
+                    'date': _row_date, 'live': _row_live, 'reasons': sell_reasons,
+                    'indicators': indicators, 'option_suggestion': opt}
+        return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
+                'date': _row_date, 'live': _row_live, 'reasons': [], 'indicators': indicators}
+
+    def scan_pa(self, symbols=None, min_score: int = 70) -> dict:
+        """Price-action scan (no spot warm-up; relies on scan() having run)."""
+        if symbols is None:
+            symbols = FNO_SYMBOLS
+        try:
+            min_score = int(min_score)
+        except Exception:
+            min_score = 70
+        bullish, bearish = [], []
+        for sym in symbols:
+            try:
+                r = self._score_price_action(sym)
+            except Exception:
+                continue
+            if r.get('score', 0) < min_score:
+                continue
+            if r.get('type') == 'BUY':
+                bullish.append(r)
+            elif r.get('type') == 'SELL':
+                bearish.append(r)
+        bullish.sort(key=lambda x: x.get('score', 0), reverse=True)
+        bearish.sort(key=lambda x: x.get('score', 0), reverse=True)
+        return {'bullish': bullish, 'bearish': bearish,
+                'total_scanned': len(symbols), 'min_score': min_score}
+
+    def scan_sd(self, symbols=None, min_score: int = 70) -> dict:
+        """Supply/Demand scan (no spot warm-up; relies on scan() having run)."""
+        if symbols is None:
+            symbols = FNO_SYMBOLS
+        try:
+            min_score = int(min_score)
+        except Exception:
+            min_score = 70
+        bullish, bearish = [], []
+        for sym in symbols:
+            try:
+                r = self._score_supply_demand(sym)
+            except Exception:
+                continue
+            if r.get('score', 0) < min_score:
+                continue
+            if r.get('type') == 'BUY':
+                bullish.append(r)
+            elif r.get('type') == 'SELL':
+                bearish.append(r)
+        bullish.sort(key=lambda x: x.get('score', 0), reverse=True)
+        bearish.sort(key=lambda x: x.get('score', 0), reverse=True)
+        return {'bullish': bullish, 'bearish': bearish,
+                'total_scanned': len(symbols), 'min_score': min_score}
 
     def _analyze_vwap_symbol(self, symbol: str) -> dict:
         data = self._get_historical(symbol)
