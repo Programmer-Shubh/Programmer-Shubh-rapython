@@ -38,11 +38,12 @@ async def ws_live(websocket: WebSocket):
                     ticks[sym] = {"spot": spot, "change": 0, "ts": int(time.time()*1000), "source": "db" if spot > 0 else "na"}
                 if prev.get(sym) != ticks[sym].get("spot"):
                     changed = True
-            # Push on change or at least every 2s heartbeat (keeps connection alive)
-            if changed or int(time.time()*10) % 20 == 0:
-                await websocket.send_text(json.dumps({"type":"tick","ticks": ticks, "interval_ms": 400}))
+            # Push on change or at least every 10s heartbeat (keeps connection
+            # alive). 2s loop (was 0.4s): 5x less egress - Render bandwidth diet.
+            if changed or int(time.time()) % 10 == 0:
+                await websocket.send_text(json.dumps({"type":"tick","ticks": ticks, "interval_ms": 2000}))
                 prev = {k: v.get("spot") for k,v in ticks.items()}
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(2)
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -78,4 +79,4 @@ async def ws_chain(websocket: WebSocket, symbol: str):
 
 @router.get("/stats")
 def ws_stats():
-    return {"connections": len(_connections), "interval_ms": 400, "source": "batch parallel + change-only push + rAF", "latency": "0.4s"}
+    return {"connections": len(_connections), "interval_ms": 2000, "source": "batch parallel + change-only push + rAF", "latency": "2s"}

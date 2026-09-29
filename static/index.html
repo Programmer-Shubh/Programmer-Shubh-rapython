@@ -1934,7 +1934,13 @@ let _lastOpenTrdHTML = null;
                                 window._wsRaf=null;
                                 if(window._wsPending){
                                     window._wsPending=false;
-                                    try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); }catch(e){}
+                                    // Bandwidth diet: positions HTTP max 1 per 10s
+                                    // (WS ticks now 2s; SL exits run server-side anyway)
+                                    const now=Date.now();
+                                    if(!window._wsPosTs||now-window._wsPosTs>10000){
+                                        window._wsPosTs=now;
+                                        try{ if(!document.getElementById('pg-dashboard').classList.contains('hidden')) loadDashPositions(); }catch(e){}
+                                    }
                                 }
                             });
                         }
@@ -1956,8 +1962,8 @@ let _lastOpenTrdHTML = null;
             else if(el.querySelector('table')) el.querySelector('table').insertAdjacentHTML('beforeend', row);
         }catch(e){}
     }
-    // Fallback HTTP refresh if WS not connected — 8s (was 60s lag), plus WS gives <50ms ticks when live
-    setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },15000);
+    // Fallback HTTP refresh if WS not connected — 60s (bandwidth diet; WS is primary when live)
+    setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },60000);
     // No polling — WebSocket is primary (0.4s change-only). HTTP fallback only when WS dead.
     // Polling was the main latency source (1.5s) — now updates are push-driven via rAF.
     // chain auto-refresh removed — manual Load only (no flicker)

@@ -2,8 +2,10 @@ name: Market Hours Auto Trade
 
 on:
   schedule:
-    # Every 5 minutes, Mon-Fri, during IST market hours (9:15 AM - 3:30 PM IST = 3:45 - 10:00 UTC)
-    - cron: '*/5 3-10 * * 1-5'
+    # Every 15 minutes, Mon-Fri, during IST market hours (9:15 AM - 3:30 PM IST = 3:45 - 10:00 UTC).
+    # Bandwidth diet (was 5min): in-app SL monitor (30s thread + per-poll)
+    # owns exits; this cron is only a backup wake-up call.
+    - cron: '*/15 3-10 * * 1-5'
   workflow_dispatch:
 
 concurrency:

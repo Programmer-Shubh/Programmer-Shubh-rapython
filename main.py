@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from core.models.database import Database
@@ -103,6 +104,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Bandwidth diet: gzip JSON >1KB (~70% smaller chain/backtest payloads)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Cache static assets 1h + instant preloader (fixes browser open me bahut samay lag raha)
 @app.middleware("http")
