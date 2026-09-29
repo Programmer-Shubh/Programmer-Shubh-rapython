@@ -29,6 +29,36 @@ def _ist_today():
     return datetime.now(ist).strftime("%Y-%m-%d")
 
 
+def auto_rollover_expired():
+    """Background self-healing: every ACTIVE strategy whose end_date passed
+    is shifted to the next weekly expiry automatically - no button press
+    needed, paper/live trading keeps running. Returns rolled count."""
+    try:
+        db = Database.get_instance()
+        rows = db.fetch_all(
+            "SELECT id, symbol, end_date FROM strategies WHERE status='active'"
+        )
+        today = _ist_today()
+        n = 0
+        for r in rows or []:
+            try:
+                end = str(r.get("end_date") or "")[:10]
+                if not end or end >= today:
+                    continue
+                new_end = next_weekly_expiry(r.get("symbol") or "")
+                if new_end and new_end >= today:
+                    db.execute(
+                        "UPDATE strategies SET end_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        [new_end, r["id"]],
+                    )
+                    n += 1
+            except Exception:
+                continue
+        return n
+    except Exception:
+        return 0
+
+
 def _apply_expiry_status(r):
     """Backend source of truth: end_date < today (IST) => display expired.
 
@@ -51,6 +81,10 @@ def _apply_expiry_status(r):
 @router.get("/list")
 def list_strategies():
     db = Database.get_instance()
+    try:
+        auto_rollover_expired()  # self-heal on every view
+    except Exception:
+        pass
     rows = db.fetch_all(
         "SELECT * FROM strategies WHERE user_id=1 ORDER BY updated_at DESC"
     )

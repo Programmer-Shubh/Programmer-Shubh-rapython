@@ -61,6 +61,23 @@ async def lifespan(app: FastAPI):
         _th2.Thread(target=_sl_mon, daemon=True).start()
     except: pass
     try:
+        # Strategy self-healing: expired ACTIVE strategies roll to next
+        # weekly expiry by themselves (hourly) - no button press needed.
+        def _roll_loop():
+            import time as _t
+            _t.sleep(120)
+            while True:
+                try:
+                    from routes.strategies import auto_rollover_expired
+                    auto_rollover_expired()
+                except: pass
+                try:
+                    _t.sleep(3600)
+                except: break
+        import threading as _th3
+        _th3.Thread(target=_roll_loop, daemon=True).start()
+    except: pass
+    try:
         # Lot-size backfill in background thread (16 updates, could be slow on Postgres)
         def _lot_backfill():
             try:
