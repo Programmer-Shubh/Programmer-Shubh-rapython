@@ -1557,7 +1557,31 @@ let _lastOpenTrdHTML = null;
         try{quantIndicators=[{id:'rsi',name:'RSI',params:[{key:'period',label:'Period',val:14}],candle:'5',field:'equity',mode:'both'},{id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',val:10},{key:'multiplier',label:'Multiplier',val:3}],candle:'5',field:'equity',mode:'both'}];renderQuantTable();}catch(e){}
     }
 
-    async function backtestStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);setTimeout(async()=>{try{document.getElementById('s-name').value=s.name||'';document.getElementById('s-sym').value=s.symbol||'NIFTY';document.getElementById('s-start').value=s.start_date||'';document.getElementById('s-end').value=s.end_date||'';document.getElementById('s-tf').value=s.timeframe||'daily';if(s.legs)try{stratLegs=Array.isArray(s.legs)?s.legs:JSON.parse(s.legs);renderLegs();}catch(e){}if(s.indicators)try{const inds=Array.isArray(s.indicators)?s.indicators:JSON.parse(s.indicators);quantIndicators=inds.map(iv=>({id:iv.id||iv, name:iv.id||iv, params:Object.entries(iv.params||{}).map(([k,v])=>({key:k,label:k,val:v})), candle:'5',field:'equity',mode:'both'}));renderQuantTable();}catch(e){}await runBacktest();}catch(e){alert('Backtest failed: '+e.message);}},300);}catch(e){alert('Error: '+e.message);}}
+    function _loadStratToForm(s){
+        try{
+            const box=document.getElementById('r-syms');
+            const v=s.symbol||'NIFTY';
+            if(box){box.querySelectorAll('input').forEach(i=>{i.checked=(i.value===v);});}
+            try{if(typeof rSymsRefresh==='function')rSymsRefresh();}catch(e){}
+            if(s.start_date){try{document.getElementById('r-start').value=s.start_date;}catch(e){}}
+            if(s.end_date){try{document.getElementById('r-end').value=s.end_date;}catch(e){}}
+            try{
+                const ao=(typeof s.advanced_options==='string')?JSON.parse(s.advanced_options||'{}'):(s.advanced_options||{});
+                if(ao.trade_mode)document.getElementById('r-type').value=ao.trade_mode;
+                if(ao.entry_time)document.getElementById('r-entry').value=ao.entry_time;
+                if(ao.exit_time)document.getElementById('r-exit').value=ao.exit_time;
+                if(s.timeframe)document.getElementById('r-timeframe').value=s.timeframe;
+            }catch(e){}
+            try{
+                const rm=(typeof s.risk_management==='string')?JSON.parse(s.risk_management||'{}'):(s.risk_management||{});
+                if(rm.daily_stop_loss)document.getElementById('r-sl').value=rm.daily_stop_loss;
+                if(rm.daily_take_profit)document.getElementById('r-tp').value=rm.daily_take_profit;
+            }catch(e){}
+            if(s.legs)try{stratLegs=Array.isArray(s.legs)?s.legs:JSON.parse(s.legs);renderLegs();}catch(e){}
+            if(s.indicators)try{const inds=Array.isArray(s.indicators)?s.indicators:JSON.parse(s.indicators);quantIndicators=inds.map(iv=>({id:iv.id||iv, name:iv.id||iv, params:Object.entries(iv.params||{}).map(([k,v])=>({key:k,label:k,val:v})), candle:'5',field:'equity',mode:'both'}));renderQuantTable();}catch(e){}
+        }catch(e){}
+    }
+    async function backtestStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);setTimeout(async()=>{try{_loadStratToForm(s);await runBacktest();}catch(e){alert('Backtest failed: '+e.message);}},300);}catch(e){alert('Error: '+e.message);}}
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3"><div class="text-center p-4"><i class="bi bi-lightbulb" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">No strategies yet</p><small class="text-muted">Create your first strategy to get started</small></div></p>';return;}
     // Running status per strategy: count open paper/live trades by strategy_id
     let runMap={};try{const o=await A('/api/trades/open');(o.positions||[]).forEach(t=>{const sid=t.strategy_id||0;if(!sid)return;runMap[sid]=runMap[sid]||{paper:0,live:0};if((t.trade_mode||'paper')==='live')runMap[sid].live++;else runMap[sid].paper++;});}catch(e){}
@@ -1608,7 +1632,7 @@ let _lastOpenTrdHTML = null;
         const w=document.createElement('div');w.innerHTML=h;document.body.appendChild(w.firstChild);
     }catch(e){alert('Error: '+e.message);}}
     async function atFromStrat(id,status){const newStatus=status==='active'?'paused':'active';try{const s=await A('/api/strategies/'+id);if(s&&!s.error){const keep={id:s.id,name:s.name,symbol:s.symbol,start_date:s.start_date,end_date:s.end_date,timeframe:s.timeframe,description:s.description,indicators:s.indicators,entry_conditions:s.entry_conditions,exit_conditions:s.exit_conditions,legs:s.legs,advanced_options:s.advanced_options,risk_management:s.risk_management,status:newStatus};await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(keep)});}else{await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:newStatus})});}}catch(e){}loadStrats();loadTrades();}
-    async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);document.getElementById('s-name').value=s.name||'';document.getElementById('s-sym').value=s.symbol||'BANKNIFTY';document.getElementById('s-start').value=s.start_date||'';document.getElementById('s-end').value=s.end_date||'';document.getElementById('s-tf').value=s.timeframe||'daily';}catch(e){alert('Error');}}
+    async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);setTimeout(()=>{try{_loadStratToForm(s);try{document.getElementById('r-name').value=s.name||'';}catch(e){}}catch(e){alert('Error: '+e.message);}},300);}catch(e){alert('Error');}}
     async function delStrat(id){if(!confirm('Delete this strategy?'))return;try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadStrats();}catch(e){alert('Error: '+e.message);}}
 
 
@@ -2438,7 +2462,7 @@ def run(data):
             window.addEventListener('resize',()=>{try{_tvChart.applyOptions({width:el.clientWidth});}catch(e){}});
         }catch(err){btn.innerHTML=orig;document.getElementById('tv-info').textContent='Error: '+err.message;}
     }
-    async function kaTest(){const s=document.getElementById('ka-status');s.textContent='pinging...';try{const r=await A('/api/keepalive/ping');s.textContent=(r&&r.status==='ok')?('OK - uptime '+Math.round(r.uptime_sec||0)+'s'):'Failed';}catch(e){try{const r2=await A(location.origin+'/api/keepalive/ping');s.textContent=(r2&&r2.status==='ok')?'OK (same origin)':'Failed';}catch(e2){s.textContent='Failed: '+e.message;}}}
+    async function kaTest(){const s=document.getElementById('ka-status');if(!s)return;try{s.textContent='pinging...';}catch(e){return;}try{const r=await A('/api/keepalive/ping');s.textContent=(r&&r.status==='ok')?('OK - uptime '+Math.round(r.uptime_sec||0)+'s'):'Failed';}catch(e){try{const r2=await A(location.origin+'/api/keepalive/ping');s.textContent=(r2&&r2.status==='ok')?'OK (same origin)':'Failed';}catch(e2){s.textContent='Failed: '+e.message;}}}
 
      const BROKER_FIELD_LABELS={
          dhan:{client_id:'Client ID',access_token:'Access Token',refresh_token:'Refresh Token'},

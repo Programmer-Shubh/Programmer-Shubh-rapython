@@ -665,7 +665,7 @@ def _run_backtest_core(req: BacktestRequest):
                 from utils.helpers import is_optionable as _isopt
                 _has_opt_legs = any(str((l or {}).get("option_type", "")).upper() in ("CE", "PE") for l in (legs or []))
                 if _has_opt_legs and not _isopt(_sym):
-                    _per_symbol[_sym] = {"error": "par koi options nahi hain (F&O me nahi) - option backtest/trade impossible. Spot/Equity par chalao.", "total_trades": 0,
+                    _per_symbol[_sym] = {"error": f"{_sym} me options nahi hain (F&O me listed nahi) - option backtest/trade impossible. Spot/Equity par chalao.", "total_trades": 0,
                                          "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
                     continue
             except Exception:
@@ -798,7 +798,11 @@ def _run_backtest_core(req: BacktestRequest):
                                  "win_rate": _sm.get("win_rate", 0),
                                  "net_pnl": round(_sm.get("net_pnl", 0), 2)}
         if not _all_trades:
-            errs = "; ".join(f"{k}: {v.get('error')}" for k, v in _per_symbol.items() if v.get("error"))
+            # Skip the "SYM: " prefix when the message already names the symbol
+            def _e(k, v):
+                _m = str((v or {}).get("error") or "")
+                return _m if _m.startswith(str(k)) else f"{k}: {_m}"
+            errs = "; ".join(_e(k, v) for k, v in _per_symbol.items() if v.get("error"))
             if errs:
                 return {"error": errs}
             # No trades due to strict indicator thresholds -> SuperTrend-only retry
