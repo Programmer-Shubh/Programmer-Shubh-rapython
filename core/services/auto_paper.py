@@ -150,6 +150,67 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
         return {"placed": [], "skipped": f"error: {e}"[:150]}
 
 
+def dry_run_status():
+    """No trades placed. Reports per ACTIVE strategy: due or skip-reason.
+    Used to diagnose empty history without touching anything."""
+    out = []
+    try:
+        import json as _js
+        from core.models.database import Database
+        db = Database.get_instance()
+        today = _ist_today()
+        try:
+            rows = db.fetch_all(
+                "SELECT id, name, symbol, status, end_date, legs FROM strategies ORDER BY updated_at DESC"
+            )
+        except Exception as e:
+            return {"error": f"strategies unreadable: {e}"[:150], "today": today}
+        for s in rows or []:
+            try:
+                sid = s.get("id")
+                st = str(s.get("status") or "")
+                if st != "active":
+                    out.append({"id": sid, "name": s.get("name"), "decision": "skip",
+                                "reason": f"status={st} (Auto Trade ON karo)"})
+                    continue
+                try:
+                    legs = _js.loads(s.get("legs") or "[]")
+                except Exception:
+                    legs = []
+                if not legs:
+                    out.append({"id": sid, "name": s.get("name"), "decision": "skip",
+                                "reason": "no legs saved"})
+                    continue
+                if any(str(l.get("option_type", "")).upper() == "AUTO" for l in legs):
+                    out.append({"id": sid, "name": s.get("name"), "decision": "skip",
+                                "reason": "AUTO legs need manual direction"})
+                    continue
+                try:
+                    has_open = db.fetch_one(
+                        "SELECT id FROM paper_trades WHERE strategy_id=? AND status='open' LIMIT 1", [sid])
+                    if has_open:
+                        out.append({"id": sid, "name": s.get("name"), "decision": "wait",
+                                    "reason": f"open position #{has_open['id']} running"})
+                        continue
+                    traded = db.fetch_one(
+                        "SELECT id FROM paper_trades WHERE strategy_id=? AND entry_date=? LIMIT 1", [sid, today])
+                    if traded:
+                        out.append({"id": sid, "name": s.get("name"), "decision": "wait",
+                                    "reason": "today already traded (1/day rule)"})
+                        continue
+                except Exception as e:
+                    out.append({"id": sid, "name": s.get("name"), "decision": "skip",
+                                "reason": f"db check failed: {e}"[:120]})
+                    continue
+                out.append({"id": sid, "name": s.get("name"), "decision": "DUE",
+                            "reason": f"{len(legs)} leg(s) will place on next worker run"})
+            except Exception:
+                continue
+        return {"today": today, "strategies": out}
+    except Exception as e:
+        return {"error": str(e)[:150]}
+
+
 def start_background(interval_s=1800):
     """Daemon thread: auto paper-trade scan every `interval_s` (default 30min)."""
     def _loop():

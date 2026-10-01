@@ -106,6 +106,16 @@ def run_monitor(key: str = ""):
         return {"error": str(e)[:200]}
 
 
+@router.get("/auto-paper-status")
+def auto_paper_status():
+    """Dry-run diagnosis: why each strategy did/didn't paper-trade. No orders."""
+    try:
+        from core.services.auto_paper import dry_run_status
+        return {"success": True, **dry_run_status()}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 @router.post("/place")
 def place_trade(req: PlaceTradeRequest):
     # Mandatory Risk Management: SL/Target required (especially for option selling)
