@@ -107,11 +107,22 @@ def run_monitor(key: str = ""):
 
 
 @router.get("/auto-paper-status")
-def auto_paper_status():
-    """Dry-run diagnosis: why each strategy did/didn't paper-trade. No orders."""
+def auto_paper_status(run: int = 0):
+    """Dry-run diagnosis: why each strategy did/didn't paper-trade. No orders.
+    ?run=1 forces one worker pass now (same idempotent 1/day rules)."""
     try:
-        from core.services.auto_paper import dry_run_status
-        return {"success": True, **dry_run_status()}
+        from core.services.auto_paper import dry_run_status, run_once
+        out = {"success": True, **dry_run_status()}
+        if run:
+            try:
+                out["forced_run"] = run_once(min_interval=0)
+            except Exception as e:
+                out["forced_run"] = {"error": str(e)[:150]}
+            try:
+                out.update({k: v for k, v in dry_run_status().items() if k == "strategies"})
+            except Exception:
+                pass
+        return out
     except Exception as e:
         return {"error": str(e)[:200]}
 
