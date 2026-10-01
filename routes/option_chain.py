@@ -293,6 +293,13 @@ def place_trade(req: TradeRequest):
         # Data Validation: symbol, option_type, quantity, strike checks
         if not req.symbol or not str(req.symbol).strip():
             return {"error": "Symbol missing"}
+        # No options on non-F&O symbols (GOLDBEES/SILVERBEES): block fantasy orders
+        try:
+            from utils.helpers import is_optionable as _isopt2
+            if not _isopt2(req.symbol):
+                return {"error": f"{str(req.symbol).upper()} par koi options nahi hain (F&O me nahi) - order lagana impossible"}
+        except Exception:
+            pass
         if req.option_type not in ("CE", "PE"):
             return {"error": "Option type must be CE or PE"}
         if req.quantity <= 0:

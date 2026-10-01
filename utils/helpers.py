@@ -96,6 +96,22 @@ def get_lot_size(symbol: str) -> int:
     return lots.get(symbol.upper(), 50)
 
 
+OPTION_INDICES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+
+# Canonical NSE F&O stock list (options exist ONLY on these + indices).
+# ETFs like GOLDBEES/SILVERBEES have NO options - option backtests/orders
+# on them are fantasy (model Rs1.5 premiums on strikes that can't trade).
+FNO_STOCKS = {'RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL','TITAN','BAJAJ-AUTO','NESTLEIND','TRENT','BEL','DMART','INDIGO','CONCOR','LTF'}
+
+
+def is_optionable(symbol: str) -> bool:
+    """True only if exchange-traded options exist (index or F&O stock)."""
+    try:
+        return str(symbol or "").strip().upper() in OPTION_INDICES or str(symbol or "").strip().upper() in FNO_STOCKS
+    except Exception:
+        return False
+
+
 def get_strike_step(symbol: str) -> float:
     steps = {
         "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50, "MIDCPNIFTY": 50,

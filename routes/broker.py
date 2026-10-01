@@ -1119,6 +1119,12 @@ async def place_live_order(req: LiveOrderRequest):
         symbol = (req.symbol or "").upper()
         if not symbol:
             return {"error": "Symbol required"}
+        try:
+            from utils.helpers import is_optionable as _isopt3
+            if not _isopt3(symbol):
+                return {"error": f"{symbol} par koi options nahi hain (F&O me nahi) - live order impossible"}
+        except Exception:
+            pass
         # Strategy expiry: auto-rollover to next weekly expiry by default so
         # live trading keeps running instead of blocking on a past end_date.
         _rolled_to = ""

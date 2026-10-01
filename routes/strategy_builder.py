@@ -658,6 +658,18 @@ def _run_backtest_core(req: BacktestRequest):
         _bar_cap = 40 if len(_syms) > 1 else 60
         for _sym in _syms:
             _use_db = False
+            # No options exist on non-F&O symbols (GOLDBEES/SILVERBEES ETFs):
+            # an option backtest there prices fantasy strikes that can never
+            # trade. Refuse honestly instead of fabricating a CE/PE trade list.
+            try:
+                from utils.helpers import is_optionable as _isopt
+                _has_opt_legs = any(str((l or {}).get("option_type", "")).upper() in ("CE", "PE") for l in (legs or []))
+                if _has_opt_legs and not _isopt(_sym):
+                    _per_symbol[_sym] = {"error": "par koi options nahi hain (F&O me nahi) - option backtest/trade impossible. Spot/Equity par chalao.", "total_trades": 0,
+                                         "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
+                    continue
+            except Exception:
+                pass
             # Algotest-style: REAL NSE history first (spot + option premiums from DB)
             try:
                 _db_hist = _load_db_history(_sym, start_date, end_date)
