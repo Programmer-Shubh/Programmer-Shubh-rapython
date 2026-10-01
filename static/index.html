@@ -396,6 +396,39 @@
                         <div class="col-md-8 d-flex align-items-center"><small class="text-muted">Order/Strike/Lots — Template se auto (Strategy Templates neeche)</small></div>
                     </div>
                     </div>
+                    <div class="slab-sec"><div class="slab-sec-title"><i class="bi bi-grid"></i> Strategy Templates — legs yahin banao</div>
+            <div class="mt-3">
+                <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Templates — Click to add legs</button>
+            </div>
+            <div class="collapse show mt-2" id="legBuilder">
+                <div class="mt-2 d-flex gap-1 flex-wrap">
+                    <span class="small text-muted me-1">Templates:</span>
+                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('single')">Single</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('straddle')">Straddle (ATM CE+PE Sell)</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('strangle')">Strangle (OTM CE+PE Sell)</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bullspread')">Bull Call Spread</button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bearspread')">Bear Call Spread</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('bearputspread')">Bear Put Spread</button>
+                    <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('bullputspread')">Bull Put Spread</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironcondor')">Iron Condor</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('longcall')">Long Call</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('longput')">Long Put</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('shortcall')">Short Call</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('shortput')">Short Put</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironbutterfly')">Iron Butterfly</button>
+                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('butterfly')">Butterfly</button>
+                    <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('calendar')">Calendar</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="clearLegs()">Clear</button>
+                </div>
+                <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
+                <div class="row g-2 mt-2" id="strategyRiskRow">
+                    <div class="col-md-4"><label class="form-label small">Strategy Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
+                    <div class="col-md-4"><label class="form-label small">Strategy Stop Loss (₹) — overall MTM</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
+                    <div class="col-md-4"><label class="form-label small">Strategy Target (₹) — overall MTM</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
+                </div>
+                <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
+                    </div>
+
                     <div class="slab-sec"><div class="slab-sec-title">Schedule & Risk</div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
@@ -445,7 +478,7 @@
                     </div>
                     </div>
                 </div>
-            <div class="step-indicator mb-2 slab"><div class="step active">1 Setup</div><div class="step">2 Indicators</div><div class="step">3 Backtest</div><div class="step">4 Strategy</div></div>
+            
             <div class="card mb-2" style="display:none"><div class="card-body p-2">
             <div class="d-flex gap-1 mb-2 flex-wrap" id="q-instruments"></div>
             </div></div>
@@ -472,36 +505,6 @@
                     <div style="display:flex;justify-content:space-between"><span class="small">0</span><span class="small">20</span></div>
                 </div>
             </div>
-            <div class="mt-3">
-                <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Templates — Click to add legs</button>
-            </div>
-            <div class="collapse show mt-2" id="legBuilder">
-                <div class="mt-2 d-flex gap-1 flex-wrap">
-                    <span class="small text-muted me-1">Templates:</span>
-                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('single')">Single</button>
-                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('straddle')">Straddle (ATM CE+PE Sell)</button>
-                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('strangle')">Strangle (OTM CE+PE Sell)</button>
-                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bullspread')">Bull Call Spread</button>
-                    <button class="btn btn-sm btn-outline-warning" onclick="applyTemplate('bearspread')">Bear Call Spread</button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('bearputspread')">Bear Put Spread</button>
-                    <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('bullputspread')">Bull Put Spread</button>
-                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironcondor')">Iron Condor</button>
-                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('longcall')">Long Call</button>
-                    <button class="btn btn-sm btn-outline-primary" onclick="applyTemplate('longput')">Long Put</button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('shortcall')">Short Call</button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('shortput')">Short Put</button>
-                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironbutterfly')">Iron Butterfly</button>
-                    <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('butterfly')">Butterfly</button>
-                    <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('calendar')">Calendar</button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="clearLegs()">Clear</button>
-                </div>
-                <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
-                <div class="row g-2 mt-2" id="strategyRiskRow">
-                    <div class="col-md-4"><label class="form-label small">Strategy Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
-                    <div class="col-md-4"><label class="form-label small">Strategy Stop Loss (₹) — overall MTM</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
-                    <div class="col-md-4"><label class="form-label small">Strategy Target (₹) — overall MTM</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
-                </div>
-                <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
                 </div>
                 <div class="card mt-3 slab-card">
                     <div class="card-header"><span class="slab-num">3</span><i class="bi bi-play-circle"></i> Run & Backtest</div>
