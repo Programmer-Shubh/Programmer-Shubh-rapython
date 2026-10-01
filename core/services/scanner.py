@@ -776,6 +776,71 @@ class OptionScanner:
 
     _SYNT_CACHE = {}
     _SYNT_TTL = 600
+
+    def _clean_series(self, rows: list) -> list:
+        """Kill corrupt bars that fabricate impossible indicator levels
+        (e.g. BEL supertrend 4912 vs price 392 = 12x, circuits cap at 20%).
+        1) Clamp OHLC consistency (close/open inside [low, high]).
+        2) Drop bars with high/low ratio > 1.5 (impossible daily range).
+        3) Truncate at >30% inter-bar close jumps (unadjusted split/bonus or
+           mixed-symbol series) - keep the recent consistent segment.
+        Returns cleaned oldest->newest (may be < input; callers check len)."""
+        try:
+            out = []
+            for r in rows or []:
+                try:
+                    o = float(r.get("open_price", 0) or 0)
+                    h = float(r.get("high_price", 0) or 0)
+                    l = float(r.get("low_price", 0) or 0)
+                    c = float(r.get("close_price", 0) or 0)
+                except Exception:
+                    continue
+                if o <= 0 or h <= 0 or l <= 0 or c <= 0:
+                    continue
+                if h < l:
+                    continue
+                if h / l > 1.5:
+                    continue
+                h = max(h, o, c)
+                l = min(l, o, c)
+                d = dict(r)
+                d["open_price"], d["high_price"], d["low_price"], d["close_price"] = o, h, l, c
+                out.append(d)
+            # Truncate at corporate-action/mix jumps (>30% close-to-close)
+            if len(out) >= 2:
+                cut = 0
+                for k in range(1, len(out)):
+                    try:
+                        pc = float(out[k - 1].get("close_price", 0) or 0)
+                        cc = float(out[k].get("close_price", 0) or 0)
+                    except Exception:
+                        continue
+                    if pc > 0 and cc > 0 and abs(cc - pc) / pc > 0.30:
+                        cut = k
+                if cut:
+                    out = out[cut:]
+            return out
+        except Exception:
+            return rows or []
+
+    def _sane_levels(self, spot: float, *levels) -> bool:
+        """Indicator levels must be within [0.5x, 2x] of spot. A SuperTrend
+        at 12x the price can only come from a corrupt series - refuse to
+        score it instead of emitting a fantasy-backed signal."""
+        try:
+            if not spot or spot <= 0:
+                return False
+            for lv in levels:
+                try:
+                    v = float(lv or 0)
+                except Exception:
+                    continue
+                if v > 0 and (v < spot * 0.5 or v > spot * 2.0):
+                    return False
+            return True
+        except Exception:
+            return False
+
     def _get_historical(self, symbol: str) -> list:
         import time as _t, datetime as _dt
         now = _t.time()
@@ -813,7 +878,8 @@ class OptionScanner:
                     r['low_price'] = float(r.get('low_price', 0) or 0)
                     r['close_price'] = float(r.get('close_price', 0) or 0)
                     r['open_price'] = float(r.get('open_price', 0) or 0)
-                # cache DB result too
+                # cache DB result too (cleaned: corrupt bars fabricate levels)
+                rows = self._clean_series(rows)
                 try:
                     self._SYNT_CACHE[ck] = (now, rows)
                     if len(self._SYNT_CACHE) > 80: self._SYNT_CACHE.pop(next(iter(self._SYNT_CACHE)))
@@ -857,6 +923,7 @@ class OptionScanner:
                 except Exception:
                     pass
                 synth = synth[-45:]
+                synth = self._clean_series(synth)
                 try:
                     self._SYNT_CACHE[ck] = (now, synth)
                     if len(self._SYNT_CACHE) > 80: self._SYNT_CACHE.pop(next(iter(self._SYNT_CACHE)))
@@ -1091,6 +1158,17 @@ class OptionScanner:
         vol_sma20 = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else 1
         i = len(data) - 1
         prev = i - 1
+        # Corrupt-series guard: ST/EMA at 12x the price (e.g. BEL 4912 vs 392)
+        # can only come from mixed/jumped bars - refuse to score it.
+        try:
+            _stv = supertrend[i] if i < len(supertrend) else 0
+            _emv = ema200[i] if i < len(ema200) else 0
+            if _stv and _emv and not self._sane_levels(spot, _stv, _emv):
+                return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
+                        'date': _row_date, 'live': _row_live,
+                        'reasons': ['Corrupt series guard'], 'indicators': {}}
+        except Exception:
+            pass
         buy_score = 0
         sell_score = 0
         buy_reasons = []
@@ -1200,6 +1278,10 @@ class OptionScanner:
         vol_ok = vsma > 0 and vols[i] >= vsma * vol_mult
         rng = highs[i] - lows[i]
         body = abs(closes[i] - opens[i])
+        if ema_v and not self._sane_levels(spot, ema_v):
+            return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
+                    'date': _row_date, 'live': _row_live,
+                    'reasons': ['Corrupt series guard'], 'indicators': {}}
         buy_score, sell_score = 0, 0
         buy_reasons, sell_reasons = [], []
         bull_eng = opens[prev] > closes[prev] and closes[i] > opens[i] and closes[i] >= opens[prev] and opens[i] <= closes[prev]
@@ -1306,6 +1388,10 @@ class OptionScanner:
             st_v = st[i] if i < len(st) and st[i] else 0
         except Exception:
             st_v = 0
+        if st_v and not self._sane_levels(spot, st_v):
+            return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
+                    'date': _row_date, 'live': _row_live,
+                    'reasons': ['Corrupt series guard'], 'indicators': {}}
         buy_score, sell_score = 0, 0
         buy_reasons, sell_reasons = [], []
         # Demand: price came from above, wicked into the zone, closed back up
@@ -1566,6 +1652,10 @@ class OptionScanner:
         vwap_val = vwap_data['vwap'][i] if vwap_data['vwap'][i] else spot
         upper2 = vwap_data['upper2'][i] if vwap_data['upper2'][i] else spot * 1.02
         lower2 = vwap_data['lower2'][i] if vwap_data['lower2'][i] else spot * 0.98
+        if not self._sane_levels(spot, vwap_val, upper2, lower2):
+            return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
+                    'date': _row_date, 'live': _row_live,
+                    'reasons': ['Corrupt series guard'], 'indicators': {}}
         long_score = 0
         short_score = 0
         long_reasons = []
