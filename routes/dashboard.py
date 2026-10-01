@@ -16,7 +16,7 @@ def get_spots():
     # Cloud-first live prices (parallel, ~5s max): Yahoo -> Google -> Stooq -> DB stale.
     # Sequential 8s fetches caused proxy 502s; parallel fixes it.
     live = LiveMarketData()
-    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "RELIANCE", "HDFCBANK", "TCS", "INFY"]
+    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "HDFCBANK", "TCS", "INFY"]
     try:
         found = live.get_live_spots_parallel(symbols, max_workers=8) or {}
     except Exception:

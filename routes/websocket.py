@@ -16,7 +16,7 @@ async def ws_live(websocket: WebSocket):
     _connections.add(websocket)
     try:
         live = LiveMarketData()
-        symbols = ["NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","RELIANCE","HDFCBANK","TCS","INFY"]
+        symbols = ["NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","SENSEX","HDFCBANK","TCS","INFY"]
         prev = {}
         while True:
             # Batch parallel fetch (8 symbols in ~0.8s), but only PUSH when
