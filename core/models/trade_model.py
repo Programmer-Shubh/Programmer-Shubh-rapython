@@ -432,6 +432,35 @@ class TradeModel:
         # entry-IV pin, hardcoded dte=7 model. Bad-tick + display clamps stay.
         self._trim_cache(self._last_premiums, self._last_premiums_max)
         self._trim_cache(self._last_spots, self._last_spots_max)
+        # Equity (arbitrage) legs: symbol carries exchange suffix like
+        # "LT (BSE)" - price off the live underlying SPOT, never the option
+        # chain (strike 0). Same value feeds positions table + SL monitor.
+        if str(option_type or "").upper() == "EQ":
+            try:
+                base = str(symbol or "").split(" (")[0].strip().upper()
+                if base:
+                    from core.services.live_market_data import LiveMarketData as _LMD2
+                    sp = 0
+                    try:
+                        sp = float((_LMD2().get_live_spot(base) or {}).get("spot") or 0)
+                    except Exception:
+                        sp = 0
+                    if sp <= 0:
+                        try:
+                            sp = float(_LMD2().get_spot_price(base) or 0)
+                        except Exception:
+                            sp = 0
+                    if sp <= 0:
+                        row = self.db.fetch_one(
+                            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+                            [base])
+                        if row and row.get("close_price"):
+                            sp = float(row["close_price"])
+                    if sp > 0:
+                        return round(float(sp), 2)
+            except Exception:
+                pass
+            return None
         if strike is None or float(strike or 0) <= 0:
             return None
         strike = float(strike)

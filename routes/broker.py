@@ -55,8 +55,21 @@ class LiveToggleRequest(BaseModel):
     enabled: bool = False
 
 
+def _auto_live_broker() -> str:
+    """Real broker connected -> LIVE stays ON by itself (no toggle needed)."""
+    try:
+        for b in ("dhan", "angel"):
+            if _real_token(b):
+                return b
+    except Exception:
+        pass
+    return ""
+
+
 def _live_enabled() -> bool:
     try:
+        if _auto_live_broker():
+            return True
         db = Database.get_instance()
         row = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key='live_trading_enabled'")
         return (row.get("setting_value") if row else "0") == "1"
@@ -140,7 +153,9 @@ def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str)
 @router.get("/live-status")
 def live_status():
     real = [b for b in ("fyers", "dhan") if _real_token(b)]
-    return {"enabled": _live_enabled(), "real_brokers": real,
+    auto = _auto_live_broker()
+    return {"enabled": _live_enabled(), "real_brokers": real, "auto": bool(auto),
+            "auto_broker": auto,
             "note": "Fyers/Dhan/Angel/Shoonya live supported. Dry-run first to verify broker symbol/token."}
 
 
@@ -165,7 +180,13 @@ def live_toggle(req: LiveToggleRequest):
                            ["1" if req.enabled else "0"])
         except Exception as e:
             return {"error": f"live-toggle failed: {e}"[:200]}
-    return {"enabled": bool(req.enabled)}
+    # A connected real broker keeps LIVE always-ON: explicit disable is
+    # refused so trading never silently goes dark while connected.
+    auto = _auto_live_broker()
+    if auto and not req.enabled:
+        return {"enabled": True, "auto": True, "auto_broker": auto,
+                "note": f"LIVE stays ON - {auto} connected (disconnect broker to disable)"}
+    return {"enabled": bool(req.enabled), "auto": bool(auto), "auto_broker": auto}
 
 
 def _env_config(broker: str) -> dict:

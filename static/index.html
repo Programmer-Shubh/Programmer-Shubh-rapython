@@ -1845,16 +1845,25 @@ let _lastOpenTrdHTML = null;
     async function liveStatus(){
         try{const r=await A('/api/broker/live-status');
             const on=r.enabled===true;
-            document.getElementById('live-toggle-btn').textContent=on?'Disable LIVE':'Enable LIVE';
-            document.getElementById('live-toggle-btn').className=on?'btn btn-sm btn-danger':'btn btn-sm btn-outline-danger';
-            document.getElementById('live-status').textContent='LIVE '+(on?'ON':'OFF')+' | Real broker: '+((r.real_brokers&&r.real_brokers.length)?r.real_brokers.join(','):'none');
+            const auto=r.auto===true;
+            const btn=document.getElementById('live-toggle-btn');
+            if(auto){
+                btn.textContent='LIVE ON (auto)';
+                btn.className='btn btn-sm btn-success';
+                btn.disabled=true;
+            }else{
+                btn.disabled=false;
+                btn.textContent=on?'Disable LIVE':'Enable LIVE';
+                btn.className=on?'btn btn-sm btn-danger':'btn btn-sm btn-outline-danger';
+            }
+            document.getElementById('live-status').textContent='LIVE '+(on?'ON':'OFF')+(auto?' (auto - '+(r.auto_broker||'broker')+' connected)':'')+' | Real broker: '+((r.real_brokers&&r.real_brokers.length)?r.real_brokers.join(','):'none');
         }catch(e){}
     }
     async function liveToggle(){
         try{const cur=document.getElementById('live-toggle-btn').textContent.includes('Disable');
             if(!cur&&!confirm('Enable REAL-MONEY live trading? Orders will execute on the exchange via connected broker.'))return;
             const r=await P('/api/broker/live-toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!cur})});
-            alert('LIVE trading '+(r.enabled?'ENABLED - real orders will execute':'DISABLED'));
+            alert(r.note||('LIVE trading '+(r.enabled?'ENABLED - real orders will execute':'DISABLED')));
             liveStatus();
         }catch(e){alert('Error: '+e.message);}
     }
