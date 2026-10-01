@@ -396,7 +396,47 @@
                         <div class="col-md-8 d-flex align-items-center"><small class="text-muted">Order/Strike/Lots — Template se auto (Strategy Templates neeche)</small></div>
                     </div>
                     </div>
-                    <div class="slab-sec"><div class="slab-sec-title"><i class="bi bi-grid"></i> Strategy Templates — legs yahin banao</div>
+                    <div class="slab-sec"><div class="slab-sec-title">Schedule & Risk</div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
+                        <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:05"><small class="text-muted" id="r-exit-note">Intraday square-off</small></div>
+                        <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
+                        <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
+                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
+                        <div class="col-md-2"><label class="form-label small">Chart Timeframe</label><select id="r-timeframe" class="form-select form-select-sm"><option value="1d" selected>Daily</option><option value="5m">5 Minute</option><option value="15m">15 Minute</option><option value="30m">30 Minute</option><option value="1h">1 Hour</option><option value="1m">1 Minute</option></select></div>
+                        
+                    </div>
+                    </div>
+
+                </div>
+            <div class="step-indicator mb-2 slab"><div class="step active">1 Setup</div><div class="step">2 Indicators</div><div class="step">3 Backtest</div><div class="step">4 Strategy</div></div>
+            <div class="card mb-2" style="display:none"><div class="card-body p-2">
+            <div class="d-flex gap-1 mb-2 flex-wrap" id="q-instruments"></div>
+            </div></div>
+            <div id="custom-form">
+                <div class="col-md-4" style="display:none"><label class="form-label">Instrument Settings <span class="badge bg-info">NIFTY/BANKNIFTY lot auto</span></label>
+                    <div class="row g-1">
+                        <div class="col"><label class="form-label small">Symbol (All F&O)</label><select class="form-select form-select-sm" id="s-index"><option>Loading...</option></select></div>
+                        <div class="col"><label class="form-label small">Select Underlying</label><select class="form-select form-select-sm" id="s-underlying"><option selected>Index</option><option>Stock</option><option>Underlying</option></select></div>
+                        <div class="col"><label class="form-label small">Underlying from</label><select class="form-select form-select-sm" id="s-underlying-src"><option selected>Cash</option><option>Futures</option><option>Spot</option></select></div>
+                    </div>
+                </div>
+                <div class="col-md-4" style="display:none"><label class="form-label">Entry settings</label>
+                    <div class="row g-1">
+                        <div class="col"><label class="form-label small">Strategy Type</label><select class="form-select form-select-sm" id="s-strat-type"><option selected>Intraday</option><option>BTST</option><option>Positional</option></select></div>
+                        <div class="col"><label class="form-label small">Entry Time</label><input type="time" class="form-control form-control-sm" id="s-entry-time" value="09:35"></div>
+                        <div class="col"><label class="form-label small">Exit Time</label><input type="time" class="form-control form-control-sm" id="s-exit-time" value="15:14"></div>
+                    </div>
+                </div>
+                <div class="col-md-2" style="display:none"><label class="form-label">No re-entry after</label>
+                    <input type="time" class="form-control form-control-sm" id="s-no-reentry" value="09:35">
+                </div>
+                <div class="col-md-2"><label class="form-label">Overall Momentum</label>
+                    <input type="range" class="form-range" id="s-momentum" min="0" max="20" value="0">
+                    <div style="display:flex;justify-content:space-between"><span class="small">0</span><span class="small">20</span></div>
+                </div>
+            </div>
             <div class="mt-3">
                 <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#legBuilder"><i class="bi bi-caret-down"></i> Templates — Click to add legs</button>
             </div>
@@ -427,21 +467,7 @@
                     <div class="col-md-4"><label class="form-label small">Strategy Target (₹) — overall MTM</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
                 </div>
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
-                    </div>
-
-                    <div class="slab-sec"><div class="slab-sec-title">Schedule & Risk</div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
-                        <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
-                        <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:05"><small class="text-muted" id="r-exit-note">Intraday square-off</small></div>
-                        <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
-                        <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
-                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
-                        <div class="col-md-2"><label class="form-label small">Chart Timeframe</label><select id="r-timeframe" class="form-select form-select-sm"><option value="1d" selected>Daily</option><option value="5m">5 Minute</option><option value="15m">15 Minute</option><option value="30m">30 Minute</option><option value="1h">1 Hour</option><option value="1m">1 Minute</option></select></div>
-                        
-                    </div>
-                    </div>
-
+                </div>
                     <div class="slab-sec" style="background:linear-gradient(135deg,#f0f7ff 0%,#ffffff 100%); border:1px solid #dbeafe"><div class="slab-sec-title"><i class="bi bi-cpu"></i> Indicators — signal <span id="autoDirBadge" class="badge bg-success ms-2" style="font-size:11px">Auto: Bullish</span></div>
                     <div class="row g-2 mt-2">
                         <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
@@ -477,35 +503,6 @@
                         <div class="col-md-3 d-flex align-items-end"><small class="text-muted" style="font-size:10px">Slippage 0.5% realistic | Drawdown Days + Badge as per strategy Mar 2025 update</small></div>
                     </div>
                     </div>
-                </div>
-            
-            <div class="card mb-2" style="display:none"><div class="card-body p-2">
-            <div class="d-flex gap-1 mb-2 flex-wrap" id="q-instruments"></div>
-            </div></div>
-            <div id="custom-form">
-                <div class="col-md-4" style="display:none"><label class="form-label">Instrument Settings <span class="badge bg-info">NIFTY/BANKNIFTY lot auto</span></label>
-                    <div class="row g-1">
-                        <div class="col"><label class="form-label small">Symbol (All F&O)</label><select class="form-select form-select-sm" id="s-index"><option>Loading...</option></select></div>
-                        <div class="col"><label class="form-label small">Select Underlying</label><select class="form-select form-select-sm" id="s-underlying"><option selected>Index</option><option>Stock</option><option>Underlying</option></select></div>
-                        <div class="col"><label class="form-label small">Underlying from</label><select class="form-select form-select-sm" id="s-underlying-src"><option selected>Cash</option><option>Futures</option><option>Spot</option></select></div>
-                    </div>
-                </div>
-                <div class="col-md-4" style="display:none"><label class="form-label">Entry settings</label>
-                    <div class="row g-1">
-                        <div class="col"><label class="form-label small">Strategy Type</label><select class="form-select form-select-sm" id="s-strat-type"><option selected>Intraday</option><option>BTST</option><option>Positional</option></select></div>
-                        <div class="col"><label class="form-label small">Entry Time</label><input type="time" class="form-control form-control-sm" id="s-entry-time" value="09:35"></div>
-                        <div class="col"><label class="form-label small">Exit Time</label><input type="time" class="form-control form-control-sm" id="s-exit-time" value="15:14"></div>
-                    </div>
-                </div>
-                <div class="col-md-2" style="display:none"><label class="form-label">No re-entry after</label>
-                    <input type="time" class="form-control form-control-sm" id="s-no-reentry" value="09:35">
-                </div>
-                <div class="col-md-2"><label class="form-label">Overall Momentum</label>
-                    <input type="range" class="form-range" id="s-momentum" min="0" max="20" value="0">
-                    <div style="display:flex;justify-content:space-between"><span class="small">0</span><span class="small">20</span></div>
-                </div>
-            </div>
-                </div>
                 <div class="card mt-3 slab-card">
                     <div class="card-header"><span class="slab-num">3</span><i class="bi bi-play-circle"></i> Run & Backtest</div>
                     <div class="card-body">
@@ -980,11 +977,9 @@
                 const opt=s.option_suggestion||{};
                 const score=s.score||0;
                 const badgeCls=score>=90?'bg-success':score>=80?'bg-primary':'bg-secondary';
-                const dirCls=(s.direction||'')==='bullish'?'bull':'bear';
-                const ivTxt=s.indicators?`RSI ${s.indicators.rsi||'-'} | VWAP ${s.indicators.vwap||'-'}`:'';
-                const volTxt=s.reasons? s.reasons.slice(0,2).join(' • '):'';
+                const allR=(s.reasons||[]).join(' • ');
                 const btns=stratBtns({symbol:s.symbol, direction:s.direction, signal_type:s.signal_type, option_suggestion:opt});
-                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol} <small class="text-muted">₹${(s.price||0).toFixed(0)}</small></span><span class="d-flex gap-1 align-items-center"><span class="badge ${badgeCls}">Score ${score}</span>${s.tf&&s.tf!=='1d'?'<span class="badge bg-dark">LIVE '+s.tf+'</span>':''}${s.ai?'<span class="badge bg-info">AI</span>':''}${btns}</span></div><div class="meta">${s.signal_type} ${opt.strike||''} | Prem ₹${(opt.premium||0).toFixed(2)} | ${ivTxt}</div><div class="meta" style="font-size:10px">${volTxt}</div><div style="margin-top:4px">${R((s.reasons||[]).slice(2))}</div></div>`;
+                h+=`<div class="sig-item" style="padding:4px 8px"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><div style="min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px" title="${s.symbol} ${s.signal_type} | ${allR}"><strong>${s.symbol}</strong> <small class="text-muted">₹${(s.price||0).toFixed(0)}</small> <span class="badge ${badgeCls}">Score ${score}</span>${s.tf&&s.tf!=='1d'?'<span class="badge bg-dark">LIVE '+s.tf+'</span>':''}${s.ai?'<span class="badge bg-info">AI</span>':''} <span class="text-muted">${s.signal_type} ${opt.strike||''} | ₹${(opt.premium||0).toFixed(2)}</span> <span class="text-muted small">${allR}</span></div><div style="white-space:nowrap;flex-shrink:0">${btns}</div></div></div>`;
             });
             h+='</div>';
             el.innerHTML=h;
