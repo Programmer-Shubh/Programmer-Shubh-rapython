@@ -140,7 +140,8 @@ def save_strategy(req: StrategyRequest):
         sets = ", ".join(f"{k}=?" for k in data)
         vals = list(data.values()) + [req.id]
         db.execute(f"UPDATE strategies SET {sets}, updated_at=CURRENT_TIMESTAMP WHERE id=?", vals)
-        return {"id": req.id, "status": "updated"}
+        saved_id = req.id
+        saved_status = "updated"
     else:
         cols = ", ".join(data.keys())
         placeholders = ", ".join(["?"] * len(data))
@@ -149,7 +150,23 @@ def save_strategy(req: StrategyRequest):
             f"INSERT INTO strategies (user_id, {cols}) VALUES (?, {placeholders})",
             vals,
         )
-        return {"id": row_id, "status": "created"}
+        saved_id = row_id
+        saved_status = "created"
+    # Save => paper trade lagao (1/day + open-position guards keep it
+    # idempotent; market-closed saves wait for the worker).
+    auto_trades = []
+    try:
+        if (req.status or "") == "active" and (req.legs or []):
+            from core.services.sl_monitor import market_open_ist as _mkt
+            if _mkt():
+                from core.services.auto_paper import place_for_strategy as _pl
+                auto_trades = (_pl(saved_id) or {}).get("placed", [])
+    except Exception:
+        pass
+    resp = {"id": saved_id, "status": saved_status}
+    if auto_trades:
+        resp["auto_trades"] = auto_trades
+    return resp
 
 
 @router.delete("/{strat_id}")
