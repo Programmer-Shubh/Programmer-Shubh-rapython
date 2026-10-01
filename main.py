@@ -73,6 +73,16 @@ async def lifespan(app: FastAPI):
         _th4.Thread(target=_ap_loop, daemon=True).start()
     except: pass
     try:
+        # Dhan token keeper: validate + sync + renew every 6h (auto fetch).
+        def _tk_loop():
+            try:
+                from core.services.token_keeper import start_background as _tk
+                _tk(6 * 3600)
+            except: pass
+        import threading as _th5
+        _th5.Thread(target=_tk_loop, daemon=True).start()
+    except: pass
+    try:
         # Strategy self-healing: expired ACTIVE strategies roll to next
         # weekly expiry by themselves (hourly) - no button press needed.
         def _roll_loop():

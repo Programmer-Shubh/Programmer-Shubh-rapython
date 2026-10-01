@@ -46,18 +46,23 @@ def _broker_cfg(name):
             cfg = json.loads(row["setting_value"])
             if isinstance(cfg, dict):
                 cfg = {k: (v.strip() if isinstance(v, str) else v) for k, v in cfg.items()}
+                # DB wins (live truth); env only seeds keys the DB lacks.
                 try:
                     import os
+                    _seeds = {}
                     if name == "dhan":
-                        if os.environ.get("DHAN_CLIENT_ID"):
-                            cfg["client_id"] = os.environ["DHAN_CLIENT_ID"]
-                        if os.environ.get("DHAN_ACCESS_TOKEN"):
-                            cfg["access_token"] = os.environ["DHAN_ACCESS_TOKEN"]
+                        _seeds = {
+                            "client_id": os.environ.get("RATRADE_DHAN_CLIENT_ID") or os.environ.get("DHAN_CLIENT_ID") or "",
+                            "access_token": os.environ.get("RATRADE_DHAN_ACCESS_TOKEN") or os.environ.get("DHAN_ACCESS_TOKEN") or "",
+                        }
                     elif name == "angel":
                         for k, e in (("api_key", "ANGEL_API_KEY"), ("client_code", "ANGEL_CLIENT_CODE"),
                                      ("access_token", "ANGEL_ACCESS_TOKEN")):
                             if os.environ.get(e):
-                                cfg[k] = os.environ[e]
+                                _seeds[k] = os.environ[e]
+                    for k, v in _seeds.items():
+                        if v and not cfg.get(k):
+                            cfg[k] = v
                 except Exception:
                     pass
                 return cfg

@@ -235,9 +235,14 @@ def _get_config(broker: str) -> dict:
             cfg = {k: (v.strip() if isinstance(v, str) else v) for k, v in loaded.items()} if isinstance(loaded, dict) else {}
         except Exception:
             cfg = {}
-    # Env wins over DB so redeploys never lose credentials
+    # DB wins over env: UI connects + token-keeper renewals are the live
+    # truth (env/dashboard values are only the first-boot seed). The keeper
+    # syncs any valid env rotation INTO the DB by itself.
     try:
-        cfg.update(_env_config(broker))
+        env = _env_config(broker) or {}
+        for k, v in env.items():
+            if k not in cfg or not cfg.get(k):
+                cfg[k] = v
     except Exception:
         pass
     return cfg
@@ -405,6 +410,11 @@ async def dhan_feed_status():
             from core.services import tick_engine as _te
             st["tick_engine"] = _te.state()
             st["tick_signals"] = _te.get_signals()
+        except Exception:
+            pass
+        try:
+            from core.services import token_keeper as _tk
+            st["token_keeper"] = _tk.status()
         except Exception:
             pass
         try:

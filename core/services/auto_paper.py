@@ -77,8 +77,90 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
         return {"placed": [], "skipped": f"error: {e}"[:150]}
 
 
+def _today_signal(sid, s, today):
+    """True if the strategy's own indicators fire an entry dated TODAY on
+    REAL history (backtest engine, same legs/config). Guards:
+    - needs 30+ real DB bars (never signals on synthetic fallback);
+    - 180s cap (worker must not hang).
+    Returns (fires: bool, note: str)."""
+    try:
+        import json as _js
+        import concurrent.futures as _cf
+        sym = str(s.get("symbol") or "").upper()
+        if not sym:
+            return False, "no symbol"
+        try:
+            from routes.strategy_builder import _load_db_history
+            import datetime as _dt
+            _end = _dt.datetime.strptime(today, "%Y-%m-%d").date()
+            _start = (_end - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
+            _hist = _load_db_history(sym, _start, today)
+            if not _hist or len(_hist) < 30:
+                return False, "no real history (synthetic par signal nahi)"
+        except Exception:
+            return False, "history unreadable"
+        try:
+            legs = _js.loads(s.get("legs") or "[]")
+        except Exception:
+            legs = []
+        if not legs:
+            return False, "no legs"
+        try:
+            adv = _js.loads(s.get("advanced_options") or "{}")
+        except Exception:
+            adv = {}
+        if not isinstance(adv, dict):
+            adv = {}
+        adv = dict(adv)
+        adv.setdefault("trade_mode", "intraday")
+        adv.setdefault("timeframe", "1d")
+        try:
+            risk = _js.loads(s.get("risk_management") or "{}")
+        except Exception:
+            risk = {}
+        if not isinstance(risk, dict):
+            risk = {}
+
+        def _run():
+            from routes.strategy_builder import _run_backtest_core, BacktestRequest
+            req = BacktestRequest(
+                symbol=sym, symbols=[sym],
+                start_date=(min(h.get("trade_date", today) for h in _hist[-60:]) if _hist else today),
+                end_date=today, indicators=[],
+                legs=[], advanced={}, risk={})
+            # Real saved config (indicators + legs), not blanks
+            try:
+                inds = _js.loads(s.get("indicators") or "[]")
+            except Exception:
+                inds = []
+            req.indicators = inds if isinstance(inds, list) else []
+            req.legs = legs if isinstance(legs, list) else []
+            req.advanced = adv
+            req.risk = risk
+            return _run_backtest_core(req)
+
+        with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+            try:
+                res = _ex.submit(_run).result(timeout=180)
+            except Exception as e:
+                return False, f"engine timeout/fail: {e}"[:100]
+        try:
+            tl = ((res or {}).get("metrics") or {}).get("trade_list") or []
+        except Exception:
+            tl = []
+        try:
+            if any(str(t.get("entry_date", ""))[:10] == today for t in tl):
+                return True, "aaj ka signal mila"
+        except Exception:
+            pass
+        return False, "aaj koi signal nahi"
+    except Exception as e:
+        return False, f"signal-check fail: {e}"[:120]
+
+
 def place_for_strategy(sid):
     """Place paper trades for ONE strategy now (used by worker + save hook).
+    SIGNAL-GATED: entries only when today's signal fires on real history.
     Same 1/day + open-position guards, so Save is idempotent: saving twice
     does NOT double-trade. Returns {placed, notes}."""
     placed, notes = [], []
@@ -115,6 +197,14 @@ def place_for_strategy(sid):
             return {"placed": placed, "notes": [f"{s.get('name')}: no legs - skipped"]}
         if any(str(l.get("option_type", "")).upper() == "AUTO" for l in legs):
             return {"placed": placed, "notes": [f"{s.get('name')}: AUTO legs need manual direction - skipped"]}
+        # Signal gate: indicator signal aaj fire hua tabhi entry (mechanical
+        # daily entries nahi - signals coincide karein zaroori nahi).
+        try:
+            _fires, _why = _today_signal(sid, s, today)
+            if not _fires:
+                return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
+        except Exception:
+            pass
         try:
             rm = _js.loads(s.get("risk_management") or "{}")
         except Exception:
