@@ -546,13 +546,29 @@ class Database:
     def execute(self, query, params=None):
         if self._is_postgres():
             q = self._adapt_query(query)
-            # Handle RETURNING id for inserts
+            # Handle RETURNING id for inserts - but only tables that HAVE an
+            # id column (settings/others use setting_key PK; blindly appending
+            # crashed live-toggle with UndefinedColumn on first enable).
             is_insert = q.strip().upper().startswith("INSERT")
-            if is_insert and "RETURNING" not in q.upper():
+            want_returning = is_insert and "RETURNING" not in q.upper()
+            if want_returning:
                 q = q.rstrip(";") + " RETURNING id"
             with self._conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(q, params or [])
+                    try:
+                        cur.execute(q, params or [])
+                    except Exception as e:
+                        # Table without id column (e.g. settings): retry plain
+                        if want_returning and "UndefinedColumn" in type(e).__name__:
+                            try:
+                                conn.rollback()
+                            except Exception:
+                                pass
+                            q = self._adapt_query(query)
+                            cur.execute(q, params or [])
+                            conn.commit()
+                            return cur.rowcount
+                        raise
                     # Try to get lastrowid
                     try:
                         if is_insert:

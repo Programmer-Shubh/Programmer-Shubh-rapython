@@ -439,7 +439,8 @@ class TradeModel:
         cache_key = f"{symbol}_{option_type}_{strike}_{expiry or ''}"
         try:
             from core.services.contract_pricer import get_contract_ltp
-            live = get_contract_ltp(symbol, strike, option_type, expiry)
+            # Positions always read FRESH (no 10s cache) so the table ticks live
+            live = get_contract_ltp(symbol, strike, option_type, expiry, fresh=True)
             if live and float(live) > 0:
                 val = float(live)
                 # Bad-tick filter: reject >60% premium jump unless the

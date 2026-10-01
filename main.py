@@ -62,6 +62,17 @@ async def lifespan(app: FastAPI):
         _th2.Thread(target=_sl_mon, daemon=True).start()
     except: pass
     try:
+        # Auto paper-trading: ACTIVE saved strategies place today's paper
+        # trades by themselves (the missing executor - backtest never did).
+        def _ap_loop():
+            try:
+                from core.services.auto_paper import start_background as _ap
+                _ap(1800)
+            except: pass
+        import threading as _th4
+        _th4.Thread(target=_ap_loop, daemon=True).start()
+    except: pass
+    try:
         # Strategy self-healing: expired ACTIVE strategies roll to next
         # weekly expiry by themselves (hourly) - no button press needed.
         def _roll_loop():

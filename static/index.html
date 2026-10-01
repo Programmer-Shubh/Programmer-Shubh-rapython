@@ -984,13 +984,29 @@
             h+='</div>';
             el.innerHTML=h;
         };
+        let _done=false;
         try{
-            const r=await A('/api/scanner/opportunities-4part?min_score=70');
+            // 45s timeout: slow cold scans must show Retry, never stuck Loading
+            const _ctl=new AbortController();
+            const _to=setTimeout(()=>{try{_ctl.abort();}catch(e){}},45000);
+            let r;
+            try{
+                const _resp=await fetch('/api/scanner/opportunities-4part?min_score=70',{signal:_ctl.signal});
+                r=await _resp.json();
+            }finally{
+                try{clearTimeout(_to);}catch(e){}
+            }
+            if(r&&r.error) throw new Error(r.error);
             const all=[...(r.ce_buy||[]),...(r.pe_buy||[]),...(r.ce_sell||[]),...(r.pe_sell||[])];
             renderTop(all);
+            _done=true;
             if(r.dummy){ setTimeout(()=>{ try{ loadOpps(); }catch(e){} }, 2500); }
         }catch(e){
-            if(el) el.innerHTML='<p class="text-danger small">Failed to load</p>';
+            if(el) el.innerHTML='<p class="text-danger small">Load failed ('+((e&&e.name==='AbortError')?'timeout':String((e&&e.message)||e).slice(0,120))+') <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps()">Retry</button></p>';
+        }finally{
+            if(!_done&&el&&/Loading\.\.\./.test(el.innerHTML||'')){
+                el.innerHTML='<p class="text-muted small p-2">No data — <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps()">Retry</button></p>';
+            }
         }
     }
 
@@ -1021,16 +1037,28 @@
             const p=await A('/api/dashboard/portfolio');
             if(p.positions&&p.positions.length){
                 let h='<table><tr><th>#</th><th>Time</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Expiry</th><th>Qty</th><th>Lot Size</th><th>Entry</th><th>Current</th><th>P&L</th><th>SL (₹)</th><th>TP (₹)</th><th>Mode</th><th>Action</th></tr>';
+                try{
+                    if(!window._posPrev) window._posPrev={};
+                    const _ids=new Set();
+                    p.positions.forEach(t=>{_ids.add(t.id);});
+                    Object.keys(window._posPrev).forEach(k=>{if(!_ids.has(Number(k))) delete window._posPrev[k];});
+                }catch(e){}
                 p.positions.forEach(t=>{
                     const isLive=t.trade_mode==='live';
                     const ep = Number(t.entry_price)||0;
                     const curPrice = Number(t.current_price ?? t.entry_price)||0;
+                    let _flash='';
+                    try{
+                        const _prev=window._posPrev?window._posPrev[t.id]:null;
+                        if(_prev!=null&&curPrice!==_prev) _flash=curPrice>_prev?'price-flash-up':'price-flash-down';
+                        if(window._posPrev) window._posPrev[t.id]=curPrice;
+                    }catch(e){}
                     const strike = Number(t.strike)||0;
                     const qty = Number(t.qty)||1;
                     const lot = Number(t.lot_size)||0;
                     const pnl = Number(t.pnl)||0;
                     const sideBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
-                    h+=`<tr><td>${t.id}</td><td class="text-muted small">${t.entry_time||''}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${strike}</td><td>${t.expiry_date||'-'}</td><td>${qty}</td><td>${lot}</td><td>₹${ep.toFixed(2)}</td><td>₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>₹${t.sl||1500}</td><td>₹${t.tp||3000}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-info" onclick="openTradeTV('${t.symbol}')">Chart</button> <button class="btn btn-sm btn-outline-secondary" onclick="editTradeSLTP(${t.id},${t.sl||1500},${t.tp||3000})">SL/TP</button> <button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-warning" onclick="closeTrade(${t.id},${curPrice})">Exit</button></td></tr>`;
+                    h+=`<tr><td>${t.id}</td><td class="text-muted small">${t.entry_time||''}</td><td>${t.symbol}</td><td>${sideBadge}</td><td>${strike}</td><td>${t.expiry_date||'-'}</td><td>${qty}</td><td>${lot}</td><td>₹${ep.toFixed(2)}</td><td class="${_flash}">₹${curPrice.toFixed(2)}</td><td class="${C(pnl)}">${F(pnl)}</td><td>₹${t.sl||1500}</td><td>₹${t.tp||3000}</td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-info" onclick="openTradeTV('${t.symbol}')">Chart</button> <button class="btn btn-sm btn-outline-secondary" onclick="editTradeSLTP(${t.id},${t.sl||1500},${t.tp||3000})">SL/TP</button> <button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-warning" onclick="closeTrade(${t.id},${curPrice})">Exit</button></td></tr>`;
                 });
                 h+='</table><div class="small text-muted mt-1">Live • '+new Date().toLocaleTimeString('en-IN')+' • auto-refresh 1.5s</div>';document.getElementById('dash-pos').innerHTML=h;_lastDashPosHTML=h;
             }else{
@@ -1916,8 +1944,9 @@ let _lastOpenTrdHTML = null;
             else if(el.querySelector('table')) el.querySelector('table').insertAdjacentHTML('beforeend', row);
         }catch(e){}
     }
-    // Fallback HTTP refresh if WS not connected — 60s (bandwidth diet; WS is primary when live)
-    setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },60000);
+    // Fallback HTTP refresh if WS not connected — 30s (positions must tick
+    // live even with dead WS; payload is ~2KB so diet impact is negligible)
+    setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },30000);
     // No polling — WebSocket is primary (0.4s change-only). HTTP fallback only when WS dead.
     // Polling was the main latency source (1.5s) — now updates are push-driven via rAF.
     // chain auto-refresh removed — manual Load only (no flicker)

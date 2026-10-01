@@ -349,9 +349,11 @@ def _nse_map(symbol):
 
 # ---------------- public API ----------------
 
-def get_contract_ltps(symbol, contracts, expiry_ymd=""):
+def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False):
     """Batch: contracts=[(strike, OPT)]. Returns {(strike, OPT): ltp} for hits.
-    Tier 1 broker-token quotes, Tier 2/3 shared fallback per missing contract."""
+    Tier 1 broker-token quotes, Tier 2/3 shared fallback per missing contract.
+    fresh=True skips the 10s price-cache READ (open positions always want the
+    live tick; cache is still written)."""
     sym = (symbol or "").upper()
     norm = []
     for s, o in (contracts or []):
@@ -361,13 +363,13 @@ def get_contract_ltps(symbol, contracts, expiry_ymd=""):
             continue
     if not norm:
         return {}
-    # Fresh price cache first (10s)
+    # Fresh price cache first (10s) - skipped when fresh=True
     out = {}
     missing = []
     now = time.time()
     for key in norm:
         pk = f"{sym}_{key[0]}_{key[1]}_{str(expiry_ymd or '')[:10]}"
-        hit = _PRICE_CACHE.get(pk)
+        hit = None if fresh else _PRICE_CACHE.get(pk)
         if hit and now - hit[0] < _PRICE_TTL:
             out[key] = hit[1]
         else:
@@ -432,10 +434,10 @@ def get_contract_ltps(symbol, contracts, expiry_ymd=""):
     return out
 
 
-def get_contract_ltp(symbol, strike, option_type, expiry_ymd=""):
+def get_contract_ltp(symbol, strike, option_type, expiry_ymd="", fresh=False):
     """Single-contract wrapper. Returns float or None."""
     try:
-        res = get_contract_ltps(symbol, [(strike, option_type)], expiry_ymd)
+        res = get_contract_ltps(symbol, [(strike, option_type)], expiry_ymd, fresh=fresh)
         for v in res.values():
             return float(v)
     except Exception:

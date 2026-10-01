@@ -68,12 +68,12 @@ class LiveMarketData:
             pass
         return 0.0
 
-    def get_option_ltp(self, symbol: str, strike: float, option_type: str, expiry: str = "") -> float:
+    def get_option_ltp(self, symbol: str, strike: float, option_type: str, expiry: str = "", fresh: bool = False) -> float:
         # Delegates to the shared contract pricer (broker token-quote ->
         # fresh DB -> model) so every caller sees the chain's price.
         try:
             from core.services.contract_pricer import get_contract_ltp
-            return get_contract_ltp(symbol, strike, option_type, expiry)
+            return get_contract_ltp(symbol, strike, option_type, expiry, fresh=fresh)
         except Exception:
             pass
         try:

@@ -146,14 +146,25 @@ def live_status():
 
 @router.post("/live-toggle")
 def live_toggle(req: LiveToggleRequest):
+    # UPDATE-first (never triggers the settings-table RETURNING-id path);
+    # INSERT only when the row is missing (now safe via execute fallback).
     db = Database.get_instance()
-    row = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key='live_trading_enabled'")
-    if row:
-        db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key='live_trading_enabled'",
-                   ["1" if req.enabled else "0"])
-    else:
-        db.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('live_trading_enabled', ?)",
-                   ["1" if req.enabled else "0"])
+    try:
+        n = db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key='live_trading_enabled'",
+                       ["1" if req.enabled else "0"])
+    except Exception:
+        n = 0
+    if not n:
+        try:
+            row = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key='live_trading_enabled'")
+            if not row:
+                db.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('live_trading_enabled', ?)",
+                           ["1" if req.enabled else "0"])
+            else:
+                db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key='live_trading_enabled'",
+                           ["1" if req.enabled else "0"])
+        except Exception as e:
+            return {"error": f"live-toggle failed: {e}"[:200]}
     return {"enabled": bool(req.enabled)}
 
 
