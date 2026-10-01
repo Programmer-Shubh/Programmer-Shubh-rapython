@@ -2005,7 +2005,7 @@ let _lastOpenTrdHTML = null;
     // ALWAYS render even if /api/broker/list is unreachable (server down/deploy).
     // login_url = official broker login page (new tab) - verified Sep 2026.
     const FALLBACK_BROKERS=[
-        {key:'dhan',name:'Dhan',icon:'bi-bank',color:'text-primary',desc:'Client ID + Access Token + Refresh Token',fields:['client_id','access_token','refresh_token'],configured:false,config:{},login_url:'https://login.dhan.co/',token_hint:'login.dhan.co par login karke Profile → API Access se Client ID + Access Token copy karo, phir setup me paste karo — token auto-save ho jaega.'},
+        {key:'dhan',name:'Dhan',icon:'bi-bank',color:'text-primary',desc:'PIN + TOTP = fully automatic (no daily login)',fields:['client_id','access_token','refresh_token','pin','totp_secret'],configured:false,config:{},login_url:'https://login.dhan.co/',token_hint:'BEST: Dhan PIN (6-digit) + TOTP Secret save karo (Dhan Web > API > Setup TOTP, ek baar) — phir token roz khud banega, login ki zaroorat nahi. Ya token paste karo.'},
         {key:'angel',name:'Angel One',icon:'bi-graph-up-arrow',color:'text-success',desc:'Client Code + Password + API Key',fields:['client_code','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://www.angelone.in/login/',token_hint:'angelone.in par login karke SmartAPI se Client Code + API Key + TOTP Secret copy karo — Auto-connect dabao token save hoga.'},
         {key:'bigul',name:'Bigul',icon:'bi-bullseye',color:'text-warning',desc:'Mobile se login — OTP auto-fetch, token auto-connect',fields:['client_id','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://bigul.co/login',token_hint:'Mobile number se login karo — OTP dalte hi token auto-fetch ho jayega. Ya API token paste karke Auto-connect dabao.'}
     ];
@@ -2464,10 +2464,10 @@ def run(data):
     }
     async function kaTest(){const s=document.getElementById('ka-status');if(!s)return;try{s.textContent='pinging...';}catch(e){return;}try{const r=await A('/api/keepalive/ping');s.textContent=(r&&r.status==='ok')?('OK - uptime '+Math.round(r.uptime_sec||0)+'s'):'Failed';}catch(e){try{const r2=await A(location.origin+'/api/keepalive/ping');s.textContent=(r2&&r2.status==='ok')?'OK (same origin)':'Failed';}catch(e2){s.textContent='Failed: '+e.message;}}}
 
-     const BROKER_FIELD_LABELS={
-         dhan:{client_id:'Client ID',access_token:'Access Token',refresh_token:'Refresh Token'},
-         angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
-     };
+      const BROKER_FIELD_LABELS={
+          dhan:{client_id:'Client ID',access_token:'Access Token',refresh_token:'Refresh Token',pin:'Dhan PIN (6-digit, auto-login)',totp_secret:'TOTP Secret (one-time, then fully automatic)'},
+          angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
+      };
 
     </script>
 </body>

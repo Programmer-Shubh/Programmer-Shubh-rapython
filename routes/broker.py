@@ -10,13 +10,13 @@ from core.services.broker_dhan import DhanHQ
 router = APIRouter()
 
 BROKER_DEFAULTS = {
-    "dhan": {"name": "Dhan", "icon": "bi-bank", "color": "text-primary", "fields": ["client_id", "access_token", "refresh_token"], "desc": "Client ID + Access Token + Refresh Token"},
+    "dhan": {"name": "Dhan", "icon": "bi-bank", "color": "text-primary", "fields": ["client_id", "access_token", "refresh_token", "pin", "totp_secret"], "desc": "Client ID + token (auto) / PIN + TOTP = fully automatic login"},
     "angel": {"name": "Angel One", "icon": "bi-graph-up-arrow", "color": "text-success", "fields": ["client_code", "password", "api_key", "totp_secret"], "desc": "Client Code + Password + API Key"},
     "bigul": {"name": "Bigul", "icon": "bi-bullseye", "color": "text-warning", "fields": ["client_id", "password", "api_key", "totp_secret"], "desc": "Mobile se login — OTP auto-fetch, token auto-connect"},
 }
 
 BROKER_FIELD_LABELS = {
-    "dhan": {"client_id": "Client ID", "access_token": "Access Token", "refresh_token": "Refresh Token"},
+    "dhan": {"client_id": "Client ID", "access_token": "Access Token", "refresh_token": "Refresh Token", "pin": "Dhan PIN (6-digit, for auto-login)", "totp_secret": "TOTP Secret (one-time setup, then fully automatic)"},
     "angel": {"client_code": "Client Code", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
     "bigul": {"client_id": "Client ID", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
 }
@@ -428,6 +428,17 @@ async def dhan_feed_status():
         return st
     except Exception as e:
         return {"running": False, "connected": False, "error": str(e)[:150]}
+
+
+@router.post("/dhan-auto-login")
+async def dhan_auto_login_now():
+    """Force one keeper pass now: validate -> renew -> PIN+TOTP generate.
+    Returns exactly what happened (no manual login when creds are saved)."""
+    try:
+        from core.services import token_keeper as _tk
+        return {"success": True, **_tk.sync_once()}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:200]}
 
 
 @router.post("/dhan-callback")
