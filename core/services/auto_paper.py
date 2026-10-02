@@ -176,8 +176,8 @@ def place_for_strategy(sid):
         s = db.fetch_one("SELECT * FROM strategies WHERE id=?", [sid])
         if not s:
             return {"placed": placed, "notes": ["strategy not found"]}
-        if str(s.get("status") or "") != "active":
-            return {"placed": placed, "notes": [f"{s.get('name')}: status {s.get('status')} - skipped"]}
+        # Auto hamesha ON: status check nahi (paused/draft bhi chalenge).
+        # Rukna ho to strategy delete karo.
         try:
             rm0 = _js.loads(s.get("risk_management") or "{}")
         except Exception:

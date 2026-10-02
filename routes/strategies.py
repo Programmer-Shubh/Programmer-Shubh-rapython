@@ -35,6 +35,11 @@ def auto_rollover_expired():
     needed, paper/live trading keeps running. Returns rolled count."""
     try:
         db = Database.get_instance()
+        # Auto hamesha ON: purane paused ko active karo (rukna ho to delete).
+        try:
+            db.execute("UPDATE strategies SET status='active', updated_at=CURRENT_TIMESTAMP WHERE status='paused'")
+        except Exception:
+            pass
         rows = db.fetch_all(
             "SELECT id, symbol, end_date FROM strategies WHERE status='active'"
         )
@@ -152,11 +157,12 @@ def save_strategy(req: StrategyRequest):
         )
         saved_id = row_id
         saved_status = "created"
-    # Save => paper trade lagao (1/day + open-position guards keep it
-    # idempotent; market-closed saves wait for the worker).
+    # Save => paper trade lagao, status dekhe bina (auto hamesha ON).
+    # Open/max-day/signal guards keep it idempotent; market-closed saves
+    # wait for the worker.
     auto_trades = []
     try:
-        if (req.status or "") == "active" and (req.legs or []):
+        if (req.legs or []):
             from core.services.sl_monitor import market_open_ist as _mkt
             if _mkt():
                 from core.services.auto_paper import place_for_strategy as _pl
