@@ -124,6 +124,11 @@ class OptionScanner:
         bullish = []
         bearish = []
         for sym in symbols:
+            try:
+                if not self._has_real_bars(sym):
+                    continue
+            except Exception:
+                pass
             result = self._analyze_symbol(sym)
             if result.get('score', 0) < min_score:
                 continue
@@ -143,6 +148,11 @@ class OptionScanner:
         long_signals = []
         short_signals = []
         for sym in symbols:
+            try:
+                if not self._has_real_bars(sym):
+                    continue
+            except Exception:
+                pass
             result = self._analyze_vwap_symbol(sym)
             if result['type'] == 'LONG':
                 long_signals.append(result)
@@ -378,43 +388,21 @@ class OptionScanner:
             min_score = int(min_score)
         except Exception:
             min_score = 80
-        # SuperTrend + MACD crossover strategy — ensure 4 boxes always filled
-        # (user: 4 boxes na dikhe → single line). Force at least 2 per direction
-        # even if score <70, so CE/PE Buy/Sell each have trades.
+        # Strict quality: ONLY min_score+ genuine setups. The old 25-score
+        # backfills and force-from-0 fallbacks put weak trades in front of
+        # users (har trade me nuksaan ka sabse bada kaaran). An empty part
+        # now honestly stays empty - the UI shows 'No strong setups'.
         try:
             _req70 = int(min_score) if int(min_score) >= 70 else 70
         except Exception:
             _req70 = 70
         st70 = self.scan(symbols=symbols, min_score=_req70)
-        st25 = self.scan(symbols=symbols, min_score=25) if len(st70.get('bullish',[]))+len(st70.get('bearish',[])) < 8 else {"bullish":[],"bearish":[]}
-        # Build base with 70+ first, then fill missing direction from 25
+        # Build base with 70+ only - no weak fills, ever.
         base = []
         for _s in st70.get('bullish', []):
             _s = dict(_s); _s['signal_type'] = 'BUY CE'; _s['direction'] = 'bullish'; base.append(_s)
         for _s in st70.get('bearish', []):
             _s = dict(_s); _s['signal_type'] = 'BUY PE'; _s['direction'] = 'bearish'; base.append(_s)
-        # If any direction has <2, fill from 25
-        ce70 = sum(1 for s in base if s['signal_type']=='BUY CE')
-        pe70 = sum(1 for s in base if s['signal_type']=='BUY PE')
-        if ce70 < 2 or pe70 < 2:
-            seen = {x.get('symbol') for x in base}
-            for _s in (st25.get('bullish', []) + st25.get('bearish', [])):
-                if _s.get('symbol') in seen:
-                    continue
-                # Only add missing direction
-                is_bull = _s.get('type') == 'BUY'
-                if is_bull and ce70 >= 2:
-                    continue
-                if not is_bull and pe70 >= 2:
-                    continue
-                _s = dict(_s)
-                _s['signal_type'] = 'BUY CE' if is_bull else 'BUY PE'
-                _s['direction'] = 'bullish' if is_bull else 'bearish'
-                base.append(_s)
-                if _s['signal_type']=='BUY CE': ce70+=1
-                else: pe70+=1
-                if ce70>=2 and pe70>=2:
-                    break
         # Price Action + Supply/Demand (best-setting defaults), merged into
         # the same base. Existing ST/MACD entries are untouched - PA/S-D only
         # ADD trades (tagged reasons). PA/S-D bar is 60 (a 60 PA/S-D setup =
@@ -506,19 +494,7 @@ class OptionScanner:
         base.sort(key=lambda x: x.get('score', 0), reverse=True)
         ce_buy = [s for s in base if s.get('signal_type')=='BUY CE'][:top_n]
         pe_buy = [s for s in base if s.get('signal_type')=='BUY PE'][:top_n]
-        # If still empty (extreme), force at least 2 each from 25
-        if len(ce_buy) < 2:
-            extra = [s for s in base if s.get('signal_type')=='BUY CE']
-            if not extra:
-                st0 = self.scan(symbols=symbols, min_score=0)
-                for _s in st0.get('bullish', [])[:2]:
-                    _s=dict(_s); _s['signal_type']='BUY CE'; _s['direction']='bullish'; ce_buy.append(_s)
-        if len(pe_buy) < 2:
-            extra = [s for s in base if s.get('signal_type')=='BUY PE']
-            if not extra:
-                st0 = self.scan(symbols=symbols, min_score=0)
-                for _s in st0.get('bearish', [])[:2]:
-                    _s=dict(_s); _s['signal_type']='BUY PE'; _s['direction']='bearish'; pe_buy.append(_s)
+        # No force-fills: empty stays empty (honest), UI shows the message.
         # Derive Sell legs by swapping option type but keeping direction/score (premium decay capture)
         ce_sell = []
         pe_sell = []
@@ -563,8 +539,8 @@ class OptionScanner:
         except Exception:
             pass
         # AI gate: false counter-trend signals filtered per part (passes keep
-        # "AI confirm" tag). A part goes blank ONLY if nothing passes — then
-        # the best signal stays so dashboard never empties.
+        # "AI confirm" tag). STRICT: failing parts go blank honestly instead
+        # of showing the best-looking loser (har-trade-nuksaan fix).
         try:
             _kinds = {"ce_buy": "CE_BUY", "pe_buy": "PE_BUY", "ce_sell": "CE_SELL", "pe_sell": "PE_SELL"}
             _parts = {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell}
@@ -580,8 +556,7 @@ class OptionScanner:
                         _rs.insert(0, "AI confirm: " + _why)
                         _s["reasons"] = _rs
                 _passed = [x for x in _items if x.get("ai")]
-                if _passed:
-                    _parts[_pk][:] = sorted(_passed, key=lambda x: x.get("score", 0), reverse=True)[:top_n]
+                _parts[_pk][:] = sorted(_passed, key=lambda x: x.get("score", 0), reverse=True)[:top_n]
         except Exception:
             pass
         # Primary setup per symbol: highest (ai, combo, score) across the 4
@@ -980,6 +955,38 @@ class OptionScanner:
             return int(get_strike_step(symbol))
         except Exception:
             return 50
+
+    _REAL_CACHE = {}
+    _REAL_TTL = 600
+
+    def _has_real_bars(self, symbol: str, minimum: int = 30) -> bool:
+        """True only when the DB holds >=minimum REAL spot bars. Symbols
+        falling back to synthetic random-walk data must NEVER emit trades -
+        fantasy signals on fantasy prices are guaranteed losses."""
+        import time as _tm
+        ck = (symbol or "").upper()
+        try:
+            ce = self._REAL_CACHE.get(ck)
+            if ce and _tm.time() - ce[0] < self._REAL_TTL:
+                return bool(ce[1])
+        except Exception:
+            pass
+        ok = False
+        try:
+            row = self.db.fetch_one(
+                "SELECT COUNT(*) as c FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL",
+                [symbol],
+            )
+            ok = bool(row and int(row.get("c", 0) or 0) >= minimum)
+        except Exception:
+            ok = False
+        try:
+            self._REAL_CACHE[ck] = (_tm.time(), ok)
+            if len(self._REAL_CACHE) > 120:
+                self._REAL_CACHE.pop(next(iter(self._REAL_CACHE)))
+        except Exception:
+            pass
+        return ok
 
     def _suggest_option(self, symbol: str, spot: float, option_type: str) -> dict:
         """
@@ -1587,6 +1594,11 @@ class OptionScanner:
         bullish, bearish = [], []
         for sym in symbols:
             try:
+                if not self._has_real_bars(sym):
+                    continue
+            except Exception:
+                pass
+            try:
                 r = self._score_price_action(sym)
             except Exception:
                 continue
@@ -1611,6 +1623,11 @@ class OptionScanner:
             min_score = 70
         bullish, bearish = [], []
         for sym in symbols:
+            try:
+                if not self._has_real_bars(sym):
+                    continue
+            except Exception:
+                pass
             try:
                 r = self._score_supply_demand(sym)
             except Exception:
