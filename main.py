@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
         def _ap_loop():
             try:
                 from core.services.auto_paper import start_background as _ap
-                _ap(1800)
+                _ap(600)
             except: pass
         import threading as _th4
         _th4.Thread(target=_ap_loop, daemon=True).start()

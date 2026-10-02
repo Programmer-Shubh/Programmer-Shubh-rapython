@@ -179,14 +179,24 @@ def place_for_strategy(sid):
         if str(s.get("status") or "") != "active":
             return {"placed": placed, "notes": [f"{s.get('name')}: status {s.get('status')} - skipped"]}
         try:
+            rm0 = _js.loads(s.get("risk_management") or "{}")
+        except Exception:
+            rm0 = {}
+        try:
+            max_day = max(1, int((rm0 or {}).get("max_trades_per_day") or 3))
+        except Exception:
+            max_day = 3
+        # Continuous running: re-enter while nothing open, up to max/day.
+        # (SL/TP exit ke baad dobara lagana nahi padta - worker khud lagata hai.)
+        try:
             has_open = db.fetch_one(
                 "SELECT id FROM paper_trades WHERE strategy_id=? AND status='open' LIMIT 1", [sid])
             if has_open:
                 return {"placed": placed, "notes": [f"{s.get('name')}: open position running - skipped"]}
-            traded = db.fetch_one(
-                "SELECT id FROM paper_trades WHERE strategy_id=? AND entry_date=? LIMIT 1", [sid, today])
-            if traded:
-                return {"placed": placed, "notes": [f"{s.get('name')}: today already traded - skipped"]}
+            n_today = db.fetch_one(
+                "SELECT COUNT(*) as c FROM paper_trades WHERE strategy_id=? AND entry_date=?", [sid, today])
+            if n_today and int(n_today.get("c", 0) or 0) >= max_day:
+                return {"placed": placed, "notes": [f"{s.get('name')}: max {max_day}/day reached - skipped"]}
         except Exception:
             pass
         try:
@@ -302,11 +312,16 @@ def dry_run_status():
                         out.append({"id": sid, "name": s.get("name"), "decision": "wait",
                                     "reason": f"open position #{has_open['id']} running"})
                         continue
-                    traded = db.fetch_one(
-                        "SELECT id FROM paper_trades WHERE strategy_id=? AND entry_date=? LIMIT 1", [sid, today])
-                    if traded:
+                    try:
+                        _rmd = _js.loads(s.get("risk_management") or "{}")
+                        _mx = max(1, int((_rmd or {}).get("max_trades_per_day") or 3))
+                    except Exception:
+                        _mx = 3
+                    _nt = db.fetch_one(
+                        "SELECT COUNT(*) as c FROM paper_trades WHERE strategy_id=? AND entry_date=?", [sid, today])
+                    if _nt and int(_nt.get("c", 0) or 0) >= _mx:
                         out.append({"id": sid, "name": s.get("name"), "decision": "wait",
-                                    "reason": "today already traded (1/day rule)"})
+                                    "reason": f"max {_mx}/day reached"})
                         continue
                 except Exception as e:
                     out.append({"id": sid, "name": s.get("name"), "decision": "skip",
@@ -321,8 +336,9 @@ def dry_run_status():
         return {"error": str(e)[:150]}
 
 
-def start_background(interval_s=1800):
-    """Daemon thread: auto paper-trade scan every `interval_s` (default 30min)."""
+def start_background(interval_s=600):
+    """Daemon thread: auto paper-trade scan every `interval_s` (default 10min,
+    so a closed position re-enters intraday without manual clicks)."""
     def _loop():
         while True:
             try:
