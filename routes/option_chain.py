@@ -35,12 +35,21 @@ def get_dates(symbol: str):
 def get_symbols():
     bhav = BhavcopyModel()
     db_symbols = bhav.get_symbols()
-    # Full F&O master list - ensure all F&O stocks+indices appear even if DB has only 7
-    master = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL','GOLDBEES','SILVERBEES']
-    symbols = master.copy()
-    for s in db_symbols:
-        if s not in symbols:
-            symbols.append(s)
+    # Full F&O master list - ensure all F&O stocks+indices appear even if DB has only 7.
+    # Non-F&O names (GOLDBEES/SILVERBEES ETFs) are EXCLUDED everywhere:
+    # options don't exist on them (is_optionable block would refuse anyway).
+    master = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL']
+    try:
+        from utils.helpers import is_optionable as _isopt
+        symbols = [s for s in master if _isopt(s)]
+        for s in (db_symbols or []):
+            if s not in symbols and _isopt(s):
+                symbols.append(s)
+    except Exception:
+        symbols = master.copy()
+        for s in (db_symbols or []):
+            if s not in symbols:
+                symbols.append(s)
     return {"symbols": symbols}
 
 
