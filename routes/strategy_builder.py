@@ -695,24 +695,57 @@ def _run_backtest_core(req: BacktestRequest):
                     historical = historical[-_bar_cap:]
                 # Resample to intraday if needed (5m,15m etc. like algotest)
                 if timeframe in ("1m","5m","15m","30m","1h"):
+                    # Minute-level backtest: REAL TradingView bars first (no
+                    # fabricated drift). Falls back to synthetic expansion below.
+                    _real_intra = False
                     try:
-                        # Daily capped to 20 days for intraday (20x75=1500 max, then 300 cap) - instant <2s
-                        _daily = historical[-20:] if len(historical) > 20 else historical
-                        intraday=[]
-                        mins = {"1m":1,"5m":5,"15m":15,"30m":30,"1h":60}[timeframe]
-                        bars_per_day = int(375 / mins)  # 9:15-15:30 = 375 mins
-                        for d in _daily:
-                            base_price = d["close_price"]
-                            for i in range(bars_per_day):
-                                # Small random drift per intraday bar
-                                drift = (i - bars_per_day/2) * 0.0001
-                                c = base_price * (1 + drift + (i%3-1)*0.001)
-                                # Real clock time for this bar: 09:15 + i*mins (signal-time accuracy)
-                                _mm = 9 * 60 + 15 + i * mins
-                                _bt = f"{_mm // 60:02d}:{_mm % 60:02d}"
-                                intraday.append({**d, "trade_date": d["trade_date"], "close_price": round(c,2), "open_price": round(c*0.999,2), "high_price": round(c*1.002,2), "low_price": round(c*0.998,2), "bar_time": _bt})
-                        historical = intraday[-150:] if len(intraday)>150 else intraday
-                    except: pass
+                        from core.services.scanner import OptionScanner as _OS
+                        _tvdays = 0
+                        try:
+                            import datetime as _tvd
+                            _a = _tvd.datetime.strptime(str(start_date)[:10], "%Y-%m-%d")
+                            _b = _tvd.datetime.strptime(str(end_date)[:10], "%Y-%m-%d")
+                            _tvdays = max(1, (_b - _a).days)
+                        except Exception:
+                            _tvdays = 30
+                        _tvn = min(1500, max(80, _tvdays * 30))
+                        _tvbars = _OS()._fetch_intraday_bars(
+                            _sym, timeframe, n_bars=_tvn, fresh_only=False, use_cache=False)
+                        try:
+                            _tvbars = [b for b in (_tvbars or [])
+                                       if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+                        except Exception:
+                            pass
+                        if _tvbars and len(_tvbars) >= 40:
+                            historical = _tvbars[-400:] if len(_tvbars) > 400 else _tvbars
+                            _use_db = True
+                            _real_intra = True
+                            _BT_CACHE[_ck] = (_bt_t.time(), historical)
+                            if len(_BT_CACHE) > 20:
+                                _BT_CACHE.pop(next(iter(_BT_CACHE)))
+                    except Exception:
+                        pass
+                    if _real_intra:
+                        pass  # real bars kept as-is, no synthetic expansion
+                    else:
+                        try:
+                            # Daily capped to 20 days for intraday (20x75=1500 max, then 300 cap) - instant <2s
+                            _daily = historical[-20:] if len(historical) > 20 else historical
+                            intraday=[]
+                            mins = {"1m":1,"5m":5,"15m":15,"30m":30,"1h":60}[timeframe]
+                            bars_per_day = int(375 / mins)  # 9:15-15:30 = 375 mins
+                            for d in _daily:
+                                base_price = d["close_price"]
+                                for i in range(bars_per_day):
+                                    # Small random drift per intraday bar
+                                    drift = (i - bars_per_day/2) * 0.0001
+                                    c = base_price * (1 + drift + (i%3-1)*0.001)
+                                    # Real clock time for this bar: 09:15 + i*mins (signal-time accuracy)
+                                    _mm = 9 * 60 + 15 + i * mins
+                                    _bt = f"{_mm // 60:02d}:{_mm % 60:02d}"
+                                    intraday.append({**d, "trade_date": d["trade_date"], "close_price": round(c,2), "open_price": round(c*0.999,2), "high_price": round(c*1.002,2), "low_price": round(c*0.998,2), "bar_time": _bt})
+                            historical = intraday[-150:] if len(intraday)>150 else intraday
+                        except: pass
                 _BT_CACHE[_ck] = (_bt_t.time(), historical)
                 if len(_BT_CACHE) > 20:
                     _BT_CACHE.pop(next(iter(_BT_CACHE)))
@@ -1458,6 +1491,105 @@ def monte_carlo_route(req: BacktestRequest):
     eng = BacktestEngine(is_live=False)
     res = eng.run(hist, req.symbol.upper(), req.start_date, req.end_date, req.indicators or [{"id":"rsi","params":{"period":14}}], req.entry_conditions or [], req.exit_conditions or [], req.legs or [], req.advanced or {}, req.risk or {}, is_live=False)
     return monte_carlo(res.get("metrics",{}).get("trade_list",[]))
+
+
+@router.post("/walk-forward")
+def walk_forward_route(req: BacktestRequest):
+    """Rolling in-sample / out-of-sample validation (Quantman-style).
+    Shows whether the strategy survives unseen data - avg_efficiency near
+    100% = robust, near/below 0% = overfit curve-fit, don't trade it."""
+    try:
+        from core.services.walk_forward import walk_forward as _wf
+        sym = (req.symbol or "NIFTY").upper()
+        _sd, _ed = (req.start_date or "2026-01-01")[:10], (req.end_date or "2026-08-20")[:10]
+        # Adaptive windows: 12m IS needs a year+ of data; short ranges get
+        # monthly rolling windows so the test never returns 0 windows.
+        _ism, _oosm, _stm = 12, 3, 3
+        try:
+            import datetime as _wfd
+            _span = (_wfd.datetime.strptime(_ed, "%Y-%m-%d") - _wfd.datetime.strptime(_sd, "%Y-%m-%d")).days
+            if _span < 150:
+                _ism, _oosm, _stm = 1, 1, 1
+            elif _span < 400:
+                _ism, _oosm, _stm = 3, 1, 1
+            _adv = req.advanced or {}
+            _ism = int(_adv.get("wf_is_months") or _ism)
+            _oosm = int(_adv.get("wf_oos_months") or _oosm)
+            _stm = int(_adv.get("wf_step_months") or _stm)
+        except Exception:
+            pass
+        return {"success": True, "symbol": sym,
+                **_wf(sym, _sd, _ed,
+                      req.indicators or [], req.entry_conditions or [], req.exit_conditions or [],
+                      req.legs or [], req.advanced or {}, req.risk or {},
+                      is_months=_ism, oos_months=_oosm, step_months=_stm)}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Walk-forward failed: {e}"[:300]}
+
+
+class OptimizeRequest(BaseModel):
+    symbol: str = "NIFTY"
+    symbols: list = []
+    start_date: str = "2026-08-01"
+    end_date: str = "2026-08-20"
+    indicators: list = []
+    entry_conditions: list = []
+    exit_conditions: list = []
+    legs: list = []
+    advanced: dict = {}
+    risk: dict = {}
+    sl_list: list = [1000, 1500, 2000]
+    tp_list: list = [2000, 3000, 4000]
+
+
+@router.post("/optimize")
+def optimize_route(req: OptimizeRequest):
+    """Grid-search SL x TP (default 3x3=9 backtests, first symbol only).
+    Ranked by profit factor - top row = best setting. Copy it to the form."""
+    import copy
+    import time as _t
+    t0 = _t.time()
+    syms = [str(s or "").strip().upper() for s in (req.symbols or []) if str(s or "").strip()] or [req.symbol.upper()]
+    sym = syms[0]
+    try:
+        sls = [float(x) for x in (req.sl_list or [1500])][:4]
+        tps = [float(x) for x in (req.tp_list or [3000])][:4]
+    except Exception:
+        sls, tps = [1500.0], [3000.0]
+    rows = []
+    for sl in sls:
+        for tp in tps:
+            try:
+                brep = BacktestRequest(
+                    symbol=sym, symbols=[sym], start_date=req.start_date, end_date=req.end_date,
+                    indicators=copy.deepcopy(req.indicators or []),
+                    entry_conditions=copy.deepcopy(req.entry_conditions or []),
+                    exit_conditions=copy.deepcopy(req.exit_conditions or []),
+                    legs=copy.deepcopy(req.legs or []),
+                    advanced=dict(req.advanced or {}),
+                    risk=dict(req.risk or {}))
+                br = dict(brep.risk or {})
+                br["daily_stop_loss"] = sl
+                br["daily_take_profit"] = tp
+                brep.risk = br
+                r = _run_backtest_core(brep)
+                m = (r or {}).get("metrics", {}) or {}
+                rows.append({"sl": sl, "tp": tp,
+                             "net": round(m.get("net_pnl", 0) or 0, 2),
+                             "win_rate": m.get("win_rate", 0),
+                             "trades": m.get("total_trades", 0),
+                             "profit_factor": round(m.get("profit_factor", 0) or 0, 2),
+                             "max_dd": round(m.get("max_drawdown", 0) or 0, 2)})
+            except Exception as e:
+                rows.append({"sl": sl, "tp": tp, "error": str(e)[:100]})
+            if _t.time() - t0 > 100:
+                break
+    rows.sort(key=lambda r: (r.get("profit_factor", 0), r.get("net", 0)), reverse=True)
+    return {"success": True, "symbol": sym, "rows": rows,
+            "best": rows[0] if rows else {},
+            "took_ms": int((_t.time() - t0) * 1000)}
 
 
 @router.post("/report.pdf")

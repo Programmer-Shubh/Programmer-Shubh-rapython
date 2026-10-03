@@ -18,7 +18,7 @@ def walk_forward(symbol, start_date, end_date, indicators, entry_conditions, exi
             break
         hist_is = fetch_historical(symbol, cur.strftime("%Y-%m-%d"), is_end.strftime("%Y-%m-%d"), allow_synthetic=True)
         hist_oos = fetch_historical(symbol, oos_start.strftime("%Y-%m-%d"), oos_end.strftime("%Y-%m-%d"), allow_synthetic=True)
-        if not hist_is or not hist_oos or len(hist_is)<30 or len(hist_oos)<5:
+        if not hist_is or not hist_oos or len(hist_is)<20 or len(hist_oos)<5:
             cur += datetime.timedelta(days=step_months*30)
             continue
         if len(hist_is)>120: hist_is=hist_is[-120:]

@@ -1453,18 +1453,20 @@ class OptionScanner:
         return {'symbol': symbol, 'type': 'NONE', 'score': 0, 'price': spot,
                 'date': _row_date, 'live': _row_live, 'reasons': [], 'indicators': indicators}
 
-    def _fetch_intraday_bars(self, symbol: str, tf: str = "15m", n_bars: int = 80) -> list:
+    def _fetch_intraday_bars(self, symbol: str, tf: str = "15m", n_bars: int = 80, fresh_only: bool = True, use_cache: bool = True) -> list:
         """Live 15m/5m bars via TradingView (tvDatafeed), 120s cache.
-        Returns [] when stale (>90min old in market hours), short (<35),
-        or fetch fails - caller falls back to daily signals. Never raises."""
+        fresh_only=True (scanner): [] when stale (>90min old), short (<35),
+        or fetch fails - caller falls back to daily signals. Never raises.
+        fresh_only=False (backtest): any bars in range, cache bypassed."""
         import time as _tm
         ck = (symbol.upper(), tf)
-        try:
-            ce = self._INTRA_CACHE.get(ck)
-            if ce and _tm.time() - ce[0] < self._INTRA_TTL and len(ce[1]) >= 35:
-                return ce[1]
-        except Exception:
-            pass
+        if use_cache:
+            try:
+                ce = self._INTRA_CACHE.get(ck)
+                if ce and _tm.time() - ce[0] < self._INTRA_TTL and len(ce[1]) >= 35:
+                    return ce[1]
+            except Exception:
+                pass
         bars = []
         try:
             from tvDatafeed import TvDatafeed, Interval
@@ -1496,7 +1498,7 @@ class OptionScanner:
                 age_naive = (_now_naive - _last_n).total_seconds() / 60
             except Exception:
                 age_naive = 9999
-            if min(age_utc, age_naive) > 90:
+            if fresh_only and min(age_utc, age_naive) > 90:
                 return []  # stale session (weekend/holiday/closed) - daily backbone stays
             use_utc = age_utc <= age_naive
             try:
@@ -1521,12 +1523,13 @@ class OptionScanner:
                     continue
             bars = [b for b in bars if b["close_price"] > 0][-n_bars:]
             if len(bars) >= 35:
-                try:
-                    self._INTRA_CACHE[ck] = (_tm.time(), bars)
-                    if len(self._INTRA_CACHE) > 30:
-                        self._INTRA_CACHE.pop(next(iter(self._INTRA_CACHE)))
-                except Exception:
-                    pass
+                if use_cache:
+                    try:
+                        self._INTRA_CACHE[ck] = (_tm.time(), bars)
+                        if len(self._INTRA_CACHE) > 30:
+                            self._INTRA_CACHE.pop(next(iter(self._INTRA_CACHE)))
+                    except Exception:
+                        pass
                 return bars
         except Exception:
             pass
