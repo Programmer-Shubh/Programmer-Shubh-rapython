@@ -199,8 +199,15 @@ class BacktestEngine:
                 pending_entry = None
                 pending_auto_buy = None
 
+            # No exits on the entry bar itself (0-hold round-trips are
+            # look-ahead fantasy: entry at this bar's open, first honest
+            # exit from the NEXT bar). Covers pending/SL/TP/MTM/intraday.
+            try:
+                just_entered = bool(entry_bars) and entry_bars[-1] == i
+            except Exception:
+                just_entered = False
             has_open = len(entries) > len(exits)
-            if has_open and pending_exit is not None:
+            if has_open and pending_exit is not None and not just_entered:
                 entry = entries[len(exits)]
                 exec_idx = i
                 exec_bar = historical[exec_idx] if exec_idx < len(historical) else cur
@@ -214,7 +221,7 @@ class BacktestEngine:
                     kill_switch_on = True
                 pending_exit = None
 
-            has_open = len(entries) > len(exits)
+            has_open = len(entries) > len(exits) and not just_entered
             # SL/TP checked on EVERY bar first (daily bars: each bar is day-close,
             # so skipping SL on is_last meant intraday SL never triggered).
             if has_open:
@@ -230,7 +237,7 @@ class BacktestEngine:
 
             # Strategy-wise MTM Stop Loss / Target — unrealized MTM of ALL open
             # positions + realized daily_pnl. Limit hit => square-off everything.
-            has_open = len(entries) > len(exits)
+            has_open = len(entries) > len(exits) and not just_entered
             if has_open and (strategy_sl > 0 or strategy_tp > 0):
                 try:
                     open_unreal = sum(self._open_unrealized(entries[j], cur, option_type, txn_type, qty) for j in range(len(exits), len(entries)))
@@ -250,7 +257,7 @@ class BacktestEngine:
                         daily_pnl += exits[-1]["pnl"]
                     kill_switch_on = True
 
-            has_open = len(entries) > len(exits)
+            has_open = len(entries) > len(exits) and not just_entered
             # Early exit: close by early_exit_time (default 15:10) instead of 15:14
             # For daily bars, check if we're on the last bar OR if early_exit_time is set
             is_early_exit = is_last
@@ -273,7 +280,7 @@ class BacktestEngine:
             # Expiry-day square-off for positional carries (NO roll-over):
             # if the open position is held on/after its contract expiry,
             # exit at the day's close instead of shifting to the next expiry.
-            has_open = len(entries) > len(exits)
+            has_open = len(entries) > len(exits) and not just_entered
             if has_open and trade_mode != "intraday" and exp_date and cur_date >= exp_date and is_last:
                 entry = entries[len(exits)]
                 if entry.get("is_spread"):
@@ -1137,10 +1144,23 @@ class BacktestEngine:
         sl_level = _to_level(sl_amt, True)
         tp_level = _to_level(tp_amt, False)
 
-        # SL/TP is on OPTION PREMIUM, not spot - estimate premium range for this
-        # bar via Black-Scholes at bar high/low spot, then compare levels.
-        # (Comparing premium levels directly to spot high/low is wrong: spot is
-        # ~24000 while premium is ~50, so Sell SL would trigger on every bar.)
+        # SL/TP is on OPTION PREMIUM, not spot. Prefer the option's OWN
+        # bar high/low (same DB source as entry) when cached; else estimate
+        # via Black-Scholes at bar high/low spot. Mixing DB-entry with
+        # model-range on one bar minted instant fantasy exits (BPCL 2.86->1.20).
+        strike = float(entry.get("strike", 0) or 0)
+        try:
+            _bd = str(current.get("trade_date", ""))[:10]
+            _oh, _ol = 0, 0
+            for _sp in (str(strike), str(int(strike)) if float(strike) == int(float(strike)) else str(strike)):
+                _oh = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_h", 0) or 0)
+                _ol = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_l", 0) or 0)
+                if _oh > 0 and _ol > 0:
+                    break
+            if _oh > 0 and _ol > 0:
+                return self._check_sl_tp_levels(txn_type, sl_level, tp_level, max(_oh, _ol), min(_oh, _ol))
+        except Exception:
+            pass
         try:
             from utils.helpers import black_scholes as _bs
         except Exception:
@@ -1172,18 +1192,24 @@ class BacktestEngine:
             prem_high, prem_low = float("inf"), 0
         opt_high = max(prem_high, prem_low)
         opt_low = min(prem_high, prem_low)
-        hit_sl = False
-        hit_tp = False
-        if txn_type == "buy":
-            hit_sl = sl_level > 0 and opt_low <= sl_level
-            hit_tp = tp_level > 0 and opt_high >= tp_level
-        else:
-            hit_sl = sl_level > 0 and opt_high >= sl_level
-            hit_tp = tp_level > 0 and opt_low <= tp_level
-        if hit_sl:
-            return {"reason": "stoploss", "level": sl_level}
-        if hit_tp:
-            return {"reason": "target", "level": tp_level}
+        return self._check_sl_tp_levels(txn_type, sl_level, tp_level, opt_high, opt_low)
+
+    def _check_sl_tp_levels(self, txn_type, sl_level, tp_level, opt_high, opt_low):
+        """Shared hit comparison for DB-range and model-range callers."""
+        try:
+            hit_sl, hit_tp = False, False
+            if txn_type == "buy":
+                hit_sl = sl_level > 0 and opt_low <= sl_level
+                hit_tp = tp_level > 0 and opt_high >= tp_level
+            else:
+                hit_sl = sl_level > 0 and opt_high >= sl_level
+                hit_tp = tp_level > 0 and opt_low <= tp_level
+            if hit_sl:
+                return {"reason": "stoploss", "level": sl_level}
+            if hit_tp:
+                return {"reason": "target", "level": tp_level}
+        except Exception:
+            pass
         return None
 
     def run_vectorbt(self, df, symbol="NIFTY"):
@@ -1260,7 +1286,7 @@ class BacktestEngine:
                 return 0
             from core.models.database import Database
             rows = Database.get_instance().fetch_all(
-                "SELECT trade_date, strike_price, option_type, open_price, close_price "
+                "SELECT trade_date, strike_price, option_type, open_price, high_price, low_price, close_price "
                 "FROM bhavcopy_data WHERE symbol=? AND option_type IN ('CE','PE') "
                 "AND trade_date BETWEEN ? AND ?",
                 [symbol, str(start_date)[:10], str(end_date)[:10]],
@@ -1296,6 +1322,17 @@ class BacktestEngine:
                         elif o > 0:
                             self.premium_cache.setdefault(f"{d}_{_sp}_{op}_c", o)
                             n += 1
+                        # Option bar high/low for SL/TP parity (same source as
+                        # entry, never spot-BS vs DB mix on one bar)
+                        try:
+                            _h = float(r.get("high_price") or 0)
+                            _l = float(r.get("low_price") or 0)
+                            if _h > 0:
+                                self.premium_cache.setdefault(f"{d}_{_sp}_{op}_h", _h)
+                            if _l > 0:
+                                self.premium_cache.setdefault(f"{d}_{_sp}_{op}_l", _l)
+                        except Exception:
+                            pass
                 except Exception:
                     continue
             return n
