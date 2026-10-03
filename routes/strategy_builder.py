@@ -765,6 +765,11 @@ def _run_backtest_core(req: BacktestRequest):
                 pass
             engine = BacktestEngine(is_live=False)
             engine._skip_db = not _use_db  # real DB data => premiums from DB; else fast path
+            if _use_db:
+                try:
+                    engine.prefetch_option_premiums(_sym, start_date, end_date)
+                except Exception:
+                    pass
             result = engine.run(
                 historical, _sym, start_date, end_date,
                 indicators, entry_conditions, exit_conditions,

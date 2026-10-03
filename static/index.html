@@ -1243,6 +1243,19 @@ let _lastOpenTrdHTML = null;
         return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:[],exit_conditions:[],legs:legs,advanced:{allow_multi:true,trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
     }
     async function runBacktest(){
+        // Anti-pileup: Auto mode fires on every keystroke; a slow run must
+        // not stack 10 overlapping runs (spinner forever, results never
+        // settle). Latest request wins: queue one rerun max.
+        if(window._btRunning){ window._btQueued=true; return; }
+        window._btRunning=true;
+        try{
+            await _runBacktestInner();
+        }finally{
+            window._btRunning=false;
+            if(window._btQueued){ window._btQueued=false; setTimeout(()=>{try{runBacktest();}catch(e){}},200); }
+        }
+    }
+    async function _runBacktestInner(){
         // Immediate visible feedback FIRST - proves the click fired. Entry is
         // fully null-guarded: a missing button/element can never silently kill it.
         const btn=document.getElementById('s-run');
@@ -1451,7 +1464,7 @@ let _lastOpenTrdHTML = null;
         try{if(typeof renderQuantTable==='function')renderQuantTable();}catch(e){}
     }
     let _autoBT=null; function toggleAutoBacktest(on){ if(on){ if(!_autoBT) _autoBT=setTimeout(()=>{try{if(document.getElementById('r-auto')?.checked) runBacktest();}catch(e){}},800); } else { if(_autoBT) clearTimeout(_autoBT); _autoBT=null; } }
-    function scheduleAutoBT(){ if(!document.getElementById('r-auto')?.checked) return; if(_autoBT) clearTimeout(_autoBT); _autoBT=setTimeout(()=>{try{runBacktest();}catch(e){}},80); }
+    function scheduleAutoBT(){ if(!document.getElementById('r-auto')?.checked) return; if(_autoBT) clearTimeout(_autoBT); _autoBT=setTimeout(()=>{try{runBacktest();}catch(e){}},800); }
     function updLeg(i,f,v){ if(f==='lots') stratLegs[i][f]=parseInt(v)||1; else stratLegs[i][f]=v; renderLegs(); try{updateRunSummary();}catch(e){} scheduleAutoBT(); }
     function updLegStrike(i,val){ if(val==='atm'){stratLegs[i].strike_selection='atm'; stratLegs[i].otm_distance=0;} else if(val.startsWith('otm')){stratLegs[i].strike_selection='otm'; stratLegs[i].otm_distance=parseInt(val.slice(3))||1;} else if(val.startsWith('itm')){stratLegs[i].strike_selection='itm'; stratLegs[i].otm_distance=parseInt(val.slice(3))||1;} renderLegs(); try{updateRunSummary();}catch(e){} scheduleAutoBT(); }
     function addLeg(){

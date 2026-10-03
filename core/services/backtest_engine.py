@@ -1251,6 +1251,57 @@ class BacktestEngine:
                 pass
         return None
 
+    def prefetch_option_premiums(self, symbol, start_date, end_date):
+        """One batched query for the whole backtest window into premium_cache.
+        Without this, every bar x leg costs 1-2 PG roundtrips (200+ queries =
+        10-20s on cloud). Same key/value semantics as the per-bar lookups."""
+        try:
+            if getattr(self, "_skip_db", False):
+                return 0
+            from core.models.database import Database
+            rows = Database.get_instance().fetch_all(
+                "SELECT trade_date, strike_price, option_type, open_price, close_price "
+                "FROM bhavcopy_data WHERE symbol=? AND option_type IN ('CE','PE') "
+                "AND trade_date BETWEEN ? AND ?",
+                [symbol, str(start_date)[:10], str(end_date)[:10]],
+            )
+            n = 0
+            for r in rows or []:
+                try:
+                    d = str(r.get("trade_date", ""))[:10]
+                    st = float(r.get("strike_price") or 0)
+                    op = str(r.get("option_type") or "")
+                    o = float(r.get("open_price") or 0)
+                    c = float(r.get("close_price") or 0)
+                    if not d or st <= 0 or op not in ("CE", "PE"):
+                        continue
+                    # Store both float + int-like strike spellings: engine
+                    # callers pass either (22850 vs 22850.0) and keys must hit.
+                    _spell = [str(st)]
+                    try:
+                        if float(st) == int(float(st)):
+                            _spell.append(str(int(float(st))))
+                    except Exception:
+                        pass
+                    for _sp in _spell:
+                        if o > 0:
+                            self.premium_cache.setdefault(f"{d}_{_sp}_{op}_e", o)
+                            n += 1
+                        elif c > 0:
+                            self.premium_cache.setdefault(f"{d}_{_sp}_{op}_e", c)
+                            n += 1
+                        if c > 0:
+                            self.premium_cache.setdefault(f"{d}_{_sp}_{op}_c", c)
+                            n += 1
+                        elif o > 0:
+                            self.premium_cache.setdefault(f"{d}_{_sp}_{op}_c", o)
+                            n += 1
+                except Exception:
+                    continue
+            return n
+        except Exception:
+            return 0
+
     def _entry_premium(self, date, spot, strike, option_type):
         key = f"{date}_{strike}_{option_type}_e"
         if key in self.premium_cache:
