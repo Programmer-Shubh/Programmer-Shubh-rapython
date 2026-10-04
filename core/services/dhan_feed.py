@@ -36,12 +36,16 @@ _LTP_CODES = (1, 2, 4, 8)
 def parse_packet(buf: bytes):
     """Parse ONE packet from the front of buf.
     Returns (tick_or_None, bytes_consumed). tick =
-    {seg, secid, code, ltp, ltt, oi}. Never raises."""
+    {seg, secid, code, ltp, ltt, oi}. Never raises.
+    Layout (verified vs official DhanHQ-py + openbull adapters):
+    header = code u8, msglen u16 LE, segment u8, security_id i32 LE;
+    LTP float32 LE at [8:12]; quote LTT u32 at [14:18]; full OI i32 at
+    [34:38]. (An earlier BE-length build rejected every real packet.)"""
     try:
         if len(buf) < 8:
             return None, 0
         code = buf[0]
-        msglen = struct.unpack(">H", buf[1:3])[0]
+        msglen = struct.unpack("<H", buf[1:3])[0]
         if msglen <= 0 or msglen > 2048:
             return None, 0
         total = 3 + msglen
@@ -74,9 +78,9 @@ def parse_packet(buf: bytes):
                 tick["oi"] = int(struct.unpack("<i", pkt[8:12])[0])
             except Exception:
                 pass
-        if code == 8 and len(pkt) >= 42:  # full packet OI
+        if code == 8 and len(pkt) >= 38:  # full packet OI at abs [34:38]
             try:
-                tick["oi"] = int(struct.unpack("<i", pkt[38:42])[0])
+                tick["oi"] = int(struct.unpack("<i", pkt[34:38])[0])
             except Exception:
                 pass
         if code == 50:
