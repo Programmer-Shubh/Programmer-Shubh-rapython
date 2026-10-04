@@ -401,6 +401,7 @@
                         <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
                         <div class="col-md-2"><label class="form-label small">Exit Time</label><input type="time" id="r-exit" class="form-control form-control-sm" value="15:05"><small class="text-muted" id="r-exit-note">Intraday square-off</small></div>
+                        <div class="col-md-2"><label class="form-label small">Exit Mode</label><select id="r-exitmode" class="form-select form-select-sm" onchange="exitModeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
@@ -472,10 +473,9 @@
                     <div class="row g-2 mt-2">
                         <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
                             <div class="d-flex gap-3 flex-wrap align-items-end" style="font-size:12px">
-                                <label><input type="checkbox" id="r-ind-rsi" checked> RSI(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:44px;font-size:11px">)</label>
+                                <label title="Average Directional Index: trend strength gate"><input type="checkbox" id="r-ind-adx" checked> <strong>ADX</strong>(<input type="number" id="r-p-adx" value="14" min="2" max="50" style="width:44px;font-size:11px">, min <input type="number" id="r-p-adxt" value="25" min="10" max="50" step="1" style="width:44px;font-size:11px">)</label>
                                 <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(<input type="number" id="r-p-st" value="10" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-stm" value="3" min="1" max="10" step="0.5" style="width:44px;font-size:11px">) Bullish/Bearish</label>
                                 <label><input type="checkbox" id="r-ind-macd"> MACD(<input type="number" id="r-p-mf" value="12" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-ms" value="26" min="2" max="60" style="width:44px;font-size:11px">,<input type="number" id="r-p-mg" value="9" min="2" max="30" style="width:44px;font-size:11px">)</label>
-                                <label><input type="checkbox" id="r-ind-vol" checked> Volume(<input type="number" id="r-p-vol" value="20" min="2" max="60" style="width:44px;font-size:11px">)</label>
                                 <label title="Bollinger Bands: Volatility squeeze breakout"><input type="checkbox" id="r-ind-bb" checked> <strong>Bollinger</strong>(<input type="number" id="r-p-bb" value="20" min="2" max="50" style="width:44px;font-size:11px">,<input type="number" id="r-p-bbstd" value="2.0" min="1" max="3" step="0.1" style="width:44px;font-size:11px">)</label>
                                 <label title="Neural Network: ML price prediction signal"><input type="checkbox" id="r-ind-nn"> <strong>Neural</strong>(<input type="number" id="r-p-nn" value="14" min="2" max="50" style="width:44px;font-size:11px">)</label>
                             </div>
@@ -1754,20 +1754,21 @@ let _lastOpenTrdHTML = null;
     function robotTypeChange(){
         const t=document.getElementById('r-type').value;
         const ex=document.getElementById('r-exit');
+        try{const em=document.getElementById('r-exitmode');if(em)em.value=t;}catch(e){}
         if(t==='intraday'){ex.disabled=false;ex.value='15:05';document.getElementById('r-exit-note').textContent='Intraday square-off';}
         else{ex.disabled=true;document.getElementById('r-exit-note').textContent='Positional: overnight carry, no EOD exit';}
     }
     function robotCollectIndicators(){
         const indicators=[];
-        if(document.getElementById('r-ind-rsi')?.checked) indicators.push({id:'rsi',params:{period:parseInt(document.getElementById('r-p-rsi')?.value)||14}});
+        if(document.getElementById('r-ind-adx')?.checked) indicators.push({id:'adx',params:{period:parseInt(document.getElementById('r-p-adx')?.value)||14,threshold:parseFloat(document.getElementById('r-p-adxt')?.value)||25}});
         if(document.getElementById('r-ind-supertrend')?.checked) indicators.push({id:'supertrend',params:{period:parseInt(document.getElementById('r-p-st')?.value)||10,multiplier:parseFloat(document.getElementById('r-p-stm')?.value)||3}});
         if(document.getElementById('r-ind-macd')?.checked) indicators.push({id:'macd',params:{fast:parseInt(document.getElementById('r-p-mf')?.value)||12,slow:parseInt(document.getElementById('r-p-ms')?.value)||26,signal:parseInt(document.getElementById('r-p-mg')?.value)||9}});
-        if(document.getElementById('r-ind-vol')?.checked) indicators.push({id:'volume_indicator',params:{period:parseInt(document.getElementById('r-p-vol')?.value)||20}});
         if(document.getElementById('r-ind-bb')?.checked) indicators.push({id:'dynamic_bollinger',params:{period:parseInt(document.getElementById('r-p-bb')?.value)||20}});
         if(document.getElementById('r-ind-nn')?.checked) indicators.push({id:'neural_network',params:{period:parseInt(document.getElementById('r-p-nn')?.value)||14}});
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         return indicators;
     }
+    function exitModeChange(){try{const m=document.getElementById('r-exitmode').value;const t=document.getElementById('r-type');if(t)t.value=m;robotTypeChange();const em=document.getElementById('r-exitmode');if(em&&document.getElementById('r-type')&&em.value!==document.getElementById('r-type').value)em.value=document.getElementById('r-type').value;}catch(e){}}
     async function robotSave(){
         const sym=(rSyms()[0]||'NIFTY');
         const order=document.getElementById('r-order').value;

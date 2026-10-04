@@ -614,3 +614,48 @@ class IndicatorEngine:
             if vols[i] >= 2 * avg5 and avg5 > 0:
                 vol_spike[i] = True
         return {"upper": upper, "lower": lower, "squeeze": squeeze, "vol_spike": vol_spike, "signal": [1 if squeeze[i] and vol_spike[i] and closes[i] > upper[i] else -1 if squeeze[i] and vol_spike[i] and closes[i] < lower[i] else 0 for i in range(n)]}
+
+    def calculate_adx(self, data: List[Dict], period: int = 14) -> Dict:
+        """Wilder's ADX with +DI/-DI. adx[i] = trend strength (0-100);
+        +DI > -DI = bulls stronger. Best setting: period 14, trend gate 25."""
+        n = len(data)
+        adx = [0.0] * n
+        pdi = [0.0] * n
+        mdi = [0.0] * n
+        try:
+            highs = [float(d.get("high_price", 0) or 0) for d in data]
+            lows = [float(d.get("low_price", 0) or 0) for d in data]
+            closes = [float(d.get("close_price", 0) or 0) for d in data]
+            if n < period + 1:
+                return {"adx": adx, "plus_di": pdi, "minus_di": mdi}
+            pdm = [0.0] * n
+            mdm = [0.0] * n
+            tr = [0.0] * n
+            for i in range(1, n):
+                up = highs[i] - highs[i - 1]
+                dn = lows[i - 1] - lows[i]
+                if up > dn and up > 0:
+                    pdm[i] = up
+                if dn > up and dn > 0:
+                    mdm[i] = dn
+                tr[i] = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+            # Wilder smoothing over first `period` values
+            s_tr = sum(tr[1:period + 1])
+            s_pdm = sum(pdm[1:period + 1])
+            s_mdm = sum(mdm[1:period + 1])
+            for i in range(period, n):
+                if i > period:
+                    s_tr = s_tr - s_tr / period + tr[i]
+                    s_pdm = s_pdm - s_pdm / period + pdm[i]
+                    s_mdm = s_mdm - s_mdm / period + mdm[i]
+                if s_tr > 0:
+                    pdi[i] = 100 * (s_pdm / s_tr)
+                    mdi[i] = 100 * (s_mdm / s_tr)
+                    dx = 100 * abs(pdi[i] - mdi[i]) / max(pdi[i] + mdi[i], 0.0001)
+                    if i == period:
+                        adx[i] = dx
+                    else:
+                        adx[i] = ((adx[i - 1] * (period - 1)) + dx) / period
+        except Exception:
+            pass
+        return {"adx": adx, "plus_di": pdi, "minus_di": mdi}
