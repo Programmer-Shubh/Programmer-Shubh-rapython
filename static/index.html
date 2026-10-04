@@ -372,12 +372,12 @@
         </div>
         <!-- STRATEGY BUILDER — Advanced style -->
         <div id="pg-strategy" class="pg hidden" style="background:#f8fafc; padding:8px; border-radius:12px">
-            <div class="card mb-3 slab-hero" style="background:linear-gradient(135deg,#0d6efd 0%,#6610f2 50%,#00d4ff 100%);border:none">
-                <div class="card-body p-4">
-                    <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
-                        <div>
-                            <h4 class="fw-bold mb-1 text-white"><i class="bi bi-robot"></i> Strategy Lab <span class="badge bg-white text-primary ms-2" style="font-size:11px">PRO • Backtest + Robot</span></h4>
-                            <p class="mb-0 text-white-50" style="font-size:13px">5-step flow: Setup → Templates → Indicators → Backtest → Live/Paper — Technology Platform, AI Powered (not SEBI-registered advice; verify compliance yourself)</p>
+            <div class="card mb-2 slab-hero" style="background:linear-gradient(135deg,#0d6efd 0%,#6610f2 50%,#00d4ff 100%);border:none">
+                <div class="card-body py-2 px-3">
+                    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                        <div class="d-flex align-items-center gap-2">
+                            <h4 class="fw-bold mb-0 text-white" style="font-size:16px"><i class="bi bi-robot"></i> Strategy Lab <span class="badge bg-white text-primary ms-2" style="font-size:11px">PRO • Backtest + Robot</span></h4>
+                            <small class="text-white-50">Setup → Templates → Indicators → Backtest → Live/Paper</small>
                         </div>
                         <div class="d-flex gap-2 align-items-center bg-white rounded-pill p-1 shadow-sm">
                             <input type="hidden" id="s-name" value="">
@@ -406,12 +406,12 @@
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
                         <div class="col-md-2"><label class="form-label small">Chart Timeframe</label><select id="r-timeframe" class="form-select form-select-sm"><option value="1d" selected>Daily</option><option value="5m">5 Minute</option><option value="15m">15 Minute</option><option value="30m">30 Minute</option><option value="1h">1 Hour</option><option value="1m">1 Minute</option></select></div>
-                        
+                        <div class="col-md-2"><label class="form-label small">Momentum</label><input type="range" class="form-range" id="s-momentum" min="0" max="20" value="0"></div>
+
                     </div>
                     </div>
 
                 </div>
-            <div class="step-indicator mb-2 slab"><div class="step active">1 Setup</div><div class="step">2 Indicators</div><div class="step">3 Backtest</div><div class="step">4 Strategy</div></div>
             <div class="card mb-2" style="display:none"><div class="card-body p-2">
             <div class="d-flex gap-1 mb-2 flex-wrap" id="q-instruments"></div>
             </div></div>
@@ -432,10 +432,6 @@
                 </div>
                 <div class="col-md-2" style="display:none"><label class="form-label">No re-entry after</label>
                     <input type="time" class="form-control form-control-sm" id="s-no-reentry" value="09:35">
-                </div>
-                <div class="col-md-2"><label class="form-label">Overall Momentum</label>
-                    <input type="range" class="form-range" id="s-momentum" min="0" max="20" value="0">
-                    <div style="display:flex;justify-content:space-between"><span class="small">0</span><span class="small">20</span></div>
                 </div>
             </div>
             <div class="mt-3">
@@ -470,15 +466,13 @@
                 <div class="small text-muted mt-1">Nifty: lot 50 step 50 | BankNifty lot 15 step 100 | Finnifty lot 40. Delta 0.3~OTM. Weekly DTE 7, Monthly ~28.</div>
                 </div>
                     <div class="slab-sec" style="background:linear-gradient(135deg,#f0f7ff 0%,#ffffff 100%); border:1px solid #dbeafe"><div class="slab-sec-title"><i class="bi bi-cpu"></i> Indicators — signal <span id="autoDirBadge" class="badge bg-success ms-2" style="font-size:11px">Auto: Bullish</span></div>
-                    <div class="row g-2 mt-2">
-                        <div class="col-md-12"><label class="form-label small">Indicators (for backtest signal)</label>
-                            <div class="d-flex gap-3 flex-wrap align-items-end" style="font-size:12px">
-                                <label title="Average Directional Index: trend strength gate"><input type="checkbox" id="r-ind-adx" checked> <strong>ADX</strong>(<input type="number" id="r-p-adx" value="14" min="2" max="50" style="width:44px;font-size:11px">, min <input type="number" id="r-p-adxt" value="25" min="10" max="50" step="1" style="width:44px;font-size:11px">)</label>
-                                <label><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(<input type="number" id="r-p-st" value="10" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-stm" value="3" min="1" max="10" step="0.5" style="width:44px;font-size:11px">) Bullish/Bearish</label>
-                                <label><input type="checkbox" id="r-ind-macd"> MACD(<input type="number" id="r-p-mf" value="12" min="2" max="30" style="width:44px;font-size:11px">,<input type="number" id="r-p-ms" value="26" min="2" max="60" style="width:44px;font-size:11px">,<input type="number" id="r-p-mg" value="9" min="2" max="30" style="width:44px;font-size:11px">)</label>
-                                <label title="Bollinger Bands: Volatility squeeze breakout"><input type="checkbox" id="r-ind-bb" checked> <strong>Bollinger</strong>(<input type="number" id="r-p-bb" value="20" min="2" max="50" style="width:44px;font-size:11px">,<input type="number" id="r-p-bbstd" value="2.0" min="1" max="3" step="0.1" style="width:44px;font-size:11px">)</label>
-                                <label title="Neural Network: ML price prediction signal"><input type="checkbox" id="r-ind-nn"> <strong>Neural</strong>(<input type="number" id="r-p-nn" value="14" min="2" max="50" style="width:44px;font-size:11px">)</label>
-                            </div>
+                    <div class="row g-2 mt-2" style="font-size:12px">
+                        <div class="col-md-4"><label class="small"><input type="checkbox" id="r-ind-adx" checked> <strong>ADX</strong>(<input type="number" id="r-p-adx" value="14" min="2" max="50" style="width:40px;font-size:11px">,<input type="number" id="r-p-adxt" value="25" min="10" max="50" step="1" style="width:40px;font-size:11px">)</label></div>
+                        <div class="col-md-4"><label class="small"><input type="checkbox" id="r-ind-supertrend" checked> SuperTrend(<input type="number" id="r-p-st" value="10" min="2" max="30" style="width:40px;font-size:11px">,<input type="number" id="r-p-stm" value="3" min="1" max="10" step="0.5" style="width:40px;font-size:11px">)</label></div>
+                        <div class="col-md-4"><label class="small"><input type="checkbox" id="r-ind-macd"> MACD(<input type="number" id="r-p-mf" value="12" min="2" max="30" style="width:38px;font-size:11px">,<input type="number" id="r-p-ms" value="26" min="2" max="60" style="width:38px;font-size:11px">,<input type="number" id="r-p-mg" value="9" min="2" max="30" style="width:38px;font-size:11px">)</label></div>
+                        <div class="col-md-4"><label class="small" title="Bollinger Bands: Volatility squeeze breakout"><input type="checkbox" id="r-ind-bb" checked> <strong>Bollinger</strong>(<input type="number" id="r-p-bb" value="20" min="2" max="50" style="width:40px;font-size:11px">,<input type="number" id="r-p-bbstd" value="2.0" min="1" max="3" step="0.1" style="width:40px;font-size:11px">)</label></div>
+                        <div class="col-md-4"><label class="small" title="Neural Network: ML price prediction signal"><input type="checkbox" id="r-ind-nn"> <strong>Neural</strong>(<input type="number" id="r-p-nn" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
+                    </div>
                         </div>
                     </div>
 
