@@ -1574,6 +1574,8 @@ let _lastOpenTrdHTML = null;
 
     function _loadStratToForm(s){
         try{
+            try{document.getElementById('s-name').value=s.name||'';}catch(e){}
+            try{const _rs=document.getElementById('run-summary');if(_rs&&s.name)_rs.textContent='Strategy: '+s.name+' ('+(s.symbol||'')+')';}catch(e){}
             const box=document.getElementById('r-syms');
             const v=s.symbol||'NIFTY';
             if(box){box.querySelectorAll('input').forEach(i=>{i.checked=(i.value===v);});}
