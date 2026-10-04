@@ -281,11 +281,11 @@
 </head>
 <body>
     <div class="topbar">
-        <h1><i class="bi bi-graph-up-arrow"></i> RaTrade <small>ALGO TOP 5 • SEBI Compliant • AI Powered</small></h1>
+        <h1><i class="bi bi-graph-up-arrow"></i> RaTrade <small>ALGO TOP 5 • Technology Platform • AI Powered</small></h1>
         <span id="status"><span class="live-dot"></span> Connecting...</span>
     </div>
     <div class="trust-bar">
-        <span><i class="bi bi-shield-check text-success"></i> SEBI Compliant</span>
+        <span><i class="bi bi-shield-check text-success"></i> Paper-First Risk Controls</span>
         <span class="badge bg-success">Live NSE Data</span>
         <span class="badge bg-primary">Paper + Live Trading</span>
     </div>
@@ -377,7 +377,7 @@
                     <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
                         <div>
                             <h4 class="fw-bold mb-1 text-white"><i class="bi bi-robot"></i> Strategy Lab <span class="badge bg-white text-primary ms-2" style="font-size:11px">PRO • Backtest + Robot</span></h4>
-                            <p class="mb-0 text-white-50" style="font-size:13px">5-step flow: Setup → Templates → Indicators → Backtest → Live/Paper — SEBI Compliant, AI Powered</p>
+                            <p class="mb-0 text-white-50" style="font-size:13px">5-step flow: Setup → Templates → Indicators → Backtest → Live/Paper — Technology Platform, AI Powered (not SEBI-registered advice; verify compliance yourself)</p>
                         </div>
                         <div class="d-flex gap-2 align-items-center bg-white rounded-pill p-1 shadow-sm">
                             <input type="hidden" id="s-name" value="">
@@ -1250,6 +1250,14 @@ let _lastOpenTrdHTML = null;
         // settle). Latest request wins: queue one rerun max.
         if(window._btRunning){ window._btQueued=true; return; }
         window._btRunning=true;
+        // Fresh run token + wipe old trades/metrics FIRST: a new run must
+        // never display the previous run's trades (stale TCS/SBIN rows).
+        window._btRunId=(window._btRunId||0)+1;
+        try{
+            document.getElementById('bt-tl').innerHTML='';
+            document.getElementById('bt-charts').classList.add('hidden');
+            document.getElementById('bt-trades').classList.add('hidden');
+        }catch(e){}
         try{
             await _runBacktestInner();
         }finally{
@@ -1356,8 +1364,21 @@ let _lastOpenTrdHTML = null;
         try{
             if(!r) throw new Error(lastErr||'No response');
             _restore();
-            if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');return;}
+            if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');try{document.getElementById('bt-tl').innerHTML='';}catch(e){}return;}
+            // Stale-response guard: an older/slower run must never overwrite
+            // a newer run's screen. Backend binds every result to a run_id.
+            try{
+                if(r.run_id){
+                    if(window._btRenderedId===r.run_id) return;
+                    window._btRenderedId=r.run_id;
+                }
+            }catch(e){}
             const m=r.metrics||r; window._lastBacktestMetrics=m;
+            const _zt=(m.total_trades||0)===0;
+            const ZN=(v)=>_zt?'N/A':v;
+            const _p=(r.params||{});
+            const _pleg=(_p.legs||[]).map(l=>((l.transaction||'').toUpperCase()+' '+(l.option_type||'').toUpperCase())).join(' + ')||'-';
+            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+' • '+(r.cached?'(cached)':((r.took_ms||0)/1000).toFixed(1)+'s');
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
             const pnl = m.final_capital - m.initial_capital;
@@ -1374,30 +1395,32 @@ let _lastOpenTrdHTML = null;
                 zeroH=`<div class="alert alert-warning py-2 mb-2 small"><strong><i class="bi bi-exclamation-triangle"></i> 0 trades — wajah:</strong> ${r.note||'Is period/setting me koi entry signal nahi bana (honest zero).'}${tips?`<ul class="mb-0 mt-1">${tips}</ul>`:''}</div>`;
             }
             document.getElementById('bt-metrics').innerHTML=perSymH+zeroH+`
-<div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> strategy 4 Key Metrics:</strong><span>Win Prob: <strong>${m.win_rate}%</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${m.expectancy}</strong> ${m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>'}</span><span class="ms-auto badge bg-info">Slippage ${(parseFloat(document.getElementById('s-slippage')?.value)||0.50)}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
+<div class="alert alert-secondary py-1 px-2 mb-2 small text-muted">${_pinfo}</div>
+<div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> strategy 4 Key Metrics:</strong><span>Win Prob: <strong>${ZN(m.win_rate+'%')}</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${_zt?'N/A':F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${ZN(m.expectancy)}</strong> ${_zt?'':(m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>')}</span><span class="ms-auto badge bg-info">Slippage ${(parseFloat(document.getElementById('s-slippage')?.value)||0.50)}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
 <div class="row g-2 mb-2">
 <div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Run Name</div><div class="value fw-bold" style="font-size:13px">${document.getElementById('s-name').value||'-'}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlClass}">${F(m.net_pnl||pnl)}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">No. of Trades</div><div class="value">${m.total_trades}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit/Trade</div><div class="value ${pnlClass}">${F(m.avg_profit_per_trade)}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${m.win_rate}%</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Loss %</div><div class="value price-down">${m.loss_rate}%</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit on Winning</div><div class="value price-up">${F(m.avg_win)}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Avg Loss on Losing</div><div class="value price-down">${F(m.avg_loss)}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit/Trade</div><div class="value price-up">${F(m.max_win)}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss/Trade</div><div class="value price-down">${F(m.max_loss)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit/Trade</div><div class="value ${pnlClass}">${_zt?'N/A':F(m.avg_profit_per_trade)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value price-up">${ZN(m.win_rate+'%')}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Loss %</div><div class="value price-down">${ZN(m.loss_rate+'%')}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit on Winning</div><div class="value price-up">${_zt?'N/A':F(m.avg_win)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Avg Loss on Losing</div><div class="value price-down">${_zt?'N/A':F(m.avg_loss)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit/Trade</div><div class="value price-up">${_zt?'N/A':F(m.max_win)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss/Trade</div><div class="value price-down">${_zt?'N/A':F(m.max_loss)}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Max Drawdown</div><div class="value price-down">${m.max_drawdown}%</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Drawdown Days</div><div class="value">${m.max_dd_duration||0} days</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Return/MaxDD</div><div class="value price-up">${m.return_maxdd}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Reward to Risk</div><div class="value price-up">${m.reward_risk}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Expectancy</div><div class="value ${m.expectancy>=0?'price-up':'price-down'}">${m.expectancy}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Max Win Streak</div><div class="value price-up">${m.max_win_streak}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss Streak</div><div class="value price-down">${m.max_loss_streak}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Return/MaxDD</div><div class="value price-up">${ZN(m.return_maxdd)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Reward to Risk</div><div class="value price-up">${ZN(m.reward_risk)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Expectancy</div><div class="value ${m.expectancy>=0?'price-up':'price-down'}">${ZN(m.expectancy)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Win Streak</div><div class="value price-up">${ZN(m.max_win_streak)}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss Streak</div><div class="value price-down">${ZN(m.max_loss_streak)}</div></div></div>
 </div>`;
             if(r.equity_curve&&r.equity_curve.length){document.getElementById('bt-charts').classList.remove('hidden');Plotly.newPlot('eq-chart',[{y:r.equity_curve,type:'scatter',line:{color:'#0d6efd',width:2}}],{title:'Equity Curve',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}})}
-            if(!r.monthly_pnl||!Object.keys(r.monthly_pnl).length){Plotly.newPlot('mo-chart',[{x:['Jan','Feb','Mar','Apr','May','Jun'],y:[1500,-800,2300,1200,-500,1800],type:'bar',marker:{color:['#198754','#dc3545','#198754','#198754','#dc3545','#198754']}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
-            else{Plotly.newPlot('mo-chart',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
+            else{try{Plotly.purge('eq-chart');}catch(e){}}
+            if(!r.monthly_pnl||!Object.keys(r.monthly_pnl).length){document.getElementById('bt-charts').classList.remove('hidden');Plotly.newPlot('mo-chart',[{x:['No monthly data (0 trades)'],y:[0],type:'bar',marker:{color:['#adb5bd']}}],{title:'Monthly P&L - no data',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
+            else{document.getElementById('bt-charts').classList.remove('hidden');Plotly.newPlot('mo-chart',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
             if(r.trade_list&&r.trade_list.length){
                 document.getElementById('bt-trades').classList.remove('hidden');
                 let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Type</th><th>Strike</th><th>B/S</th><th>Qty</th><th>Lots</th><th>Entry Price</th><th>Exit Price</th><th>Exit Reason</th><th>Vix</th><th>P/L</th></tr></thead><tbody>';
@@ -1407,6 +1430,10 @@ let _lastOpenTrdHTML = null;
                     else{h+=`<tr><td>${++tradeIdx}</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike}</td><td>${t.position||'Sell'}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+t.entry_price.toFixed(2):'-'}</td><td>${t.exit_price?'₹'+t.exit_price.toFixed(2):'-'}</td><td class="text-muted small">${t.exit_reason||'-'}</td><td class="text-muted small">${t.vix||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;}});
                 h+='</tbody></table>';
                 document.getElementById('bt-tl').innerHTML=h;
+            }else{
+                // Zero trades: wipe the previous run's table (never show stale rows)
+                try{document.getElementById('bt-tl').innerHTML='<p class="text-muted small p-2">No trades in this run.</p>';}catch(e){}
+                try{document.getElementById('bt-trades').classList.add('hidden');}catch(e){}
             }
         }catch(e){_restore();document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+' <button class="btn btn-sm btn-primary ms-2" onclick="runBacktest()">Retry</button></p>'; showToast('Backtest failed: '+e.message, 'danger');}
     }
@@ -1507,37 +1534,51 @@ let _lastOpenTrdHTML = null;
         document.getElementById('payoffCard').style.display='block';
         await fetchPayoffSpot();
         const spot=_payoffSpot;
-        const lotMap={NIFTY:75,BANKNIFTY:15,FINNIFTY:60,MIDCPNIFTY:75,RELIANCE:250,TCS:175,INFY:400,SBIN:700};
         const sym=payoffSym();
-        const lot=lotMap[sym]||50;
+        // Live lot size from backend (hardcoded map went stale: MARUTI etc
+        // showed 50 and scaled the whole payoff wrong).
+        let lot=50;
+        try{
+            const _lr=await A('/api/lot-size/'+encodeURIComponent(sym));
+            if(_lr&&_lr.lot_size) lot=parseInt(_lr.lot_size)||50;
+            else throw 0;
+        }catch(e){
+            const lotMap={NIFTY:75,BANKNIFTY:15,FINNIFTY:60,MIDCPNIFTY:75,RELIANCE:250,TCS:175,INFY:400,SBIN:700};
+            lot=lotMap[sym]||50;
+        }
         const stepMap={NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:25};
         const step=stepMap[sym]||100;
         const atm=Math.round(spot/step)*step;
         // Black-Scholes proxy (IV 20%, DTE 7) with erf polyfill (JS Math.erf not exists)
         function erf(x){ const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911; const s=x<0?-1:1; x=Math.abs(x); const t=1/(1+p*x); const y=1-((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t*Math.exp(-x*x); return s*y; }
         function bsPremium(s,k,ot){const dte=7/365, vol=0.2, r=0.06; const d1=(Math.log(s/k)+(r+0.5*vol*vol)*dte)/(vol*Math.sqrt(dte)); const d2=d1-vol*Math.sqrt(dte); const Nd1=0.5*(1+erf(d1/Math.sqrt(2))); const Nd2=0.5*(1+erf(d2/Math.sqrt(2))); if(ot==='CE') return s*Nd1 - k*Math.exp(-r*dte)*Nd2; else return k*Math.exp(-r*dte)*(1-Nd2)-s*(1-Nd1); }
-        // build strike mapping
-        stratLegs.forEach(l=>{ let dist=l.otm_distance||0; if(l.strike_selection==='atm') l._strike=atm; else if(l.strike_selection==='otm') l._strike= atm + (l.option_type==='CE'? dist*step : -dist*step); else if(l.strike_selection==='itm') l._strike= atm + (l.option_type==='CE'? -dist*step : dist*step); else l._strike=atm; l._prem=Math.max(5, bsPremium(spot,l._strike,l.option_type)); });
+        // build strike mapping (premium floor 1.5 = engine parity, not 5)
+        stratLegs.forEach(l=>{ let dist=l.otm_distance||0; if(l.strike_selection==='atm') l._strike=atm; else if(l.strike_selection==='otm') l._strike= atm + (l.option_type==='CE'? dist*step : -dist*step); else if(l.strike_selection==='itm') l._strike= atm + (l.option_type==='CE'? -dist*step : dist*step); else l._strike=atm; l._prem=Math.max(1.5, bsPremium(spot,l._strike,l.option_type)); });
+        const _netPnl=(spt)=>{let pnl=0;stratLegs.forEach(l=>{const intr=l.option_type==='CE'?Math.max(0,spt-l._strike):Math.max(0,l._strike-spt);pnl+=(l.transaction==='buy'?(intr-l._prem):(l._prem-intr))*lot*l.lots;});return pnl;};
         const xs=[], ys=[];
         let maxP=-Infinity, minP=Infinity, breakevens=[];
         for(let pct=-8; pct<=8; pct+=0.5){
             const spt = Math.round(spot*(1+pct/100));
-            let pnl=0;
-            stratLegs.forEach(l=>{
-                const intr = l.option_type==='CE'? Math.max(0,spt - l._strike): Math.max(0,l._strike - spt);
-                const legPnl = (l.transaction==='buy'? (intr - l._prem) : (l._prem - intr)) * lot * l.lots;
-                pnl+=legPnl;
-            });
+            const pnl=_netPnl(spt);
             xs.push(spt); ys.push(Math.round(pnl));
             maxP=Math.max(maxP,pnl); minP=Math.min(minP,pnl);
             if(ys.length>1 && ((ys[ys.length-2] <0 && pnl>=0)||(ys[ys.length-2]>=0 && pnl<0))) breakevens.push(spt);
         }
-        // payoff metrics
+        // Naked short = potentially UNLIMITED loss: still falling steeply at
+        // the window edge while in loss => never clip it to the ±8% number.
+        let unlimitedLoss='';
+        try{
+            const upEdge=_netPnl(Math.round(spot*1.08)), upFar=_netPnl(Math.round(spot*1.5));
+            const dnEdge=_netPnl(Math.round(spot*0.92)), dnFar=_netPnl(Math.round(spot*0.5));
+            if(upEdge<0&&upFar<upEdge) unlimitedLoss='upside (naked short CE side)';
+            if(dnEdge<0&&dnFar<dnEdge) unlimitedLoss=(unlimitedLoss?unlimitedLoss+' + ':'')+'downside (naked short PE side)';
+        }catch(e){}
+        // payoff metrics (unlimited short loss is NEVER clipped to the window)
         const beText = breakevens.length? breakevens.map(b=>'\u20B9'+b).join(', ') : '—';
         const maxProfit = Math.round(maxP), maxLoss=Math.round(minP);
-        const rr = maxLoss<0? (maxProfit/Math.abs(maxLoss)).toFixed(2): '∞';
+        const rr = unlimitedLoss? '∞ (unlimited loss side)' : (maxLoss<0? (maxProfit/Math.abs(maxLoss)).toFixed(2): '∞');
         document.getElementById('payoff-spot').textContent='Spot: \u20B9'+spot.toFixed(2)+' | ATM: '+atm;
-        document.getElementById('payoff-metrics').innerHTML=`<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">\u20B9${maxProfit.toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">\u20B9${Math.abs(maxLoss).toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">${beText}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">${rr}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Lots×LotSize</div><div class="value">${stratLegs.reduce((a,l)=>a+l.lots,0)}×${lot}</div></div></div>`;
+        document.getElementById('payoff-metrics').innerHTML=`<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">\u20B9${maxProfit.toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">${unlimitedLoss?'Unlimited ♾️':'\u20B9'+Math.abs(maxLoss).toLocaleString()}</div></div></div>${unlimitedLoss?'<div class="col"><div class="card stat-card-sm" style="border-color:#dc3545"><div class="label">Warning</div><div class="value price-down" style="font-size:11px">Naked short: loss '+unlimitedLoss+'</div></div></div>':''}<div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">${beText}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">${rr}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Lots×LotSize</div><div class="value">${stratLegs.reduce((a,l)=>a+l.lots,0)}×${lot}</div></div></div>`;
         try{ Plotly.newPlot('payoff-chart', [{x:xs, y:ys, type:'scatter', mode:'lines', fill:'tozeroy', line:{color: maxProfit>Math.abs(maxLoss)?'#198754':'#0d6efd', width:2}, fillcolor:'rgba(13,110,253,0.08)'}, {x:[spot], y:[0], mode:'markers', marker:{color:'#dc3545', size:10}, name:'Spot'}], {title:'', xaxis:{title:'Spot at Expiry'}, yaxis:{title:'P&L (₹)'}, shapes:[{type:'line', x0:xs[0], x1:xs[xs.length-1], y0:0, y1:0, line:{color:'#6c757d', dash:'dash'}}], margin:{t:10,b:40,l:60,r:20}, paper_bgcolor:'#fff', plot_bgcolor:'#fff'}, {displayModeBar:false}); }catch(e){}
         // highlight quant cards
         document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));

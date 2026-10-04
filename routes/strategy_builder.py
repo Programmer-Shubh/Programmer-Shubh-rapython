@@ -554,8 +554,14 @@ def _run_backtest_core(req: BacktestRequest):
         _rk = hashlib.md5(json.dumps(req.model_dump() if hasattr(req,'model_dump') else req.dict(), sort_keys=True, default=str).encode()).hexdigest()
         _rc = _BT_RESULT_CACHE.get(_rk)
         if _rc and _t0 - _rc[0] < 600:
-            # return cached instantly with fresh took_ms
+            # return cached instantly with fresh took_ms AND fresh run_id
+            # (same params, but a NEW run: stale-guard needs unique ids)
             _cached = dict(_rc[1]); _cached['took_ms']=5; _cached['cached']=True
+            try:
+                import uuid as _uu2
+                _cached['run_id'] = f"bt-{_uu2.uuid4().hex[:12]}"
+            except Exception:
+                pass
             return _cached
     except Exception:
         _rk=None
@@ -926,8 +932,42 @@ def _run_backtest_core(req: BacktestRequest):
             _zero_note = _rt + (_zero_note or "")
     except Exception:
         pass
+    # Unique run binding: every result carries the exact parameters that
+    # produced it. Frontend drops any response whose run_id is stale, so an
+    # older/slower run can never overwrite a newer run's trades+metrics.
+    try:
+        import uuid as _uu
+        _run_id = f"bt-{_uu.uuid4().hex[:12]}"
+    except Exception:
+        import time as _tt
+        _run_id = f"bt-{int(_tt.time() * 1000) % 100000000}"
+    try:
+        _legs_echo = [{"option_type": str((l or {}).get("option_type", "")),
+                       "transaction": str((l or {}).get("transaction", "")),
+                       "lots": (l or {}).get("lots", 1),
+                       "strike_selection": str((l or {}).get("strike_selection", "")),
+                       "otm_distance": (l or {}).get("otm_distance", 0),
+                       "expiry": str((l or {}).get("expiry", ""))} for l in (legs or [])]
+    except Exception:
+        _legs_echo = []
+    try:
+        _inds_echo = [str((iv.get("id") if isinstance(iv, dict) else iv) or "") for iv in (indicators or [])]
+    except Exception:
+        _inds_echo = []
     _final_res = {
         "success": True,
+        "run_id": _run_id,
+        "params": {"symbols": _syms,
+                   "legs": _legs_echo,
+                   "timeframe": timeframe,
+                   "start_date": start_date, "end_date": end_date,
+                   "indicators": _inds_echo,
+                   "trade_mode": str(advanced_in.get("trade_mode", "")),
+                   "entry_time": str(advanced_in.get("entry_time", "")),
+                   "exit_time": str(advanced_in.get("exit_time", "") or advanced_in.get("early_exit_time", "")),
+                   "sl": float(risk_in.get("daily_stop_loss", 0) or 0),
+                   "tp": float(risk_in.get("daily_take_profit", 0) or 0),
+                   "max_trades_per_day": int(risk_in.get("max_trades_per_day", 0) or 0)},
         "engine": _engine_name,
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
         "symbols": _syms,

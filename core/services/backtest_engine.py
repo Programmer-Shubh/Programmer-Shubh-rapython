@@ -199,11 +199,13 @@ class BacktestEngine:
                 pending_entry = None
                 pending_auto_buy = None
 
-            # No exits on the entry bar itself (0-hold round-trips are
-            # look-ahead fantasy: entry at this bar's open, first honest
-            # exit from the NEXT bar). Covers pending/SL/TP/MTM/intraday.
+            # No signal/SL/TP exits on the entry bar of INTRADAY (minute)
+            # bars (0-hold round-trips at one timestamp are look-ahead
+            # fantasy). Daily bars have no clock: entry at open, SL/TP range
+            # and EOD exit all apply to the same date honestly (DB parity).
             try:
-                just_entered = bool(entry_bars) and entry_bars[-1] == i
+                just_entered = (bool(entry_bars) and entry_bars[-1] == i
+                                and bool(cur.get("bar_time")))
             except Exception:
                 just_entered = False
             has_open = len(entries) > len(exits)
@@ -258,13 +260,20 @@ class BacktestEngine:
                     kill_switch_on = True
 
             has_open = len(entries) > len(exits) and not just_entered
-            # Early exit: close by early_exit_time (default 15:10) instead of 15:14
-            # For daily bars, check if we're on the last bar OR if early_exit_time is set
-            is_early_exit = is_last
-            if trade_mode == "intraday" and early_exit_time:
-                # For daily bars, we can't check exact time, so use last bar
-                # For intraday (minute bars), this would check actual time
-                is_early_exit = is_last  # daily bars use last bar anyway
+            # Intraday square-off, same SESSION as entry (never next-day):
+            # minute bars -> last bar of the day; daily bars -> the entry
+            # bar's own close (one bar IS one session). Stale multi-day
+            # intraday holds are also flushed (entry_date < today).
+            is_early_exit = False
+            if trade_mode == "intraday" and has_open:
+                try:
+                    _ed = str(entries[len(exits)].get("date", "") or "")
+                except Exception:
+                    _ed = ""
+                if cur.get("bar_time"):
+                    is_early_exit = bool(is_last)
+                else:
+                    is_early_exit = bool(is_last and _ed and _ed <= cur_date)
             if has_open and trade_mode == "intraday" and is_early_exit:
                 entry = entries[len(exits)]
                 if entry.get("is_spread"):
