@@ -227,10 +227,14 @@ def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict
     max_win = round(max(pnls), 2) if pnls else 0.0
     _neg = [p for p in pnls if p < 0]
     max_loss = round(min(_neg), 2) if _neg else 0.0
-    # Streaks + drawdown on exit-date order
+    # Streaks + drawdown on exit-date order. Drawdown measured on
+    # capital-based equity (base 10L): a pure-losing curve must still show
+    # DD (old code started peak at 0.0, so all-loss runs reported 0%).
+    base = 1000000.0
     ws = ls = mws = mls = 0
     peak = cap = 0.0
     max_dd = 0.0
+    dd_run = max_dd_run = 0
     equity = []
     monthly = {}
     for p in pnls:
@@ -244,8 +248,15 @@ def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict
         mls = max(mls, ls)
         cap += p
         peak = max(peak, cap)
-        if peak > 0:
-            max_dd = max(max_dd, (peak - cap) / peak * 100)
+        eqv = base + cap
+        peakv = base + peak
+        if peakv > 0:
+            max_dd = max(max_dd, (peakv - eqv) / peakv * 100)
+        if cap < peak:
+            dd_run += 1
+            max_dd_run = max(max_dd_run, dd_run)
+        else:
+            dd_run = 0
         equity.append(round(cap, 2))
     for t in trades:
         try:
@@ -280,13 +291,13 @@ def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict
         "net_pnl": net,
         "max_win": max_win,
         "max_loss": max_loss,
-        "max_dd_duration": 0,
-        "return_maxdd": 0,
-        "reward_risk": 0,
+        "max_dd_duration": max_dd_run,
+        "return_maxdd": round(abs(round(net / base * 100, 4)) / max_dd, 2) if n and max_dd > 0 else 0,
+        "reward_risk": round((gross_win / max(wins, 1)) / max(gross_loss / max(losses, 1), 0.01), 2) if n and wins and losses else 0.0,
         "expectancy": round(net / n, 2) if n else 0.0,
         "max_win_streak": mws,
         "max_loss_streak": mls,
-        "max_trades_in_dd": 0,
+        "max_trades_in_dd": max_dd_run,
         "total_brokerage": round(total_brokerage, 2),
         "trade_list": trades,
         "equity_curve": equity,
@@ -1346,7 +1357,7 @@ def run_master_confluence(req: MasterConfluenceRequest):
                 "total_return": round(capital - initial_capital, 2),
                 "total_return_pct": round((capital - initial_capital) / initial_capital * 100, 4),
                 "win_rate": round(win_rate, 2),
-                "max_drawdown": round(max_dd, 2),
+        "max_drawdown": round(max_dd, 2),
                 "profit_factor": round(wins / max(n - wins, 1) * 100, 2) if n > 0 else 0,
                 "sharpe_ratio": round(sharpe, 4),
                 "total_trades": n,
