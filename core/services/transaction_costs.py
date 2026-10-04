@@ -81,6 +81,37 @@ class TransactionCosts:
             "total": round(total, 2),
         }
 
+    # Equity (delivery vs intraday) STT/stamp differ from options
+    STT_EQ_DELIVERY_PCT = 0.1    # 0.1% both sides (delivery)
+    STT_EQ_INTRADAY_PCT = 0.025  # 0.025% sell only (intraday)
+    STAMP_EQ_DELIVERY_BUY_PCT = 0.015
+    STAMP_EQ_INTRADAY_PCT = 0.0
+
+    @classmethod
+    def calculate_equity(cls, turnover: float, is_sell: bool, intraday: bool = True) -> dict:
+        """Equity cash-market costs (separate from options math)."""
+        brokerage = cls.BROKERAGE_PER_TRADE
+        exchange_txn = turnover * cls.EXCHANGE_TXN_PCT / 100
+        sebi_fee = turnover * cls.SEBI_FEE_PCT / 100
+        if intraday:
+            stamp_duty = turnover * cls.STAMP_EQ_INTRADAY_PCT / 100
+            stt = turnover * cls.STT_EQ_INTRADAY_PCT / 100 if is_sell else 0.0
+        else:
+            stamp_duty = turnover * cls.STAMP_EQ_DELIVERY_BUY_PCT / 100 if not is_sell else 0.0
+            stt = turnover * cls.STT_EQ_DELIVERY_PCT / 100
+        subtotal = brokerage + exchange_txn + sebi_fee + stamp_duty + stt
+        gst = subtotal * cls.GST_PCT / 100
+        total = subtotal + gst
+        return {
+            "brokerage": round(brokerage, 2),
+            "exchange_txn": round(exchange_txn, 2),
+            "sebi_fee": round(sebi_fee, 2),
+            "stamp_duty": round(stamp_duty, 2),
+            "stt": round(stt, 2),
+            "gst": round(gst, 2),
+            "total": round(total, 2),
+        }
+
     @classmethod
     def latency_delay(cls, is_live: bool = False) -> float:
         """Return simulated latency in seconds."""

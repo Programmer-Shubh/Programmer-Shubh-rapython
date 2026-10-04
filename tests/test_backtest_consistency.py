@@ -176,6 +176,38 @@ def test_optionable_guard():
     assert "trade_list" not in (r.get("metrics") or {})
 
 
+def test_equity_backtest():
+    r = _run_backtest_core(BacktestRequest(
+        symbol="RELIANCE", symbols=["RELIANCE"], start_date="2026-07-20", end_date="2026-08-20",
+        indicators=[{"id": "supertrend", "params": {"period": 10, "multiplier": 3}}],
+        legs=[{"option_type": "EQ", "transaction": "buy", "lots": 10,
+               "strike_selection": "atm", "otm_distance": 0}],
+        advanced={"trade_mode": "intraday", "timeframe": "1d"},
+        risk={"max_trades_per_day": 5, "daily_stop_loss": 1500, "daily_take_profit": 3000}))
+    assert not r.get("error"), r.get("error")
+    tl = r.get("trade_list") or []
+    assert tl, "EQ must trade"
+    for t in tl:
+        assert t.get("option_type") == "EQ", t
+        assert t.get("exit_date") == t.get("entry_date"), t
+        assert t.get("quantity") == 10, t
+        ep, xp = float(t["entry_price"]), float(t["exit_price"])
+        assert abs(ep - xp) / ep < 0.5, t
+        gross = (xp - ep) * 10
+        assert abs(t["pnl"] - gross) < abs(gross) * 0.3 + 200, (t, gross)
+
+
+def test_equity_non_fno_allowed():
+    r = _run_backtest_core(BacktestRequest(
+        symbol="GOLDBEES", symbols=["GOLDBEES"], start_date="2026-08-01", end_date="2026-08-20",
+        indicators=[{"id": "supertrend", "params": {"period": 10, "multiplier": 3}}],
+        legs=[{"option_type": "EQ", "transaction": "buy", "lots": 10,
+               "strike_selection": "atm", "otm_distance": 0}],
+        advanced={"trade_mode": "intraday", "timeframe": "1d"},
+        risk={"max_trades_per_day": 5, "daily_stop_loss": 1500, "daily_take_profit": 3000}))
+    assert not r.get("error"), r.get("error")
+
+
 def test_costs_sane():
     from core.services.transaction_costs import TransactionCosts
     c = TransactionCosts.calculate(100000, True, False)

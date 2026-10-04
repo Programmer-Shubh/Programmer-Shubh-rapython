@@ -670,6 +670,12 @@ def _run_backtest_core(req: BacktestRequest):
             try:
                 from utils.helpers import is_optionable as _isopt
                 _has_opt_legs = any(str((l or {}).get("option_type", "")).upper() in ("CE", "PE") for l in (legs or []))
+                _n_legs = len([l for l in (legs or []) if isinstance(l, dict)])
+                _has_eq = any(str((l or {}).get("option_type", "")).upper() == "EQ" for l in (legs or []))
+                if _n_legs > 1 and _has_eq:
+                    _per_symbol[_sym] = {"error": "EQ (equity) legs sirf single-leg me - option spreads ke saath mix nahi hote.", "total_trades": 0,
+                                         "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
+                    continue
                 if _has_opt_legs and not _isopt(_sym):
                     _per_symbol[_sym] = {"error": f"{_sym} me options nahi hain (F&O me listed nahi) - option backtest/trade impossible. Spot/Equity par chalao.", "total_trades": 0,
                                          "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}

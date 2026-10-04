@@ -57,6 +57,7 @@ class BacktestEngine:
         trade_mode = str(advanced_options.get("trade_mode", advanced_options.get("trade_type", "positional")) or "positional").lower()
         if trade_mode not in ("intraday", "positional", "btst"):
             trade_mode = "positional"
+        self._eq_intraday = (trade_mode == "intraday")
         max_holding = int(advanced_options.get("max_holding_bars", 20))
         # Intraday: hold max 5 bars for more trades like Quantman (positional holds longer)
         if trade_mode == "intraday":
@@ -86,7 +87,12 @@ class BacktestEngine:
         latency = TransactionCosts.latency_delay(self.is_live)
         leg = legs[0] if legs else {"option_type": "CE", "lots": 1, "transaction": "buy"}
         option_type = leg.get("option_type", "CE")
-        qty = int(leg.get("lots", 1)) * get_lot_size(symbol)
+        # EQ legs: qty = share count (lots field), NOT lots x F&O lot-size.
+        # Mixing them minted crore-rupee fantasy P&L (entry qty 10 vs exit 2500).
+        if str(option_type).upper() == "EQ":
+            qty = max(1, int(leg.get("lots", 1) or 1))
+        else:
+            qty = int(leg.get("lots", 1)) * get_lot_size(symbol)
         txn_type = leg.get("transaction", "buy").lower()
         leg_sl = float(leg.get("stop_loss", risk_management.get("daily_stop_loss", 500)) or 0)
         leg_tp = float(leg.get("take_profit", risk_management.get("daily_take_profit", 1000)) or 0)
@@ -1142,6 +1148,22 @@ class BacktestEngine:
         option_type = leg.get("option_type", "CE")
         txn_type = leg.get("transaction", "buy").lower()
         lots = int(leg.get("lots", 1))
+        # EQ (equity spot) legs: price IS the underlying (no strike/premium);
+        # qty = share count (lots field), equity cash costs, intraday-aware.
+        if str(option_type).upper() == "EQ":
+            qty = max(1, lots)
+            premium = TransactionCosts.apply_fill_slippage(float(spot or 0), "BUY" if txn_type == "buy" else "SELL", self.is_live)
+            costs = TransactionCosts.calculate_equity(premium * qty, txn_type == "sell", getattr(self, "_eq_intraday", True))
+            entry_time = getattr(self, '_entry_time', '09:35')
+            entry_clock = getattr(self, '_cur_bar_time', '') or entry_time
+            # Numeric strike (= entry spot): float(entry["strike"]) call sites
+            # across exits/MTM stay crash-free; display shows the level.
+            return {
+                "date": date, "strike": round(float(spot or 0), 2), "price": round(premium, 2),
+                "quantity": qty, "costs": costs, "time": entry_clock,
+                "total_cost": round(premium * qty + costs["total"], 2),
+                "type": txn_type, "legs": [{"option_type": "EQ", "strike": round(float(spot or 0), 2), "type": txn_type, "lots": lots}],
+            }
         qty = lots * get_lot_size(symbol)
         strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
         premium = self._entry_premium(date, spot, strike, option_type)
@@ -1265,6 +1287,17 @@ class BacktestEngine:
         sl_level = _to_level(sl_amt, True)
         tp_level = _to_level(tp_amt, False)
 
+        # EQ (equity spot) legs: SL/TP on the BAR's spot high/low directly -
+        # no Black-Scholes, no option chain. Same source as EQ entry.
+        if str(option_type or "").upper() == "EQ":
+            try:
+                _hs = float(current.get("high_price", 0) or current.get("close_price", 0) or 0)
+                _ls = float(current.get("low_price", 0) or current.get("close_price", 0) or 0)
+                if _hs and _ls:
+                    return self._check_sl_tp_levels(txn_type, sl_level, tp_level,
+                                                    max(_hs, _ls), min(_hs, _ls))
+            except Exception:
+                pass
         # SL/TP is on OPTION PREMIUM, not spot. Prefer the option's OWN
         # bar high/low (same DB source as entry) when cached; else estimate
         # via Black-Scholes at bar high/low spot. Mixing DB-entry with
@@ -1547,9 +1580,15 @@ class BacktestEngine:
         return getattr(self, '_expiry_hint', 'weekly')
 
     def _exit_premium(self, date, spot, strike, option_type):
+        # EQ legs exit at the execution-bar spot (no option chain involved)
+        if str(option_type or "").upper() == "EQ":
+            return max(float(spot or 0), 0.01)
         return self._entry_premium(date, spot, strike, option_type)
 
     def _close_premium(self, date, spot, strike, option_type):
+        # EQ legs exit at the execution-bar spot (no option chain involved)
+        if str(option_type or "").upper() == "EQ":
+            return max(float(spot or 0), 0.01)
         key = f"{date}_{strike}_{option_type}_c"
         if key in self.premium_cache:
             return self.premium_cache[key]
@@ -1682,7 +1721,16 @@ class BacktestEngine:
         # SL/TP exits (e.g. 9.30 on a far-OTM option) must execute exactly,
         # else a spot*1.5% floor (~42) silently destroys every stop-loss.
         exit_prem = max(float(exit_prem or 0), 0.05)
-        exit_costs = TransactionCosts.calculate(exit_prem * qty, txn_type == "buy", self.is_live)
+        try:
+            _eq_exit = str((entry.get("legs", [{}])[0] or {}).get("option_type", "")) == "EQ"
+        except Exception:
+            _eq_exit = False
+        if _eq_exit:
+            # Exit side is opposite of entry (buy->SELL): same convention as above
+            exit_costs = TransactionCosts.calculate_equity(
+                exit_prem * qty, txn_type == "buy", getattr(self, "_eq_intraday", True))
+        else:
+            exit_costs = TransactionCosts.calculate(exit_prem * qty, txn_type == "buy", self.is_live)
         if txn_type == "buy":
             pnl = (exit_prem * qty - exit_costs["total"]) - entry["total_cost"]
         else:
