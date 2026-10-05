@@ -37,13 +37,13 @@ jobs:
         run: python scripts/auto_scan.py
 
       - name: Run Auto Trade Logic (SL/TP checks)
+        # Heartbeat does EVERYTHING server-side (exits + entries + rollover),
+        # so paper trading continues with the browser closed / server asleep.
         # NOTE: scripts/auto_trade.py on a fresh checkout sees an EMPTY local
-        # DB, so it can never close production trades. The in-app SL monitor
-        # (core/services/sl_monitor.py) owns production exits; this step just
-        # wakes it via the idempotent monitor endpoint (cron backup).
+        # DB, so it can never close production trades - never use it directly.
         run: |
-          URL="${RATRADE_URL:-https://ratrade-iwi2.onrender.com}/api/trades/monitor"
-          curl -sf -X POST "$URL" && echo "MONITOR OK" || echo "monitor unreachable (in-app thread still covers it)"
+          URL="${RATRADE_URL:-https://ratrade-iwi2.onrender.com}/api/trades/heartbeat"
+          curl -sf -X POST "$URL" && echo "HEARTBEAT OK" || echo "heartbeat unreachable (in-app threads still cover it)"
 
       - name: Smoke-test API Server
         env:

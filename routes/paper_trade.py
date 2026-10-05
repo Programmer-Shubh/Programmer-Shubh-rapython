@@ -106,6 +106,38 @@ def run_monitor(key: str = ""):
         return {"error": str(e)[:200]}
 
 
+@router.post("/heartbeat")
+def heartbeat(key: str = ""):
+    """One wake-up call that does EVERYTHING (browser band ho tab bhi):
+    SL/TP exits + auto-paper entries + strategy rollover. Idempotent and
+    safe to call often - GitHub cron hits this every 15 min in market hours.
+    This is what keeps paper trading alive while nobody watches."""
+    try:
+        import os as _os
+        _need = _os.environ.get("MONITOR_KEY", "")
+        if _need and key != _need:
+            return {"error": "forbidden"}
+        out = {"success": True}
+        try:
+            from core.services.sl_monitor import run_once as _sl_once
+            out["exits"] = _sl_once(min_interval=0, market_hours=True)
+        except Exception as e:
+            out["exits"] = {"error": str(e)[:120]}
+        try:
+            from core.services.auto_paper import run_once as _ap_once
+            out["entries"] = _ap_once(min_interval=0, market_hours=True)
+        except Exception as e:
+            out["entries"] = {"error": str(e)[:120]}
+        try:
+            from routes.strategies import auto_rollover_expired
+            out["rolled"] = auto_rollover_expired()
+        except Exception as e:
+            out["rolled"] = f"error: {e}"[:120]
+        return out
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 @router.get("/auto-paper-status")
 def auto_paper_status(run: int = 0):
     """Dry-run diagnosis: why each strategy did/didn't paper-trade. No orders.
