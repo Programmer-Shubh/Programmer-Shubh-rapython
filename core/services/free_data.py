@@ -315,6 +315,54 @@ def fetch_yahoo_daily(symbol: str, start_date: str, end_date: str, timeout: floa
     return out
 
 
+def fetch_yahoo_intraday(symbol: str, interval: str = "15m", days: int = 5, timeout: float = 10):
+    """Yahoo intraday bars (TV nologin fails on cloud). interval 5m/15m/30m/1h,
+    IST-stamped bar dicts with bar_time. Returns [] on any failure."""
+    out = []
+    try:
+        import datetime as _dt
+        iv = {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "60m"}.get(str(interval or "15m"), "15m")
+        ysym = _YAHOO_MAP.get((symbol or "").upper(),
+                              f"{symbol}.NS" if "." not in (symbol or "") and not str(symbol or "").startswith("^") else symbol)
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval={iv}&range={int(days or 5)}d"
+        _sess = _yahoo_session()
+        try:
+            r = _sess.get(url, timeout=timeout) if _sess is not None else requests.get(url, headers=_UA, timeout=timeout)
+        except Exception:
+            return []
+        if r is None or r.status_code != 200:
+            return []
+        j = r.json()
+        res = (j.get("chart", {}).get("result") or [{}])[0]
+        ts = res.get("timestamp") or []
+        ind = res.get("indicators", {}) or {}
+        q = ((ind.get("quote") or [{}])[0]) or {}
+        oo, hh, ll, cc, vv = q.get("open") or [], q.get("high") or [], q.get("low") or [], q.get("close") or [], q.get("volume") or []
+        _ist = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+        for k, t in enumerate(ts):
+            try:
+                dt = _dt.datetime.fromtimestamp(int(t), tz=_dt.timezone.utc).astimezone(_ist)
+                if dt.weekday() >= 5:
+                    continue
+                c = float(cc[k]) if k < len(cc) and cc[k] else 0
+                if c <= 0:
+                    continue
+                o = float(oo[k]) if k < len(oo) and oo[k] else c
+                h = float(hh[k]) if k < len(hh) and hh[k] else c
+                l = float(ll[k]) if k < len(ll) and ll[k] else c
+                out.append({"symbol": str(symbol or "").upper(),
+                            "trade_date": dt.strftime("%Y-%m-%d"),
+                            "bar_time": dt.strftime("%H:%M"),
+                            "open_price": round(o, 2), "high_price": round(h, 2),
+                            "low_price": round(l, 2), "close_price": round(c, 2),
+                            "volume": int(float(vv[k] or 0)) if k < len(vv) else 0})
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
 def fetch_google_historical(symbol: str, start_date: str, end_date: str):
     """Google getprices for historical fallback."""
     try:

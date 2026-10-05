@@ -1622,6 +1622,22 @@ class OptionScanner:
                 return bars
         except Exception:
             pass
+        # TV failed on cloud (nologin limits/timeouts): Yahoo 15m fallback.
+        try:
+            from core.services.free_data import fetch_yahoo_intraday
+            yb = fetch_yahoo_intraday(symbol, tf if tf in ("5m", "15m", "30m", "1h") else "15m", days=5)
+            if yb and len(yb) >= 35:
+                yb = yb[-n_bars:]
+                if use_cache:
+                    try:
+                        self._INTRA_CACHE[ck] = (_tm.time(), yb)
+                        if len(self._INTRA_CACHE) > 30:
+                            self._INTRA_CACHE.pop(next(iter(self._INTRA_CACHE)))
+                    except Exception:
+                        pass
+                return yb
+        except Exception:
+            pass
         return []
 
     def scan_intraday(self, symbols=None, tf: str = "15m", min_score: int = 60) -> list:

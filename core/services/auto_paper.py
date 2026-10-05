@@ -121,11 +121,14 @@ def _today_signal(sid, s, today):
         if not sym:
             return False, "no symbol"
         try:
-            from routes.strategy_builder import _load_db_history
+            # Full fetch chain (DB -> TV -> Yahoo -> openchart -> Stooq),
+            # NOT DB-only: production DB had 12 stale dates while Yahoo has
+            # 1y - DB-only gate starved every strategy forever.
+            from core.services.historical_fetcher import fetch_historical
             import datetime as _dt
             _end = _dt.datetime.strptime(today, "%Y-%m-%d").date()
-            _start = (_end - _dt.timedelta(days=90)).strftime("%Y-%m-%d")
-            _hist = _load_db_history(sym, _start, today)
+            _start = (_end - _dt.timedelta(days=120)).strftime("%Y-%m-%d")
+            _hist = fetch_historical(sym, _start, today)
             if not _hist or len(_hist) < 30:
                 return False, "no real history (synthetic par signal nahi)"
         except Exception:
