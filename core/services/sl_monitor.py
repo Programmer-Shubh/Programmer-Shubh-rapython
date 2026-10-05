@@ -74,17 +74,30 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
 
 
 def start_background(interval_s=30):
-    """Daemon thread: SL/TP scan every `interval_s` in market hours."""
+    """Daemon thread: SL/TP scan every `interval_s` in market hours.
+    First scan runs immediately on boot (no blind window after deploys)."""
+    def _scan():
+        try:
+            from core.services.auto_paper import _beat
+            _beat("sl-monitor")
+        except Exception:
+            pass
+        try:
+            r = run_once(market_hours=True)
+            if r.get("closed"):
+                try:
+                    print(f"[sl-monitor] auto-closed: {r['closed']}", flush=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _loop():
+        _scan()
         while True:
             try:
                 time.sleep(interval_s)
-                r = run_once(market_hours=True)
-                if r.get("closed"):
-                    try:
-                        print(f"[sl-monitor] auto-closed: {r['closed']}", flush=True)
-                    except Exception:
-                        pass
+                _scan()
             except Exception:
                 try:
                     time.sleep(interval_s)

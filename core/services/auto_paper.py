@@ -509,21 +509,28 @@ def dry_run_status():
 def start_background(interval_s=600):
     """Daemon thread: auto paper-trade scan every `interval_s` (default 10min,
     so a closed position re-enters intraday without manual clicks)."""
+    def _onescan():
+        try:
+            _beat("daily-worker")
+            r = run_once()
+            with _LOCK:
+                _STATE["last_daily"] = {"placed": len(r.get("placed", [])),
+                                        "notes": (r.get("notes", []) or [])[:3],
+                                        "skipped": r.get("skipped", "")}
+            if r.get("placed"):
+                try:
+                    print(f"[auto-paper] placed: {r['placed']}", flush=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _loop():
+        _onescan()
         while True:
             try:
                 time.sleep(interval_s)
-                _beat("daily-worker")
-                r = run_once()
-                with _LOCK:
-                    _STATE["last_daily"] = {"placed": len(r.get("placed", [])),
-                                            "notes": (r.get("notes", []) or [])[:3],
-                                            "skipped": r.get("skipped", "")}
-                if r.get("placed"):
-                    try:
-                        print(f"[auto-paper] placed: {r['placed']}", flush=True)
-                    except Exception:
-                        pass
+                _onescan()
             except Exception:
                 try:
                     time.sleep(interval_s)
@@ -539,33 +546,37 @@ def start_background(interval_s=600):
 
 def start_live_background(interval_s=300):
     """Daemon thread: live 15m signal evaluation every `interval_s`."""
-    def _loop():
+    def _onescan():
         try:
-            time.sleep(180)
-        except Exception:
-            return
-        while True:
+            _beat("live-worker")
+            r = {"placed": [], "notes": []}
             try:
-                _beat("live-worker")
-                r = {"placed": [], "notes": []}
-                try:
-                    from core.services.sl_monitor import market_open_ist as _mkt
-                    if _mkt():
-                        r = live_signal_pass()
-                except Exception:
-                    pass
-                with _LOCK:
-                    _STATE["last_live"] = {"placed": len((r or {}).get("placed", [])),
-                                           "notes": ((r or {}).get("notes", []) or [])[:3]}
-                if (r or {}).get("placed"):
-                    try:
-                        print(f"[live-signals] placed: {r['placed']}", flush=True)
-                    except Exception:
-                        pass
+                from core.services.sl_monitor import market_open_ist as _mkt
+                if _mkt():
+                    r = live_signal_pass()
             except Exception:
                 pass
+            with _LOCK:
+                _STATE["last_live"] = {"placed": len((r or {}).get("placed", [])),
+                                       "notes": ((r or {}).get("notes", []) or [])[:3]}
+            if (r or {}).get("placed"):
+                try:
+                    print(f"[live-signals] placed: {r['placed']}", flush=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _loop():
+        try:
+            time.sleep(60)
+        except Exception:
+            return
+        _onescan()
+        while True:
             try:
                 time.sleep(interval_s)
+                _onescan()
             except Exception:
                 break
     try:

@@ -40,10 +40,20 @@ async def _fno_sync_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Health must be instant — do NOT block startup with DB work.
-    # Yield immediately so /health passes, then do migrations in background.
+    # CRITICAL lifespan rule: code AFTER yield runs ONLY at SHUTDOWN.
+    # (An earlier revision started all background threads after yield, so
+    # NONE of them ever ran in production - workers looked configured but
+    # were dead.) Everything below is scheduled BEFORE yield: instant for
+    # /health, then runs on the loop/threads.
+    try:
+        asyncio.get_running_loop().create_task(_startup_background())
+    except: pass
     yield
-    # Background post-start work (non-blocking)
+    # Shutdown: nothing special (daemon threads exit with the process).
+
+
+async def _startup_background():
+    """Fire-and-forget boot of every background system (never blocks health)."""
     try:
         await _start_background_refresh()
     except: pass
@@ -136,6 +146,9 @@ async def lifespan(app: FastAPI):
             except: pass
         import threading as _th
         _th.Thread(target=_lot_backfill, daemon=True).start()
+    except: pass
+    try:
+        print("[lifespan] background systems scheduled", flush=True)
     except: pass
 
 
