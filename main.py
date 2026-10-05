@@ -94,6 +94,18 @@ async def lifespan(app: FastAPI):
         _th6.Thread(target=_live_sig_loop, daemon=True).start()
     except: pass
     try:
+        # Opportunities cache warmup: cold scans exceed the UI timeout.
+        def _opp_warm():
+            import time as _t
+            _t.sleep(90)
+            try:
+                from routes.scanner import warm_opp_cache_once
+                warm_opp_cache_once()
+            except: pass
+        import threading as _th7
+        _th7.Thread(target=_opp_warm, daemon=True).start()
+    except: pass
+    try:
         # Strategy self-healing: expired ACTIVE strategies roll to next
         # weekly expiry by themselves (hourly) - no button press needed.
         def _roll_loop():

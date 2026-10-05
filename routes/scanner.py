@@ -66,6 +66,26 @@ def arb_exit(payload: dict):
     except Exception as e:
         return {"error": str(e)[:200]}
 
+def warm_opp_cache_once():
+    """Post-boot warmup (background thread): seed top history + compute one
+    full 4-part scan so the route cache is hot. First dashboard load then
+    takes <1s instead of timing out on a cold 60s+ scan."""
+    try:
+        from core.services.scanner import OptionScanner
+        s = OptionScanner()
+        try:
+            s._warm_history((s.INTRA_SYMBOLS if hasattr(s, "INTRA_SYMBOLS") else [])[:15])
+        except Exception:
+            pass
+        try:
+            real = s.get_4_part_opportunities(min_score=70)
+            _cache_set("opp4_70", real)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 @router.post("/seed-history")
 def seed_history(max_symbols: int = 15):
     """Synchronous Yahoo backfill for the top universe (fixes empty

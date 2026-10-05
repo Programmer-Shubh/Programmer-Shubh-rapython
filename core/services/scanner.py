@@ -88,7 +88,8 @@ class OptionScanner:
                 try:
                     for _f in _ac(_futs, timeout=20):
                         try:
-                            if _f.result():
+                            _left = max(1, _deadline - _tm.time())
+                            if _f.result(timeout=_left):
                                 done += 1
                         except Exception:
                             pass
@@ -156,7 +157,7 @@ class OptionScanner:
                     try:
                         for _f in _ac(_futs, timeout=10):
                             try:
-                                _f.result()
+                                _f.result(timeout=max(1, _deadline - _tw.time()))
                             except Exception:
                                 pass
                             if _tw.time() >= _deadline:
@@ -1645,7 +1646,8 @@ class OptionScanner:
                         break
                     sym = _futs[_f]
                     try:
-                        bars = _f.result()
+                        _left = max(1, _deadline - _tm.time())
+                        bars = _f.result(timeout=_left)
                     except Exception:
                         continue
                     if not bars or len(bars) < 35:

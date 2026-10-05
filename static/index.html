@@ -988,9 +988,10 @@
         };
         let _done=false;
         try{
-            // 45s timeout: slow cold scans must show Retry, never stuck Loading
+            // 80s timeout (cold scans exceed 45s on cloud; server warms cache
+            // after boot so repeats are instant). Never stuck on Loading.
             const _ctl=new AbortController();
-            const _to=setTimeout(()=>{try{_ctl.abort();}catch(e){}},45000);
+            const _to=setTimeout(()=>{try{_ctl.abort();}catch(e){}},80000);
             let r;
             try{
                 const _resp=await fetch('/api/scanner/opportunities-4part?min_score=70',{signal:_ctl.signal});
@@ -1000,6 +1001,7 @@
             }
             if(r&&r.error) throw new Error(r.error);
             const all=[...(r.ce_buy||[]),...(r.pe_buy||[]),...(r.ce_sell||[]),...(r.pe_sell||[])];
+            if(!all.length){ if(el) el.innerHTML='<p class="text-muted small p-2">No strong setups right now (strict 70+ filter) — <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps()">Retry</button></p>'; _done=true; return; }
             renderTop(all);
             _done=true;
             if(r.dummy){ setTimeout(()=>{ try{ loadOpps(); }catch(e){} }, 2500); }
