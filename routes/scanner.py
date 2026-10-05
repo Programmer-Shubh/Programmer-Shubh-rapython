@@ -66,6 +66,52 @@ def arb_exit(payload: dict):
     except Exception as e:
         return {"error": str(e)[:200]}
 
+@router.post("/seed-history")
+def seed_history(max_symbols: int = 15):
+    """Synchronous Yahoo backfill for the top universe (fixes empty
+    production DB: only 12 stale dates -> real-data gate blocked all).
+    Returns per-symbol ok/fail. Call once after deploy, then nightly job
+    keeps it fresh. Bounded ~40s."""
+    try:
+        max_symbols = max(1, min(int(max_symbols or 15), 25))
+    except Exception:
+        max_symbols = 15
+    try:
+        from core.services.scanner import OptionScanner
+        s = OptionScanner()
+        syms = (s.INTRA_SYMBOLS if hasattr(s, "INTRA_SYMBOLS") else [])[:max_symbols]
+        if not syms:
+            syms = ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "HDFCBANK"]
+        import datetime as _dt
+        _end = _dt.date.today().strftime("%Y-%m-%d")
+        _start = (_dt.date.today() - _dt.timedelta(days=120)).strftime("%Y-%m-%d")
+        out = {}
+        for sym in syms:
+            try:
+                from core.services.free_data import fetch_yahoo_daily
+                from core.models.bhavcopy_model import BhavcopyModel
+                bars = fetch_yahoo_daily(sym, _start, _end, timeout=10)
+                if bars and len(bars) >= 20:
+                    try:
+                        BhavcopyModel().import_data(bars)
+                    except Exception as e:
+                        out[sym] = f"db-fail: {e}"[:100]
+                        continue
+                    try:
+                        s._REAL_CACHE.pop(sym.upper(), None)
+                        s._SYNT_CACHE.pop(sym.upper(), None)
+                    except Exception:
+                        pass
+                    out[sym] = f"ok {len(bars)} bars"
+                else:
+                    out[sym] = "no-data"
+            except Exception as e:
+                out[sym] = f"error: {e}"[:100]
+        return {"seeded": out}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 @router.get("/pairs")
 def pairs_scan(symbols: str = ""):
     """Statistical Arbitrage — cointegrated pairs spread z-score."""
