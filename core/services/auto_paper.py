@@ -158,11 +158,155 @@ def _today_signal(sid, s, today):
         return False, f"signal-check fail: {e}"[:120]
 
 
-def place_for_strategy(sid):
+def _intraday_signal(sid, s, today):
+    """Live 15m-bar signal check: runs the strategy's own indicators on
+    fresh intraday bars and returns the legs that fired TODAY.
+    Returns (fired_legs_or_None, note). Never raises."""
+    import json as _js
+    try:
+        sym = str(s.get("symbol") or "").upper()
+        if not sym:
+            return None, "no symbol"
+        try:
+            from core.services.scanner import OptionScanner
+            bars = OptionScanner()._fetch_intraday_bars(sym, "15m")
+        except Exception:
+            bars = []
+        if not bars or len(bars) < 40:
+            return None, "no fresh 15m bars"
+        try:
+            legs = _js.loads(s.get("legs") or "[]")
+        except Exception:
+            legs = []
+        if not legs:
+            return None, "no legs"
+        if any(str(l.get("option_type", "")).upper() == "AUTO" for l in legs):
+            return None, "AUTO legs need manual direction"
+        try:
+            adv = _js.loads(s.get("advanced_options") or "{}")
+        except Exception:
+            adv = {}
+        if not isinstance(adv, dict):
+            adv = {}
+        adv = dict(adv)
+        adv["trade_mode"] = "intraday"
+        adv["timeframe"] = "15m"
+        try:
+            risk = _js.loads(s.get("risk_management") or "{}")
+        except Exception:
+            risk = {}
+        if not isinstance(risk, dict):
+            risk = {}
+        try:
+            inds = _js.loads(s.get("indicators") or "[]")
+        except Exception:
+            inds = []
+
+        def _run():
+            from core.services.backtest_engine import BacktestEngine
+            eng = BacktestEngine(is_live=False)
+            return eng.run(bars[-120:], sym, today, today,
+                           inds if isinstance(inds, list) else [],
+                           [], [], legs if isinstance(legs, list) else [],
+                           adv, risk, is_live=False)
+
+        import concurrent.futures as _cf
+        with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+            try:
+                res = _ex.submit(_run).result(timeout=120)
+            except Exception as e:
+                return None, f"engine timeout/fail: {e}"[:100]
+        try:
+            tl = ((res or {}).get("metrics") or {}).get("trade_list") or []
+        except Exception:
+            tl = []
+        fired = []
+        try:
+            for t in tl:
+                if str(t.get("entry_date", ""))[:10] != today:
+                    continue
+                _o = str(t.get("option_type") or "").upper()
+                _p = str(t.get("position") or "").upper()
+                for leg in legs:
+                    if (str(leg.get("option_type") or "").upper() == _o
+                            and str(leg.get("transaction") or "").upper() == _p
+                            and leg not in fired):
+                        fired.append(leg)
+                        break
+        except Exception:
+            pass
+        if fired:
+            return fired, f"{len(fired)} leg(s) fired on 15m"
+        return None, "no 15m signal right now"
+    except Exception as e:
+        return None, f"signal-check fail: {e}"[:120]
+
+
+def _execute_legs(s, legs, db, tm, today):
+    """Shared leg executor: live ATM + place_trade per leg. Returns (placed, notes)."""
+    import json as _js
+    from core.services.live_market_data import LiveMarketData
+    from utils.helpers import get_strike_step
+    placed, notes = [], []
+    sid = s.get("id")
+    try:
+        rm = _js.loads(s.get("risk_management") or "{}")
+    except Exception:
+        rm = {}
+    sl = float(rm.get("daily_stop_loss") or 1500)
+    tp = float(rm.get("daily_take_profit") or 3000)
+    sym = str(s.get("symbol") or "").upper()
+    if not sym:
+        return placed, ["no symbol - skipped"]
+    try:
+        spot = LiveMarketData().get_spot_price(sym) or 0
+    except Exception:
+        spot = 0
+    if spot <= 0:
+        return placed, [f"{s.get('name')}: no live spot - skipped"]
+    step = get_strike_step(sym)
+    atm = round(spot / step) * step if step > 0 else spot
+    from routes.option_chain import place_trade, TradeRequest
+    for leg in legs:
+        try:
+            opt = str(leg.get("option_type") or "CE").upper()
+            if opt not in ("CE", "PE"):
+                continue
+            txn = str(leg.get("transaction") or "buy").upper()
+            if txn not in ("BUY", "SELL"):
+                txn = "BUY"
+            sel = str(leg.get("strike_selection") or "atm").lower()
+            dist = int(leg.get("otm_distance") or 0)
+            strike = atm
+            if sel == "otm":
+                strike = atm + (dist * step if opt == "CE" else -dist * step)
+            elif sel == "itm":
+                strike = atm + (-dist * step if opt == "CE" else dist * step)
+            req = TradeRequest(
+                symbol=sym, option_type=opt, strike=float(strike),
+                expiry="", date=today, transaction_type=txn,
+                quantity=max(1, int(leg.get("lots") or 1)),
+                stop_loss=sl, take_profit=tp,
+                trade_type="intraday", strategy_id=int(sid or 0))
+            res = place_trade(req)
+            if isinstance(res, dict) and res.get("trade_id"):
+                placed.append({"strategy": s.get("name"), "trade_id": res["trade_id"],
+                               "entry": res.get("entry_price"),
+                               "rolled_to": res.get("rolled_to", "")})
+            elif isinstance(res, dict) and res.get("error"):
+                notes.append(f"{s.get('name')}: {str(res['error'])[:100]}")
+                break
+        except Exception as e:
+            notes.append(f"{s.get('name')}: leg failed {e}"[:120])
+            break
+    return placed, notes
+
+
+def place_for_strategy(sid, signal_check="daily"):
     """Place paper trades for ONE strategy now (used by worker + save hook).
-    SIGNAL-GATED: entries only when today's signal fires on real history.
-    Same 1/day + open-position guards, so Save is idempotent: saving twice
-    does NOT double-trade. Returns {placed, notes}."""
+    signal_check: 'daily' (backtest gate), 'intraday' (live 15m gate, only
+    fired legs), 'done' (caller already gated). Same open/max-day guards, so
+    Save is idempotent. Returns {placed, notes}."""
     placed, notes = [], []
     try:
         import json as _js
@@ -208,67 +352,57 @@ def place_for_strategy(sid):
             return {"placed": placed, "notes": [f"{s.get('name')}: no legs - skipped"]}
         if any(str(l.get("option_type", "")).upper() == "AUTO" for l in legs):
             return {"placed": placed, "notes": [f"{s.get('name')}: AUTO legs need manual direction - skipped"]}
-        # Signal gate: indicator signal aaj fire hua tabhi entry (mechanical
-        # daily entries nahi - signals coincide karein zaroori nahi).
-        try:
-            _fires, _why = _today_signal(sid, s, today)
-            if not _fires:
-                return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
-        except Exception:
-            pass
-        try:
-            rm = _js.loads(s.get("risk_management") or "{}")
-        except Exception:
-            rm = {}
-        sl = float(rm.get("daily_stop_loss") or 1500)
-        tp = float(rm.get("daily_take_profit") or 3000)
-        sym = str(s.get("symbol") or "").upper()
-        if not sym:
-            return {"placed": placed, "notes": ["no symbol - skipped"]}
-        try:
-            spot = LiveMarketData().get_spot_price(sym) or 0
-        except Exception:
-            spot = 0
-        if spot <= 0:
-            return {"placed": placed, "notes": [f"{s.get('name')}: no live spot - skipped"]}
-        step = get_strike_step(sym)
-        atm = round(spot / step) * step if step > 0 else spot
-        from routes.option_chain import place_trade, TradeRequest
-        for leg in legs:
+        # Signal gate: 'daily' runs the backtest gate, 'intraday' runs the
+        # live-15m gate (only fired legs), 'done' skips (caller gated).
+        use_legs = legs
+        if signal_check == "daily":
             try:
-                opt = str(leg.get("option_type") or "CE").upper()
-                if opt not in ("CE", "PE"):
-                    continue
-                txn = str(leg.get("transaction") or "buy").upper()
-                if txn not in ("BUY", "SELL"):
-                    txn = "BUY"
-                sel = str(leg.get("strike_selection") or "atm").lower()
-                dist = int(leg.get("otm_distance") or 0)
-                strike = atm
-                if sel == "otm":
-                    strike = atm + (dist * step if opt == "CE" else -dist * step)
-                elif sel == "itm":
-                    strike = atm + (-dist * step if opt == "CE" else dist * step)
-                req = TradeRequest(
-                    symbol=sym, option_type=opt, strike=float(strike),
-                    expiry="", date=today, transaction_type=txn,
-                    quantity=max(1, int(leg.get("lots") or 1)),
-                    stop_loss=sl, take_profit=tp,
-                    trade_type="intraday", strategy_id=int(sid or 0))
-                res = place_trade(req)
-                if isinstance(res, dict) and res.get("trade_id"):
-                    placed.append({"strategy": s.get("name"), "trade_id": res["trade_id"],
-                                   "entry": res.get("entry_price"),
-                                   "rolled_to": res.get("rolled_to", "")})
-                elif isinstance(res, dict) and res.get("error"):
-                    notes.append(f"{s.get('name')}: {str(res['error'])[:100]}")
-                    break
-            except Exception as e:
-                notes.append(f"{s.get('name')}: leg failed {e}"[:120])
-                break
+                _fires, _why = _today_signal(sid, s, today)
+                if not _fires:
+                    return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
+            except Exception:
+                pass
+        elif signal_check == "intraday":
+            try:
+                _fired, _why = _intraday_signal(sid, s, today)
+                if not _fired:
+                    return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
+                use_legs = _fired
+            except Exception:
+                pass
+        _pl, _nt = _execute_legs(s, use_legs, db, tm, today)
+        placed.extend(_pl)
+        notes.extend(_nt)
     except Exception as e:
         notes.append(f"strategy {sid} failed: {e}"[:120])
     return {"placed": placed, "notes": notes}
+
+
+def live_signal_pass(min_interval=240):
+    """Background live evaluation (every ~5 min, market hours): each ACTIVE
+    strategy's indicators are evaluated on FRESH 15m candles; fired legs
+    place paper trades immediately (max/day + open guards hold)."""
+    global _LAST_RUN
+    try:
+        from core.models.database import Database
+        db = Database.get_instance()
+        try:
+            rows = db.fetch_all(
+                "SELECT * FROM strategies WHERE status='active' ORDER BY updated_at DESC"
+            )
+        except Exception:
+            return {"placed": [], "notes": ["no-strategies-table"]}
+        placed, notes = [], []
+        for s in rows or []:
+            try:
+                r = place_for_strategy(s.get("id"), signal_check="intraday")
+                placed.extend(r.get("placed", []))
+                notes.extend(r.get("notes", [])[:2])
+            except Exception:
+                continue
+        return {"placed": placed, "notes": notes[:12]}
+    except Exception as e:
+        return {"placed": [], "notes": [f"error: {e}"[:150]]}
 
 
 def dry_run_status():

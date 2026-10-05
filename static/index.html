@@ -850,7 +850,16 @@
             document.getElementById('sent-overall').textContent=ocIcon+' '+ (st.overall||'—');
             document.getElementById('sent-conf').textContent=st.confidence?`Confidence: ${st.confidence}%`:'';
             const vd=r.verdict||{};let ve=document.getElementById('verdict-bar');if(!ve){ve=document.createElement('div');ve.id='verdict-bar';ve.className='small mt-2 p-2 rounded';document.getElementById('regime-row').insertAdjacentHTML('afterend',`<div id="verdict-bar" class="small mt-2 p-2 rounded"></div>`);ve=document.getElementById('verdict-bar');}
-            if(vd.text){ve.textContent=vd.text;ve.style.background=vd.color+'15';ve.style.borderLeft='4px solid '+vd.color;ve.style.color=vd.color;ve.style.display='block';}else if(ve){ve.style.display='none';}
+            try{
+                const al=r.alignment||{};
+                if(al.tradable){
+                    const bull=al.side==='bullish';
+                    ve.innerHTML=`<strong>${bull?'✅ ALIGNED BULLISH — trade allowed (CE Buy bias)':'🔴 ALIGNED BEARISH — trade allowed (PE Buy bias)'}</strong> <small>${al.reason||''} • conf ${al.confidence||''}%</small>`;
+                    ve.style.background=bull?'#d1e7dd':'#f8d7da';ve.style.borderLeft=bull?'4px solid #198754':'4px solid #dc3545';ve.style.color=bull?'#0f5132':'#842029';ve.style.display='block';
+                } else if(vd.text){ve.textContent=vd.text+' — '+(al.reason||'not aligned, wait');ve.style.background=vd.color+'15';ve.style.borderLeft='4px solid '+vd.color;ve.style.color=vd.color;ve.style.display='block';}else if(ve){ve.style.display='none';}
+            }catch(e){
+                if(vd.text){ve.textContent=vd.text;ve.style.background=vd.color+'15';ve.style.borderLeft='4px solid '+vd.color;ve.style.color=vd.color;ve.style.display='block';}else if(ve){ve.style.display='none';}
+            }
         }catch(e){ /* keep — */ }
     }
     async function loadRegimeSyms(){

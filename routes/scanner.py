@@ -40,24 +40,29 @@ router = APIRouter()
 
 @router.post("/equity-arb")
 def equity_arb(payload: dict):
-    """Equity arbitrage: Buy on one exchange, Sell on other. Records as two paper trades (EQ)."""
+    """Equity arbitrage via strict engine: server-side re-quote, 0.30%
+    stale-spread block, net-cost filter, atomic dual legs. Frontend prices
+    are hints only - never trusted for entry."""
     try:
-        from core.models.trade_model import TradeModel
-        import datetime as _dt
+        from core.services import arb_engine as _ae
         stock = str(payload.get("symbol") or "").upper()
-        buy_ex = str(payload.get("buy_exchange") or "NSE").upper()
-        sell_ex = str(payload.get("sell_exchange") or "BSE").upper()
-        buy_px = float(payload.get("buy_price") or 0)
-        sell_px = float(payload.get("sell_price") or 0)
         qty = int(payload.get("quantity") or 1)
-        if not stock or buy_px <=0 or sell_px <=0:
-            return {"error": "symbol and prices required"}
-        tm = TradeModel()
-        today = _dt.date.today().strftime("%Y-%m-%d")
-        # Two legs: BUY on cheap, SELL on expensive — stored as EQ trades
-        id1 = tm.db.execute("INSERT INTO paper_trades (user_id,symbol,option_type,strike_price,expiry_date,transaction_type,quantity,lot_size,entry_price,entry_date,status,trade_mode,trade_type) VALUES (1,?,'EQ',0,'', 'BUY',?,1,?,?,'open','paper','intraday')", [f"{stock} ({buy_ex})", qty, buy_px, today])
-        id2 = tm.db.execute("INSERT INTO paper_trades (user_id,symbol,option_type,strike_price,expiry_date,transaction_type,quantity,lot_size,entry_price,entry_date,status,trade_mode,trade_type) VALUES (1,?,'EQ',0,'', 'SELL',?,1,?,?,'open','paper','intraday')", [f"{stock} ({sell_ex})", qty, sell_px, today])
-        return {"success": True, "buy_id": id1, "sell_id": id2, "spread": round(sell_px - buy_px, 2)}
+        if not stock:
+            return {"error": "symbol required"}
+        return _ae.place_pair(stock, qty)
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+@router.post("/arb-exit")
+def arb_exit(payload: dict):
+    """Simultaneous square-off of ALL open EQ legs for a symbol."""
+    try:
+        from core.services import arb_engine as _ae
+        stock = str((payload or {}).get("symbol") or "").upper()
+        if not stock:
+            return {"error": "symbol required"}
+        return _ae.exit_pair(stock)
     except Exception as e:
         return {"error": str(e)[:200]}
 

@@ -87,11 +87,12 @@ class TradeModel:
         return sl_level, tp_level
 
     def close_intraday_trades(self, user_id=1) -> int:
-        """15:10 IST forced square-off for INTRADAY trades only.
+        """15:15 IST forced square-off for INTRADAY trades only (cash/EQ
+        never held overnight - short-delivery auction safety).
         Positional trades (trade_type='positional') carry overnight."""
         try:
             now = self._ist_now()
-            if now.time() < __import__("datetime").time(15, 10):
+            if now.time() < __import__("datetime").time(15, 15):
                 return 0
             today = now.strftime("%Y-%m-%d")
             opens = self.db.fetch_all(

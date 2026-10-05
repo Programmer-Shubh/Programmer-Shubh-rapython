@@ -59,6 +59,15 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
         if not fn:
             return {"closed": [], "skipped": "no-check-fn"}
         closed = fn() or []
+        # Arb pair stops (time/spread) ride along the same scan
+        try:
+            from core.services import arb_engine as _ae
+            _arb = _ae.check_arb_stops() or []
+            if _arb:
+                closed = list(closed) + [{"id": None, "reason": "arb:" + str(a.get("reason", "")),
+                                          "arb": a} for a in _arb]
+        except Exception:
+            pass
         return {"closed": closed, "skipped": ""}
     except Exception as e:
         return {"closed": [], "skipped": f"error: {e}"[:150]}

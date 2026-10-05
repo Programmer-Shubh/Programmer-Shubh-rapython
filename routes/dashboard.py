@@ -255,12 +255,14 @@ def market_regime(symbol: str):
                     conf += 25
                 else:
                     checks.append({"label": "EMA20 > EMA50", "ok": False})
-                # ADX via supertrend direction as proxy (strong trend if price far from ST)
+                # Real ADX(14): trend strength >= 20 (no ST-distance proxy)
                 try:
-                    st = ie.calculate_supertrend(data, 10, 3.0) or []
-                    stv = st[-1] if st else 0
-                    adx_strong = abs(spot - stv) / spot > 0.02 if spot and stv else False
-                    checks.append({"label": "ADX strong", "ok": bool(adx_strong)})
+                    _adx = ie.calculate_adx(data, 14) or {}
+                    _av = (_adx.get("adx") or [0])[-1] or 0
+                    _pd = (_adx.get("plus_di") or [0])[-1] or 0
+                    _md = (_adx.get("minus_di") or [0])[-1] or 0
+                    adx_strong = _av >= 20
+                    checks.append({"label": f"ADX {_av:.0f} ({'+DI' if _pd >= _md else '-DI'} dominant)", "ok": bool(adx_strong)})
                     if adx_strong:
                         conf += 25
                 except Exception:
@@ -356,6 +358,26 @@ def market_regime(symbol: str):
                 verdict_color = "#856404"
         except Exception:
             pass
+        # Tradable alignment: regime AND sentiment must confirm the SAME
+        # side with strength (regime conf >= 70, sentiment conf >= 70).
+        # Mixed/weak = no trade (this gate is what makes signals tradable).
+        _side, _tradable, _why = "none", False, "no alignment"
+        try:
+            _rb = "BULLISH" in regime
+            _sb = overall == "BULLISH"
+            _sr = overall == "BEARISH"
+            if _rb and _sb and conf >= 70 and overall_conf >= 70:
+                _side, _tradable = "bullish", True
+                _why = f"regime {conf}% + sentiment {overall_conf}% both bullish"
+            elif (not _rb) and _sr and conf >= 70 and overall_conf >= 70:
+                _side, _tradable = "bearish", True
+                _why = f"regime {conf}% + sentiment {overall_conf}% both bearish"
+            elif _rb or _sb:
+                _why = "partial lean, not confirmed - wait"
+            else:
+                _why = "bearish lean unconfirmed - wait"
+        except Exception:
+            pass
         return {
             "symbol": sym, "spot": spot,
             "regime": {"label": regime, "confidence": conf, "checks": checks, "resistance": resist},
@@ -363,6 +385,8 @@ def market_regime(symbol: str):
                           "put_writing": put_w, "call_writing": call_w,
                           "overall": overall, "confidence": overall_conf},
             "verdict": {"text": verdict, "color": verdict_color},
+            "alignment": {"side": _side, "tradable": _tradable,
+                          "confidence": min(conf, overall_conf), "reason": _why},
         }
     except Exception as e:
         return {"symbol": sym, "error": str(e)[:200]}
