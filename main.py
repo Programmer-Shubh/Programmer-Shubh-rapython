@@ -86,25 +86,10 @@ async def lifespan(app: FastAPI):
         # Live signal worker: ACTIVE strategies evaluated on fresh 15m
         # candles every 5 min in market hours (ADX/ST/BB live loop).
         def _live_sig_loop():
-            import time as _t
-            _t.sleep(180)
-            while True:
-                try:
-                    from core.services.auto_paper import live_signal_pass
-                    from core.services.sl_monitor import market_open_ist as _mkt
-                    if _mkt():
-                        r = live_signal_pass()
-                        if r.get("placed"):
-                            try:
-                                print(f"[live-signals] placed: {r['placed']}", flush=True)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-                try:
-                    _t.sleep(300)
-                except Exception:
-                    break
+            try:
+                from core.services.auto_paper import start_live_background as _lsb
+                _lsb(300)
+            except: pass
         import threading as _th6
         _th6.Thread(target=_live_sig_loop, daemon=True).start()
     except: pass

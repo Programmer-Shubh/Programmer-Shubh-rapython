@@ -111,8 +111,12 @@ def auto_paper_status(run: int = 0):
     """Dry-run diagnosis: why each strategy did/didn't paper-trade. No orders.
     ?run=1 forces one worker pass now (same idempotent 1/day rules)."""
     try:
-        from core.services.auto_paper import dry_run_status, run_once
+        from core.services.auto_paper import dry_run_status, run_once, worker_state
         out = {"success": True, **dry_run_status()}
+        try:
+            out["worker"] = worker_state()
+        except Exception:
+            pass
         if run:
             try:
                 out["forced_run"] = run_once(min_interval=0)

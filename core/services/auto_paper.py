@@ -18,6 +18,37 @@ import time
 _LOCK = threading.Lock()
 _LAST_RUN = 0.0
 _MIN_INTERVAL = 1200
+# Observable worker state (heartbeat for /auto-paper-status)
+_STATE = {"threads": {}, "last_daily": {}, "last_live": {}}
+
+
+def _beat(name):
+    try:
+        import datetime as _dt
+        with _LOCK:
+            _STATE["threads"][name] = _dt.datetime.utcnow().strftime("%H:%M:%S")
+    except Exception:
+        pass
+
+
+def worker_state():
+    try:
+        from core.services.sl_monitor import market_open_ist as _mkt
+        _open = bool(_mkt())
+    except Exception:
+        _open = None
+    try:
+        import datetime as _dt
+        _now = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        _now = ""
+    with _LOCK:
+        st = {"threads": dict(_STATE["threads"]),
+              "last_daily": dict(_STATE["last_daily"]),
+              "last_live": dict(_STATE["last_live"])}
+    st["server_ist"] = _now
+    st["market_open"] = _open
+    return st
 
 
 def _ist_today():
@@ -482,7 +513,12 @@ def start_background(interval_s=600):
         while True:
             try:
                 time.sleep(interval_s)
+                _beat("daily-worker")
                 r = run_once()
+                with _LOCK:
+                    _STATE["last_daily"] = {"placed": len(r.get("placed", [])),
+                                            "notes": (r.get("notes", []) or [])[:3],
+                                            "skipped": r.get("skipped", "")}
                 if r.get("placed"):
                     try:
                         print(f"[auto-paper] placed: {r['placed']}", flush=True)
@@ -495,6 +531,45 @@ def start_background(interval_s=600):
                     break
     try:
         th = threading.Thread(target=_loop, name="auto-paper", daemon=True)
+        th.start()
+        return True
+    except Exception:
+        return False
+
+
+def start_live_background(interval_s=300):
+    """Daemon thread: live 15m signal evaluation every `interval_s`."""
+    def _loop():
+        try:
+            time.sleep(180)
+        except Exception:
+            return
+        while True:
+            try:
+                _beat("live-worker")
+                r = {"placed": [], "notes": []}
+                try:
+                    from core.services.sl_monitor import market_open_ist as _mkt
+                    if _mkt():
+                        r = live_signal_pass()
+                except Exception:
+                    pass
+                with _LOCK:
+                    _STATE["last_live"] = {"placed": len((r or {}).get("placed", [])),
+                                           "notes": ((r or {}).get("notes", []) or [])[:3]}
+                if (r or {}).get("placed"):
+                    try:
+                        print(f"[live-signals] placed: {r['placed']}", flush=True)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                time.sleep(interval_s)
+            except Exception:
+                break
+    try:
+        th = threading.Thread(target=_loop, name="live-signals", daemon=True)
         th.start()
         return True
     except Exception:
