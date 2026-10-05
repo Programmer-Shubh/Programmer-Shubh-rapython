@@ -234,10 +234,24 @@ def rollover_strategy(strat_id: int):
 @router.get("/{strat_id}/trades")
 def strategy_trades(strat_id: int, unlinked: int = 0):
     """Paper-trade detail for a saved strategy: open positions (live LTP +
-    unrealized P&L) + closed trade history."""
+    unrealized P&L) + closed trade history. Strictly strategy-wise:
+    only trades with this strategy_id are counted in open/closed."""
     try:
         from core.models.trade_model import TradeModel
         tm = TradeModel()
+        # Strategy header so modal can show name/symbol even if no trades
+        strat_info = {}
+        try:
+            srow = tm.db.fetch_one(
+                "SELECT id, name, symbol FROM strategies WHERE id=?", [strat_id]
+            )
+            if srow:
+                strat_info = {
+                    "id": srow.get("id"), "name": srow.get("name"),
+                    "symbol": srow.get("symbol"),
+                }
+        except Exception:
+            pass
         opens = []
         try:
             for p in tm.get_open_positions_with_pnl():
@@ -259,14 +273,16 @@ def strategy_trades(strat_id: int, unlinked: int = 0):
                     "unrealized_pnl": p.get("unrealized_pnl"),
                     "trade_mode": t.get("trade_mode"),
                     "status": t.get("status"),
+                    "entry_date": t.get("entry_date", ""),
                 })
         except Exception:
             pass
         closed = []
         try:
+            # COALESCE: old rows with NULL strategy_id never leak into a strategy
             rows = tm.db.fetch_all(
-                "SELECT * FROM paper_trades WHERE strategy_id=? AND status<>'open' ORDER BY id DESC LIMIT 50",
-                [strat_id],
+                "SELECT * FROM paper_trades WHERE COALESCE(strategy_id,0)=? AND status<>'open' ORDER BY id DESC LIMIT 50",
+                [int(strat_id)],
             )
             for t in rows or []:
                 closed.append({
@@ -279,10 +295,20 @@ def strategy_trades(strat_id: int, unlinked: int = 0):
                     "pnl": t.get("pnl"),
                     "exit_reason": t.get("exit_status") or t.get("exit_reason"),
                     "trade_mode": t.get("trade_mode"),
+                    "entry_date": t.get("entry_date", ""),
+                    "exit_date": t.get("exit_date", ""),
                 })
         except Exception:
             pass
-        # Unlinked manual trades (strategy_id=0): shown separately so history
+        try:
+            open_pnl = round(sum(float(o.get("unrealized_pnl") or 0) for o in opens), 2)
+        except Exception:
+            open_pnl = 0
+        try:
+            closed_pnl = round(sum(float(c.get("pnl") or 0) for c in closed), 2)
+        except Exception:
+            closed_pnl = 0
+        # Unlinked manual trades (strategy_id=0/NULL): shown separately so history
         # is never "missing" - honestly labeled, never attributed.
         manual = []
         if unlinked:
@@ -304,8 +330,11 @@ def strategy_trades(strat_id: int, unlinked: int = 0):
                     })
             except Exception:
                 pass
-        return {"strategy_id": strat_id, "open": opens, "closed": closed,
+        return {"strategy_id": strat_id, "strategy": strat_info,
+                "open": opens, "closed": closed,
                 "open_count": len(opens), "closed_count": len(closed),
+                "open_pnl": open_pnl, "closed_pnl": closed_pnl,
+                "total_pnl": round(open_pnl + closed_pnl, 2),
                 "manual": manual, "manual_count": len(manual)}
     except Exception as e:
         return {"error": f"Detail failed: {e}"}

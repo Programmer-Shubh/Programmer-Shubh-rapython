@@ -1675,10 +1675,13 @@ let _lastOpenTrdHTML = null;
         alert('Paper trade lag gaya!\n'+placed.join('\n')+'\n\nOpen Positions me dikhega.');
         loadTrades();try{loadDashPositions();}catch(e){}try{loadStrats();loadRobotSaved();}catch(e){}
     }catch(e){alert('Error: '+e.message);}}
-    async function stratDetail(id,name){try{const d=await A('/api/strategies/'+id+'/trades');if(d.error){alert(d.error);return;}
+    async function stratDetail(id,name){try{const d=await A('/api/strategies/'+id+'/trades?unlinked=1');if(d.error){alert(d.error);return;}
+        const sName=(d.strategy&&d.strategy.name)||name||('#'+id);
+        const sSym=(d.strategy&&d.strategy.symbol)||'';
         let h='<div id="stratModal" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">';
-        h+='<div style="background:#fff;border-radius:10px;max-width:720px;width:92%;max-height:84vh;overflow:auto;padding:14px">';
-        h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong>Paper Detail - '+(name||('#'+id))+'</strong><button class="btn btn-sm btn-outline-dark" onclick="document.getElementById(&apos;stratModal&apos;).remove()">Close</button></div>';
+        h+='<div style="background:#fff;border-radius:10px;max-width:760px;width:94%;max-height:84vh;overflow:auto;padding:14px">';
+        h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><strong>Paper Detail - '+sName+' <span class="text-muted small">#'+id+(sSym?' | '+sSym:'')+'</span></strong><button class="btn btn-sm btn-outline-dark" onclick="document.getElementById(&apos;stratModal&apos;).remove()">Close</button></div>';
+        h+='<div class="small text-muted mb-2">Sirf isi strategy ke trades (strategy_id='+id+') | Open P&L ₹'+Number(d.open_pnl||0).toFixed(2)+' | Closed P&L ₹'+Number(d.closed_pnl||0).toFixed(2)+' | Total ₹'+Number(d.total_pnl||0).toFixed(2)+'</div>';
         const o=d.open||[];
         h+='<div class=\"small fw-bold mb-1\">Open ('+o.length+')</div>';
         if(o.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th></tr></thead><tbody>';
@@ -1689,6 +1692,11 @@ let _lastOpenTrdHTML = null;
         if(c.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Exit</th></tr></thead><tbody>';
         c.forEach(t=>{h+='<tr><td>'+t.id+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>₹'+Number(t.entry_price||0).toFixed(2)+'</td><td>₹'+Number(t.exit_price||0).toFixed(2)+'</td><td>'+Number(t.pnl||0).toFixed(2)+'</td><td class=\"small text-muted\">'+(t.exit_reason||'')+'</td></tr>';});
         h+='</tbody></table>';}else{h+='<p class=\"text-muted small\">Koi closed trade nahi.</p>';}
+        const m=d.manual||[];
+        if(m.length){h+='<div class=\"small fw-bold mb-1 mt-2 text-muted\">Bina strategy wale (manual, is strategy ke nahi) ('+m.length+')</div>';
+        h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Status</th><th>P&L</th></tr></thead><tbody>';
+        m.forEach(t=>{h+='<tr><td>'+t.id+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>'+(t.status||'')+'</td><td>'+Number(t.pnl||0).toFixed(2)+'</td></tr>';});
+        h+='</tbody></table>';}
         h+='</div></div>';
         const w=document.createElement('div');w.innerHTML=h;document.body.appendChild(w.firstChild);
     }catch(e){alert('Error: '+e.message);}}
