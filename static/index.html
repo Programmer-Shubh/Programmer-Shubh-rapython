@@ -1675,7 +1675,7 @@ let _lastOpenTrdHTML = null;
         alert('Paper trade lag gaya!\n'+placed.join('\n')+'\n\nOpen Positions me dikhega.');
         loadTrades();try{loadDashPositions();}catch(e){}try{loadStrats();loadRobotSaved();}catch(e){}
     }catch(e){alert('Error: '+e.message);}}
-    async function stratDetail(id,name){try{const d=await A('/api/strategies/'+id+'/trades?unlinked=1');if(d.error){alert(d.error);return;}
+    async function stratDetail(id,name){try{const d=await A('/api/strategies/'+id+'/trades');if(d.error){alert(d.error);return;}
         let h='<div id="stratModal" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">';
         h+='<div style="background:#fff;border-radius:10px;max-width:720px;width:92%;max-height:84vh;overflow:auto;padding:14px">';
         h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><strong>Paper Detail - '+(name||('#'+id))+'</strong><button class="btn btn-sm btn-outline-dark" onclick="document.getElementById(&apos;stratModal&apos;).remove()">Close</button></div>';
@@ -1689,11 +1689,6 @@ let _lastOpenTrdHTML = null;
         if(c.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Exit</th></tr></thead><tbody>';
         c.forEach(t=>{h+='<tr><td>'+t.id+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>₹'+Number(t.entry_price||0).toFixed(2)+'</td><td>₹'+Number(t.exit_price||0).toFixed(2)+'</td><td>'+Number(t.pnl||0).toFixed(2)+'</td><td class=\"small text-muted\">'+(t.exit_reason||'')+'</td></tr>';});
         h+='</tbody></table>';}else{h+='<p class=\"text-muted small\">Koi closed trade nahi.</p>';}
-        const mm=d.manual||[];
-        h+='<div class=\"small fw-bold mb-1 mt-2\">Manual trades (bina strategy, ' + mm.length + ')</div>';
-        if(mm.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Exit/P&L</th><th>Status</th></tr></thead><tbody>';
-        mm.forEach(t=>{const ex=(t.status==='open')?'open':('₹'+Number(t.exit_price||0).toFixed(2)+' / '+Number(t.pnl||0).toFixed(2));h+='<tr><td>'+t.id+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>₹'+Number(t.entry_price||0).toFixed(2)+'</td><td>'+ex+'</td><td class=\"small text-muted\">'+(t.status||'')+'</td></tr>';});
-        h+='</tbody></table>';}else{h+='<p class=\"text-muted small\">Koi manual trade nahi.</p>';}
         h+='</div></div>';
         const w=document.createElement('div');w.innerHTML=h;document.body.appendChild(w.firstChild);
     }catch(e){alert('Error: '+e.message);}}
