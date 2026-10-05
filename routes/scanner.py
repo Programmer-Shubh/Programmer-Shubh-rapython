@@ -390,6 +390,8 @@ def opportunities_4part(min_score: int = 80, debug: int = 0):
     if cached:
         cached_time, cached_val = cached
         if now - cached_time < 120 and not cached_val.get("dummy"):
+            if debug:
+                return _attach_opp_debug(cached_val, None, min_score)
             return cached_val
         # stale or dummy -> return instantly, refresh async with real scan
         try:
@@ -398,6 +400,8 @@ def opportunities_4part(min_score: int = 80, debug: int = 0):
                 except: pass
             _th.Thread(target=_bg, daemon=True).start()
         except: pass
+        if debug:
+            return _attach_opp_debug(cached_val, None, min_score)
         return cached_val
     # Cache miss -> compute real scan instantly (no dummy) — user wants
     # SuperTrend+MACD real conditions, not Instant view. 8-10s first load
@@ -407,16 +411,36 @@ def opportunities_4part(min_score: int = 80, debug: int = 0):
         real = s.get_4_part_opportunities(min_score=min_score)
         _cache_set(k, real)
         if debug:
-            try:
-                from core.services.live_market_data import _LIVE_CACHE
-                real["_debug"] = dict(getattr(s, "_last_debug", {}) or {})
-                real["_debug"]["live_cache_symbols"] = len(_LIVE_CACHE or {})
-                real["_debug"]["parts"] = {p: len(real.get(p, [])) for p in ("ce_buy", "pe_buy", "ce_sell", "pe_sell")}
-            except Exception:
-                pass
+            return _attach_opp_debug(real, s, min_score)
         return real
     except Exception as e:
         # Fallback to dummy only if real fails
         dummy = _dummy_4part(min_score)
         _cache_set(k, dummy)
+        if debug:
+            return _attach_opp_debug(dummy, None, min_score)
         return dummy
+
+
+def _db_max_date():
+    try:
+        from core.models.database import Database as _DB
+        row = _DB.get_instance().fetch_one(
+            "SELECT MAX(trade_date) d FROM bhavcopy_data WHERE option_type IS NULL")
+        return str((row or {}).get("d") or "")
+    except Exception:
+        return ""
+
+
+def _attach_opp_debug(resp, scanner, min_score):
+    # Debug attaches on ANY path (fresh or cached) so empties are diagnosable
+    try:
+        from core.services.live_market_data import _LIVE_CACHE
+        d = dict(getattr(scanner, "_last_debug", {}) or {}) if scanner else {}
+        d["live_cache_symbols"] = len(_LIVE_CACHE or {})
+        d["db_max_date"] = _db_max_date()
+        d["parts"] = {p: len((resp or {}).get(p, [])) for p in ("ce_buy", "pe_buy", "ce_sell", "pe_sell")}
+        resp["_debug"] = d
+    except Exception:
+        pass
+    return resp
