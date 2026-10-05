@@ -418,10 +418,18 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
             return db_data
     except Exception:
         pass
-    # 2) External sources — 8s budget (Yahoo removed): Stooq -> openchart -> tvDatafeed
+    # 2) External sources: Yahoo daily FIRST (proven on cloud - same API
+    # family as working spot quotes), then Stooq -> openchart -> tvDatafeed.
     import time as _t
-    _deadline = _t.time() + 8
-    for fetcher in [_fetch_stooq_historical, _fetch_openchart_historical, _fetch_tvDatafeed_historical]:
+    _deadline = _t.time() + 25
+
+    def _fetch_yahoo_hist(sym, s, e):
+        try:
+            from core.services.free_data import fetch_yahoo_daily
+            return fetch_yahoo_daily(sym, s, e)
+        except Exception:
+            return []
+    for fetcher in [_fetch_yahoo_hist, _fetch_stooq_historical, _fetch_openchart_historical, _fetch_tvDatafeed_historical]:
         try:
             if _t.time() > _deadline:
                 break

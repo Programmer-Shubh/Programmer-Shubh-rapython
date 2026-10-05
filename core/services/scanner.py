@@ -39,6 +39,72 @@ class OptionScanner:
         self.indicators = IndicatorEngine()
         self.db = Database.get_instance()
 
+    def _warm_history(self, symbols):
+        """Backfill missing DB history via Yahoo daily (parallel, 20s budget).
+        Production PG had only 12 stale dates -> every symbol failed the
+        real-data gate -> empty dashboard. Warmed rows are imported to DB,
+        so subsequent scans read DB instantly. Never raises."""
+        try:
+            import datetime as _dt
+            from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed as _ac
+            import time as _tm
+            need = []
+            for s in (symbols or [])[:60]:
+                try:
+                    if not self._has_real_bars(s):
+                        need.append(s)
+                except Exception:
+                    pass
+            if not need:
+                return 0
+            _end = _dt.date.today().strftime("%Y-%m-%d")
+            _start = (_dt.date.today() - _dt.timedelta(days=120)).strftime("%Y-%m-%d")
+            done = 0
+
+            def _one(sym):
+                try:
+                    from core.services.free_data import fetch_yahoo_daily
+                    from core.models.bhavcopy_model import BhavcopyModel
+                    bars = fetch_yahoo_daily(sym, _start, _end, timeout=8)
+                    if bars and len(bars) >= 20:
+                        try:
+                            BhavcopyModel().import_data(bars)
+                        except Exception:
+                            pass
+                        try:
+                            self._REAL_CACHE.pop(sym.upper(), None)
+                            self._SYNT_CACHE.pop(sym.upper(), None)
+                        except Exception:
+                            pass
+                        return True
+                except Exception:
+                    pass
+                return False
+
+            _deadline = _tm.time() + 20
+            _ex = _TPE(max_workers=8)
+            try:
+                _futs = {_ex.submit(_one, _s): _s for _s in need}
+                try:
+                    for _f in _ac(_futs, timeout=20):
+                        try:
+                            if _f.result():
+                                done += 1
+                        except Exception:
+                            pass
+                        if _tm.time() >= _deadline:
+                            break
+                except Exception:
+                    pass
+            finally:
+                try:
+                    _ex.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
+            return done
+        except Exception:
+            return 0
+
     def _warm_live_spots(self, symbols):
         """Batch-fill fresh live spots for symbols missing them.
         Yahoo-only (5s timeout, parallel): NSE-direct hangs ~4s per symbol
@@ -392,6 +458,12 @@ class OptionScanner:
         # backfills and force-from-0 fallbacks put weak trades in front of
         # users (har trade me nuksaan ka sabse bada kaaran). An empty part
         # now honestly stays empty - the UI shows 'No strong setups'.
+        # History warm-up first: missing DB history (fresh/failed DB) is
+        # backfilled from Yahoo so the real-data gate has something to score.
+        try:
+            self._warm_history(symbols)
+        except Exception:
+            pass
         _dbg = {"scanned": 0, "no_real_bars": 0, "base": 0,
                 "pre_ai": {}, "post_ai": {}}
         try:

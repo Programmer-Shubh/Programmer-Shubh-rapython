@@ -254,6 +254,67 @@ def fetch_cloud_spot(symbol: str) -> dict:
     return {"spot": spot, "change": chg, "high": spot, "low": spot, "source": source or "live"}
 
 
+def fetch_yahoo_daily(symbol: str, start_date: str, end_date: str, timeout: float = 10):
+    """Yahoo daily OHLC history (most reliable cloud source - same endpoint
+    as the working spot quotes). Split-adjusted via adjclose factor so
+    corporate actions don't fabricate jumps. Returns bar dicts or []."""
+    out = []
+    try:
+        import datetime as _dt
+        ysym = _YAHOO_MAP.get((symbol or "").upper(),
+                              f"{symbol}.NS" if "." not in (symbol or "") and not str(symbol or "").startswith("^") else symbol)
+        try:
+            p1 = int(_dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").replace(tzinfo=_dt.timezone.utc).timestamp())
+            p2 = int((_dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d") + _dt.timedelta(days=1)).replace(tzinfo=_dt.timezone.utc).timestamp())
+        except Exception:
+            p1, p2 = 0, 0
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=1d&period1={p1}&period2={p2}"
+        _sess = _yahoo_session()
+        try:
+            r = _sess.get(url, timeout=timeout) if _sess is not None else requests.get(url, headers=_UA, timeout=timeout)
+        except Exception:
+            return []
+        if r is None or r.status_code != 200:
+            return []
+        j = r.json()
+        res = (j.get("chart", {}).get("result") or [{}])[0]
+        ts = res.get("timestamp") or []
+        ind = res.get("indicators", {}) or {}
+        q = ((ind.get("quote") or [{}])[0]) or {}
+        adj = ((ind.get("adjclose") or [{}])[0] or {}).get("adjclose") or []
+        oo, hh, ll, cc, vv = q.get("open") or [], q.get("high") or [], q.get("low") or [], q.get("close") or [], q.get("volume") or []
+        for k, t in enumerate(ts):
+            try:
+                td = _dt.datetime.utcfromtimestamp(int(t)).strftime("%Y-%m-%d")
+                if td < str(start_date)[:10] or td > str(end_date)[:10]:
+                    continue
+                c = float(cc[k]) if k < len(cc) and cc[k] else 0
+                if c <= 0:
+                    continue
+                o = float(oo[k]) if k < len(oo) and oo[k] else c
+                h = float(hh[k]) if k < len(hh) and hh[k] else c
+                l = float(ll[k]) if k < len(ll) and ll[k] else c
+                v = int(float(vv[k] or 0)) if k < len(vv) else 0
+                # Split-adjust everything by adjclose factor (keeps O/H/L/C consistent)
+                try:
+                    ac = float(adj[k]) if k < len(adj) and adj[k] else 0
+                    if ac > 0 and c > 0:
+                        f = ac / c
+                        o, h, l, c = o * f, h * f, l * f, ac
+                except Exception:
+                    pass
+                out.append({"symbol": str(symbol or "").upper(), "trade_date": td, "expiry_date": "",
+                            "strike_price": None, "option_type": None,
+                            "open_price": round(o, 2), "high_price": round(h, 2),
+                            "low_price": round(l, 2), "close_price": round(c, 2),
+                            "volume": v, "oi": 0})
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
 def fetch_google_historical(symbol: str, start_date: str, end_date: str):
     """Google getprices for historical fallback."""
     try:
