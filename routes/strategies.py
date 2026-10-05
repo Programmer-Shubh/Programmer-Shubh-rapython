@@ -232,7 +232,7 @@ def rollover_strategy(strat_id: int):
 
 
 @router.get("/{strat_id}/trades")
-def strategy_trades(strat_id: int):
+def strategy_trades(strat_id: int, unlinked: int = 0):
     """Paper-trade detail for a saved strategy: open positions (live LTP +
     unrealized P&L) + closed trade history."""
     try:
@@ -282,8 +282,31 @@ def strategy_trades(strat_id: int):
                 })
         except Exception:
             pass
+        # Unlinked manual trades (strategy_id=0): shown separately so history
+        # is never "missing" - honestly labeled, never attributed.
+        manual = []
+        if unlinked:
+            try:
+                mrows = tm.db.fetch_all(
+                    "SELECT * FROM paper_trades WHERE COALESCE(strategy_id,0)=0 ORDER BY id DESC LIMIT 20",
+                )
+                for t in mrows or []:
+                    manual.append({
+                        "id": t.get("id"), "symbol": t.get("symbol"),
+                        "transaction_type": t.get("transaction_type"),
+                        "option_type": t.get("option_type"),
+                        "strike": t.get("strike_price"),
+                        "entry_price": t.get("entry_price"),
+                        "exit_price": t.get("exit_price"),
+                        "pnl": t.get("pnl"),
+                        "status": t.get("status"),
+                        "exit_reason": t.get("exit_status"),
+                    })
+            except Exception:
+                pass
         return {"strategy_id": strat_id, "open": opens, "closed": closed,
-                "open_count": len(opens), "closed_count": len(closed)}
+                "open_count": len(opens), "closed_count": len(closed),
+                "manual": manual, "manual_count": len(manual)}
     except Exception as e:
         return {"error": f"Detail failed: {e}"}
 
