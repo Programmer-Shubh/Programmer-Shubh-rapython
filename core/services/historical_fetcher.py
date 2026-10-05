@@ -411,16 +411,26 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
         ltd = _last_trading_day()
         if ed > ltd: end_date = ltd.strftime("%Y-%m-%d")
     except: pass
-    # 1) Instant local cache (6-month archive) - serves backtest in <10ms
-    try:
-        db_data = _fetch_db_historical(symbol, start_date, end_date)
-        if db_data and len(db_data) >= 5:
-            return db_data
-    except Exception:
-        pass
-    # 2) External sources: Yahoo daily FIRST (proven on cloud - same API
-    # family as working spot quotes), then Stooq -> openchart -> tvDatafeed.
+    # 1) Instant local cache - but ONLY when fresh (max bar within 7 days
+    # of end_date). A stale cache must never win over live network data.
     import time as _t
+    db_data = []
+    try:
+        db_data = _fetch_db_historical(symbol, start_date, end_date) or []
+        if db_data and len(db_data) >= 5:
+            try:
+                _mx = max(str(r.get("trade_date", ""))[:10] for r in db_data)
+                import datetime as _dti
+                _ed = _dti.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                _md = _dti.datetime.strptime(_mx, "%Y-%m-%d").date()
+                if (_ed - _md).days <= 7:
+                    return db_data
+            except Exception:
+                return db_data
+    except Exception:
+        db_data = []
+    # 2) Network order: TV -> Yahoo -> openchart -> Stooq. First hit with
+    # 5+ bars wins; missing dates are merged over the stale DB partial.
     _deadline = _t.time() + 25
 
     def _fetch_yahoo_hist(sym, s, e):
@@ -429,12 +439,28 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
             return fetch_yahoo_daily(sym, s, e)
         except Exception:
             return []
-    for fetcher in [_fetch_yahoo_hist, _fetch_stooq_historical, _fetch_openchart_historical, _fetch_tvDatafeed_historical]:
+
+    def _merge_over(base, extra):
+        try:
+            seen = {str(r.get("trade_date", ""))[:10] for r in (base or [])}
+            out = list(base or [])
+            for r in (extra or []):
+                if str(r.get("trade_date", ""))[:10] not in seen:
+                    out.append(r)
+                    seen.add(str(r.get("trade_date", ""))[:10])
+            out.sort(key=lambda r: str(r.get("trade_date", "")))
+            return out
+        except Exception:
+            return base or extra or []
+
+    for fetcher in [_fetch_tvDatafeed_historical, _fetch_yahoo_hist,
+                    _fetch_openchart_historical, _fetch_stooq_historical]:
         try:
             if _t.time() > _deadline:
                 break
             data = fetcher(symbol, start_date, end_date)
             if data and len(data) >= 5:
+                data = _merge_over(db_data, data)
                 # Cache it for next time (instant backtest thereafter)
                 try:
                     from core.models.bhavcopy_model import BhavcopyModel
@@ -444,4 +470,4 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
                 return data
         except Exception:
             continue
-    return []
+    return db_data if db_data and len(db_data) >= 5 else []
