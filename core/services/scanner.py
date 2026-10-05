@@ -392,6 +392,12 @@ class OptionScanner:
         # backfills and force-from-0 fallbacks put weak trades in front of
         # users (har trade me nuksaan ka sabse bada kaaran). An empty part
         # now honestly stays empty - the UI shows 'No strong setups'.
+        _dbg = {"scanned": 0, "no_real_bars": 0, "base": 0,
+                "pre_ai": {}, "post_ai": {}}
+        try:
+            self._last_debug = _dbg
+        except Exception:
+            pass
         try:
             _req70 = int(min_score) if int(min_score) >= 70 else 70
         except Exception:
@@ -491,6 +497,11 @@ class OptionScanner:
                         continue
         except Exception:
             pass
+        try:
+            _dbg["base"] = len(base)
+            _dbg["real_gate_fail"] = sum(1 for v in (getattr(self, "_REAL_CACHE", {}) or {}).values() if isinstance(v, tuple) and not v[1])
+        except Exception:
+            pass
         base.sort(key=lambda x: x.get('score', 0), reverse=True)
         ce_buy = [s for s in base if s.get('signal_type')=='BUY CE'][:top_n]
         pe_buy = [s for s in base if s.get('signal_type')=='BUY PE'][:top_n]
@@ -556,6 +567,11 @@ class OptionScanner:
                         _rs.insert(0, "AI confirm: " + _why)
                         _s["reasons"] = _rs
                 _passed = [x for x in _items if x.get("ai")]
+                try:
+                    _dbg["pre_ai"][_pk] = len(_items)
+                    _dbg["post_ai"][_pk] = len(_passed)
+                except Exception:
+                    pass
                 _parts[_pk][:] = sorted(_passed, key=lambda x: x.get("score", 0), reverse=True)[:top_n]
         except Exception:
             pass

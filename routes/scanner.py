@@ -306,7 +306,7 @@ def _dummy_4part(min_score=80):
     return {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell, "min_score": min_score, "dummy": True}
 
 @router.get("/opportunities-4part")
-def opportunities_4part(min_score: int = 80):
+def opportunities_4part(min_score: int = 80, debug: int = 0):
     """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, Score>=80 - instant after open (stale-while-revalidate + dummy instant)"""
     try: min_score=int(min_score)
     except: min_score=80
@@ -335,6 +335,14 @@ def opportunities_4part(min_score: int = 80):
         s = OptionScanner()
         real = s.get_4_part_opportunities(min_score=min_score)
         _cache_set(k, real)
+        if debug:
+            try:
+                from core.services.live_market_data import _LIVE_CACHE
+                real["_debug"] = dict(getattr(s, "_last_debug", {}) or {})
+                real["_debug"]["live_cache_symbols"] = len(_LIVE_CACHE or {})
+                real["_debug"]["parts"] = {p: len(real.get(p, [])) for p in ("ce_buy", "pe_buy", "ce_sell", "pe_sell")}
+            except Exception:
+                pass
         return real
     except Exception as e:
         # Fallback to dummy only if real fails
