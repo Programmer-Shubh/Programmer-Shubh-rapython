@@ -391,7 +391,7 @@
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols + Order</small></div>
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 10)</label> <span class="badge bg-success ms-1" style="font-size:11px">OTM 1-6 ≥ ₹20 only (auto)</span> <span id="r-otm20-note" class="small text-muted"></span><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
+                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">OTM 1-6 ≥ ₹20 (monthly)</span> <span id="r-otm20-note" class="small text-muted"></span> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
                         <input type="hidden" id="r-order" value="CE-BUY"><input type="hidden" id="r-strike" value="ATM"><input type="hidden" id="r-otm" value="1"><input type="hidden" id="r-lots" value="1">
                         <div class="col-md-8 d-flex align-items-center"><small class="text-muted">Order/Strike/Lots — Template se auto (Strategy Templates neeche)</small></div>
                     </div>
@@ -780,7 +780,7 @@
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     // OTM filter 15-min client reuse: baar-baar load nahi (server bhi 15-min cache).
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols)return c.data;}catch(e){}return null;}
     async function otmFresh(){const c=otmCached();if(c)return c;const d=await A('/api/chain/symbols-otm?min_premium=20');try{window._otmData={ts:Date.now(),data:d};}catch(e){}return d;}
@@ -803,7 +803,8 @@
             }
             if(!sel) return;
             const current=sel.value;
-            try{document.getElementById('r-otm20-note').textContent=syms.length+' symbols (OTM 1-6 ≥ ₹20)';}catch(e){}
+            try{document.getElementById('r-otm20-note').textContent=syms.length+' symbols (OTM 1-6 ≥ ₹20, monthly)';}catch(e){}
+            try{window._symCount=syms.length;}catch(e){}
             sel.innerHTML=syms.map(x=>`<option value="${x}" ${x===current?'selected':''}>${x}</option>`).join('');
             // Same full chain list as tap-checkboxes (keep current ticks)
             const rbox=document.getElementById('r-syms');
@@ -812,7 +813,7 @@
                 let keep=cur.length?cur:[syms[0]];
                 try{const saved=JSON.parse(localStorage.getItem('rSyms')||'[]');if(saved.length)keep=saved.filter(x=>syms.includes(x));if(!keep.length)keep=[syms[0]];}catch(e){}
                 rbox.innerHTML=syms.map(x=>`<label><input type="checkbox" value="${x}" ${keep.includes(x)?'checked':''}> ${x}</label>`).join('');
-                rbox.onchange=()=>{try{const v=[...rbox.querySelectorAll('input:checked')].map(o=>o.value);if(v.length>10){[...rbox.querySelectorAll('input:checked')].slice(10).forEach(el=>el.checked=false);}rSymsRefresh();updateRunSummary();}catch(e){}};
+                rbox.onchange=()=>{try{const v=[...rbox.querySelectorAll('input:checked')].map(o=>o.value);if(v.length>25){[...rbox.querySelectorAll('input:checked')].slice(25).forEach(el=>el.checked=false);}rSymsRefresh();updateRunSummary();}catch(e){}};
                 rSymsRefresh();
             }
             const psel=document.getElementById('py-sym');
@@ -1243,7 +1244,8 @@ let _lastOpenTrdHTML = null;
         const autoDir=autoMode();
         return quantIndicators.map(q=>{const p={};(q.params||[]).forEach(pr=>{const v=parseFloat(pr.val);p[pr.key]=isNaN(v)?0:v;});p.mode=autoDir;p.candle=q.candle||'5';p.field=q.field||'equity';return {id:q.id,params:p};});
     }
-    function rSyms(){const b=document.getElementById('r-syms');if(b){const v=[...b.querySelectorAll('input:checked')].map(o=>o.value).filter(Boolean).slice(0,10);if(v.length)return v;}const s=document.getElementById('r-sym');if(s)return [...s.selectedOptions].map(o=>o.value).filter(Boolean).slice(0,10);return ['NIFTY'];}
+    function rSyms(){const b=document.getElementById('r-syms');if(b){const v=[...b.querySelectorAll('input:checked')].map(o=>o.value).filter(Boolean).slice(0,25);if(v.length)return v;}const s=document.getElementById('r-sym');if(s)return [...s.selectedOptions].map(o=>o.value).filter(Boolean).slice(0,25);return ['NIFTY'];}
+    function tickAllSyms(){try{const b=document.getElementById('r-syms');if(!b)return;const all=[...b.querySelectorAll('input')].slice(0,25);all.forEach(i=>{i.checked=true;});try{rSymsRefresh();updateRunSummary();}catch(e){}try{const c=document.getElementById('r-sym-count');if(c)c.textContent=all.length;}catch(e){}}catch(e){}}
     function rSymsRefresh(){try{const c=document.getElementById('r-sym-count');if(c)c.textContent=rSyms().length;try{localStorage.setItem('rSyms',JSON.stringify(rSyms()));}catch(e){}}catch(e){}}
 
     async function marginLine(sym,opt,strike,lots,txn,mode){try{
@@ -1792,18 +1794,18 @@ let _lastOpenTrdHTML = null;
         h+='<div class="small text-muted mb-2">Sirf isi strategy ke trades (strategy_id='+id+') | Open P&L ₹'+Number(d.open_pnl||0).toFixed(2)+' | Closed P&L ₹'+Number(d.closed_pnl||0).toFixed(2)+' | Total ₹'+Number(d.total_pnl||0).toFixed(2)+'</div>';
         const o=d.open||[];
         h+='<div class=\"small fw-bold mb-1\">Open ('+o.length+')</div>';
-        if(o.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Entry Date</th><th>Entry Time</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th></tr></thead><tbody>';
-        o.forEach(t=>{h+='<tr><td>'+t.id+'</td><td class=\"small text-muted\">'+(t.entry_date||'-')+'</td><td class=\"small text-muted\">'+(t.entry_time||'-')+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>₹'+Number(t.entry_price||0).toFixed(2)+'</td><td>₹'+Number(t.current_price||0).toFixed(2)+'</td><td>'+Number(t.unrealized_pnl||0).toFixed(2)+'</td><td>'+(t.trade_mode||'paper')+'</td></tr>';});
+        if(o.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Entry Date</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Current</th><th>P&L</th><th>Mode</th></tr></thead><tbody>';
+        o.forEach(t=>{h+='<tr><td>'+t.id+'</td><td class=\"small text-muted\">'+(t.entry_date||'-')+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>₹'+Number(t.entry_price||0).toFixed(2)+'</td><td>₹'+Number(t.current_price||0).toFixed(2)+'</td><td>'+Number(t.unrealized_pnl||0).toFixed(2)+'</td><td>'+(t.trade_mode||'paper')+'</td></tr>';});
         h+='</tbody></table>';}else{h+='<p class=\"text-muted small\">Koi open trade nahi.</p>';}
         const c=d.closed||[];
         h+='<div class=\"small fw-bold mb-1 mt-2\">Closed ('+c.length+')</div>';
-        if(c.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Exit</th></tr></thead><tbody>';
-        c.forEach(t=>{h+='<tr><td>'+t.id+'</td><td class=\"small text-muted\">'+(t.entry_date||'-')+'</td><td class=\"small text-muted\">'+(t.entry_time||'-')+'</td><td class=\"small text-muted\">'+(t.exit_date||'-')+'</td><td class=\"small text-muted\">'+(t.exit_time||'-')+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>₹'+Number(t.entry_price||0).toFixed(2)+'</td><td>₹'+Number(t.exit_price||0).toFixed(2)+'</td><td>'+Number(t.pnl||0).toFixed(2)+'</td><td class=\"small text-muted\">'+(t.exit_reason||'')+'</td></tr>';});
+        if(c.length){h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Entry Date</th><th>Exit Date</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Exit</th></tr></thead><tbody>';
+        c.forEach(t=>{h+='<tr><td>'+t.id+'</td><td class=\"small text-muted\">'+(t.entry_date||'-')+'</td><td class=\"small text-muted\">'+(t.exit_date||'-')+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>₹'+Number(t.entry_price||0).toFixed(2)+'</td><td>₹'+Number(t.exit_price||0).toFixed(2)+'</td><td>'+Number(t.pnl||0).toFixed(2)+'</td><td class=\"small text-muted\">'+(t.exit_reason||'')+'</td></tr>';});
         h+='</tbody></table>';}else{h+='<p class=\"text-muted small\">Koi closed trade nahi.</p>';}
         const m=d.manual||[];
         if(m.length){h+='<div class=\"small fw-bold mb-1 mt-2 text-muted\">Bina strategy wale (manual, is strategy ke nahi) ('+m.length+')</div>';
-        h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Status</th><th>P&L</th></tr></thead><tbody>';
-        m.forEach(t=>{h+='<tr><td>'+t.id+'</td><td class=\"small text-muted\">'+(t.entry_date||'-')+'</td><td class=\"small text-muted\">'+(t.entry_time||'-')+'</td><td class=\"small text-muted\">'+(t.exit_date||'-')+'</td><td class=\"small text-muted\">'+(t.exit_time||'-')+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>'+(t.status||'')+'</td><td>'+Number(t.pnl||0).toFixed(2)+'</td></tr>';});
+        h+='<table class=\"table table-sm\"><thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Strike</th><th>Status</th><th>P&L</th></tr></thead><tbody>';
+        m.forEach(t=>{h+='<tr><td>'+t.id+'</td><td>'+t.symbol+'</td><td>'+(t.transaction_type||'')+' '+(t.option_type||'')+'</td><td>'+t.strike+'</td><td>'+(t.status||'')+'</td><td>'+Number(t.pnl||0).toFixed(2)+'</td></tr>';});
         h+='</tbody></table>';}
         h+='</div></div>';
         const w=document.createElement('div');w.innerHTML=h;document.body.appendChild(w.firstChild);

@@ -671,17 +671,17 @@ def _run_backtest_core(req: BacktestRequest):
             pass
         if not _syms:
             _syms = [symbol]
-        _syms = _syms[:10]
+        _syms = _syms[:25]
         _all_trades = []
         _per_symbol = {}
         _brokerage = 0.0
         _first_m = None
         _engine_name = "engine"
         # Multi-symbol support: always allow all symbols (user selected them)
-        if len(_syms) > 10:
-            _syms = _syms[:5]
+        if len(_syms) > 25:
+            _syms = _syms[:25]
         timeframe = (advanced_in.get("timeframe") or "1d").lower()
-        _syms = _syms[:10]
+        _syms = _syms[:25]
         _bar_cap = 40 if len(_syms) > 1 else 60
         for _sym in _syms:
             _use_db = False

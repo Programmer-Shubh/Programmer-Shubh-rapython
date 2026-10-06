@@ -56,10 +56,15 @@ def get_symbols():
 _OTM_CACHE = {"ts": 0, "min_premium": None, "result": None}
 
 
+EXCLUDE_SYMBOLS = {"NIFTYNXT50", "NIFTYFPI"}  # DB me rows hain par NSE derivatives nahi
+OTM_FILTER_DTE = 28  # monthly expiry basis: positional traders ka instrument;
+# weekly par far-OTM me time-value nahi bachta isliye sirf ~22 pass hote the
+
+
 @router.get("/symbols-otm")
 def symbols_otm(min_premium: float = 20.0):
     """Backtest symbol dropdown ke liye: sirf wahi F&O symbols jinke
-    OTM 1-6 (CE upar + PE neeche, total 12 strikes) ka model premium
+    OTM 1-6 (CE upar + PE neeche, total 12 strikes) ka MONTHLY model premium
     >= min_premium ho. DB spot + local model = zero egress, 15-min cache."""
     import time as _t
     try:
@@ -107,9 +112,12 @@ def symbols_otm(min_premium: float = 20.0):
                 if step <= 0:
                     failed[sym] = 0
                     continue
+                if sym in EXCLUDE_SYMBOLS:
+                    failed[sym] = 0
+                    continue
                 atm = round(spot / step) * step
-                ce = [model_premium(spot, atm + i * step, 7, "CE", symbol=sym) for i in range(1, 7)]
-                pe = [model_premium(spot, atm - i * step, 7, "PE", symbol=sym) for i in range(1, 7)]
+                ce = [model_premium(spot, atm + i * step, OTM_FILTER_DTE, "CE", symbol=sym) for i in range(1, 7)]
+                pe = [model_premium(spot, atm - i * step, OTM_FILTER_DTE, "PE", symbol=sym) for i in range(1, 7)]
                 ce = [round(float(x or 0), 2) for x in ce]
                 pe = [round(float(x or 0), 2) for x in pe]
                 _mn = min(ce + pe) if (ce and pe) else 0
