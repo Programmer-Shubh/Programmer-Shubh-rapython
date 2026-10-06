@@ -89,7 +89,7 @@ def symbols_otm(min_premium: float = 20.0):
             pass
     except Exception:
         _uni = master
-    ok, detail = [], {}
+    ok, detail, failed = [], {}, {}
     try:
         bhav = BhavcopyModel()
         for sym in _uni:
@@ -99,23 +99,28 @@ def symbols_otm(min_premium: float = 20.0):
                     [sym])
                 spot = float(row["close_price"]) if row and row["close_price"] else 0
                 if spot <= 0:
+                    failed[sym] = 0
                     continue
                 step = get_strike_step(sym) or 0
                 if step <= 0:
+                    failed[sym] = 0
                     continue
                 atm = round(spot / step) * step
                 ce = [model_premium(spot, atm + i * step, 7, "CE", symbol=sym) for i in range(1, 7)]
                 pe = [model_premium(spot, atm - i * step, 7, "PE", symbol=sym) for i in range(1, 7)]
                 ce = [round(float(x or 0), 2) for x in ce]
                 pe = [round(float(x or 0), 2) for x in pe]
+                _mn = min(ce + pe) if (ce and pe) else 0
                 if all(v >= min_premium for v in ce + pe):
                     ok.append(sym)
                     detail[sym] = {"spot": round(spot, 2), "otm_ce": ce, "otm_pe": pe}
+                else:
+                    failed[sym] = _mn
             except Exception:
                 continue
     except Exception as e:
         return {"symbols": [], "error": str(e)[:150]}
-    res = {"symbols": ok, "count": len(ok), "min_premium": min_premium, "detail": detail}
+    res = {"symbols": ok, "count": len(ok), "min_premium": min_premium, "detail": detail, "failed": failed}
     try:
         _OTM_CACHE.update({"ts": _t.time(), "min_premium": min_premium, "result": res})
     except Exception:
