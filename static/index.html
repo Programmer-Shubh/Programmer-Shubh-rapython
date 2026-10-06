@@ -781,9 +781,11 @@
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
         if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
-    // OTM filter 15-min client reuse: baar-baar load nahi (server bhi 15-min cache).
-    function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols)return c.data;}catch(e){}return null;}
-    async function otmFresh(){const c=otmCached();if(c)return c;const d=await A('/api/chain/symbols-otm?min_premium=20');try{window._otmData={ts:Date.now(),data:d};}catch(e){}return d;}
+    // OTM filter cache-first: memory (15-min) -> localStorage (60-min) -> network.
+    // "Loading symbols..." kabhi atakta nahi - pehli baar ke baad turant list.
+    function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
+        try{const l=JSON.parse(localStorage.getItem('otmSymsCacheV1')||'null');if(l&&l.ts&&Date.now()-l.ts<60*60*1000&&l.data&&l.data.symbols&&l.data.symbols.length)return l.data;}catch(e){}return null;}
+    async function otmFresh(){const c=otmCached();if(c)return c;const d=await A('/api/chain/symbols-otm?min_premium=20');try{window._otmData={ts:Date.now(),data:d};localStorage.setItem('otmSymsCacheV1',JSON.stringify({ts:Date.now(),data:d}));}catch(e){}return d;}
     async function loadStrategySymbols(){
         try{
             const sel=document.getElementById('s-index');
