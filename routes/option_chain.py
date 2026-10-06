@@ -73,11 +73,26 @@ def symbols_otm(min_premium: float = 20.0):
             return _OTM_CACHE["result"]
     except Exception:
         pass
-    master = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'TCS', 'INFY', 'ITC', 'SBIN', 'AXISBANK', 'KOTAKBANK', 'LT', 'HINDUNILVR', 'BHARTIARTL', 'M&M', 'MARUTI', 'BAJFINANCE', 'WIPRO', 'ONGC', 'SUNPHARMA', 'ULTRACEMCO', 'NTPC', 'POWERGRID', 'TATAMOTORS', 'TATASTEEL', 'HCLTECH', 'JSWSTEEL', 'COALINDIA', 'DRREDDY', 'CIPLA', 'ADANIENT', 'SBILIFE', 'BPCL', 'GRASIM', 'TECHM', 'DIVISLAB', 'EICHERMOT', 'BRITANNIA', 'HINDALCO', 'VEDL', 'INDUSINDBK', 'SHREECEM', 'NESTLEIND', 'BAJAJFINSV', 'HEROMOTOCO', 'APOLLOHOSP', 'UPL']
+    master = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'TCS', 'INFY', 'ITC', 'SBIN', 'AXISBANK', 'KOTAKBANK', 'LT', 'HINDUNILVR', 'BHARTIARTL', 'M&M', 'MARUTI', 'BAJFINANCE', 'WIPRO', 'ONGC', 'SUNPHARMA', 'ULTRACEMCO', 'NTPC', 'POWERGRID', 'TATAMOTORS', 'TATASTEEL', 'HCLTECH', 'JSWSTEEL', 'COALINDIA', 'DRREDDY', 'CIPLA', 'ADANIENT', 'SBILIFE', 'BPCL', 'GRASIM', 'TECHM', 'DIVISLAB', 'EICHERMOT', 'BRITANNIA', 'HINDALCO', 'VEDL', 'INDUSINDBK', 'SHREECEM', 'NESTLEIND', 'BAJAJFINSV', 'HEROMOTOCO', 'APOLLOHOSP', 'UPL']
+    # Universe = master + DB ke optionable symbols (NIFTYNXT50/non-F&O bahar).
+    try:
+        from utils.helpers import is_optionable as _isopt
+        _uni = list(master)
+        try:
+            _db_all = BhavcopyModel().db.fetch_all(
+                "SELECT DISTINCT symbol FROM bhavcopy_data WHERE option_type IS NULL")
+            for _r in (_db_all or []):
+                _s = str((_r or {}).get("symbol") or "").upper()
+                if _s and _s not in _uni and _isopt(_s):
+                    _uni.append(_s)
+        except Exception:
+            pass
+    except Exception:
+        _uni = master
     ok, detail = [], {}
     try:
         bhav = BhavcopyModel()
-        for sym in master:
+        for sym in _uni:
             try:
                 row = bhav.db.fetch_one(
                     "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
