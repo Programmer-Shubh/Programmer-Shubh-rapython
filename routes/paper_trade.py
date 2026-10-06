@@ -226,6 +226,14 @@ def place_trade(req: PlaceTradeRequest):
     if existing:
         return {"error": f"Duplicate open position exists for {req.symbol} {req.strike} {req.option_type} {req.transaction_type} (ID {existing['id']}) - close or delete existing first"}
     adj_premium = TransactionCosts.apply_fill_slippage(req.entry_price, req.transaction_type, is_live=True)
+    # Hard floor: ₹1-2 lottery tickets kabhi place nahi hote
+    try:
+        from utils.helpers import check_min_premium as _cmp2
+        _merr2 = _cmp2(adj_premium, req.option_type)
+        if _merr2:
+            return {"error": _merr2}
+    except Exception:
+        pass
     lot_size = get_lot_size(req.symbol)
     costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
     trade_model = TradeModel()

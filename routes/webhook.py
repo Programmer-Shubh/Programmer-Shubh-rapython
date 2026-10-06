@@ -132,6 +132,14 @@ def _place_from_signal(data: dict, source: str = "webhook") -> dict:
             premium = round(spot * 0.01, 2)
     if premium <= 0:
         return {"error": f"No premium for {symbol} {strike}{opt_type}"}
+    # Hard floor: ₹1-2 lottery tickets kabhi place nahi hote
+    try:
+        from utils.helpers import check_min_premium as _cmpw
+        _merrw = _cmpw(premium, opt_type)
+        if _merrw:
+            return {"error": _merrw}
+    except Exception:
+        pass
     adj = TransactionCosts.apply_fill_slippage(premium, action, is_live=False)
     lot = get_lot_size(symbol)
     costs = TransactionCosts.calculate(adj * qty * lot, action=="SELL", is_live=False)

@@ -112,6 +112,26 @@ def is_optionable(symbol: str) -> bool:
         return False
 
 
+# Minimum option premium (₹) for backtest entries AND live/paper orders.
+# ₹1-2 lottery tickets (far-OTM) are blocked everywhere: SELL me unlimited
+# risk for pennies, BUY me predictable decay. EQ (equity) legs exempt.
+MIN_ORDER_PREMIUM = 20.0
+
+
+def check_min_premium(premium, option_type: str = "CE") -> str | None:
+    """Error string if option premium below floor, else None (pass)."""
+    try:
+        if str(option_type or "").upper() == "EQ":
+            return None
+        px = float(premium or 0)
+    except Exception:
+        return "Premium samajh nahi aaya - order blocked"
+    if px < MIN_ORDER_PREMIUM:
+        return (f"Premium ₹{px:.2f} < ₹{MIN_ORDER_PREMIUM:.0f} floor - "
+                f"ye strike bahut door OTM hai. ATM ke najdeek strike chuno.")
+    return None
+
+
 def get_strike_step(symbol: str) -> float:
     steps = {
         "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50, "MIDCPNIFTY": 50,

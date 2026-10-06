@@ -573,6 +573,14 @@ def place_trade(req: TradeRequest):
                         premium = model_premium(spot_chk, req.strike, expiry_days, req.option_type, symbol=req.symbol)
                 except Exception:
                     pass
+        # Hard floor: ₹1-2 lottery tickets (far-OTM) kabhi place nahi hote
+        try:
+            from utils.helpers import check_min_premium as _cmp
+            _merr = _cmp(premium, req.option_type)
+            if _merr:
+                return {"error": _merr}
+        except Exception:
+            pass
         adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
         lot_size = get_lot_size(req.symbol)
         costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)

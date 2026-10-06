@@ -1274,6 +1274,29 @@ async def place_live_order(req: LiveOrderRequest):
             strike = align_strike_price(symbol, strike)
         except Exception:
             pass
+        # Hard floor: ₹1-2 lottery tickets (far-OTM) - dry_run aur real dono blocked
+        try:
+            from utils.helpers import check_min_premium as _cmp3
+            from core.models.trade_model import TradeModel as _TM3
+            _px3 = 0.0
+            try:
+                _px3 = float(_TM3().get_option_premium(symbol, opt, strike, req.expiry or "") or 0)
+            except Exception:
+                _px3 = 0.0
+            if _px3 <= 0:
+                try:
+                    from core.services.live_market_data import LiveMarketData as _LM3
+                    from utils.helpers import model_premium as _mp3
+                    _sp3 = _LM3().get_spot_price(symbol) or 0
+                    if _sp3:
+                        _px3 = float(_mp3(_sp3, strike, 7, opt, symbol=symbol) or 0)
+                except Exception:
+                    pass
+            _merr3 = _cmp3(_px3, opt) if _px3 > 0 else None
+            if _merr3:
+                return {"error": _merr3}
+        except Exception:
+            pass
         exp_hint = req.expiry or "weekly"
         # Broker choice
         want = (req.broker or "").lower()

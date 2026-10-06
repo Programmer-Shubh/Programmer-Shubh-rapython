@@ -790,6 +790,17 @@
             // Full F&O master list fallback if DB has few symbols
             const master=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','LT','AXISBANK','KOTAKBANK','HINDUNILVR','BHARTIARTL','MARUTI','M&M','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','TITAN','BAJAJFINSV','NESTLEIND','APOLLOHOSP','UPL','HEROMOTOCO'];
             let syms=[...new Set([...(s.symbols||[]), ...master])].sort();
+            try{window._fullSyms=syms.slice();}catch(e){}
+            // Default: SIRF OTM 1-6 >= ₹20 wale symbols (₹1-2 lottery tickets bahar).
+            // Fail/empty par full list (filter checkbox OFF rehta hai).
+            try{
+                const f=await A('/api/chain/symbols-otm?min_premium=20');
+                if(f && f.symbols && f.symbols.length){
+                    syms=f.symbols.slice().sort();
+                    try{document.getElementById('r-otm20').checked=true;}catch(e){}
+                    try{document.getElementById('r-otm20-note').textContent=f.count+' symbols (OTM 1-6 ≥ ₹20)';}catch(e){}
+                }
+            }catch(e){}
             sel.innerHTML=syms.map(x=>`<option value="${x}" ${x===current?'selected':''}>${x}</option>`).join('');
             // Same full chain list as tap-checkboxes (keep current ticks)
             const rbox=document.getElementById('r-syms');
@@ -1235,7 +1246,7 @@ let _lastOpenTrdHTML = null;
         const on=document.getElementById('r-otm20').checked;
         const note=document.getElementById('r-otm20-note');
         const box=document.getElementById('r-syms');if(!box)return;
-        if(!on){box.querySelectorAll('input').forEach(i=>{i.disabled=false;});if(note)note.textContent='';return;}
+        if(!on){const full=window._fullSyms||[];if(full.length){const cur=[...box.querySelectorAll('input:checked')].map(o=>o.value);box.innerHTML=full.map(x=>`<label><input type="checkbox" value="${x}" ${cur.includes(x)?'checked':''}> ${x}</label>`).join('');try{rSymsRefresh();updateRunSummary();}catch(e){}}else{box.querySelectorAll('input').forEach(i=>{i.disabled=false;});}if(note)note.textContent='';return;}
         if(note)note.textContent='check ho raha...';
         const r=await A('/api/chain/symbols-otm?min_premium=20');
         const ok=new Set(r.symbols||[]);
