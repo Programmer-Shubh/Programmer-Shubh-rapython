@@ -1570,14 +1570,45 @@ class OptionScanner:
                 _naive_idx
             except NameError:
                 _naive_idx = idx
+            # tvDatafeed stamps are UTC -> IST convert (deterministic).
+            # Whichever set (UTC-converted vs naive) lands a majority of bars
+            # inside the NSE session (09:00-16:00 IST) wins - no more mixed
+            # UTC/IST bar_time leaking into backtest entry/exit clocks.
+            def _in_session(hhmm: str) -> bool:
+                try:
+                    return "09:00" <= hhmm <= "16:00"
+                except Exception:
+                    return False
+            _cand_utc, _cand_naive = [], []
             for k in range(len(df)):
                 try:
-                    _ts = cand_utc[k] if use_utc else _naive_idx[k]
-                    _py = _ts.to_pydatetime() if hasattr(_ts, "to_pydatetime") else _ts
-                    _py = _py.replace(tzinfo=None)
+                    _tsu = cand_utc[k]
+                    _pu = _tsu.to_pydatetime() if hasattr(_tsu, "to_pydatetime") else _tsu
+                    _pu = _pu.replace(tzinfo=None)
+                    _cand_utc.append((_pu.strftime("%Y-%m-%d"), _pu.strftime("%H:%M")))
+                except Exception:
+                    _cand_utc.append(("", ""))
+                try:
+                    _tsn = _naive_idx[k]
+                    _pn = _tsn.to_pydatetime() if hasattr(_tsn, "to_pydatetime") else _tsn
+                    _pn = _pn.replace(tzinfo=None)
+                    _cand_naive.append((_pn.strftime("%Y-%m-%d"), _pn.strftime("%H:%M")))
+                except Exception:
+                    _cand_naive.append(("", ""))
+            try:
+                _utc_score = sum(1 for _, t in _cand_utc if t and _in_session(t))
+                _nv_score = sum(1 for _, t in _cand_naive if t and _in_session(t))
+                _use_utc_set = _utc_score >= _nv_score
+            except Exception:
+                _use_utc_set = use_utc
+            for k in range(len(df)):
+                try:
+                    _dt_s, _tm_s = (_cand_utc[k] if _use_utc_set else _cand_naive[k])
+                    if not _dt_s:
+                        continue
                     bars.append({
-                        "trade_date": _py.strftime("%Y-%m-%d"),
-                        "bar_time": _py.strftime("%H:%M"),
+                        "trade_date": _dt_s,
+                        "bar_time": _tm_s,
                         "open_price": round(float(df["open"].iloc[k]), 2),
                         "high_price": round(float(df["high"].iloc[k]), 2),
                         "low_price": round(float(df["low"].iloc[k]), 2),

@@ -192,10 +192,13 @@ class BacktestEngine:
                     trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
                 else:
                     trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
-                # Min-premium guard: don't sell lottery tickets (Rs2-3 premium =
-                # pennies of max profit, huge tail loss). Skip without using the
-                # day's trade quota so a better setup can still enter later.
-                if min_premium > 0 and txn_type == "sell" and float(trade.get("price", 0) or 0) < min_premium:
+                # Min-premium guard: Rs20 se saste entries (BUY or SELL) kabhi
+                # nahi - signal-time estimate chook sakta hai, isliye ACTUAL
+                # entry premium par final check. Skip without using the day's
+                # trade quota so a better setup can still enter later.
+                # (Spreads exempt: net credit/debit premium compare nahi hota.)
+                if (min_premium > 0 and not is_spread
+                        and float(trade.get("price", 0) or 0) < min_premium):
                     pending_entry = None
                     pending_auto_buy = None
                     continue

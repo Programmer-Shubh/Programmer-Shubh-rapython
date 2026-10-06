@@ -598,16 +598,6 @@ def _run_backtest_core(req: BacktestRequest):
             risk_in["daily_take_profit"] = float(req.take_profit)
         if "max_trades_per_day" not in risk_in:
             risk_in["max_trades_per_day"] = 3
-        # OTM premium floor: ₹20 se saste option strikes auto-drop (engine
-        # signal + execution dono jagah skip karta hai). Sirf option legs par -
-        # EQ (equity) me premium concept nahi, wahan floor lagana 0 trades dega.
-        # Explicit value bheji ho to wahi.
-        try:
-            _has_opt = any(str((l or {}).get("option_type", "")).upper() in ("CE", "PE") for l in (legs or []))
-            if _has_opt:
-                advanced_in.setdefault("min_entry_premium", 20)
-        except Exception:
-            pass
         # Normalize legs + handle presets (Bear Call, Bull Put, Bear Put, Iron Condor)
         raw_legs = req.legs or []
         preset = (req.strategy_preset or advanced_in.get("preset") or "").lower()
@@ -646,6 +636,17 @@ def _run_backtest_core(req: BacktestRequest):
                 {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
                 {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
             ]
+        # OTM premium floor: Rs20 se saste option strikes auto-drop (engine
+        # signal + execution dono jagah skip karta hai). Yahan lagana ZAROORI
+        # hai (legs normalize/preset-expand ke BAAD) - pehle lagane par NameError
+        # aata tha aur floor kabhi lagta hi nahi tha. Sirf option legs par -
+        # EQ (equity) me premium concept nahi. Explicit value ho to wahi.
+        try:
+            _has_opt = any(str((l or {}).get("option_type", "")).upper() in ("CE", "PE") for l in (legs or []))
+            if _has_opt:
+                advanced_in.setdefault("min_entry_premium", 20)
+        except Exception:
+            pass
         # Indicators: if empty, inject defaults - include supertrend so synthetic always yields trades (rsi+ema alone gives 0 on flat synthetic)
         indicators = req.indicators or []
         if not indicators:

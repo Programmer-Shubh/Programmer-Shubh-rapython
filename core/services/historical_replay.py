@@ -179,12 +179,17 @@ class HistoricalReplayEngine:
                     trade = self.bt_engine._enter_single(cur_date, spot, self.symbol, self.legs[0],
                                                          strike_sel, delta_target, otm_dist)
 
-                # Min-premium guard (same as backtest engine): skip lottery-ticket sells
+                # Min-premium guard (same as backtest engine): Rs20 se saste
+                # BUY aur SELL entries dono skip (spreads exempt)
                 try:
                     _min_prem = float(self.advanced_options.get("min_entry_premium", 0) or 0)
                 except Exception:
                     _min_prem = 0
-                if _min_prem > 0 and txn_type == "sell" and float(trade.get("price", 0) or 0) < _min_prem:
+                try:
+                    _is_spr = len(self.legs or []) > 1
+                except Exception:
+                    _is_spr = False
+                if _min_prem > 0 and not _is_spr and float(trade.get("price", 0) or 0) < _min_prem:
                     self.pending_entry = None
                     self.pending_auto_buy = None
                     continue
