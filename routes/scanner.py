@@ -423,6 +423,63 @@ def opportunities_4part(min_score: int = 80, debug: int = 0):
         return dummy
 
 
+@router.get("/pulse")
+def market_pulse(min_score: int = 70):
+    """Market Pulse: dashboard widget ke liye halka live-signal feed.
+    Bandwidth-safe: koi fresh scan nahi - sirf opportunities-4part cache
+    padhta hai (miss par background refresh lagakar stale/dummy deta hai).
+    Har signal ka stable id taaki browser naya signal pehchan sake."""
+    try:
+        min_score = int(min_score or 70)
+    except Exception:
+        min_score = 70
+    if _rate_limit("pulse", 5.0):
+        pass
+    out, live, ts = [], False, 0
+    try:
+        for _mk in (f"opp4_{min_score}", "opp4_80", "opp4_70"):
+            _c = _cache_get(_mk)
+            if _c:
+                ts, out_val = _c[0], _c[1]
+                if isinstance(out_val, dict) and not out_val.get("dummy"):
+                    live = (_t.time() - ts) < 600
+                    _src = out_val
+                    break
+        else:
+            _src = {}
+        if not _src:
+            # Cache miss: background me real scan, abhi khaali jawab
+            try:
+                def _bg():
+                    try:
+                        _cache_set(f"opp4_{min_score}",
+                                   OptionScanner().get_4_part_opportunities(min_score=min_score))
+                    except Exception:
+                        pass
+                _th.Thread(target=_bg, daemon=True).start()
+            except Exception:
+                pass
+            return {"signals": [], "live": False, "ts": 0,
+                    "note": "Scan taiyaar ho raha hai - 1 min me dobara dekho"}
+        for _part in ("ce_buy", "pe_buy", "ce_sell", "pe_sell"):
+            for _o in (list(_src.get(_part) or [])[:3]):
+                try:
+                    _os = (_o.get("option_suggestion") or {})
+                    out.append({
+                        "id": f"{_o.get('symbol')}_{_o.get('signal_type')}_{_os.get('strike', 0)}",
+                        "symbol": _o.get("symbol"), "signal": _o.get("signal_type"),
+                        "direction": _o.get("direction"), "score": _o.get("score"),
+                        "strike": _os.get("strike"), "premium": _os.get("premium"),
+                        "reasons": list(_o.get("reasons") or [])[:2],
+                    })
+                except Exception:
+                    continue
+        out = sorted(out, key=lambda x: x.get("score") or 0, reverse=True)[:8]
+    except Exception as e:
+        return {"signals": [], "live": False, "ts": 0, "error": str(e)[:150]}
+    return {"signals": out, "live": live, "ts": int(ts), "count": len(out)}
+
+
 def _db_max_date():
     try:
         from core.models.database import Database as _DB

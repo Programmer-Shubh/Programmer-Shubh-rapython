@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 
 class EmailAlertParser:
-    """Parses email alerts from Chartink, Gocharting.com, and Investing.com."""
+    """Parses email alerts from Chartink and Investing.com (generic fallback)."""
 
     SYMBOL_MAP = {
         "nifty": "NIFTY", "banknifty": "BANKNIFTY", "finnifty": "FINNIFTY",
@@ -24,8 +24,6 @@ class EmailAlertParser:
             source = self._detect_source(email_text)
         if source == "chartink":
             return self._parse_chartink(email_text)
-        elif source == "gocharting":
-            return self._parse_gocharting(email_text)
         elif source == "investing":
             return self._parse_investing(email_text)
         else:
@@ -35,8 +33,6 @@ class EmailAlertParser:
         t = text.lower()
         if "chartink" in t or "scanalert" in t or "chartink.com" in t:
             return "chartink"
-        if "gocharting" in t or "gocharting.com" in t:
-            return "gocharting"
         if "investing.com" in t or "investing alert" in t:
             return "investing"
         return "generic"
@@ -46,30 +42,6 @@ class EmailAlertParser:
         t = text.upper()
         action = "BUY"
         if any(w in t for w in ["SELL", "SHORT", "BEARISH"]):
-            action = "SELL"
-        result["action"] = action
-        symbol = self._extract_symbol(t)
-        if symbol:
-            result["symbol"] = symbol
-        opt_type = self._extract_option_type(t)
-        if opt_type:
-            result["option_type"] = opt_type
-        strike = self._extract_strike(t)
-        if strike:
-            result["strike"] = strike
-        expiry = self._extract_expiry(text)
-        if expiry:
-            result["expiry"] = expiry
-        qty = self._extract_quantity(t)
-        if qty:
-            result["quantity"] = qty
-        return result if "symbol" in result else None
-
-    def _parse_gocharting(self, text: str) -> Optional[Dict]:
-        result = {"source": "gocharting", "raw": text}
-        t = text.upper()
-        action = "BUY"
-        if any(w in t for w in ["SELL", "SHORT", "TARGET", "BOOK"]):
             action = "SELL"
         result["action"] = action
         symbol = self._extract_symbol(t)
@@ -138,8 +110,9 @@ class EmailAlertParser:
         return result if "symbol" in result else None
 
     def _extract_symbol(self, text: str) -> Optional[str]:
+        tl = text.lower()
         for key, sym in self.SYMBOL_MAP.items():
-            if key in text:
+            if key in tl:
                 return sym
         m = re.search(r'\b([A-Z]{2,10})\b', text)
         if m:

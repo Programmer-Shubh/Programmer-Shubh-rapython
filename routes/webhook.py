@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, Header
 from pydantic import BaseModel
 from typing import Optional
 import json
+import os
 from core.models.trade_model import TradeModel
 from core.services.transaction_costs import TransactionCosts
 from core.services.live_market_data import LiveMarketData
@@ -9,6 +10,18 @@ from utils.helpers import get_lot_size
 import time
 
 router = APIRouter()
+
+
+def _webhook_auth(request: Request, token_header: Optional[str]) -> bool:
+    """Secret-token guard. Render me WEBHOOK_TOKEN set karo (koi bhi lambi
+    random string); phir har webhook call me header `x-email-token: <token>`
+    ya `?token=<token>` compulsory hai. Token set nahi hai to purana
+    open behaviour (backward compatible)."""
+    need = (os.environ.get("WEBHOOK_TOKEN") or "").strip()
+    if not need:
+        return True
+    got = (token_header or "").strip() or (request.query_params.get("token") or "").strip()
+    return bool(got) and got == need
 
 class WebhookSignal(BaseModel):
     symbol: str = "NIFTY"
@@ -139,8 +152,10 @@ def _place_from_signal(data: dict, source: str = "webhook") -> dict:
 
 
 @router.post("/free")
-async def webhook_free(request: Request):
+async def webhook_free(request: Request, x_email_token: Optional[str] = Header(None)):
     """Free TradingView webhook (Stoxo/NextLevel style) - works with Chrome Extension in Free plan."""
+    if not _webhook_auth(request, x_email_token):
+        return {"success": False, "error": "forbidden: galat ya missing webhook token (x-email-token header ya ?token=)"}
     try:
         body = await request.body()
         text = body.decode("utf-8", errors="ignore") if body else ""
@@ -166,6 +181,8 @@ async def webhook_free(request: Request):
 @router.post("/email")
 async def webhook_email(request: Request, x_email_token: Optional[str] = Header(None)):
     """Email hack: Free alert Email -> Pipedream/IFTTT -> POST here. Body is raw email text."""
+    if not _webhook_auth(request, x_email_token):
+        return {"success": False, "error": "forbidden: galat ya missing webhook token (x-email-token header ya ?token=)"}
     try:
         body = await request.body()
         text = body.decode("utf-8", errors="ignore") if body else ""
@@ -196,7 +213,9 @@ async def webhook_email(request: Request, x_email_token: Optional[str] = Header(
 
 @router.get("/test")
 def webhook_test():
-    return {"webhooks": {
+    locked = bool((os.environ.get("WEBHOOK_TOKEN") or "").strip())
+    return {"auth": ("ON (x-email-token header ya ?token= compulsory)" if locked else "OFF (Render me WEBHOOK_TOKEN set karo taaki ON ho)"),
+            "webhooks": {
         "free": "POST /api/webhook/free  (Chrome Extension, Stoxo style, FREE)",
         "email": "POST /api/webhook/email (Pipedream/IFTTT free 2 webhooks)",
         "tradingview": "POST /api/webhook/tradingview (paid webhook, same as free)"

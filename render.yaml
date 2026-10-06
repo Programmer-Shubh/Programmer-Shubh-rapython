@@ -29,6 +29,9 @@ services:
     #   Fyers: RATRADE_FYERS_APP_ID, RATRADE_FYERS_SECRET (+ redirect URI default)
     #   Shoonya: RATRADE_SHOONYA_UID, RATRADE_SHOONYA_PWD, RATRADE_SHOONYA_VC, RATRADE_SHOONYA_APIKEY, RATRADE_SHOONYA_SECRET
     #   Angel: RATRADE_ANGEL_CLIENT_CODE, RATRADE_ANGEL_PASSWORD, RATRADE_ANGEL_API_KEY, RATRADE_ANGEL_TOTP_SECRET
+    #   Webhook security: WEBHOOK_TOKEN (koi bhi lambi random string). Set karne
+    #   par /api/webhook/* me header x-email-token ya ?token= compulsory ho jata
+    #   hai. Bina iske koi bhi trade trigger kar sakta hai - production me set karo.
     #   NOTE: Dhan/Fyers access tokens still expire ~daily; use Connect / Refresh
     #   buttons (Dhan auto-renews when possible). Env only saves re-typing IDs/secrets.
     autoDeploy: true

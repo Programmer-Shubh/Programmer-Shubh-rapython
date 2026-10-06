@@ -314,6 +314,7 @@
             </div>
             <div class="card mb-2" style="background:linear-gradient(135deg,#f8fbff 0%,#ffffff 100%)"><div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small">Arbitrage — Equity NSE/BSE</strong><span class="badge bg-success">Live</span><button class="btn btn-sm btn-outline-primary" onclick="loadPairs()">Refresh</button></div><div class="card-body p-2 small" id="pairs-box"><span class="text-muted">Loading...</span></div></div>
             <div class="row" id="mkt-cards"></div>
+            <div class="card mb-2" style="border-left:4px solid #ff9800"><div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2"><strong class="small"><i class="bi bi-lightning-charge-fill"></i> Market Pulse — Live Signals</strong><span><span id="pulse-live" class="badge bg-secondary me-1">—</span><button class="btn btn-sm btn-outline-success" id="pulse-bell" onclick="pulseBell()"><i class="bi bi-bell"></i> Notifications ON karo</button> <button class="btn btn-sm btn-outline-primary" onclick="loadPulse(true)"><i class="bi bi-arrow-clockwise"></i></button></span></div><div class="card-body p-2 small" id="pulse-box"><span class="text-muted">Loading signals...</span></div></div>
             <div class="card">
                 <div class="card-header">Today — NSE Future & Option Top 5 Bullish & Bearish <small class="text-muted" id="fno-date"></small> <button class="btn btn-sm btn-outline-primary" onclick="loadFnoTop5()"><i class="bi bi-arrow-clockwise"></i></button></div>
                 <div class="card-body p-0"><div id="fno-top5" class="sig-grid" style="padding:12px"></div></div>
@@ -633,7 +634,7 @@
 
         <!-- EMAIL ALERTS - Multi-Platform (Webhook Alert Manager Style) -->
         <div id="pg-alerts" class="pg hidden">
-            <h4 class="fw-bold mb-3"><i class="bi bi-envelope-at"></i> Email Alerts — Chartink / Gocharting / Investing.com</h4>
+            <h4 class="fw-bold mb-3"><i class="bi bi-envelope-at"></i> Email Alerts — Chartink / Investing.com</h4>
             <div class="row g-3">
                 <div class="col-md-4">
                     <div class="card" style="border:2px solid #0d6efd">
@@ -644,7 +645,11 @@
                                 <small class="text-muted">Pipedream/IFTTT se is URL pe forward kare</small>
                             </div>
                             <div class="mb-2"><label class="form-label small fw-bold">Supported Sources</label>
-                                <div><span class="badge bg-info me-1">Chartink</span><span class="badge bg-success me-1">Gocharting.com</span><span class="badge bg-warning text-dark">Investing.com</span></div>
+                                <div><span class="badge bg-info me-1">Chartink</span><span class="badge bg-warning text-dark">Investing.com</span></div>
+                            </div>
+                            <div class="mb-2"><label class="form-label small fw-bold">Webhook Token (सुरक्षा)</label>
+                                <div class="input-group input-group-sm"><input class="form-control" id="wh-token" type="password" placeholder="Render me WEBHOOK_TOKEN jaisa rakha hai"><button class="btn btn-outline-primary" onclick="saveWhToken()">Save</button></div>
+                                <small class="text-muted">Save karte hi neeche URL me token jud jayega. <button class="btn btn-sm btn-link p-0" onclick="testWebhook()">Test bhejo</button> <span id="wh-test" class="small"></span></small>
                             </div>
                             <hr>
                             <div class="mb-2"><label class="form-label small fw-bold">Risk Management</label>
@@ -690,7 +695,7 @@
                 <div class="card-header"><i class="bi bi-info-circle"></i> How It Works (Webhook Alert Manager Style)</div>
                 <div class="card-body">
                     <div class="row g-3">
-                        <div class="col-md-4"><div class="step"><span class="step-num">1</span><strong>Platform Setup</strong><p class="small text-muted mt-1">Chartink/Gocharting/Investing.com pe alert banaye. Email notification ON kare.</p></div></div>
+                        <div class="col-md-4"><div class="step"><span class="step-num">1</span><strong>Platform Setup</strong><p class="small text-muted mt-1">Chartink/Investing.com pe alert banaye. Email notification ON kare.</p></div></div>
                         <div class="col-md-4"><div class="step"><span class="step-num">2</span><strong>Forward to RaTrade</strong><p class="small text-muted mt-1">Pipedream/IFTTT (free) se email ko is URL pe forward kare. Auto-parse hoga.</p></div></div>
                         <div class="col-md-4"><div class="step"><span class="step-num">3</span><strong>Auto-Execute</strong><p class="small text-muted mt-1">Broker se auto-order place hoga. SL/TP/Trailing sab built-in hai.</p></div></div>
                     </div>
@@ -721,6 +726,8 @@
                     <div class="col-6 col-md-2 d-flex gap-2 align-items-center flex-wrap"><label class="small"><input type="checkbox" id="tv-marks" checked> Markers</label><label class="small"><input type="checkbox" id="tv-st" checked> SuperTrend</label><label class="small"><input type="checkbox" id="tv-ema" checked> EMA</label><label class="small"><input type="checkbox" id="tv-auto" checked> Auto-refresh 60s</label></div>
                 </div>
             </div></div>
+            <div class="card mb-2" style="border-left:4px solid #2962ff"><div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between"><div class="d-flex gap-2 align-items-center"><strong class="small">Pro Chart (TradingView)</strong><select id="tv-adv-sym" class="form-select form-select-sm" style="width:150px" onchange="tvAdvLoad()"><option value="NSE:NIFTY">NIFTY</option><option value="NSE:BANKNIFTY">BANKNIFTY</option><option value="NSE:FINNIFTY">FINNIFTY</option><option value="NSE:RELIANCE">RELIANCE</option><option value="NSE:TCS">TCS</option><option value="NSE:HDFCBANK">HDFCBANK</option><option value="NSE:INFY">INFY</option><option value="NSE:SBIN">SBIN</option></select></div><small class="text-muted">Indicators + watchlist andar hi milega</small></div></div></div>
+            <div class="card mb-2"><div class="card-body p-1"><div id="tv-adv-widget" style="height:560px"><p class="text-muted p-3">Chart tab kholte hi pro chart load hoga (internet chahiye).</p></div></div></div>
             <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:520px"></div><div class="small p-2"><span style="color:#198754">▲ BUY</span> <span style="color:#dc3545">▼ SELL</span> <span style="color:#0d6efd">● EXIT</span> <span style="color:#ff9800">● OPEN</span> <span style="color:#ff9800">— SuperTrend</span> <span style="color:#2962ff">— EMAfast</span> <span style="color:#6f42c1">— EMAslow</span></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
         </div>
 
@@ -767,7 +774,7 @@
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='tvchart')tvAdvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     async function loadStrategySymbols(){
         try{
             const s=await A('/api/chain/symbols');
@@ -955,7 +962,7 @@
         try{const _c=_getDashCache(); if(_c&&_c.spot){let h='';for(const [sym,d] of Object.entries(_c.spot)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; document.getElementById('status').innerHTML='<span class="live-dot"></span> Cached';}}catch(e){}
         try{const s=await A('/api/dashboard/spot');document.getElementById('status').innerHTML='<span class="live-dot"></span> Connected';let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; try{_setDashCache({spot:s});}catch(e){}}catch(e){document.getElementById('status').innerHTML='Offline';}
         loadRegimeSyms().then(()=>{loadRegime();loadMTFSyms();});
-        loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();loadPairs();loadMTF();
+        loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();loadPairs();loadMTF();try{loadPulse(true);}catch(e){}
     }
     function singleBtn(sym,action,type,strike,exp,label,cls){return `<button class="btn btn-sm ${cls}" onclick="quickStrat('${sym}','${action}','${type}',${strike},'${exp}')">${label}</button>`;}
     function stratBtns(x){const sig=(x.signal_type||x.type||'').toUpperCase();const opt=x.option_suggestion||{};const sym=x.symbol,strike=opt.strike||0,exp=opt.expiry||''; if(sig.includes('SELL')&&sig.includes('CE')) return singleBtn(sym,'SELL','CE',strike,exp,'Sell CE','btn-sell'); if(sig.includes('SELL')&&sig.includes('PE')) return singleBtn(sym,'SELL','PE',strike,exp,'Sell PE','btn-sell'); if(sig.includes('CE')) return singleBtn(sym,'BUY','CE',strike,exp,'Buy CE','btn-buy'); if(sig.includes('PE')) return singleBtn(sym,'BUY','PE',strike,exp,'Buy PE','btn-buy'); const bull=(x.direction==='bullish')||(!x.direction&&sig.includes('CE')); return bull?singleBtn(sym,'BUY','CE',strike,exp,'Buy CE','btn-buy'):singleBtn(sym,'BUY','PE',strike,exp,'Buy PE','btn-buy');}
@@ -1785,7 +1792,7 @@ let _lastOpenTrdHTML = null;
         document.getElementById('alert-count').textContent=alerts.length;
         if(!alerts.length){document.getElementById('alert-list').innerHTML='<p class="text-muted p-3">No alerts yet.</p>';return;}
         let h='';alerts.slice().reverse().forEach(a=>{
-            const src=a.source==='chartink'?'bg-info':a.source==='gocharting'?'bg-success':'bg-warning text-dark';
+            const src=a.source==='chartink'?'bg-info':'bg-warning text-dark';
             const badge=a.action==='BUY'?'badge-buy':'badge-sell';
             h+=`<div style="padding:8px 12px;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center">
                 <div><span class="badge ${src}">${a.source}</span> <strong>${a.symbol}</strong> ${a.strike} ${a.option_type} <span class="badge ${badge}">${a.action}</span></div>
@@ -1818,7 +1825,11 @@ let _lastOpenTrdHTML = null;
         const cfg={sl_pct:parseFloat(document.getElementById('alert-sl').value)||2,tp_pct:parseFloat(document.getElementById('alert-tp').value)||4,max_trades:int(document.getElementById('alert-max').value)||5,daily_loss_limit:parseFloat(document.getElementById('alert-dl').value)||5000,trailing:document.getElementById('alert-trail').value,lock_at:parseFloat(document.getElementById('alert-lock').value)||1};
         try{await P('/api/email-alerts/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});alert('Config saved!');}catch(e){alert('Error: '+e.message);}
     }
-    (function(){document.getElementById('alert-url').value=location.origin+'/api/webhook/email';})();
+    function whToken(){try{return localStorage.getItem('whToken')||'';}catch(e){return '';}}
+    function refreshAlertUrl(){try{const t=whToken();document.getElementById('alert-url').value=location.origin+'/api/webhook/email'+(t?'?token='+encodeURIComponent(t):'');const w=document.getElementById('wh-token');if(w&&!w.value&&t)w.value=t;}catch(e){}}
+    function saveWhToken(){try{const w=document.getElementById('wh-token').value||'';localStorage.setItem('whToken',w);refreshAlertUrl();alert('Webhook token save ho gaya!');}catch(e){alert('Error: '+e.message);}}
+    async function testWebhook(){try{document.getElementById('wh-test').textContent='bhej rahe...';const t=whToken();const r=await P('/api/webhook/test',{});const live=(r&&r.auth||'').startsWith('ON');let msg='Auth '+(live?'ON':'OFF');if(live&&!t)msg+=' — par browser me token save nahi hai!';document.getElementById('wh-test').textContent=msg;}catch(e){document.getElementById('wh-test').textContent='Error: '+e.message;}}
+    (function(){refreshAlertUrl();})();
     function initWebhook(){ try{ loadAlerts(); }catch(e){} try{ loadAlertTrades(); }catch(e){} try{ loadRiskStatus(); }catch(e){} }
     // Robot: auto-fill dates
     (function(){const e=new Date(); const fmt=d=>d.toISOString().split('T')[0]; try{if(document.getElementById('r-start')){document.getElementById('r-start').value='2026-08-02'; document.getElementById('r-end').value=fmt(e);}}catch(e){}})();
@@ -2610,6 +2621,51 @@ def run(data):
         }catch(err){btn.innerHTML=orig;document.getElementById('tv-info').textContent='Error: '+err.message;}
     }
     async function kaTest(){const s=document.getElementById('ka-status');if(!s)return;try{s.textContent='pinging...';}catch(e){return;}try{const r=await A('/api/keepalive/ping');s.textContent=(r&&r.status==='ok')?('OK - uptime '+Math.round(r.uptime_sec||0)+'s'):'Failed';}catch(e){try{const r2=await A(location.origin+'/api/keepalive/ping');s.textContent=(r2&&r2.status==='ok')?'OK (same origin)':'Failed';}catch(e2){s.textContent='Failed: '+e.message;}}}
+    // Pro Chart (TradingView Advanced widget, official free embed - browser se seedha TradingView CDN, server ka bandwidth zero)
+    let _tvAdvSym='';
+    function tvAdvLoad(){try{
+        const box=document.getElementById('tv-adv-widget');if(!box)return;
+        const sym=(document.getElementById('tv-adv-sym')||{}).value||'NSE:NIFTY';
+        if(sym===_tvAdvSym&&box.querySelector('iframe'))return;
+        _tvAdvSym=sym;box.innerHTML='';
+        const wrap=document.createElement('div');wrap.className='tradingview-widget-container';wrap.style.height='100%';
+        wrap.innerHTML='<div class="tradingview-widget-container__widget" style="height:560px;width:100%"></div>';
+        const sc=document.createElement('script');sc.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';sc.async=true;
+        sc.innerHTML=JSON.stringify({autosize:true,symbol:sym,interval:'15',timezone:'Asia/Kolkata',theme:'light',style:'1',locale:'en',allow_symbol_change:true,support_host:'https://www.tradingview.com'});
+        wrap.appendChild(sc);box.appendChild(wrap);
+    }catch(e){try{document.getElementById('tv-adv-widget').innerHTML='<p class="text-danger p-3">Chart load nahi hua: '+e.message+'</p>';}catch(_){}}}
+    // Market Pulse: live signals + push notification (dashboard widget, 60s poll)
+    function pulseSeen(){try{return new Set(JSON.parse(localStorage.getItem('pulseSeen')||'[]'));}catch(e){return new Set();}}
+    function pulseMark(ids){try{const s=pulseSeen();ids.forEach(i=>s.add(i));localStorage.setItem('pulseSeen',JSON.stringify([...s].slice(-200)));}catch(e){}}
+    async function pulseBell(){try{
+        if(!('Notification' in window)){alert('Is browser me notifications supported nahi');return;}
+        const p=await Notification.requestPermission();
+        document.getElementById('pulse-bell').innerHTML=p==='granted'?'🔔 ON hai':'<i class="bi bi-bell"></i> Notifications ON karo';
+        if(p==='granted')alert('Market Pulse notifications ON! Naya signal aate hi sandesh milega.');
+    }catch(e){alert('Error: '+e.message);}}
+    async function loadPulse(force){
+        try{
+            const box=document.getElementById('pulse-box');if(!box)return;
+            // Dashboard dikh nahi raha to poll skip (bandwidth bachat)
+            if(!force&&document.getElementById('pg-dashboard').classList.contains('hidden'))return;
+            const r=await A('/api/scanner/pulse?min_score=70');
+            const sigs=(r&&r.signals)||[];
+            try{document.getElementById('pulse-live').textContent=r.live?('● Live ('+sigs.length+')'):('○ '+(r.note||'taiyaar ho raha'));document.getElementById('pulse-live').className='badge me-1 '+(r.live?'bg-success':'bg-secondary');}catch(e){}
+            if(!sigs.length){box.innerHTML='<span class="text-muted">'+((r&&r.note)||'Abhi koi signal nahi.')+'</span>';return;}
+            let h='<div class="d-flex gap-2 flex-wrap">';
+            sigs.forEach(s=>{const bull=(s.direction||'')==='bullish';h+=`<span class="badge ${bull?'bg-success':'bg-danger'}" style="font-size:12px;padding:6px 10px">${s.symbol} ${s.signal||''} @${s.strike||''} <span class="badge bg-light text-dark ms-1">${s.score}</span></span>`;});
+            h+='</div><div class="small text-muted mt-1">'+sigs.slice(0,3).map(s=>(s.reasons||[]).join(' + ')).filter(Boolean).join(' | ')+'</div>';
+            box.innerHTML=h;
+            // Naye signals par push: toast + desktop notification
+            const seen=pulseSeen();const fresh=sigs.filter(s=>s.id&&!seen.has(s.id));
+            if(fresh.length&&!box.dataset.first){
+                fresh.slice(0,3).forEach(s=>{try{showToast('⚡ '+s.symbol+' '+(s.signal||'')+' @'+(s.strike||''),'info');}catch(e){}});
+                try{if(Notification.permission==='granted'){const f=fresh[0];new Notification('Market Pulse: '+f.symbol+' '+(f.signal||''),{body:'Strike '+(f.strike||'')+' | Score '+f.score});}}catch(e){}
+            }
+            box.dataset.first='1';pulseMark(sigs.map(s=>s.id));
+        }catch(e){}
+    }
+    setInterval(()=>{try{loadPulse(false);}catch(e){}},60000);
 
       const BROKER_FIELD_LABELS={
           dhan:{client_id:'Client ID',access_token:'Access Token',refresh_token:'Refresh Token',pin:'Dhan PIN (6-digit, auto-login)',totp_secret:'TOTP Secret (one-time, then fully automatic)'},
