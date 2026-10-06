@@ -101,13 +101,75 @@ OPTION_INDICES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BAN
 # Canonical NSE F&O stock list (options exist ONLY on these + indices).
 # ETFs like GOLDBEES/SILVERBEES have NO options - option backtests/orders
 # on them are fantasy (model Rs1.5 premiums on strikes that can't trade).
-FNO_STOCKS = {'RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL','TITAN','BAJAJ-AUTO','NESTLEIND','TRENT','BEL','DMART','INDIGO','CONCOR','LTF'}
+FNO_STOCKS = {'RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL','TITAN','BAJAJ-AUTO','NESTLEIND','TRENT','BEL','DMART','INDIGO','CONCOR','LTF',
+# NSE F&O expansion (official derivatives - backtest/live block hote the)
+'ABB','AMBER','ALKEM','ASIANPAINT','BAJAJHLDNG','BOSCHLTD','CDSL','CUMMINSIND','DIXON','FORCEMOT','GVT&D','HAL','KEI','LTM','OFSS','PAGEIND','PERSISTENT','POLYCAB','POWERINDIA','RADICO','SIEMENS','SOLARINDS','TORNTPHARM','TVSMOTOR','TATAPOWER','TATACONSUM','COLPAL','DABUR','MARICO','MUTHOOTFIN','SRF','PIDILITIND','CROMPTON','VOLTAS','ASHOKLEY','BAJAJHLDNG','KAYNES','KPITTECH','MPHASIS','COFORGE','PERSISTENT'}
+
+# DB ground-truth caches (official NSE bhavcopy rows = derivatives exist;
+# static lists purani pad jati hain, ye khud update hota hai)
+_DB_FNO_CACHE = {"ts": 0, "syms": set()}
+_DB_FNO_TTL = 3600
+_DB_STEP_CACHE = {}
+_DB_STEP_TTL = 3600
+
+
+def _db_has_options(symbol: str) -> bool:
+    """Official NSE F&O bhavcopy me 50+ option rows = options exist karte hain."""
+    try:
+        s = str(symbol or "").strip().upper()
+        if not s:
+            return False
+        now = _time.time()
+        if now - _DB_FNO_CACHE["ts"] < _DB_FNO_TTL and _DB_FNO_CACHE["syms"]:
+            return s in _DB_FNO_CACHE["syms"]
+        from core.models.database import Database as _DB
+        rows = _DB.get_instance().fetch_all(
+            "SELECT symbol FROM bhavcopy_data WHERE option_type IN ('CE','PE') "
+            "GROUP BY symbol HAVING COUNT(*) >= 50")
+        syms = {str((r or {}).get("symbol") or "").upper() for r in (rows or [])}
+        _DB_FNO_CACHE.update({"ts": now, "syms": syms})
+        return s in syms
+    except Exception:
+        return False
+
+
+def _db_strike_step(symbol: str) -> float:
+    """Asli traded strikes ka GCD = exchange step (ground truth)."""
+    try:
+        s = str(symbol or "").strip().upper()
+        now = _time.time()
+        hit = _DB_STEP_CACHE.get(s)
+        if hit and now - hit[0] < _DB_STEP_TTL:
+            return hit[1]
+        from core.models.database import Database as _DB
+        rows = _DB.get_instance().fetch_all(
+            "SELECT DISTINCT strike_price AS k FROM bhavcopy_data WHERE symbol=? "
+            "AND option_type IN ('CE','PE') AND strike_price > 0 LIMIT 200", [s])
+        import math as _m
+        g = 0
+        for r in (rows or []):
+            try:
+                g = _m.gcd(g, int(round(float(r["k"]) * 100)))
+            except Exception:
+                continue
+        step = round(g / 100, 2) if g > 0 else 0
+        if step < 1 or step > 1000:
+            return 0
+        _DB_STEP_CACHE[s] = (now, step)
+        return step
+    except Exception:
+        return 0
 
 
 def is_optionable(symbol: str) -> bool:
-    """True only if exchange-traded options exist (index or F&O stock)."""
+    """True only if exchange-traded options exist (index or F&O stock).
+    Static list first (instant), phir DB ground-truth (naye F&O additions
+    code-update ke bina kaam karte hain)."""
     try:
-        return str(symbol or "").strip().upper() in OPTION_INDICES or str(symbol or "").strip().upper() in FNO_STOCKS
+        s = str(symbol or "").strip().upper()
+        if s in OPTION_INDICES or s in FNO_STOCKS:
+            return True
+        return _db_has_options(s)
     except Exception:
         return False
 
@@ -150,7 +212,17 @@ def get_strike_step(symbol: str) -> float:
         "APOLLOHOSP": 20, "UPL": 10,
         "GOLDBEES": 1, "SILVERBEES": 5,
     }
-    return steps.get(symbol.upper(), 50)
+    hit = steps.get(symbol.upper())
+    if hit:
+        return hit
+    # Unmapped symbol: asli traded strikes se step nikalo, warna 50
+    try:
+        _db_step = _db_strike_step(symbol)
+        if _db_step:
+            return _db_step
+    except Exception:
+        pass
+    return 50
 
 
 def align_strike_price(symbol: str, strike: float) -> float:
