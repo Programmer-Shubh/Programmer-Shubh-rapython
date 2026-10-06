@@ -53,6 +53,61 @@ def get_symbols():
     return {"symbols": symbols}
 
 
+_OTM_CACHE = {"ts": 0, "min_premium": None, "result": None}
+
+
+@router.get("/symbols-otm")
+def symbols_otm(min_premium: float = 20.0):
+    """Backtest symbol dropdown ke liye: sirf wahi F&O symbols jinke
+    OTM 1-6 (CE upar + PE neeche, total 12 strikes) ka model premium
+    >= min_premium ho. DB spot + local model = zero egress, 15-min cache."""
+    import time as _t
+    try:
+        min_premium = float(min_premium or 20.0)
+    except Exception:
+        min_premium = 20.0
+    try:
+        if (_t.time() - _OTM_CACHE.get("ts", 0) < 900
+                and _OTM_CACHE.get("min_premium") == min_premium
+                and _OTM_CACHE.get("result")):
+            return _OTM_CACHE["result"]
+    except Exception:
+        pass
+    master = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'TCS', 'INFY', 'ITC', 'SBIN', 'AXISBANK', 'KOTAKBANK', 'LT', 'HINDUNILVR', 'BHARTIARTL', 'M&M', 'MARUTI', 'BAJFINANCE', 'WIPRO', 'ONGC', 'SUNPHARMA', 'ULTRACEMCO', 'NTPC', 'POWERGRID', 'TATAMOTORS', 'TATASTEEL', 'HCLTECH', 'JSWSTEEL', 'COALINDIA', 'DRREDDY', 'CIPLA', 'ADANIENT', 'SBILIFE', 'BPCL', 'GRASIM', 'TECHM', 'DIVISLAB', 'EICHERMOT', 'BRITANNIA', 'HINDALCO', 'VEDL', 'INDUSINDBK', 'SHREECEM', 'NESTLEIND', 'BAJAJFINSV', 'HEROMOTOCO', 'APOLLOHOSP', 'UPL']
+    ok, detail = [], {}
+    try:
+        bhav = BhavcopyModel()
+        for sym in master:
+            try:
+                row = bhav.db.fetch_one(
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+                    [sym])
+                spot = float(row["close_price"]) if row and row["close_price"] else 0
+                if spot <= 0:
+                    continue
+                step = get_strike_step(sym) or 0
+                if step <= 0:
+                    continue
+                atm = round(spot / step) * step
+                ce = [model_premium(spot, atm + i * step, 7, "CE", symbol=sym) for i in range(1, 7)]
+                pe = [model_premium(spot, atm - i * step, 7, "PE", symbol=sym) for i in range(1, 7)]
+                ce = [round(float(x or 0), 2) for x in ce]
+                pe = [round(float(x or 0), 2) for x in pe]
+                if all(v >= min_premium for v in ce + pe):
+                    ok.append(sym)
+                    detail[sym] = {"spot": round(spot, 2), "otm_ce": ce, "otm_pe": pe}
+            except Exception:
+                continue
+    except Exception as e:
+        return {"symbols": [], "error": str(e)[:150]}
+    res = {"symbols": ok, "count": len(ok), "min_premium": min_premium, "detail": detail}
+    try:
+        _OTM_CACHE.update({"ts": _t.time(), "min_premium": min_premium, "result": res})
+    except Exception:
+        pass
+    return res
+
+
 @router.get("/expiries/{symbol}/{date}")
 def get_expiries(symbol: str, date: str):
     bhav = BhavcopyModel()
@@ -541,6 +596,16 @@ def place_trade(req: TradeRequest):
             "strategy_id": req.strategy_id or 0,
         })
         _resp = {"trade_id": trade_id, "entry_price": round(adj_premium, 2), "costs": costs}
+        try:
+            _tqty = int(req.quantity or 1) * int(lot_size or 0)
+            if str(req.transaction_type or "").upper() == "BUY":
+                _resp["margin"] = {"required": round(float(adj_premium) * _tqty, 2),
+                                   "note": "BUY: premium×qty (exact)"}
+            else:
+                _resp["margin"] = {"required": round(0.12 * float(req.strike) * _tqty, 2),
+                                   "note": "SELL estimate ~12% (SPAN approx)"}
+        except Exception:
+            pass
         if _rolled_to:
             _resp["rolled_to"] = _rolled_to
         return _resp

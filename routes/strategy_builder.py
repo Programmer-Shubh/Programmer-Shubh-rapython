@@ -598,6 +598,16 @@ def _run_backtest_core(req: BacktestRequest):
             risk_in["daily_take_profit"] = float(req.take_profit)
         if "max_trades_per_day" not in risk_in:
             risk_in["max_trades_per_day"] = 3
+        # OTM premium floor: ₹20 se saste option strikes auto-drop (engine
+        # signal + execution dono jagah skip karta hai). Sirf option legs par -
+        # EQ (equity) me premium concept nahi, wahan floor lagana 0 trades dega.
+        # Explicit value bheji ho to wahi.
+        try:
+            _has_opt = any(str((l or {}).get("option_type", "")).upper() in ("CE", "PE") for l in (legs or []))
+            if _has_opt:
+                advanced_in.setdefault("min_entry_premium", 20)
+        except Exception:
+            pass
         # Normalize legs + handle presets (Bear Call, Bull Put, Bear Put, Iron Condor)
         raw_legs = req.legs or []
         preset = (req.strategy_preset or advanced_in.get("preset") or "").lower()

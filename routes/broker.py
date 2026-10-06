@@ -1122,6 +1122,94 @@ async def _estimate_margin(broker: str, cfg: dict, preview: dict,
     return {"required": None, "note": "Shoonya has no public margin API — check RMS/Span in app"}
 
 
+class MarginPreviewRequest(BaseModel):
+    symbol: str
+    option_type: str = "CE"
+    transaction_type: str = "BUY"
+    quantity: int = 1
+    strike: float = 0
+    expiry: str = ""
+    trade_type: str = "intraday"
+    mode: str = "paper"  # paper | live
+    broker: str = ""
+
+
+@router.post("/margin-preview")
+async def margin_preview(req: MarginPreviewRequest):
+    """Har order window me required margin dikhane ke liye.
+    live + Dhan connected => official margin calculator.
+    paper / no-broker => honest local estimate (BUY = premium×qty exact,
+    SELL = ~12% underlying SPAN estimate). Kabhi order nahi lagata."""
+    try:
+        from utils.helpers import get_lot_size, get_strike_step, model_premium
+        symbol = (req.symbol or "").upper()
+        if not symbol:
+            return {"error": "Symbol required"}
+        opt = str(req.option_type or "CE").upper()
+        txn = str(req.transaction_type or "BUY").upper()
+        lots = max(1, int(req.quantity or 1))
+        lot = get_lot_size(symbol)
+        strike = float(req.strike or 0)
+        if strike <= 0:
+            try:
+                from core.services.live_market_data import LiveMarketData as _LM
+                spot0 = _LM().get_spot_price(symbol) or 0
+                step0 = get_strike_step(symbol)
+                strike = round(spot0 / step0) * step0 if spot0 and step0 else 0
+            except Exception:
+                strike = 0
+        if strike <= 0:
+            return {"error": "Strike required"}
+        # Premium (local pricer, no order)
+        px = 0.0
+        try:
+            from core.models.trade_model import TradeModel as _TM
+            px = float(_TM().get_option_premium(symbol, opt, strike, req.expiry or "") or 0)
+        except Exception:
+            px = 0.0
+        if px <= 0:
+            try:
+                from core.services.live_market_data import LiveMarketData as _LM2
+                spot1 = _LM2().get_spot_price(symbol) or 0
+                px = float(model_premium(spot1 or strike, strike, 7, opt, symbol=symbol)) if spot1 else 0.0
+            except Exception:
+                px = 0.0
+        total_qty = lots * lot
+        # LIVE + Dhan connected => official SPAN calculator
+        if str(req.mode or "").lower() == "live":
+            try:
+                want = (req.broker or "").lower() or "dhan"
+                if want == "dhan" and _real_token("dhan"):
+                    from core.services.symbol_resolver import resolve_contract
+                    _res = await resolve_contract("dhan", _get_config("dhan") or {},
+                                                  symbol, req.expiry or "weekly", strike, opt)
+                    if _res.get("ok"):
+                        _tt = str(req.trade_type or "intraday").lower()
+                        _pv = {"quantity": total_qty, "side": txn,
+                               "security_id": (_res.get("refs") or {}).get("security_id", ""),
+                               "expiry": _res.get("expiry_used", ""),
+                               "product": "MARGIN" if _tt == "positional" else "INTRADAY"}
+                        m = await _estimate_margin("dhan", _get_config("dhan") or {}, _pv, symbol, opt, strike)
+                        if m.get("required"):
+                            return {"required": m["required"], "source": "dhan-official",
+                                    "premium": round(px, 2), "lot_size": lot, "total_qty": total_qty,
+                                    "note": "Dhan SPAN+exposure (official)"}
+            except Exception as e:
+                return {"required": None, "premium": round(px, 2),
+                        "note": f"Dhan margin unavailable: {str(e)[:100]}"}
+        # Local estimate (paper ya no-broker): BUY exact, SELL ~SPAN
+        if txn == "BUY":
+            return {"required": round(px * total_qty, 2), "source": "estimate",
+                    "premium": round(px, 2), "lot_size": lot, "total_qty": total_qty,
+                    "note": "BUY me premium×qty hi lagta hai (exact)"}
+        base = strike or px
+        return {"required": round(0.12 * base * total_qty, 2), "source": "estimate",
+                "premium": round(px, 2), "lot_size": lot, "total_qty": total_qty,
+                "note": "SELL estimate ~12% underlying (SPAN approx, broker se confirm karo)"}
+    except Exception as e:
+        return {"error": f"Margin preview failed: {e}"[:200]}
+
+
 @router.post("/place-live")
 async def place_live_order(req: LiveOrderRequest):
     """REAL live order execution (real money). Safety chain:
