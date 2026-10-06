@@ -1014,7 +1014,7 @@
             }
             if(r&&r.error) throw new Error(r.error);
             const all=[...(r.ce_buy||[]),...(r.pe_buy||[]),...(r.ce_sell||[]),...(r.pe_sell||[])];
-            if(!all.length){ if(el) el.innerHTML='<p class="text-muted small p-2">No strong setups right now (strict 70+ filter) — <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps()">Retry</button></p>'; _done=true; return; }
+            if(!all.length){ if(el) el.innerHTML='<p class="text-muted small p-2">No setups right now (sirf SuperTrend + MACD + Volume>500k wale trades) — <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps()">Retry</button></p>'; _done=true; return; }
             renderTop(all);
             _done=true;
             if(r.dummy){ setTimeout(()=>{ try{ loadOpps(); }catch(e){} }, 2500); }

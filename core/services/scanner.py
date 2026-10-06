@@ -272,7 +272,9 @@ class OptionScanner:
         except Exception:
             min_score = 80
         if symbols is None:
-            symbols = FNO_SYMBOLS
+            symbols = list(FNO_SYMBOLS)
+        else:
+            symbols = list(symbols)
         # Mix indices + stocks equally - shuffle ordered to avoid indices always winning
         # Prioritize but allow stocks to rank higher via score
         index_priority = ['NIFTY', 'BANKNIFTY', 'FINNIFTY']
@@ -285,32 +287,9 @@ class OptionScanner:
                     symbols.append(s)
         except Exception:
             pass
-        ordered = index_priority + [s for s in symbols if s not in index_priority]
-        # Cap universe: nsefin F&O import added 200+ illiquid symbols to DB and
-        # db_sym_list dragged them all into every scan (33s). Dashboard needs
-        # liquid F&O names only — cap at 60.
-        ordered = ordered[:60]
-        vwap_result = self.scan_vwap(ordered)
-        all_signals = []
-        seen = set()
-        for s in vwap_result.get('long', []):
-            if s['symbol'] in seen:
-                continue
-            seen.add(s['symbol'])
-            s['signal_type'] = 'BUY CE'
-            s['direction'] = 'bullish'
-            all_signals.append(s)
-        for s in vwap_result.get('short', []):
-            if s['symbol'] in seen:
-                continue
-            seen.add(s['symbol'])
-            s['signal_type'] = 'BUY PE'
-            s['direction'] = 'bearish'
-            all_signals.append(s)
-
-        # Dashboard rule: prefer min_score+ trades, but NEVER return blank.
-        # Realistic VWAP scores top out ~30-60, so hard 80 filter = always empty.
-        # Fallback: best available signals (min 25) so 4-part dashboard always shows trades.
+        # Dashboard Trade Opportunity = SIRF ST+MACD+Vol500k gate ke signals
+        # (VWAP/RSI/EMA/combos hata diye). Score>=min_score prefer, fallback >=25.
+        all_signals = self._smv_signals(symbols)
         qualified = [s for s in all_signals if s.get('score', 0) >= min_score]
         if qualified:
             all_signals = qualified
@@ -386,6 +365,128 @@ class OptionScanner:
         except Exception:
             pass
         return None
+
+    # Dashboard Trade Opportunity ka EKLOTA filter: sirf ye 3.
+    SMV_VOL_MIN = 500000
+
+    def _smv_signals(self, symbols=None):
+        """Gate-driven opportunity backbone: har symbol par _smv_gate, pass
+        hone par BUY CE (bullish) / BUY PE (bearish) signal. Score = 70 +
+        10*STfresh + 10*MACDfresh. Dashboard Trade Opportunity SIRF inse banti hai."""
+        if symbols is None:
+            symbols = list(FNO_SYMBOLS)
+        else:
+            symbols = list(symbols)
+        try:
+            db_syms = self.db.fetch_all("SELECT DISTINCT symbol FROM bhavcopy_data WHERE option_type IS NULL ORDER BY symbol")
+            for r in (db_syms or []):
+                if r["symbol"] not in symbols:
+                    symbols.append(r["symbol"])
+        except Exception:
+            pass
+        index_priority = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+        ordered = index_priority + [s for s in symbols if s not in index_priority]
+        ordered = ordered[:60]
+        out = []
+        for sym in ordered:
+            try:
+                data = self._get_historical(sym)
+            except Exception:
+                continue
+            if not data or len(data) < 26:
+                continue
+            try:
+                gd, gr = self._smv_gate(sym, data)
+            except Exception:
+                continue
+            if not gd:
+                continue
+            try:
+                close = float(data[-1].get("close_price", 0) or 0)
+            except Exception:
+                close = 0
+            if close <= 0:
+                continue
+            crosses = sum(1 for r in (gr or []) if "cross" in str(r).lower())
+            score = 70 + 10 * min(crosses, 2)
+            if gd == "bullish":
+                sig, opt = "BUY CE", "CE"
+            else:
+                sig, opt = "BUY PE", "PE"
+            try:
+                sug = self._suggest_option(sym, close, opt)
+            except Exception:
+                sug = {}
+            if not (sug or {}).get("strike"):
+                continue
+            out.append({"symbol": sym, "signal_type": sig, "direction": gd,
+                        "score": score, "price": close,
+                        "reasons": ["ST+MACD+Vol500k: " + "; ".join(gr or [])],
+                        "indicators": {"supertrend": 0, "macd": 0},
+                        "option_suggestion": sug, "ai": True, "combo": False})
+        out.sort(key=lambda x: x.get("score", 0), reverse=True)
+        return out
+
+    def _smv_gate(self, symbol: str, data=None):
+        """SuperTrend side + MACD side + Volume>500000 - teeno agree to signal.
+        Baaki sab indicator filters (RSI/EMA/VWAP/combos/AI-gate) dashboard
+        opportunity me istemal nahi hote. Returns (direction, reasons) or (None, why).
+        Volume data missing (0) ho to volume-check skip (saza nahi) - ST+MACD decide karenge."""
+        try:
+            if data is None:
+                data = self._get_historical(symbol)
+            if not data or len(data) < 26:
+                return None, "data kam (<26 bars)"
+            closes = [float(d.get("close_price", 0) or 0) for d in data]
+            vols = [float(d.get("volume", 0) or 0) for d in data]
+            st = self.indicators.calculate_supertrend(data, 10, 3.0) or []
+            md = self.indicators.calculate_macd(closes, 12, 26, 9) or {}
+            m = md.get("macd", []) if isinstance(md, dict) else []
+            s = md.get("signal", []) if isinstance(md, dict) else []
+            i = len(data) - 1
+            prev = i - 1
+            close = closes[i]
+            stv = st[i] if i < len(st) else None
+            if stv is None:
+                return None, "SuperTrend nahi bana"
+            st_bull = close > stv
+            mv = m[i] if i < len(m) else None
+            sv = s[i] if i < len(s) else None
+            if mv is None or sv is None or (mv == 0 and sv == 0):
+                return None, "MACD nahi bana"
+            macd_bull = mv > sv
+            vol = vols[i]
+            if vol <= 0:
+                vol_ok, vol_txt = True, "vol n/a"
+            else:
+                vol_ok = vol > self.SMV_VOL_MIN
+                vol_txt = f"vol {int(vol):,}"
+            if not vol_ok:
+                return None, f"volume kam ({int(vol):,}<500000)"
+            # Fresh crossover notes (jaankari, shart nahi)
+            try:
+                stp = st[prev] if prev < len(st) else None
+                st_cross = bool(stp) and ((closes[prev] <= stp) if st_bull else (closes[prev] >= stp))
+            except Exception:
+                st_cross = False
+            try:
+                mp = m[prev] if prev < len(m) else None
+                sp = s[prev] if prev < len(s) else None
+                macd_cross = (mp is not None and sp is not None
+                              and ((mp <= sp) if macd_bull else (mp >= sp)))
+            except Exception:
+                macd_cross = False
+            if st_bull and macd_bull:
+                rs = [f"SuperTrend bullish{' (fresh cross)' if st_cross else ''}",
+                      f"MACD bullish{' (crossover)' if macd_cross else ''}", vol_txt]
+                return "bullish", rs
+            if (not st_bull) and (not macd_bull):
+                rs = [f"SuperTrend bearish{' (fresh cross)' if st_cross else ''}",
+                      f"MACD bearish{' (crossover)' if macd_cross else ''}", vol_txt]
+                return "bearish", rs
+            return None, "ST/MACD direction mismatch"
+        except Exception as e:
+            return None, f"gate error: {e}"[:100]
 
     def _ai_gate(self, symbol: str, kind: str):
         """AI 4-part filter (VWAP+RSI+candle+volume): blocks false counter-trend
@@ -475,101 +576,9 @@ class OptionScanner:
             _req70 = int(min_score) if int(min_score) >= 70 else 70
         except Exception:
             _req70 = 70
-        st70 = self.scan(symbols=symbols, min_score=_req70)
-        # Build base with 70+ only - no weak fills, ever.
-        base = []
-        for _s in st70.get('bullish', []):
-            _s = dict(_s); _s['signal_type'] = 'BUY CE'; _s['direction'] = 'bullish'; base.append(_s)
-        for _s in st70.get('bearish', []):
-            _s = dict(_s); _s['signal_type'] = 'BUY PE'; _s['direction'] = 'bearish'; base.append(_s)
-        # Price Action + Supply/Demand (best-setting defaults), merged into
-        # the same base. Existing ST/MACD entries are untouched - PA/S-D only
-        # ADD trades (tagged reasons). PA/S-D bar is 60 (a 60 PA/S-D setup =
-        # engulf+breakout+trend, as selective as ST 70+; volume spikes are
-        # rare on EOD bars so 70+ would hide them all).
-        try:
-            _pa_min = min(_req70, 60)
-            for _fn in (self.scan_pa, self.scan_sd):
-                try:
-                    _extra = _fn(symbols=symbols, min_score=_pa_min)
-                except Exception:
-                    continue
-                for _s in (_extra.get('bullish', []) or []):
-                    _s = dict(_s)
-                    _s['signal_type'] = 'BUY CE'
-                    _s['direction'] = 'bullish'
-                    base.append(_s)
-                for _s in (_extra.get('bearish', []) or []):
-                    _s = dict(_s)
-                    _s['signal_type'] = 'BUY PE'
-                    _s['direction'] = 'bearish'
-                    base.append(_s)
-        except Exception:
-            pass
-        # LIVE intraday (15m TradingView bars): conditions matching RIGHT NOW
-        # score on fresh bars and merge with a (15m) tag. Market-hours only;
-        # any failure/staleness silently keeps the daily backbone.
-        try:
-            _mkt_open = True
-            try:
-                from core.services.sl_monitor import market_open_ist as _mkt
-                _mkt_open = bool(_mkt())
-            except Exception:
-                pass
-            if _mkt_open:
-                for _r in (self.scan_intraday(symbols=self.INTRA_SYMBOLS, tf="15m", min_score=60) or []):
-                    try:
-                        _t = _r.get("type")
-                        if _t == "BUY":
-                            _r["signal_type"] = "BUY CE"
-                            _r["direction"] = "bullish"
-                        elif _t == "SELL":
-                            _r["signal_type"] = "BUY PE"
-                            _r["direction"] = "bearish"
-                        else:
-                            continue
-                        base.append(_r)
-                    except Exception:
-                        continue
-        except Exception:
-            pass
-        # TICK breakout (1m LIVE): Dhan WS velocity ignition. Idle without a
-        # connected feed - never blank-fills. Score 75, clearly tagged.
-        try:
-            _mkt_open2 = True
-            try:
-                from core.services.sl_monitor import market_open_ist as _mkt2
-                _mkt_open2 = bool(_mkt2())
-            except Exception:
-                pass
-            if _mkt_open2:
-                from core.services import tick_engine as _te
-                for _sig in (_te.get_signals() or []):
-                    try:
-                        _sym = _sig.get("symbol", "")
-                        _side = _sig.get("side", "")
-                        if _side == "bullish":
-                            _st, _dn, _ot = "BUY CE", "bullish", "CE"
-                        elif _side == "bearish":
-                            _st, _dn, _ot = "BUY PE", "bearish", "PE"
-                        else:
-                            continue
-                        _sp = _te._spot_for(_sym) or float(_sig.get("ltp") or 0)
-                        _opt = self._suggest_option(_sym, _sp, _ot)
-                        if not _opt.get("strike"):
-                            continue
-                        base.append({
-                            "symbol": _sym, "type": "BUY" if _side == "bullish" else "SELL",
-                            "score": 75, "price": _sp, "date": "", "live": True,
-                            "reasons": [_sig.get("reason", "(1m LIVE) Tick breakout")],
-                            "indicators": {"tick_move_pct": _sig.get("move_pct", 0)},
-                            "option_suggestion": _opt,
-                            "signal_type": _st, "direction": _dn, "tf": "1m",
-                        })
-                    except Exception:
-                        continue
-        except Exception:
-            pass
+        # Dashboard Trade Opportunity backbone = SIRF ST+MACD+Vol500k gate.
+        # Purane engines (scan/VWAP/PA/SD/intraday/tick/combo/AI-gate) hata diye.
+        base = self._smv_signals(symbols)
         try:
             _dbg["base"] = len(base)
             _dbg["real_gate_fail"] = sum(1 for v in (getattr(self, "_REAL_CACHE", {}) or {}).values() if isinstance(v, tuple) and not v[1])
@@ -602,50 +611,17 @@ class OptionScanner:
                     pe_sell.append(ns)
         ce_sell = sorted(ce_sell, key=lambda x: x['score'], reverse=True)[:top_n]
         pe_sell = sorted(pe_sell, key=lambda x: x['score'], reverse=True)[:top_n]
-        # Strong-confirmation: OppCombo (ST+MACD+EMA+Vol) agreement sorts first
-        # with a "Combo confirm" tag, so dashboard shows the strongest trades up.
-        # Never filters to blank — unconfirmed signals stay below.
+        # Base pehle se ST+MACD+Vol500k-gated hai (ai=True tagged). Parts ko
+        # score-sort + top_n trim. Sell legs direction-consistent hi bante hain.
         try:
-            _parts = {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell}
-            for _items in _parts.values():
-                for _s in _items:
-                    try:
-                        _combo = self._opp_combo_dir(_s.get("symbol", ""))
-                        _want = _s.get("direction", "")
-                        _s["combo"] = bool(_combo and _combo == _want)
-                        if _s["combo"]:
-                            _rs = _s.get("reasons") or []
-                            _rs.insert(0, "Combo confirm (ST+MACD+EMA+Vol)")
-                            _s["reasons"] = _rs
-                    except Exception:
-                        _s["combo"] = False
-                _items.sort(key=lambda x: (1 if x.get("combo") else 0, x.get("score", 0)), reverse=True)
-        except Exception:
-            pass
-        # AI gate: false counter-trend signals filtered per part (passes keep
-        # "AI confirm" tag). STRICT: failing parts go blank honestly instead
-        # of showing the best-looking loser (har-trade-nuksaan fix).
-        try:
-            _kinds = {"ce_buy": "CE_BUY", "pe_buy": "PE_BUY", "ce_sell": "CE_SELL", "pe_sell": "PE_SELL"}
             _parts = {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell}
             for _pk, _items in _parts.items():
-                for _s in _items:
-                    try:
-                        _ok, _why = self._ai_gate(_s.get("symbol", ""), _kinds[_pk])
-                    except Exception:
-                        _ok, _why = True, ""
-                    _s["ai"] = bool(_ok)
-                    if _ok and _why:
-                        _rs = _s.get("reasons") or []
-                        _rs.insert(0, "AI confirm: " + _why)
-                        _s["reasons"] = _rs
-                _passed = [x for x in _items if x.get("ai")]
                 try:
                     _dbg["pre_ai"][_pk] = len(_items)
-                    _dbg["post_ai"][_pk] = len(_passed)
+                    _dbg["post_ai"][_pk] = len(_items)
                 except Exception:
                     pass
-                _parts[_pk][:] = sorted(_passed, key=lambda x: x.get("score", 0), reverse=True)[:top_n]
+                _parts[_pk][:] = sorted(_items, key=lambda x: x.get("score", 0), reverse=True)[:top_n]
         except Exception:
             pass
         # Primary setup per symbol: highest (ai, combo, score) across the 4
