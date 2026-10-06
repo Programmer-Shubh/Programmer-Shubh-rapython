@@ -274,6 +274,7 @@ def strategy_trades(strat_id: int, unlinked: int = 0):
                     "trade_mode": t.get("trade_mode"),
                     "status": t.get("status"),
                     "entry_date": t.get("entry_date", ""),
+                    "entry_time": TradeModel.ist_hhmm(t.get("created_at", "")),
                 })
         except Exception:
             pass
@@ -296,7 +297,9 @@ def strategy_trades(strat_id: int, unlinked: int = 0):
                     "exit_reason": t.get("exit_status") or t.get("exit_reason"),
                     "trade_mode": t.get("trade_mode"),
                     "entry_date": t.get("entry_date", ""),
+                    "entry_time": TradeModel.ist_hhmm(t.get("created_at", "")),
                     "exit_date": t.get("exit_date", ""),
+                    "exit_time": TradeModel.ist_hhmm(t.get("updated_at", "")),
                 })
         except Exception:
             pass
@@ -327,6 +330,10 @@ def strategy_trades(strat_id: int, unlinked: int = 0):
                         "pnl": t.get("pnl"),
                         "status": t.get("status"),
                         "exit_reason": t.get("exit_status"),
+                        "entry_date": t.get("entry_date", ""),
+                        "entry_time": TradeModel.ist_hhmm(t.get("created_at", "")),
+                        "exit_date": t.get("exit_date", ""),
+                        "exit_time": TradeModel.ist_hhmm(t.get("updated_at", "")),
                     })
             except Exception:
                 pass
