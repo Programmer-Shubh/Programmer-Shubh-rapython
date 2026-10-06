@@ -346,3 +346,75 @@ def rollover_endpoint(strat_id: int):
     if not new_end:
         return {"error": "Rollover failed"}
     return {"strategy_id": strat_id, "end_date": new_end, "status": "rolled"}
+
+
+@router.post("/{strat_id}/backtest")
+def strategy_backtest(strat_id: int):
+    """Saved strategy ka backtest EXACT saved config par - form round-trip
+    me kho jaane wale fields (entry/exit conditions, lots, mtd, checkbox
+    indicators) se zero-metrics aata tha. Ye endpoint DB se sidha
+    BacktestRequest banakar chalata hai."""
+    import json as _js
+    try:
+        db = Database.get_instance()
+        row = db.fetch_one("SELECT * FROM strategies WHERE id=?", [strat_id])
+        if not row:
+            return {"error": "Strategy not found"}
+
+        def _ld(v, fb):
+            try:
+                if v is None or v == "":
+                    return fb
+                return _js.loads(v) if isinstance(v, str) else (v or fb)
+            except Exception:
+                return fb
+
+        legs = _ld(row.get("legs"), [])
+        indicators = _ld(row.get("indicators"), [])
+        entry_conditions = _ld(row.get("entry_conditions"), [])
+        exit_conditions = _ld(row.get("exit_conditions"), [])
+        advanced = _ld(row.get("advanced_options"), {})
+        risk = _ld(row.get("risk_management"), {})
+        # Top-level timeframe bhi advanced me mirror karo (form sirf
+        # advanced.timeframe padhta tha, purani rows me top-level tha)
+        try:
+            if row.get("timeframe") and not advanced.get("timeframe"):
+                advanced["timeframe"] = row.get("timeframe")
+        except Exception:
+            pass
+        # Saved legs me lots/expiry missing ho to sane defaults
+        try:
+            for _l in (legs or []):
+                if isinstance(_l, dict):
+                    _l.setdefault("lots", 1)
+                    _l.setdefault("expiry", "weekly")
+                    _l.setdefault("strike_selection", "atm")
+                    _l.setdefault("otm_distance", 0)
+        except Exception:
+            pass
+        if not legs:
+            return {"error": "Is strategy me koi leg nahi - pehle leg add karke save karo"}
+        from routes.strategy_builder import BacktestRequest, _run_backtest_core
+        req = BacktestRequest(
+            symbol=(row.get("symbol") or "NIFTY"),
+            symbols=[],
+            start_date=(row.get("start_date") or ""),
+            end_date=(row.get("end_date") or ""),
+            indicators=indicators or [],
+            entry_conditions=entry_conditions or [],
+            exit_conditions=exit_conditions or [],
+            legs=legs,
+            advanced=advanced or {},
+            risk=risk or {},
+        )
+        res = _run_backtest_core(req)
+        try:
+            res["strategy_id"] = strat_id
+            res["strategy_name"] = row.get("name") or ""
+        except Exception:
+            pass
+        return res
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Backtest failed: {e}"[:250]}

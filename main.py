@@ -25,17 +25,18 @@ async def _start_background_refresh():
 
 async def _fno_sync_loop():
     """Official F&O bhavcopy auto-download + old-data purge.
-    Runs after startup settles, then every 6h. Best-effort (never crashes app)."""
+    Bandwidth saver: once daily, 7-day window (was: every 6h x 30d).
+    Best-effort (never crashes app)."""
     import asyncio as _aio
     await _aio.sleep(600)  # 10 min: let cold-start settle (avoid OOM/timeout 502s)
     while True:
         try:
             from core.services import nsefin_bhav as _fb
-            await _aio.to_thread(_fb.backfill_fno, 30, 2)
+            await _aio.to_thread(_fb.backfill_fno, 7, 2)
             await _aio.to_thread(_fb.purge_old_data, 12)
         except Exception:
             pass
-        await _aio.sleep(6 * 3600)
+        await _aio.sleep(24 * 3600)
 
 
 @asynccontextmanager
@@ -66,7 +67,7 @@ async def _startup_background():
         def _sl_mon():
             try:
                 from core.services.sl_monitor import start_background
-                start_background(30)
+                start_background(120)
             except: pass
         import threading as _th2
         _th2.Thread(target=_sl_mon, daemon=True).start()
@@ -77,7 +78,7 @@ async def _startup_background():
         def _ap_loop():
             try:
                 from core.services.auto_paper import start_background as _ap
-                _ap(600)
+                _ap(1800)
             except: pass
         import threading as _th4
         _th4.Thread(target=_ap_loop, daemon=True).start()
@@ -98,7 +99,7 @@ async def _startup_background():
         def _live_sig_loop():
             try:
                 from core.services.auto_paper import start_live_background as _lsb
-                _lsb(300)
+                _lsb(900)
             except: pass
         import threading as _th6
         _th6.Thread(target=_live_sig_loop, daemon=True).start()

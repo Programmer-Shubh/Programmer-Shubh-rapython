@@ -3,7 +3,7 @@ Target is breached, using the same rupee-level math as the backtest engine.
 
 Why in-process: the GitHub cron runs scripts/auto_trade.py against a fresh
 empty checkout DB, so it NEVER sees production trades. This runs against the
-app's real DB: (a) a daemon thread every 30s in market hours, (b) throttled
+app's real DB: (a) a daemon thread every 120s in market hours, (b) throttled
 inside the portfolio endpoints so an exit reflects the moment you look.
 
 Throttled (min 20s between full scans, thread-safe): portfolio polls often,

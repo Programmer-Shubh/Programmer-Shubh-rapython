@@ -16,8 +16,28 @@ EXTRA_SYMBOLS = ["RELIANCE", "HDFCBANK", "ICICIBANK", "TCS", "INFY", "ITC", "SBI
                  "HINDALCO", "VEDL", "INDUSINDBK", "SHREECEM", "NESTLEIND", "BAJAJFINSV", "HEROMOTOCO",
                  "APOLLOHOSP", "UPL"]
 ALL_SYMBOLS = INDEX_SYMBOLS + EXTRA_SYMBOLS
-_REFRESH_INTERVAL = 300  # 5 min (45s burned GBs of service-initiated egress on Render)
+# Bandwidth saver: market-hours gate + 15-min cycle keeps Render
+# Service-Initiated egress to ~20MB/week (was 1.25GB: 5-min full-chain
+# polling 24/7, nights/weekends included). Chains are the heaviest payload,
+# so only 2 indices refresh chains; rest is tiny spot batches.
+_REFRESH_INTERVAL = 900  # 15 min, market hours only
+_CHAIN_SYMBOLS = ["NIFTY", "BANKNIFTY"]  # full option chains (heavy)
+_SPOT_BATCH_N = 4  # extra symbols per cycle (light Yahoo spots)
 _RUNNING = False
+
+
+def _market_open_now() -> bool:
+    """Mon-Fri 09:00-15:45 IST. Outside this, workers must not touch network."""
+    try:
+        from datetime import datetime, timedelta, timezone
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(ist)
+        if now.weekday() >= 5:
+            return False
+        mins = now.hour * 60 + now.minute
+        return 9 * 60 <= mins <= 15 * 60 + 45
+    except Exception:
+        return True
 
 
 def _seed_history(symbol: str):
@@ -78,9 +98,9 @@ def refresh_all(light: bool = False):
     if light:
         return {}, 0
     live = LiveMarketData()
-    chains = live.get_live_chains_parallel(INDEX_SYMBOLS)
+    chains = live.get_live_chains_parallel(_CHAIN_SYMBOLS)
     chain_ok = 0
-    for sym in INDEX_SYMBOLS:
+    for sym in _CHAIN_SYMBOLS:
         chain = chains.get(sym)
         if chain:
             chain_ok += 1
@@ -96,11 +116,11 @@ def refresh_all(light: bool = False):
                     "change": 0, "high": spot, "low": spot, "source": src,
                 }}
     if light:
-        return {sym: bool(chains.get(sym)) for sym in INDEX_SYMBOLS}, chain_ok
+        return {sym: bool(chains.get(sym)) for sym in _CHAIN_SYMBOLS}, chain_ok
     # Full refresh (background, after startup) - Yahoo live batch (subprocess 12s) + history seed
     try:
-        # Use batch Yahoo live (reliable, 400ms) for 8 stocks per cycle
-        batch_syms = EXTRA_SYMBOLS[:8]
+        # Use batch Yahoo live (reliable, 400ms) for a few stocks per cycle
+        batch_syms = EXTRA_SYMBOLS[:_SPOT_BATCH_N]
         try:
             batch = live.get_live_spots_parallel(batch_syms, max_workers=8)
             for sym, spot_data in batch.items():
@@ -164,10 +184,14 @@ async def run_refresh_loop():
             from core.services.historical_fetcher import fetch_historical
             from core.models.bhavcopy_model import BhavcopyModel
             bhav = BhavcopyModel()
-            # Last 1 year for all F&O - chunked to avoid NSE block
+            # Bandwidth saver: max 8 most-needed symbols per night (was: all 50
+            # x 1y every night - and on ephemeral free-tier DB, every restart).
             end = __import__("datetime").date.today().strftime("%Y-%m-%d")
             start = (__import__("datetime").date.today() - __import__("datetime").timedelta(days=365)).strftime("%Y-%m-%d")
+            _done = 0
             for sym in ALL_SYMBOLS:
+                if _done >= 8:
+                    break
                 try:
                     # Skip if already has 200+ rows in last year
                     has = bhav.get_dates(sym)
@@ -177,6 +201,7 @@ async def run_refresh_loop():
                     if data and len(data) >= 5:
                         bhav.import_data(data)
                         logger.info(f"[nightly] {sym} imported {len(data)}")
+                    _done += 1
                     import time as _t; _t.sleep(0.8)
                 except Exception as ex:
                     logger.warning(f"[nightly] {sym} fail: {ex}")
@@ -186,6 +211,10 @@ async def run_refresh_loop():
     asyncio.get_running_loop().create_task(_nightly_import_loop())
     while True:
         await asyncio.sleep(_REFRESH_INTERVAL)
+        # Bandwidth saver: market closed => zero network, just sleep again.
+        # (nights + weekends were ~80% of the 1.25GB egress.)
+        if not _market_open_now():
+            continue
         try:
             await asyncio.to_thread(refresh_all, False)
         except Exception as e:

@@ -74,7 +74,8 @@ def warm_opp_cache_once():
         from core.services.scanner import OptionScanner
         s = OptionScanner()
         try:
-            s._warm_history((s.INTRA_SYMBOLS if hasattr(s, "INTRA_SYMBOLS") else [])[:15])
+            # Bandwidth saver: warm only 8 symbols per boot (was 15)
+            s._warm_history((s.INTRA_SYMBOLS if hasattr(s, "INTRA_SYMBOLS") else [])[:8])
         except Exception:
             pass
         try:

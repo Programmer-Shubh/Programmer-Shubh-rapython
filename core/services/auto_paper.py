@@ -20,6 +20,12 @@ _LAST_RUN = 0.0
 _MIN_INTERVAL = 1200
 # Observable worker state (heartbeat for /auto-paper-status)
 _STATE = {"threads": {}, "last_daily": {}, "last_live": {}}
+# Bandwidth saver caches: history refetch was the top per-run eater
+# (120d Yahoo fetch per strategy per worker run + per heartbeat).
+_HIST_CACHE = {}  # (sym, start, end) -> (ts, hist); TTL 6h
+_HIST_TTL = 6 * 3600
+_INTRA_CACHE = {}  # sym -> (ts, bars); TTL 15 min (shared across strategies)
+_INTRA_TTL = 900
 
 
 def _beat(name):
@@ -124,11 +130,24 @@ def _today_signal(sid, s, today):
             # Full fetch chain (DB -> TV -> Yahoo -> openchart -> Stooq),
             # NOT DB-only: production DB had 12 stale dates while Yahoo has
             # 1y - DB-only gate starved every strategy forever.
-            from core.services.historical_fetcher import fetch_historical
+            # Bandwidth saver: day-cache (6h TTL) - same symbol fetched once,
+            # not on every worker/heartbeat run.
             import datetime as _dt
             _end = _dt.datetime.strptime(today, "%Y-%m-%d").date()
             _start = (_end - _dt.timedelta(days=120)).strftime("%Y-%m-%d")
-            _hist = fetch_historical(sym, _start, today)
+            _ck = (sym, _start, today)
+            _ch = _HIST_CACHE.get(_ck)
+            if _ch and time.time() - _ch[0] < _HIST_TTL:
+                _hist = _ch[1]
+            else:
+                from core.services.historical_fetcher import fetch_historical
+                _hist = fetch_historical(sym, _start, today)
+                try:
+                    _HIST_CACHE[_ck] = (time.time(), _hist)
+                    if len(_HIST_CACHE) > 30:
+                        _HIST_CACHE.pop(next(iter(_HIST_CACHE)))
+                except Exception:
+                    pass
             if not _hist or len(_hist) < 30:
                 return False, "no real history (synthetic par signal nahi)"
         except Exception:
@@ -202,8 +221,20 @@ def _intraday_signal(sid, s, today):
         if not sym:
             return None, "no symbol"
         try:
-            from core.services.scanner import OptionScanner
-            bars = OptionScanner()._fetch_intraday_bars(sym, "15m")
+            # Bandwidth saver: 15m bars shared across strategies, 15-min TTL
+            # (was: fresh fetch per strategy per 5-min run).
+            _ic = _INTRA_CACHE.get(sym)
+            if _ic and time.time() - _ic[0] < _INTRA_TTL:
+                bars = _ic[1]
+            else:
+                from core.services.scanner import OptionScanner
+                bars = OptionScanner()._fetch_intraday_bars(sym, "15m")
+                try:
+                    _INTRA_CACHE[sym] = (time.time(), bars)
+                    if len(_INTRA_CACHE) > 20:
+                        _INTRA_CACHE.pop(next(iter(_INTRA_CACHE)))
+                except Exception:
+                    pass
         except Exception:
             bars = []
         if not bars or len(bars) < 40:
