@@ -596,6 +596,15 @@
                         <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('dhan')"><i class="bi bi-wallet2"></i> Account</button>
                     </div>
                 </div></div></div>
+                <div class="col" style="min-width:240px"><div class="card" style="border:2px solid #ff9800"><div class="card-body text-center" style="padding:20px">
+                    <div style="margin-bottom:12px"><i class="bi bi-funnel-fill" style="font-size:36px;color:#ff9800"></i></div>
+                    <h6 class="fw-bold">ScanX by Dhan</h6><p class="text-muted small">50+ readymade screeners, live insights — Dhan login se khulta hai</p>
+                    <div style="margin-bottom:10px"><span class="badge bg-warning text-dark">Redirect link</span></div>
+                    <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
+                        <a class="btn btn-sm text-white" style="background:#ff9800" href="https://scanx.trade" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> ScanX kholo</a>
+                    </div>
+                    <small class="text-muted d-block mt-2">ScanX Dhan ka apna product hai — login wahi Dhan ID se hota hai (auto-login/SSO third-party sites ko Dhan deta nahi). Signal mile to yahi Market Pulse se 1-tap order lagao.</small>
+                </div></div></div>
                 <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
                     <div style="margin-bottom:12px"><i class="bi bi-graph-up-arrow text-success" style="font-size:36px"></i></div>
                     <h6 class="fw-bold">Angel One</h6><p class="text-muted small">Client Code + Password + API Key</p>
@@ -2652,9 +2661,9 @@ def run(data):
             const sigs=(r&&r.signals)||[];
             try{document.getElementById('pulse-live').textContent=r.live?('● Live ('+sigs.length+')'):('○ '+(r.note||'taiyaar ho raha'));document.getElementById('pulse-live').className='badge me-1 '+(r.live?'bg-success':'bg-secondary');}catch(e){}
             if(!sigs.length){box.innerHTML='<span class="text-muted">'+((r&&r.note)||'Abhi koi signal nahi.')+'</span>';return;}
-            let h='<div class="d-flex gap-2 flex-wrap">';
-            sigs.forEach(s=>{const bull=(s.direction||'')==='bullish';h+=`<span class="badge ${bull?'bg-success':'bg-danger'}" style="font-size:12px;padding:6px 10px">${s.symbol} ${s.signal||''} @${s.strike||''} <span class="badge bg-light text-dark ms-1">${s.score}</span></span>`;});
-            h+='</div><div class="small text-muted mt-1">'+sigs.slice(0,3).map(s=>(s.reasons||[]).join(' + ')).filter(Boolean).join(' | ')+'</div>';
+            let h='<div class="d-flex flex-column gap-1">';
+            sigs.forEach(s=>{const bull=(s.direction||'')==='bullish';const _pp=String(s.signal||'').toUpperCase().split(' ');const _act=_pp[0]==='SELL'?'SELL':'BUY';const _typ=_pp[1]==='PE'?'PE':'CE';h+=`<div class="d-flex justify-content-between align-items-center flex-wrap gap-2" style="border-bottom:1px solid #f0f0f0;padding:4px 2px"><span><span class="badge ${bull?'bg-success':'bg-danger'}" style="font-size:12px">${s.symbol} ${s.signal||''} @${s.strike||''}</span> <span class="badge bg-light text-dark">Score ${s.score}</span> <small class="text-muted">${(s.reasons||[]).join(' + ')}</small></span><button class="btn btn-sm ${bull?'btn-success':'btn-danger'}" onclick="quickStrat('${s.symbol}','${_act}','${_typ}',${s.strike||0},'')">1-tap Trade</button></div>`;});
+            h+='</div><div class="small text-muted mt-1">1-tap Trade: paper ya Dhan-LIVE (dry-run preview ke saath) — Dhan Connect zaroori.</div>';
             box.innerHTML=h;
             // Naye signals par push: toast + desktop notification
             const seen=pulseSeen();const fresh=sigs.filter(s=>s.id&&!seen.has(s.id));
