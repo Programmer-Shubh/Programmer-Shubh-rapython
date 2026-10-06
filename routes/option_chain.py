@@ -74,16 +74,18 @@ def symbols_otm(min_premium: float = 20.0):
     except Exception:
         pass
     master = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX', 'RELIANCE', 'HDFCBANK', 'ICICIBANK', 'TCS', 'INFY', 'ITC', 'SBIN', 'AXISBANK', 'KOTAKBANK', 'LT', 'HINDUNILVR', 'BHARTIARTL', 'M&M', 'MARUTI', 'BAJFINANCE', 'WIPRO', 'ONGC', 'SUNPHARMA', 'ULTRACEMCO', 'NTPC', 'POWERGRID', 'TATAMOTORS', 'TATASTEEL', 'HCLTECH', 'JSWSTEEL', 'COALINDIA', 'DRREDDY', 'CIPLA', 'ADANIENT', 'SBILIFE', 'BPCL', 'GRASIM', 'TECHM', 'DIVISLAB', 'EICHERMOT', 'BRITANNIA', 'HINDALCO', 'VEDL', 'INDUSINDBK', 'SHREECEM', 'NESTLEIND', 'BAJAJFINSV', 'HEROMOTOCO', 'APOLLOHOSP', 'UPL']
-    # Universe = master + DB ke optionable symbols (NIFTYNXT50/non-F&O bahar).
+    # Universe = master + DB ke ASLI listed derivatives (official NSE F&O
+    # bhavcopy me 50+ option rows = options exist karte hain; static F&O
+    # list maintain karne ya manual add karne ki zaroorat nahi - sab automatic).
     try:
-        from utils.helpers import is_optionable as _isopt
         _uni = list(master)
         try:
-            _db_all = BhavcopyModel().db.fetch_all(
-                "SELECT DISTINCT symbol FROM bhavcopy_data WHERE option_type IS NULL")
-            for _r in (_db_all or []):
+            _db_opt = BhavcopyModel().db.fetch_all(
+                "SELECT symbol FROM bhavcopy_data WHERE option_type IN ('CE','PE') "
+                "GROUP BY symbol HAVING COUNT(*) >= 50")
+            for _r in (_db_opt or []):
                 _s = str((_r or {}).get("symbol") or "").upper()
-                if _s and _s not in _uni and _isopt(_s):
+                if _s and _s not in _uni:
                     _uni.append(_s)
         except Exception:
             pass
