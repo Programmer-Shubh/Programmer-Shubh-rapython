@@ -99,12 +99,38 @@ def symbols_otm(min_premium: float = 20.0):
     ok, detail, failed = [], {}, {}
     try:
         bhav = BhavcopyModel()
+        # Spots: pehle DB, jo missing unke liye live batch (Render par deploy
+        # ke baad DB khaali hota hai - bina fallback ke list hamesha khaali).
+        _spots, _src, _missing = {}, {}, []
         for sym in _uni:
             try:
                 row = bhav.db.fetch_one(
                     "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
                     [sym])
-                spot = float(row["close_price"]) if row and row["close_price"] else 0
+                _sp = float(row["close_price"]) if row and row["close_price"] else 0
+            except Exception:
+                _sp = 0
+            if _sp > 0:
+                _spots[sym] = _sp
+                _src[sym] = "db"
+            else:
+                _missing.append(sym)
+        if _missing:
+            try:
+                _live = LiveMarketData().get_live_spots_parallel(_missing, max_workers=8) or {}
+                for _ms in _missing:
+                    try:
+                        _lv = float(((_live.get(_ms) or {}).get("spot")) or 0)
+                    except Exception:
+                        _lv = 0
+                    if _lv > 0:
+                        _spots[_ms] = _lv
+                        _src[_ms] = "live"
+            except Exception:
+                pass
+        for sym in _uni:
+            try:
+                spot = float(_spots.get(sym) or 0)
                 if spot <= 0:
                     failed[sym] = 0
                     continue
@@ -123,7 +149,8 @@ def symbols_otm(min_premium: float = 20.0):
                 _mn = min(ce + pe) if (ce and pe) else 0
                 if all(v >= min_premium for v in ce + pe):
                     ok.append(sym)
-                    detail[sym] = {"spot": round(spot, 2), "otm_ce": ce, "otm_pe": pe}
+                    detail[sym] = {"spot": round(spot, 2), "spot_src": _src.get(sym, "db"),
+                                   "otm_ce": ce, "otm_pe": pe}
                 else:
                     failed[sym] = _mn
             except Exception:
