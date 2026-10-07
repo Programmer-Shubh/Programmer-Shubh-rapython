@@ -1368,14 +1368,14 @@ let _lastOpenTrdHTML = null;
         const btn=document.getElementById('s-run');
         const rbtn=document.getElementById('r-run');
         const orig=btn?btn.innerHTML:''; const rorig=rbtn?rbtn.innerHTML:'';
-        const _restore=()=>{ try{if(btn)btn.innerHTML=orig;}catch(e){} try{if(rbtn)rbtn.innerHTML=rorig;}catch(e){} };
+        const _restore=()=>{ try{if(btn){btn.innerHTML=orig;btn.disabled=false;}}catch(e){} try{if(rbtn){rbtn.innerHTML=rorig;rbtn.disabled=false;}}catch(e){} };
         try{
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Starting backtest...</p>';
         }catch(e){}
         try{updateRunSummary();}catch(e){}
-        if(btn)btn.innerHTML='<span class="spinner"></span> Running...';
-        if(rbtn)rbtn.innerHTML='<span class="spinner"></span> Running...';
+        if(btn){btn.innerHTML='<span class="spinner"></span> Running...';btn.disabled=true;}
+        if(rbtn){rbtn.innerHTML='<span class="spinner"></span> Running...';rbtn.disabled=true;}
         let body=null;
         try{ body=_unifiedBody(); }catch(ue){ _restore(); try{document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Form error: '+(ue.message||ue)+'</p>';}catch(e){} return; }
         if(!body){_restore();return;}
@@ -1481,7 +1481,7 @@ let _lastOpenTrdHTML = null;
             // a newer run's screen. Backend binds every result to a run_id.
             try{
                 if(r.run_id){
-                    if(window._btRenderedId===r.run_id) return;
+                    if(window._btRenderedId===r.run_id){_restore();return;}
                     window._btRenderedId=r.run_id;
                 }
             }catch(e){}

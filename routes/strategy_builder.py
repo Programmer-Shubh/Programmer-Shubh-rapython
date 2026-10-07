@@ -1360,6 +1360,17 @@ def run_backtest(req: BacktestRequest):
     return _run_backtest_core(req)
 
 
+_BT_RUNNING = {}
+
+
+def _bt_req_hash(req_dict: dict) -> str:
+    try:
+        import hashlib as _hl, json as _js
+        return _hl.md5(_js.dumps(req_dict, sort_keys=True, default=str).encode()).hexdigest()
+    except Exception:
+        return ""
+
+
 def _bt_worker(job_id: str, req_dict: dict):
     try:
         with _BT_JOBS_LOCK:
@@ -1385,6 +1396,12 @@ def _bt_worker(job_id: str, req_dict: dict):
             _BT_JOBS[job_id]["status"] = "done"
             _BT_JOBS[job_id]["result"] = result
             _BT_JOBS[job_id]["done_at"] = _bt_time.time()
+            try:
+                _h = _BT_JOBS[job_id].get("req_hash", "")
+                if _h and _BT_RUNNING.get(_h) == job_id:
+                    _BT_RUNNING.pop(_h, None)
+            except Exception:
+                pass
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1392,6 +1409,12 @@ def _bt_worker(job_id: str, req_dict: dict):
             with _BT_JOBS_LOCK:
                 _BT_JOBS[job_id]["status"] = "error"
                 _BT_JOBS[job_id]["error"] = str(e)[:500]
+                try:
+                    _h = _BT_JOBS[job_id].get("req_hash", "")
+                    if _h and _BT_RUNNING.get(_h) == job_id:
+                        _BT_RUNNING.pop(_h, None)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1400,17 +1423,30 @@ def _bt_worker(job_id: str, req_dict: dict):
 def run_backtest_async(req: BacktestRequest):
     # Returns instantly {job_id}; UI polls /result/{job_id}. Survives
     # proxy timeouts that kill 60s+ sync requests on the free tier.
-    job_id = _bt_uuid.uuid4().hex[:12]
+    # Same request dobara aaye (double-click) to purana job_id wapas -
+    # duplicate heavy workers nahi (OOM ka sabse bada kaaran tha).
     try:
         req_dict = req.model_dump()
     except Exception:
         req_dict = req.dict() if hasattr(req, "dict") else dict(req)
+    _rh = _bt_req_hash(req_dict)
     with _BT_JOBS_LOCK:
         # prune old jobs (keep last 20)
         while len(_BT_JOBS) >= 20:
             oldest = min(_BT_JOBS.items(), key=lambda kv: kv[1].get("started_at", 0))[0]
             _BT_JOBS.pop(oldest, None)
-        _BT_JOBS[job_id] = {"status": "queued", "started_at": _bt_time.time(), "result": None, "error": ""}
+        if _rh:
+            _old = _BT_RUNNING.get(_rh)
+            if _old:
+                _oj = _BT_JOBS.get(_old)
+                if _oj and _oj.get("status") in ("queued", "running"):
+                    return {"job_id": _old, "status": _oj.get("status"), "deduped": True}
+                _BT_RUNNING.pop(_rh, None)
+    job_id = _bt_uuid.uuid4().hex[:12]
+    with _BT_JOBS_LOCK:
+        _BT_JOBS[job_id] = {"status": "queued", "started_at": _bt_time.time(), "result": None, "error": "", "req_hash": _rh}
+        if _rh:
+            _BT_RUNNING[_rh] = job_id
     t = _bt_thread.Thread(target=_bt_worker, args=(job_id, req_dict), daemon=True)
     t.start()
     return {"job_id": job_id, "status": "queued"}
