@@ -62,18 +62,30 @@ OTM_FILTER_DTE = 28  # monthly expiry basis: positional traders ka instrument;
 
 
 @router.get("/symbols-otm")
-def symbols_otm(min_premium: float = 20.0):
-    """Backtest symbol dropdown ke liye: sirf wahi F&O symbols jinke
-    OTM 1-6 (CE upar + PE neeche, total 12 strikes) ka MONTHLY model premium
-    >= min_premium ho. DB spot + local model = zero egress, 15-min cache."""
+def symbols_otm(min_premium: float = 20.0, otm_to: int = 6, dte: int = 28):
+    """Symbol filter: sirf wahi F&O symbols jinke OTM 1..otm_to (CE upar +
+    PE neeche) ka model premium >= min_premium ho. dte=7 weekly (next-week),
+    dte=28 monthly. DB spot (+live fallback) + local model, 15-min cache."""
     import time as _t
     try:
         min_premium = float(min_premium or 20.0)
     except Exception:
         min_premium = 20.0
     try:
+        otm_to = max(1, min(int(otm_to or 6), 6))
+    except Exception:
+        otm_to = 6
+    try:
+        dte = int(dte or 28)
+        if dte not in (7, 14, 28):
+            dte = 28
+    except Exception:
+        dte = 28
+    try:
         if (_t.time() - _OTM_CACHE.get("ts", 0) < 900
                 and _OTM_CACHE.get("min_premium") == min_premium
+                and _OTM_CACHE.get("otm_to") == otm_to
+                and _OTM_CACHE.get("dte") == dte
                 and _OTM_CACHE.get("result")):
             return _OTM_CACHE["result"]
     except Exception:
@@ -147,8 +159,8 @@ def symbols_otm(min_premium: float = 20.0):
                     failed[sym] = 0
                     continue
                 atm = round(spot / step) * step
-                ce = [model_premium(spot, atm + i * step, OTM_FILTER_DTE, "CE", symbol=sym) for i in range(1, 7)]
-                pe = [model_premium(spot, atm - i * step, OTM_FILTER_DTE, "PE", symbol=sym) for i in range(1, 7)]
+                ce = [model_premium(spot, atm + i * step, dte, "CE", symbol=sym) for i in range(1, otm_to + 1)]
+                pe = [model_premium(spot, atm - i * step, dte, "PE", symbol=sym) for i in range(1, otm_to + 1)]
                 ce = [round(float(x or 0), 2) for x in ce]
                 pe = [round(float(x or 0), 2) for x in pe]
                 _mn = min(ce + pe) if (ce and pe) else 0
@@ -162,9 +174,11 @@ def symbols_otm(min_premium: float = 20.0):
                 continue
     except Exception as e:
         return {"symbols": [], "error": str(e)[:150]}
-    res = {"symbols": ok, "count": len(ok), "min_premium": min_premium, "detail": detail, "failed": failed}
+    res = {"symbols": ok, "count": len(ok), "min_premium": min_premium,
+           "otm_to": otm_to, "dte": dte, "detail": detail, "failed": failed}
     try:
-        _OTM_CACHE.update({"ts": _t.time(), "min_premium": min_premium, "result": res})
+        _OTM_CACHE.update({"ts": _t.time(), "min_premium": min_premium,
+                           "otm_to": otm_to, "dte": dte, "result": res})
     except Exception:
         pass
     return res
