@@ -41,7 +41,7 @@ def _market_open_now() -> bool:
 
 
 def _seed_history(symbol: str):
-    """6-month EOD archive: openchart -> tvDatafeed, always 180 days."""
+    """6-month EOD archive: fetch_historical priority chain, always 180 days."""
     from datetime import datetime, timedelta
     db = Database.get_instance()
     has = db.fetch_one(

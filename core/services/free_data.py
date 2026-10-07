@@ -316,7 +316,7 @@ def fetch_yahoo_daily(symbol: str, start_date: str, end_date: str, timeout: floa
 
 
 def fetch_yahoo_intraday(symbol: str, interval: str = "15m", days: int = 5, timeout: float = 10):
-    """Yahoo intraday bars (TV nologin fails on cloud). interval 5m/15m/30m/1h,
+    """Yahoo intraday bars (primary intraday source). interval 5m/15m/30m/1h,
     IST-stamped bar dicts with bar_time. Returns [] on any failure."""
     out = []
     try:

@@ -1,6 +1,6 @@
 """Fill 3-month NSE history (spot OHLC) into local DB for backtest.
-Uses tvDatafeed (only working free source here). Safe to re-run
-(import_data dedupes by symbol/date/expiry/strike/option).
+Uses fetch_historical priority chain (DB/nsepython/Yahoo/Stooq/AV/TD).
+Safe to re-run (import_data dedupes by symbol/date/expiry/strike/option).
 Usage:  PYTHONPATH=. python scripts/fill_history.py [months] [SYM1 SYM2 ...]
 """
 import sys
@@ -14,7 +14,7 @@ SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",
 def main():
     months = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 3
     syms = [s.upper() for s in sys.argv[2:] if not s.isdigit()] or SYMBOLS
-    from core.services.historical_fetcher import _fetch_tvDatafeed_historical, _last_trading_day
+    from core.services.historical_fetcher import fetch_historical, _last_trading_day
     from core.models.bhavcopy_model import BhavcopyModel
     from core.models.database import Database
     end = _last_trading_day().strftime("%Y-%m-%d")
@@ -26,7 +26,7 @@ def main():
             before = Database.get_instance().fetch_one(
                 "SELECT COUNT(*) c FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL AND trade_date BETWEEN ? AND ?",
                 [sym, start, end])
-            data = _fetch_tvDatafeed_historical(sym, start, end) or []
+            data = fetch_historical(sym, start, end) or []
             n = bhav.import_data(data) if data else 0
             after = Database.get_instance().fetch_one(
                 "SELECT COUNT(*) c, MIN(trade_date) mn, MAX(trade_date) mx FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL AND trade_date BETWEEN ? AND ?",

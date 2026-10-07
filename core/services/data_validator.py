@@ -4,7 +4,7 @@ Priority (primary truth first):
   1. NSE/BSE official - nsefin bhavcopy + nsepython + local DB archive
   2. Yahoo Finance (ONLY last-60-day window) + Stooq (keyless secondary)
   3. Alpha Vantage / Twelve Data - API key (env) hone par fallback
-  4. TradingView / openchart - reference ONLY (bars ke liye istemal nahi)
+  4. openchart - reference ONLY (bars ke liye istemal nahi)
 
 Validation statuses:
   VALID          - primary source se bars, ya dono sources agree
@@ -29,7 +29,7 @@ SOURCE_RANK = {
     "nsepython": 1,
     "yahoo": 2, "stooq": 2,
     "alphavantage": 3, "twelvedata": 3,
-    "tradingview": 4, "openchart": 4, "synthetic": 9,
+    "openchart": 4, "synthetic": 9,
 }
 
 

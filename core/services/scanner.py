@@ -1519,9 +1519,10 @@ class OptionScanner:
                 'date': _row_date, 'live': _row_live, 'reasons': [], 'indicators': indicators}
 
     def _fetch_intraday_bars(self, symbol: str, tf: str = "15m", n_bars: int = 80, fresh_only: bool = True, use_cache: bool = True) -> list:
-        """Live 15m/5m bars via TradingView (tvDatafeed), 120s cache.
-        fresh_only=True (scanner): [] when stale (>90min old), short (<35),
-        or fetch fails - caller falls back to daily signals. Never raises.
+        """Live 15m/5m bars via Yahoo Finance (IST-stamped), 120s cache.
+        (TradingView/tvDatafeed feed hamesha ke liye hataya gaya.)
+        fresh_only=True (scanner): [] when short (<35) or fetch fails -
+        caller falls back to daily signals. Never raises.
         fresh_only=False (backtest): any bars in range, cache bypassed."""
         import time as _tm
         ck = (symbol.upper(), tf)
@@ -1534,133 +1535,21 @@ class OptionScanner:
                 pass
         bars = []
         try:
-            from tvDatafeed import TvDatafeed, Interval
-            _iv = {"5m": Interval.in_5_minute, "15m": Interval.in_15_minute}.get(tf, Interval.in_15_minute)
-            tv = TvDatafeed()
-            df = tv.get_hist(symbol=symbol.upper(), exchange="NSE", interval=_iv, n_bars=n_bars)
-            if df is None or len(df) < 35:
-                return []
-            import datetime as _dt
-            import pandas as _pd
-            idx = _pd.to_datetime(df.index)
-            # TV stamps may be UTC or IST-naive: accept whichever is fresh.
-            try:
-                now_ist = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
-            except Exception:
-                now_ist = _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
-            _now_naive = now_ist.replace(tzinfo=None)
-            # Aware index par tz_localize("UTC") CRASH karta hai (already tz-aware)
-            # -> cand_utc unbound -> UTC stamps leak. Dono case handle karo.
-            try:
-                if idx.tz is None:
-                    cand_utc = idx.tz_localize("UTC").tz_convert("Asia/Kolkata")
-                else:
-                    cand_utc = idx.tz_convert("Asia/Kolkata")
-            except Exception:
-                cand_utc = None
-            try:
-                age_utc = (_now_naive - cand_utc[-1].replace(tzinfo=None).to_pydatetime()).total_seconds() / 60
-            except Exception:
+            from core.services.free_data import fetch_yahoo_intraday
+            # ~25 bars/day (15m): 60-day Yahoo limit me jitna mile
+            _days = min(60, max(5, int(n_bars or 80) // 20))
+            yb = fetch_yahoo_intraday(symbol, tf if tf in ("5m", "15m", "30m", "1h") else "15m", days=_days)
+            if yb and len(yb) >= 35:
+                bars = yb[-n_bars:]
+                # Session filter: exchange bandh (09:00-15:45 IST ke bahar) me
+                # trading impossible - aise bars indicator/signal bigadte hain.
                 try:
-                    age_utc = (_now_naive - cand_utc[-1].replace(tzinfo=None)).total_seconds() / 60
+                    _sess = [b for b in bars
+                             if "09:00" <= str(b.get("bar_time", "09:15")) <= "15:45"]
+                    if len(_sess) >= 35:
+                        bars = _sess
                 except Exception:
-                    age_utc = 9999
-            try:
-                try:
-                    _naive_idx = idx.tz_localize(None)
-                except Exception:
-                    _naive_idx = idx.tz_convert(None) if idx.tz is not None else idx
-                _last_n = _naive_idx[-1].to_pydatetime() if hasattr(_naive_idx[-1], "to_pydatetime") else _naive_idx[-1]
-                age_naive = (_now_naive - _last_n).total_seconds() / 60
-            except Exception:
-                age_naive = 9999
-            if fresh_only and min(age_utc, age_naive) > 90:
-                return []  # stale session (weekend/holiday/closed) - daily backbone stays
-            use_utc = age_utc <= age_naive
-            try:
-                _naive_idx
-            except NameError:
-                _naive_idx = idx
-            # tvDatafeed nologin stamps are US/EASTERN (server default), NOT UTC!
-            # (23:45 EDT = 09:15 IST session open.) Three candidates compete;
-            # whichever lands a majority of bars inside NSE session
-            # (09:00-16:00 IST) wins - no more wrong-zone bar_time clocks.
-            def _in_session(hhmm: str) -> bool:
-                try:
-                    return "09:00" <= hhmm <= "16:00"
-                except Exception:
-                    return False
-            def _cands(key):
-                try:
-                    return key.to_pydatetime() if hasattr(key, "to_pydatetime") else key
-                except Exception:
-                    return key
-            _sets = {"utc": [], "east": [], "naive": []}
-            for k in range(len(df)):
-                try:
-                    _tsu = cand_utc[k]
-                    _pu = _cands(_tsu).replace(tzinfo=None)
-                    _sets["utc"].append((_pu.strftime("%Y-%m-%d"), _pu.strftime("%H:%M")))
-                except Exception:
-                    _sets["utc"].append(("", ""))
-                try:
-                    _raw = _naive_idx[k]
-                    _pr = _cands(_raw).replace(tzinfo=None)
-                    _sets["naive"].append((_pr.strftime("%Y-%m-%d"), _pr.strftime("%H:%M")))
-                except Exception:
-                    _sets["naive"].append(("", ""))
-                try:
-                    import datetime as _dte
-                    _pe = _cands(_naive_idx[k]).replace(tzinfo=None)
-                    _ee = _dte.datetime(_pe.year, _pe.month, _pe.day, _pe.hour, _pe.minute)
-                    try:
-                        _ee = _ee.replace(tzinfo=_dte.timezone.utc)
-                    except Exception:
-                        pass
-                    # interpret naive numbers as US/Eastern -> IST
-                    from zoneinfo import ZoneInfo as _ZI
-                    try:
-                        _el = _pe.replace(tzinfo=_ZI("US/Eastern")).astimezone(_ZI("Asia/Kolkata")).replace(tzinfo=None)
-                    except Exception:
-                        _el = _pe + _dte.timedelta(hours=9, minutes=30)
-                    _sets["east"].append((_el.strftime("%Y-%m-%d"), _el.strftime("%H:%M")))
-                except Exception:
-                    _sets["east"].append(("", ""))
-            try:
-                _scores = {name: sum(1 for _, t in vals if t and _in_session(t))
-                           for name, vals in _sets.items()}
-                _best = max(_scores, key=lambda n: (_scores[n], {"utc": 1, "east": 2, "naive": 0}[n]))
-                _chosen = _sets[_best]
-            except Exception:
-                _chosen = _sets["utc"] if use_utc else _sets["naive"]
-            for k in range(len(df)):
-                try:
-                    _dt_s, _tm_s = _chosen[k]
-                    if not _dt_s:
-                        continue
-                    bars.append({
-                        "trade_date": _dt_s,
-                        "bar_time": _tm_s,
-                        "open_price": round(float(df["open"].iloc[k]), 2),
-                        "high_price": round(float(df["high"].iloc[k]), 2),
-                        "low_price": round(float(df["low"].iloc[k]), 2),
-                        "close_price": round(float(df["close"].iloc[k]), 2),
-                        "volume": int(float(df["volume"].iloc[k] or 0)),
-                    })
-                except Exception:
-                    continue
-            bars = [b for b in bars if b["close_price"] > 0][-n_bars:]
-            # Session filter: exchange bandh (09:00-15:45 IST ke bahar) me
-            # trading impossible - aise bars indicator/signal bigadte hain.
-            # (Yahoo/synthetic paths pehle se session-only hain.)
-            try:
-                _sess = [b for b in bars
-                         if "09:00" <= str(b.get("bar_time", "09:15")) <= "15:45"]
-                if len(_sess) >= 35:
-                    bars = _sess
-            except Exception:
-                pass
-            if len(bars) >= 35:
+                    pass
                 if use_cache:
                     try:
                         self._INTRA_CACHE[ck] = (_tm.time(), bars)
@@ -1669,22 +1558,6 @@ class OptionScanner:
                     except Exception:
                         pass
                 return bars
-        except Exception:
-            pass
-        # TV failed on cloud (nologin limits/timeouts): Yahoo 15m fallback.
-        try:
-            from core.services.free_data import fetch_yahoo_intraday
-            yb = fetch_yahoo_intraday(symbol, tf if tf in ("5m", "15m", "30m", "1h") else "15m", days=5)
-            if yb and len(yb) >= 35:
-                yb = yb[-n_bars:]
-                if use_cache:
-                    try:
-                        self._INTRA_CACHE[ck] = (_tm.time(), yb)
-                        if len(self._INTRA_CACHE) > 30:
-                            self._INTRA_CACHE.pop(next(iter(self._INTRA_CACHE)))
-                    except Exception:
-                        pass
-                return yb
         except Exception:
             pass
         return []

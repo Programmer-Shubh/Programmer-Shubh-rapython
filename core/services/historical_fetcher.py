@@ -4,7 +4,7 @@ import re
 import json
 from typing import List, Dict
 # Sources: DB -> nsepython (NSE official) -> Yahoo -> Stooq -> AlphaVantage/
-# TwelveData -> (tvDatafeed/openchart reference only).
+# TwelveData -> (openchart reference only).
 # NSE kabhi-kabhi bot-block karta hai - nsepython fail ho to chain aage badhta
 # hai (koi crash/timeout nahi).
 
@@ -246,75 +246,10 @@ def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Di
     return []
 
 
-def _fetch_tvDatafeed_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """tvDatafeed-enhanced: TradingView in-memory DataFrame, no CSV. pip install tvdatafeed-enhanced."""
-    try:
-        # Try tvDatafeed first (correct package: tvdatafeed-enhanced, repo rongardF/tvdatafeed)
-        # Single attempt, 150 bars (fast, no Render timeout). No retry loop - caller has 8s budget.
-        try:
-            from tvDatafeed import TvDatafeed, Interval
-            from concurrent.futures import ThreadPoolExecutor
-            df = None
-            try:
-                tv = TvDatafeed()
-                def _do_hist():
-                    try:
-                        return tv.get_hist(symbol=symbol, exchange='NSE', interval=Interval.in_daily, n_bars=150)
-                    except Exception:
-                        return tv.get_hist(symbol=symbol, exchange='NSE', interval='1d', n_bars=150)
-                with ThreadPoolExecutor(max_workers=1) as _ex:
-                    _fut = _ex.submit(_do_hist)
-                    try:
-                        df = _fut.result(timeout=12)
-                    except Exception:
-                        df = None
-            except Exception:
-                df = None
-            if df is not None and not df.empty:
-                # tvDatafeed returns DataFrame with columns: symbol, open, high, low, close, volume, datetime
-                # Normalize to our format
-                out=[]
-                for idx, row in df.iterrows():
-                    td = str(idx)[:10] if hasattr(idx, 'strftime') else str(row.get('datetime',''))[:10]
-                    # Try to get date from index
-                    try:
-                        td = idx.strftime('%Y-%m-%d') if hasattr(idx, 'strftime') else str(td)[:10]
-                    except: td=str(td)[:10]
-                    if td < start_date or td > end_date: continue
-                    cl=float(row.get('close', row.get('Close',0)) or 0)
-                    if cl<=0: continue
-                    out.append({"symbol":symbol,"trade_date":td,"open_price":float(row.get('open',row.get('Open',cl))),"high_price":float(row.get('high',row.get('High',cl))),"low_price":float(row.get('low',row.get('Low',cl))),"close_price":round(cl,2),"volume":int(row.get('volume',row.get('Volume',0)) or 0),"oi":0})
-                if len(out)>=5:
-                    return out
-        except Exception:
-            pass
-        # Fallback to openchart (also TradingView in-memory)
-        try:
-            import openchart
-            # openchart also provides DataFrame
-            df = openchart.get_history(symbol, interval='1d', start=start_date, end=end_date)
-            if df is not None and not df.empty:
-                out=[]
-                for idx, row in df.iterrows():
-                    td=str(idx)[:10]
-                    try: td=idx.strftime('%Y-%m-%d')
-                    except: pass
-                    if td < start_date or td > end_date: continue
-                    cl=float(row.get('close',0) or 0)
-                    if cl<=0: continue
-                    out.append({"symbol":symbol,"trade_date":td,"open_price":float(row.get('open',cl)),"high_price":float(row.get('high',cl)),"low_price":float(row.get('low',cl)),"close_price":round(cl,2),"volume":int(row.get('volume',0) or 0),"oi":0})
-                if len(out)>=5:
-                    return out
-        except Exception:
-            pass
-    except Exception:
-        pass
-    return []
-
 def _fetch_openchart_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """openchart (marketcalls/openchart NSEData): NSE charting API via search +
     historical. Indices -> IDX segment, stocks -> EQ. May return [] where NSE
-    blocks charting API (then tvDatafeed fallback serves)."""
+    blocks charting API (reference only)."""
     try:
         from openchart import NSEData
         import datetime as _dt
@@ -465,7 +400,7 @@ def _last_trading_day():
 
 def fetch_historical(symbol: str, start_date: str, end_date: str, allow_synthetic: bool = False, with_quality: bool = False):
     """Priority chain (spec): NSE/BSE official (DB/nsepython) -> Yahoo (60-day) ->
-    Stooq -> Alpha Vantage / Twelve Data -> (TradingView/openchart reference only).
+    Stooq -> Alpha Vantage / Twelve Data -> (openchart reference only).
     NO cross-source date merge/fill: first source with 5+ bars wins as-is.
     with_quality=True returns (bars, quality-dict)."""
     allow_synthetic = False
@@ -503,7 +438,7 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
     except Exception:
         db_data = []
     # 2) Priority order: nsepython (NSE official) -> Yahoo (60d) -> Stooq ->
-    # Alpha Vantage -> Twelve Data. TV/openchart are reference-only
+    # Alpha Vantage -> Twelve Data. openchart is reference-only
     # (never bar suppliers).
     _deadline = _t.time() + 25
 

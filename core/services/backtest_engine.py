@@ -1501,7 +1501,7 @@ class BacktestEngine:
         """Vectorbt lightning-fast in-memory backtest on DataFrame (no CSV)."""
         try:
             import vectorbt as vbt
-            # df is Pandas DataFrame with columns: open, high, low, close (lowercase from tvDatafeed/nsepython/openchart)
+            # df is Pandas DataFrame with columns: open, high, low, close (lowercase from nsepython/openchart)
             # Map to proper case for vectorbt
             if 'close' in df.columns:
                 close = df['close']
@@ -1672,7 +1672,7 @@ class BacktestEngine:
                     return float(row2["close_price"])
             except Exception:
                 pass
-        # 4) Try openchart/tvDatafeed real historical via strategy_builder fetch (no synthetic) - live only
+        # 4) Try openchart real historical via strategy_builder fetch (no synthetic) - live only
         if self.is_live:
             try:
                 from routes.strategy_builder import _fetch_google_finance, _fetch_and_store_nselib

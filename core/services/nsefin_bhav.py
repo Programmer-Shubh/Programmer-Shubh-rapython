@@ -1,7 +1,6 @@
 """NSE official F&O bhavcopy via nsefin (marketcalls/nsefin, PyPI).
-Auto-download + import + retention purge. All NSE-direct scrapers
-(nselib/jugaad/nsepython/archives) were removed (blocked); nsefin's
-bhavcopy endpoint works. Best-effort: every failure returns safely.
+Auto-download + import + retention purge. nsepython history fetcher
+bhi active hai (historical_fetcher). Best-effort: every failure returns safely.
 """
 import datetime
 import logging

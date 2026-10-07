@@ -210,8 +210,8 @@ def _normalize_legs(raw_legs: list, lots_fallback: int = 1) -> list:
 
 
 def _intraday_full_range(sym, timeframe, start_date, end_date):
-    """Full-range 15m bars (spec §1/§5): TradingView latest-N first, else
-    Yahoo 60-day chunks. NO synthetic fabrication - na mile to ([], reason).
+    """Full-range 15m bars (spec §1/§5): Yahoo 60-day windows (TV feed removed).
+    NO synthetic fabrication - na mile to ([], reason).
     Returns (bars_chrono_ist, src). Bars sorted, deduped, IST."""
     import datetime as _dt
     try:
@@ -222,19 +222,7 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
     if _e < _s:
         return [], "bad-range"
     _span = max(1, (_e - _s).days + 1)
-    # 1) TradingView latest-N (covers ~60 sessions at 1500 bars)
-    try:
-        from core.services.scanner import OptionScanner as _OS
-        _tvn = min(1500, max(80, _span * 30))
-        _tvbars = _OS()._fetch_intraday_bars(
-            sym, timeframe, n_bars=_tvn, fresh_only=False, use_cache=False) or []
-        _tvbars = [b for b in _tvbars
-                   if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
-        if len(_tvbars) >= 40:
-            return _dedup_bars(_tvbars[-1500:]), "tradingview_intraday"
-    except Exception:
-        pass
-    # 2) Yahoo 15m (hard 60-day/request limit): single window back from
+    # 1) Yahoo 15m (hard 60-day/request limit): single window back from
     # end_date. Older start = honest gap (no fabrication, ever).
     try:
         from core.services.free_data import fetch_yahoo_intraday as _fy
@@ -604,13 +592,13 @@ def _fetch_stocksrin_live(symbol):
 
 
 def _fetch_and_store_nselib(symbol, start_date, end_date):
-    """Fetch historical OHLC (openchart -> tvDatafeed, NSE-direct removed) and store in DB.
-    Name kept for backward-compat callers (backtest_engine live path)."""
+    """Fetch historical OHLC via priority chain (DB/nsepython/Yahoo/Stooq/AV/TD)
+    and store in DB. Name kept for backward-compat callers (backtest_engine live path)."""
     try:
-        from core.services.historical_fetcher import _fetch_openchart_historical, _fetch_tvDatafeed_historical
+        from core.services.historical_fetcher import _fetch_openchart_historical, fetch_historical
         rows = _fetch_openchart_historical(symbol, start_date, end_date)
         if not rows:
-            rows = _fetch_tvDatafeed_historical(symbol, start_date, end_date)
+            rows = fetch_historical(symbol, start_date, end_date) or []
         if not rows:
             return 0
         bhav = BhavcopyModel()
@@ -1669,7 +1657,7 @@ def seed_backtest_data(symbol: str = "NIFTY", months: int = 12):
     old rows purged (12-month retention)."""
     import datetime as _dt
     from core.services import nsefin_bhav as _fb
-    from core.services.historical_fetcher import _fetch_openchart_historical, _fetch_tvDatafeed_historical, _fetch_db_historical
+    from core.services.historical_fetcher import _fetch_openchart_historical, fetch_historical, _fetch_db_historical
     from core.models.bhavcopy_model import BhavcopyModel
     out = {}
     try:
@@ -1696,7 +1684,7 @@ def seed_backtest_data(symbol: str = "NIFTY", months: int = 12):
             continue
         rows = _fetch_openchart_historical(sym, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
         if not rows or len(rows) < 5:
-            rows = _fetch_tvDatafeed_historical(sym, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+            rows = fetch_historical(sym, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")) or []
         if rows and len(rows) >= 5:
             try: BhavcopyModel().import_data(rows)
             except: pass

@@ -127,7 +127,7 @@ def _today_signal(sid, s, today):
         if not sym:
             return False, "no symbol"
         try:
-            # Full fetch chain (DB -> TV -> Yahoo -> openchart -> Stooq),
+            # Full fetch chain (DB -> nsepython -> Yahoo -> Stooq -> AV/TD),
             # NOT DB-only: production DB had 12 stale dates while Yahoo has
             # 1y - DB-only gate starved every strategy forever.
             # Bandwidth saver: day-cache (6h TTL) - same symbol fetched once,
