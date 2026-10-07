@@ -401,19 +401,28 @@ def _last_trading_day():
     while d.weekday() >= 5: d -= datetime.timedelta(days=1)
     return d
 
-def fetch_historical(symbol: str, start_date: str, end_date: str, allow_synthetic: bool = False) -> List[Dict]:
-    """Real 6-month local archive. end_date clamped to last completed trading day. DB -> Stooq -> openchart -> tvDatafeed."""
-    allow_synthetic=False
+def fetch_historical(symbol: str, start_date: str, end_date: str, allow_synthetic: bool = False, with_quality: bool = False):
+    """Priority chain (spec): NSE/BSE official -> Yahoo (60-day) ->
+    Alpha Vantage / Twelve Data -> (TradingView/openchart/Stooq reference ONLY).
+    NO cross-source date merge/fill: first source with 5+ bars wins as-is.
+    with_quality=True returns (bars, quality-dict)."""
+    allow_synthetic = False
     symbol = symbol.upper()
     # Clamp end_date to last completed trading day (avoid today ongoing session)
     try:
         ed = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
         ltd = _last_trading_day()
-        if ed > ltd: end_date = ltd.strftime("%Y-%m-%d")
-    except: pass
-    # 1) Instant local cache - but ONLY when fresh (max bar within 7 days
-    # of end_date). A stale cache must never win over live network data.
+        if ed > ltd:
+            end_date = ltd.strftime("%Y-%m-%d")
+    except Exception:
+        pass
     import time as _t
+    from core.services import data_validator as _dv
+
+    def _out(bars, quality):
+        return (bars, quality) if with_quality else bars
+
+    # 1) Official primary: fresh local archive (max bar within 7 days of end).
     db_data = []
     try:
         db_data = _fetch_db_historical(symbol, start_date, end_date) or []
@@ -424,50 +433,45 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
                 _ed = _dti.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
                 _md = _dti.datetime.strptime(_mx, "%Y-%m-%d").date()
                 if (_ed - _md).days <= 7:
-                    return db_data
+                    return _out(db_data, {"status": "VALID", "source": "nse_official_db",
+                                          "bars": len(db_data), "note": "NSE/BSE official primary truth"})
             except Exception:
-                return db_data
+                return _out(db_data, {"status": "VALID", "source": "nse_official_db",
+                                      "bars": len(db_data), "note": "NSE/BSE official primary truth"})
     except Exception:
         db_data = []
-    # 2) Network order: TV -> Yahoo -> openchart -> Stooq. First hit with
-    # 5+ bars wins; missing dates are merged over the stale DB partial.
+    # 2) Priority order: Yahoo (60d) -> Alpha Vantage -> Twelve Data.
+    # TV/openchart/Stooq are reference-only (never bar suppliers).
     _deadline = _t.time() + 25
 
     def _fetch_yahoo_hist(sym, s, e):
         try:
             from core.services.free_data import fetch_yahoo_daily
-            return fetch_yahoo_daily(sym, s, e)
+            return _dv.yahoo_60d_filter(fetch_yahoo_daily(sym, s, e))
         except Exception:
             return []
 
-    def _merge_over(base, extra):
-        try:
-            seen = {str(r.get("trade_date", ""))[:10] for r in (base or [])}
-            out = list(base or [])
-            for r in (extra or []):
-                if str(r.get("trade_date", ""))[:10] not in seen:
-                    out.append(r)
-                    seen.add(str(r.get("trade_date", ""))[:10])
-            out.sort(key=lambda r: str(r.get("trade_date", "")))
-            return out
-        except Exception:
-            return base or extra or []
-
-    for fetcher in [_fetch_tvDatafeed_historical, _fetch_yahoo_hist,
-                    _fetch_openchart_historical, _fetch_stooq_historical]:
+    for _name, _fn in (("yahoo", _fetch_yahoo_hist),
+                       ("alphavantage", _dv._fetch_alphavantage_daily),
+                       ("twelvedata", _dv._fetch_twelvedata_daily)):
         try:
             if _t.time() > _deadline:
                 break
-            data = fetcher(symbol, start_date, end_date)
+            data = _fn(symbol, start_date, end_date)
             if data and len(data) >= 5:
-                data = _merge_over(db_data, data)
-                # Cache it for next time (instant backtest thereafter)
+                # Validate vs official DB overlap (free, no egress)
+                q = _dv.validate_symbol(data, _name, db_data or None, "nse_official_db")
                 try:
                     from core.models.bhavcopy_model import BhavcopyModel
                     BhavcopyModel().import_data(data)
                 except Exception:
                     pass
-                return data
+                return _out(data, q)
         except Exception:
             continue
-    return db_data if db_data and len(db_data) >= 5 else []
+    # 3) Nothing usable: stale DB partial (>=5) or INSUFFICIENT (honest, no fill).
+    if db_data and len(db_data) >= 5:
+        return _out(db_data, {"status": "SECONDARY_ONLY", "source": "nse_official_db",
+                              "bars": len(db_data), "note": "stale official partial - fresh nahi"})
+    return _out([], {"status": "INSUFFICIENT", "source": "none", "bars": 0,
+                     "note": "primary missing, koi secondary bhi nahi"})

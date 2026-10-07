@@ -713,6 +713,8 @@ def _run_backtest_core(req: BacktestRequest):
                 # Fast fallback: synthetic (instant) — no live fetch during backtest to keep it <2s
                 # Real data will be backfilled by nightly job, not per-request
                 pass
+            # Data provenance (spec): har symbol ka bars-kahan-se-aaya record.
+            _hist_src = "nse_official_db"
             if _db_hist and len(_db_hist) >= 15:
                 historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
                 _use_db = True
@@ -721,9 +723,14 @@ def _run_backtest_core(req: BacktestRequest):
                 _ce = _BT_CACHE.get(_ck)
                 if _ce and _bt_t.time() - _ce[0] < 300:
                     historical = _ce[1]
+                    try:
+                        _hist_src = _ce[2] if len(_ce) > 2 else "cache"
+                    except Exception:
+                        _hist_src = "cache"
                 else:
                     # Fallback instant: synthetic only, no DB/network - <50ms
                     historical = _generate_synthetic_fallback(_sym, start_date, end_date)
+                    _hist_src = "synthetic"
                 # Cap daily to 60 bars BEFORE intraday expansion (1Y range = 250 bars x 75 = 18750 -> 60s hang)
                 if len(historical) > _bar_cap:
                     historical = historical[-_bar_cap:]
@@ -754,7 +761,8 @@ def _run_backtest_core(req: BacktestRequest):
                             historical = _tvbars[-400:] if len(_tvbars) > 400 else _tvbars
                             _use_db = True
                             _real_intra = True
-                            _BT_CACHE[_ck] = (_bt_t.time(), historical)
+                            _hist_src = "tradingview_intraday"
+                            _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src)
                             if len(_BT_CACHE) > 20:
                                 _BT_CACHE.pop(next(iter(_BT_CACHE)))
                     except Exception:
@@ -779,8 +787,9 @@ def _run_backtest_core(req: BacktestRequest):
                                     _bt = f"{_mm // 60:02d}:{_mm % 60:02d}"
                                     intraday.append({**d, "trade_date": d["trade_date"], "close_price": round(c,2), "open_price": round(c*0.999,2), "high_price": round(c*1.002,2), "low_price": round(c*0.998,2), "bar_time": _bt})
                             historical = intraday[-150:] if len(intraday)>150 else intraday
+                            _hist_src = "synthetic_expansion"
                         except: pass
-                _BT_CACHE[_ck] = (_bt_t.time(), historical)
+                _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src)
                 if len(_BT_CACHE) > 20:
                     _BT_CACHE.pop(next(iter(_BT_CACHE)))
             # If too few bars (<30), indicators won't warm up -> force longer synthetic
@@ -789,11 +798,14 @@ def _run_backtest_core(req: BacktestRequest):
                 synth = _generate_synthetic_fallback(_sym, start_date, end_date)
                 if synth and len(synth) >= 30:
                     historical = synth
+                    _hist_src = "synthetic"
                 elif not historical:
                     historical = synth
+                    _hist_src = "synthetic"
             if not historical or len(historical) < 5:
                 _per_symbol[_sym] = {"error": f"No data for {_sym}", "total_trades": 0,
-                                     "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
+                                     "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                     "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
                 continue
             if len(historical) > _bar_cap:
                 historical = historical[-_bar_cap:]
@@ -845,7 +857,9 @@ def _run_backtest_core(req: BacktestRequest):
             )
             if not result.get("success"):
                 _per_symbol[_sym] = {"error": result.get("error", "Backtest failed"), "total_trades": 0,
-                                     "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
+                                     "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                     "data": {"source": str(_hist_src or ""), "status": "INSUFFICIENT",
+                                              "bars": len(historical or [])}}
                 continue
             _sm = result["metrics"]
             try:
@@ -864,11 +878,25 @@ def _run_backtest_core(req: BacktestRequest):
                 _brokerage += float(_sm.get("total_brokerage", 0) or 0)
             except Exception:
                 pass
+            try:
+                _dq_src = str(_hist_src or "")
+                if _dq_src == "nse_official_db":
+                    _dq = {"source": "NSE official", "status": "VALID"}
+                elif _dq_src == "tradingview_intraday":
+                    _dq = {"source": "TradingView intraday", "status": "SECONDARY_ONLY"}
+                elif _dq_src in ("synthetic", "synthetic_expansion"):
+                    _dq = {"source": "Synthetic", "status": "SYNTHETIC"}
+                else:
+                    _dq = {"source": "Cache", "status": "SECONDARY_ONLY"}
+                _dq["bars"] = len(historical or [])
+            except Exception:
+                _dq = {"source": "?", "status": "INSUFFICIENT", "bars": 0}
             _per_symbol[_sym] = {"total_trades": _sm.get("total_trades", 0),
                                  "winning_trades": _sm.get("winning_trades", 0),
                                  "losing_trades": _sm.get("losing_trades", 0),
                                  "win_rate": _sm.get("win_rate", 0),
-                                 "net_pnl": round(_sm.get("net_pnl", 0), 2)}
+                                 "net_pnl": round(_sm.get("net_pnl", 0), 2),
+                                 "data": _dq}
         if not _all_trades:
             # Skip the "SYM: " prefix when the message already names the symbol
             def _e(k, v):
@@ -907,7 +935,7 @@ def _run_backtest_core(req: BacktestRequest):
                             _first_m = _sm2
                         try: _brokerage += float(_sm2.get("total_brokerage",0) or 0)
                         except Exception: pass
-                        _per_symbol[_sym0] = {"total_trades": _sm2.get("total_trades",0), "winning_trades": _sm2.get("winning_trades",0), "losing_trades": _sm2.get("losing_trades",0), "win_rate": _sm2.get("win_rate",0), "net_pnl": round(_sm2.get("net_pnl",0),2)}
+                        _per_symbol[_sym0] = {"total_trades": _sm2.get("total_trades",0), "winning_trades": _sm2.get("winning_trades",0), "losing_trades": _sm2.get("losing_trades",0), "win_rate": _sm2.get("win_rate",0), "net_pnl": round(_sm2.get("net_pnl",0),2), "data": {"source": "Synthetic retry", "status": "SYNTHETIC", "bars": len(_hist0 or [])}}
             except: pass
             if not _all_trades:
                 if _first_m is not None:
@@ -919,6 +947,23 @@ def _run_backtest_core(req: BacktestRequest):
                 m = _merge_trade_metrics(_all_trades, _brokerage)
         else:
             m = _merge_trade_metrics(_all_trades, _brokerage)
+        # Data provenance note: symbols alag-alag data paths par chale hon
+        # (official DB vs intraday vs synthetic) to user ko saaf dikhe -
+        # mixed windows me trade-count compare karna misleading hota hai.
+        _prov_note = ""
+        try:
+            _srcs = {}
+            for _k, _v in (_per_symbol or {}).items():
+                if isinstance(_v, dict) and (_v.get("total_trades", 0) or 0) >= 0 and not _v.get("error"):
+                    _d = (_v.get("data") or {})
+                    _srcs[_k] = str(_d.get("source") or "?")
+            _kinds = set(_srcs.values())
+            if len(_kinds) > 1:
+                _prov_note = ("Data note: symbols alag sources par chale - " +
+                              ", ".join(f"{_k}({_v})" for _k, _v in sorted(_srcs.items())) +
+                              ". Count compare karte waqt dhyaan rakho.")
+        except Exception:
+            _prov_note = ""
         # Honest results: no fabricated win-rate or P/L — engine output as-is.
         # Zero-trade diagnosis: never leave the user guessing why nothing traded.
         _zero_note = ""
@@ -1000,7 +1045,7 @@ def _run_backtest_core(req: BacktestRequest):
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
         "symbols": _syms,
         "per_symbol": _per_symbol,
-        "note": _zero_note,
+        "note": ((_prov_note + " ") if _prov_note else "") + (_zero_note or ""),
         "suggestions": _zero_tips,
         "took_ms": int((__import__("time").time() - _t0) * 1000),
         "metrics": {

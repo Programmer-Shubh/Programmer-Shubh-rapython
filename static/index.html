@@ -1472,7 +1472,7 @@ let _lastOpenTrdHTML = null;
             let perSymH='';
             if(r.symbols&&r.symbols.length>1&&r.per_symbol){
                 perSymH='<div class="card mb-2"><div class="card-body p-2"><table class="bt-table"><thead><tr><th>Symbol</th><th>Trades</th><th>Win %</th><th>Net P&L</th><th>Status</th></tr></thead><tbody>';
-                r.symbols.forEach(sx=>{const pm=r.per_symbol[sx]||{};const st=pm.error?`<span class="text-danger small">${pm.error}</span>`:'<span class="text-success small">OK</span>';perSymH+=`<tr><td><strong>${sx}</strong></td><td>${pm.total_trades||0}</td><td>${pm.win_rate||0}%</td><td class="${C(pm.net_pnl||0)}">${F(pm.net_pnl||0)}</td><td>${st}</td></tr>`;});
+                r.symbols.forEach(sx=>{const pm=r.per_symbol[sx]||{};const st=pm.error?`<span class="text-danger small">${pm.error}</span>`:'<span class="text-success small">OK</span>';const dq=pm.data||{};const dqBadge=dq.status?`<div><span class="badge ${dq.status==='VALID'?'bg-success':dq.status==='MISMATCH'?'bg-danger':dq.status==='SYNTHETIC'?'bg-warning text-dark':'bg-secondary'}" title="${dq.source||''} • ${dq.bars||0} bars">${dq.status}</span></div>`:'';perSymH+=`<tr><td><strong>${sx}</strong></td><td>${pm.total_trades||0}</td><td>${pm.win_rate||0}%</td><td class="${C(pm.net_pnl||0)}">${F(pm.net_pnl||0)}</td><td>${st}${dqBadge}</td></tr>`;});
                 perSymH+='</tbody></table></div></div>';
             }
             let zeroH='';
