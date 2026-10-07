@@ -861,6 +861,35 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                             pass
             except Exception:
                 _pre15 = {}
+        # Daily DB preload (local, tez) + Yahoo-daily parallel supplement SIRF
+        # un symbols ke liye jinke DB bars <15 hain. Pehle har symbol serial
+        # Yahoo fetch karta tha (25 symbols x 10s timeout = timeout-tak hang).
+        _preDB, _preY = {}, {}
+        try:
+            for _s in list(_syms):
+                try:
+                    _preDB[_s] = _load_db_history(_s, start_date, end_date) or []
+                except Exception:
+                    _preDB[_s] = []
+            _needY = [_s for _s in list(_syms) if len(_preDB.get(_s, [])) < 15]
+            if _needY:
+                try:
+                    from concurrent.futures import ThreadPoolExecutor as _TPE2
+                    def _oneY(_s):
+                        try:
+                            return _s, _yahoo_full_range(_s, start_date, end_date)
+                        except Exception:
+                            return _s, []
+                    with _TPE2(max_workers=6) as _ex2:
+                        for _s, _r in _ex2.map(_oneY, _needY):
+                            try:
+                                _preY[_s] = _r or []
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
         for _sym in _syms:
             _use_db = False
             # No options exist on non-F&O symbols (GOLDBEES/SILVERBEES ETFs):
@@ -933,9 +962,12 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     _fire_prog(_sym)
                     continue
             else:
-                # DAILY: NSE official DB (>=15) else Yahoo full-range, else out.
+                # DAILY: preloaded DB (>=15) else pre-fetched Yahoo, else direct.
                 try:
-                    _db_hist = _load_db_history(_sym, start_date, end_date)
+                    if _sym in _preDB:
+                        _db_hist = _preDB[_sym]
+                    else:
+                        _db_hist = _load_db_history(_sym, start_date, end_date)
                 except Exception:
                     _db_hist = []
                 if _cache_ok and not (_db_hist and len(_db_hist) >= 15):
@@ -949,9 +981,12 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
                     _use_db = True
                 else:
-                    # Spec: DB<15 to Yahoo full-range (single source, 60d-cut).
+                    # Spec: DB<15 to Yahoo full-range (prefetched parallel, else direct).
                     # Na mile to INSUFFICIENT - synthetic fabrication kabhi nahi.
-                    _yb = _yahoo_full_range(_sym, start_date, end_date)
+                    try:
+                        _yb = _preY.get(_sym) if _sym in _preY else _yahoo_full_range(_sym, start_date, end_date)
+                    except Exception:
+                        _yb = []
                     if _yb and len(_yb) >= 15:
                         historical = _yb
                         _hist_src = "yahoo_daily"

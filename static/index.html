@@ -293,7 +293,7 @@
         <button class="active" onclick="go('dashboard',this)"><i class="bi bi-speedometer2"></i> Dashboard</button>
         <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
-        <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Lab</button>
+        <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Backtest</button>
 
         <button onclick="go('tvchart',this)"><i class="bi bi-candlestick"></i> TV Chart</button>
         <button onclick="go('brokers',this)"><i class="bi bi-plug"></i> Brokers</button>
@@ -376,7 +376,7 @@
                 <div class="card-body py-2 px-3">
                     <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
                         <div class="d-flex align-items-center gap-2">
-                            <h4 class="fw-bold mb-0 text-white" style="font-size:16px"><i class="bi bi-robot"></i> Strategy Lab <span class="badge bg-white text-primary ms-2" style="font-size:11px">PRO • Backtest + Robot</span></h4>
+                            <h4 class="fw-bold mb-0 text-white" style="font-size:16px"><i class="bi bi-robot"></i> Strategy Backtest <span class="badge bg-white text-primary ms-2" style="font-size:11px">PRO • Backtest + Robot</span></h4>
                             <small class="text-white-50">Setup → Templates → Indicators → Backtest → Live/Paper</small>
                         </div>
                         <div class="d-flex gap-2 align-items-center bg-white rounded-pill p-1 shadow-sm">
@@ -1891,7 +1891,7 @@ let _lastOpenTrdHTML = null;
     (function(){refreshAlertUrl();})();
     function initWebhook(){ try{ loadAlerts(); }catch(e){} try{ loadAlertTrades(); }catch(e){} try{ loadRiskStatus(); }catch(e){} }
     // Robot: auto-fill dates
-    (function(){const e=new Date(); const fmt=d=>d.toISOString().split('T')[0]; try{if(document.getElementById('r-start')){document.getElementById('r-start').value='2026-08-02'; document.getElementById('r-end').value=fmt(e);}}catch(e){}})();
+    (function(){const e=new Date(); const s=new Date(e); s.setDate(e.getDate()-20); const fmt=d=>d.toISOString().split('T')[0]; try{if(document.getElementById('r-start')){document.getElementById('r-start').value=fmt(s); document.getElementById('r-end').value=fmt(e);}}catch(e){}})();
     function updateRunSummary(){try{
             const el=document.getElementById('run-summary');if(!el)return;
             const syms=rSyms();const symTxt=syms.join('+')||'NIFTY';
@@ -2127,7 +2127,7 @@ let _lastOpenTrdHTML = null;
     async function downloadReportPDF(){const body=_collectBacktestBody(); if(!body) return; try{const r=await fetch('/api/backtest/report.pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='RaTrade_'+body.symbol+'_'+body.start_date+'.pdf'; a.click();}catch(e){alert(e.message);}}
     function _collectBacktestBody(){return _unifiedBody();}
 
-    (function(){const e=new Date(); const s=new Date(); s.setMonth(e.getMonth()-2); s.setDate(2); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('r-start').value=fmt(s); document.getElementById('r-end').value=fmt(e);}catch(e){}})();
+    (function(){const e=new Date(); const s=new Date(e); s.setDate(e.getDate()-20); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('r-start').value=fmt(s); document.getElementById('r-end').value=fmt(e);}catch(e){} try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e){}})();
     document.getElementById('s-index')?.addEventListener('change', renderQInstruments);
     setTimeout(renderQInstruments, 800);
     addCondition();
