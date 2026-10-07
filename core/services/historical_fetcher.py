@@ -3,9 +3,10 @@ import requests
 import re
 import json
 from typing import List, Dict
-# Sources: DB -> Stooq -> openchart (marketcalls) -> tvDatafeed (TradingView).
-# NSE-direct fetchers (nselib/jugaad/nsepython/archives) REMOVED — NSE blocks
-# them (empty/archive responses); openchart+tvDatafeed serve instead.
+# Sources: DB -> nsepython (NSE official) -> Yahoo -> Stooq -> AlphaVantage/
+# TwelveData -> (tvDatafeed/openchart reference only).
+# NSE kabhi-kabhi bot-block karta hai - nsepython fail ho to chain aage badhta
+# hai (koi crash/timeout nahi).
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -362,6 +363,67 @@ def _fetch_openchart_historical(symbol: str, start_date: str, end_date: str) -> 
         pass
     return []
 
+def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """nsepython: NSE official equity/index history (PRIMARY when reachable).
+    NSE bot-block kare to [] (chain aage badhta hai). Thread-guarded timeout."""
+    try:
+        from concurrent.futures import ThreadPoolExecutor as _TPE
+        sym = str(symbol or "").upper()
+        try:
+            _s = datetime.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").strftime("%d-%m-%Y")
+            _e = datetime.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").strftime("%d-%m-%Y")
+        except Exception:
+            return []
+
+        def _do():
+            from nsepython import equity_history, index_history
+            _IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX", "INDIAVIX"}
+            try:
+                if sym in _IDX:
+                    return index_history(sym, _s, _e)
+                return equity_history(sym, "EQ", _s, _e)
+            except Exception:
+                return None
+
+        df = None
+        try:
+            with _TPE(max_workers=1) as _ex:
+                df = _ex.submit(_do).result(timeout=15)
+        except Exception:
+            return []
+        if df is None or getattr(df, "empty", True):
+            return []
+        out = []
+        for idx, row in df.iterrows():
+            try:
+                try:
+                    td = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10]
+                except Exception:
+                    td = str(row.get("TIMESTAMP", row.get("Date", "")))[:10]
+                # nsepython alternate column names
+                if not td or len(td) < 10:
+                    td = str(row.get("TIMESTAMP", row.get("Date", row.get("date", ""))))[:10]
+                if td < str(start_date)[:10] or td > str(end_date)[:10]:
+                    continue
+                cl = float(row.get("CLOSE", row.get("close", row.get("Close", 0))) or 0)
+                if cl <= 0:
+                    continue
+                o = float(row.get("OPEN", row.get("open", row.get("Open", cl))) or cl)
+                h = float(row.get("HIGH", row.get("high", row.get("High", cl))) or cl)
+                l = float(row.get("LOW", row.get("low", row.get("Low", cl))) or cl)
+                out.append({"symbol": sym, "trade_date": td,
+                            "open_price": round(o, 2), "high_price": round(h, 2),
+                            "low_price": round(l, 2), "close_price": round(cl, 2),
+                            "volume": int(float(row.get("VOLUME", row.get("volume", row.get("Volume", row.get("TOTTRDQTY", 0)))) or 0)),
+                            "oi": 0})
+            except Exception:
+                continue
+        out.sort(key=lambda r: r["trade_date"])
+        return out if len(out) >= 5 else []
+    except Exception:
+        return []
+
+
 def _fetch_stooq_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """Stooq daily CSV in-memory (no file write) - cloud-friendly, free, no key. Replaces Yahoo."""
     try:
@@ -402,8 +464,8 @@ def _last_trading_day():
     return d
 
 def fetch_historical(symbol: str, start_date: str, end_date: str, allow_synthetic: bool = False, with_quality: bool = False):
-    """Priority chain (spec): NSE/BSE official -> Yahoo (60-day) ->
-    Alpha Vantage / Twelve Data -> (TradingView/openchart/Stooq reference ONLY).
+    """Priority chain (spec): NSE/BSE official (DB/nsepython) -> Yahoo (60-day) ->
+    Stooq -> Alpha Vantage / Twelve Data -> (TradingView/openchart reference only).
     NO cross-source date merge/fill: first source with 5+ bars wins as-is.
     with_quality=True returns (bars, quality-dict)."""
     allow_synthetic = False
@@ -440,8 +502,9 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
                                       "bars": len(db_data), "note": "NSE/BSE official primary truth"})
     except Exception:
         db_data = []
-    # 2) Priority order: Yahoo (60d) -> Alpha Vantage -> Twelve Data.
-    # TV/openchart/Stooq are reference-only (never bar suppliers).
+    # 2) Priority order: nsepython (NSE official) -> Yahoo (60d) -> Stooq ->
+    # Alpha Vantage -> Twelve Data. TV/openchart are reference-only
+    # (never bar suppliers).
     _deadline = _t.time() + 25
 
     def _fetch_yahoo_hist(sym, s, e):
@@ -451,7 +514,9 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
         except Exception:
             return []
 
-    for _name, _fn in (("yahoo", _fetch_yahoo_hist),
+    for _name, _fn in (("nsepython", _fetch_nsepython_historical),
+                       ("yahoo", _fetch_yahoo_hist),
+                       ("stooq", _fetch_stooq_historical),
                        ("alphavantage", _dv._fetch_alphavantage_daily),
                        ("twelvedata", _dv._fetch_twelvedata_daily)):
         try:

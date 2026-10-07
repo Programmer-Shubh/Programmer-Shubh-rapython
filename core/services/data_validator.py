@@ -1,10 +1,10 @@
 """Data source priority + validation (user-spec, strictly enforced).
 
 Priority (primary truth first):
-  1. NSE/BSE official - nsefin bhavcopy + local DB archive (DB holds official rows)
-  2. Yahoo Finance - ONLY last-60-day window (older bars ignored)
+  1. NSE/BSE official - nsefin bhavcopy + nsepython + local DB archive
+  2. Yahoo Finance (ONLY last-60-day window) + Stooq (keyless secondary)
   3. Alpha Vantage / Twelve Data - API key (env) hone par fallback
-  4. TradingView / openchart / Stooq - reference ONLY (bars ke liye istemal nahi)
+  4. TradingView / openchart - reference ONLY (bars ke liye istemal nahi)
 
 Validation statuses:
   VALID          - primary source se bars, ya dono sources agree
@@ -26,9 +26,10 @@ MISMATCH_FRAC = 0.20
 
 SOURCE_RANK = {
     "nse": 1, "bse": 1, "nsefin": 1, "db": 1, "nse_official_db": 1,
-    "yahoo": 2,
+    "nsepython": 1,
+    "yahoo": 2, "stooq": 2,
     "alphavantage": 3, "twelvedata": 3,
-    "tradingview": 4, "openchart": 4, "stooq": 4, "synthetic": 9,
+    "tradingview": 4, "openchart": 4, "synthetic": 9,
 }
 
 
