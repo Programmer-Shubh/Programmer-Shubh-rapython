@@ -1191,9 +1191,11 @@ async def margin_preview(req: MarginPreviewRequest):
                                "product": "MARGIN" if _tt == "positional" else "INTRADAY"}
                         m = await _estimate_margin("dhan", _get_config("dhan") or {}, _pv, symbol, opt, strike)
                         if m.get("required"):
+                            _naked = (txn == "SELL")
                             return {"required": m["required"], "source": "dhan-official",
                                     "premium": round(px, 2), "lot_size": lot, "total_qty": total_qty,
-                                    "note": "Dhan SPAN+exposure (official)"}
+                                    "naked": _naked,
+                                    "note": "Dhan SPAN+exposure (official)" + (" NAKED SELL: unlimited loss possible - hedge lagao" if _naked else "")}
             except Exception as e:
                 return {"required": None, "premium": round(px, 2),
                         "note": f"Dhan margin unavailable: {str(e)[:100]}"}
@@ -1201,11 +1203,13 @@ async def margin_preview(req: MarginPreviewRequest):
         if txn == "BUY":
             return {"required": round(px * total_qty, 2), "source": "estimate",
                     "premium": round(px, 2), "lot_size": lot, "total_qty": total_qty,
+                    "naked": False,
                     "note": "BUY me premium×qty hi lagta hai (exact)"}
         base = strike or px
         return {"required": round(0.12 * base * total_qty, 2), "source": "estimate",
                 "premium": round(px, 2), "lot_size": lot, "total_qty": total_qty,
-                "note": "SELL estimate ~12% underlying (SPAN approx, broker se confirm karo)"}
+                "naked": True,
+                "note": "SELL estimate ~12% underlying (SPAN approx, broker se confirm karo). NAKED SELL: unlimited loss possible - hedge (spread) lagao"}
     except Exception as e:
         return {"error": f"Margin preview failed: {e}"[:200]}
 
