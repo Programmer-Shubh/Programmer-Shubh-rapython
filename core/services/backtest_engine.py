@@ -118,6 +118,19 @@ class BacktestEngine:
         pending_entry_signal = None
         pending_auto_buy = None
         daily_trades = 0
+        # Diagnostics (spec §13): evaluated/generated/rejected + coverage.
+        # Kabhi inflate nahi karte - sirf gintee, signal logic untouched.
+        self._n_eval = 0
+        self._n_sig = 0
+        self._rej = {}
+        self._cov_days = set()
+        self._cov_bars = 0
+        self._cov_bt = 0
+        try:
+            self._ind_ids = [(d.get("id", "") if isinstance(d, dict) else str(d or ""))
+                              for d in (ind_list or [])]
+        except Exception:
+            self._ind_ids = []
         daily_pnl = 0.0
         kill_switch_on = False
         last_date = ""
@@ -201,6 +214,10 @@ class BacktestEngine:
                         and float(trade.get("price", 0) or 0) < min_premium):
                     pending_entry = None
                     pending_auto_buy = None
+                    try:
+                        self._rej["min_premium_lt_20"] = self._rej.get("min_premium_lt_20", 0) + 1
+                    except Exception:
+                        pass
                     continue
                 entries.append(trade)
                 entry_bars.append(i)
@@ -226,7 +243,8 @@ class BacktestEngine:
                 exit_prem = self._exit_premium(cur_date, spot, float(entry["strike"]), option_type)
                 # Apply transaction costs with is_live flag
                 exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
-                self._close_position(entries, exits, entry, exit_prem, pending_exit, cur_date, qty, txn_type)
+                self._close_position(entries, exits, entry, exit_prem, pending_exit, cur_date, qty, txn_type,
+                                     trigger=f"signal:{pending_exit}")
                 daily_pnl += exits[-1]["pnl"]
                 if (daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and daily_pnl <= -strategy_sl) or (strategy_tp > 0 and daily_pnl >= strategy_tp):
                     kill_switch_on = True
@@ -241,7 +259,9 @@ class BacktestEngine:
                     hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
                     if hit:
                         sl_exit = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live)
-                        self._close_position(entries, exits, entry, sl_exit, hit["reason"], cur_date, qty, txn_type)
+                        _trig = f"{'SL' if hit['reason'] == 'stoploss' else 'TP'}@{float(hit['level']):.2f}"
+                        self._close_position(entries, exits, entry, sl_exit, hit["reason"], cur_date, qty, txn_type,
+                                             trigger=_trig)
                         daily_pnl += exits[-1]["pnl"]
                         if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
                             kill_switch_on = True
@@ -256,15 +276,23 @@ class BacktestEngine:
                     open_unreal = 0.0
                 total_mtm = daily_pnl + open_unreal
                 if (strategy_sl > 0 and total_mtm <= -strategy_sl) or (strategy_tp > 0 and total_mtm >= strategy_tp):
+                    # Trigger label shows ACTUAL values (spec §9): e.g.
+                    # MTM -751<=-300/sym - kabhi overall-SL se confuse na ho.
+                    try:
+                        _lim = f"-{strategy_sl:.0f}" if total_mtm <= 0 else f"+{strategy_tp:.0f}"
+                        _trig_mtm = f"MTM {total_mtm:.0f} vs {_lim}/sym"
+                    except Exception:
+                        _trig_mtm = "strategy_sl_tp"
                     # Close all open positions simultaneously
                     while len(entries) > len(exits):
                         entry = entries[len(exits)]
                         if entry.get("is_spread"):
-                            self._close_spread(entries, exits, entry, "strategy_sl_tp", cur_date)
+                            self._close_spread(entries, exits, entry, "strategy_sl_tp", cur_date, trigger=_trig_mtm)
                         else:
                             exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
                             exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
-                            self._close_position(entries, exits, entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type)
+                            self._close_position(entries, exits, entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type,
+                                                 trigger=_trig_mtm)
                         daily_pnl += exits[-1]["pnl"]
                     kill_switch_on = True
 
@@ -286,11 +314,12 @@ class BacktestEngine:
             if has_open and trade_mode == "intraday" and is_early_exit:
                 entry = entries[len(exits)]
                 if entry.get("is_spread"):
-                    self._close_spread(entries, exits, entry, "intraday", cur_date)
+                    self._close_spread(entries, exits, entry, "intraday", cur_date, trigger="EOD")
                 else:
                     exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
                     exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
-                    self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type)
+                    self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type,
+                                         trigger="EOD")
                 daily_pnl += exits[-1]["pnl"]
                 if (daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and daily_pnl <= -strategy_sl) or (strategy_tp > 0 and daily_pnl >= strategy_tp):
                     kill_switch_on = True
@@ -302,11 +331,11 @@ class BacktestEngine:
             if has_open and trade_mode != "intraday" and exp_date and cur_date >= exp_date and is_last:
                 entry = entries[len(exits)]
                 if entry.get("is_spread"):
-                    self._close_spread(entries, exits, entry, "expiry_squareoff", cur_date)
-                else:
+                    self._close_spread(entries, exits, entry, "expiry_squareoff", cur_date, trigger="expiry")
                     exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
                     exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
-                    self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff", cur_date, qty, txn_type)
+                    self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff", cur_date, qty, txn_type,
+                                         trigger="expiry")
                 daily_pnl += exits[-1]["pnl"]
                 if (daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and daily_pnl <= -strategy_sl) or (strategy_tp > 0 and daily_pnl >= strategy_tp):
                     kill_switch_on = True
@@ -323,6 +352,15 @@ class BacktestEngine:
                 # Signal generated at bar i-1, execution at bar i
                 buy_sig = self._get_buy_signal(i, pre_calc, historical, entry_conditions)
                 sell_sig = self._get_sell_signal(i, pre_calc, historical, exit_conditions)
+                # Diagnostics counters only (logic untouched)
+                try:
+                    if _in_range:
+                        self._n_eval += 1
+                        self._cov_days.add(str(cur_date)[:10])
+                        if buy_sig or sell_sig:
+                            self._n_sig += 1
+                except Exception:
+                    pass
                 # For spreads (multi-leg like Bear Call Spread), allow entry on either signal to avoid 0 trades when single indicator rare
                 # Auto-signal mode: if advanced auto_signal, pick CE on buy_sig, PE on sell_sig
                 auto_signal = bool(advanced_options.get("auto_signal") or (legs and legs[0].get("transaction","").lower()=="auto"))
@@ -371,6 +409,16 @@ class BacktestEngine:
                             can_enter = False
                     except Exception:
                         pass
+                try:
+                    if entry_sig and not can_enter and _in_range:
+                        if has_open:
+                            self._rej["position_already_open"] = self._rej.get("position_already_open", 0) + 1
+                        elif daily_trades >= max_trades_day:
+                            self._rej["max_trades_day"] = self._rej.get("max_trades_day", 0) + 1
+                        else:
+                            self._rej["entry_gates"] = self._rej.get("entry_gates", 0) + 1
+                except Exception:
+                    pass
                 if entry_sig and can_enter:
                     # Apply latency: in backtest mode, wait enough bars for latency to elapse
                     # In live mode, execute immediately
@@ -392,6 +440,10 @@ class BacktestEngine:
                 if pending_entry_signal is not None and not is_spread and not auto_signal:
                     if i - pending_entry_signal > 3:
                         pending_entry_signal = None
+                        try:
+                            self._rej["signal_expired_3bars"] = self._rej.get("signal_expired_3bars", 0) + 1
+                        except Exception:
+                            pass
                     elif can_enter and i - pending_entry_signal >= max(1, latency):
                         pending_entry = i
                         pending_entry_signal = None
@@ -409,13 +461,42 @@ class BacktestEngine:
                 self._close_spread(entries, exits, entry, "end_of_period", last["trade_date"])
             else:
                 exit_prem = self._close_premium(last["trade_date"], float(last["close_price"]), float(entry["strike"]), option_type)
-                self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type)
+                self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type,
+                                     trigger="end_of_period")
 
         # Quantman: restore slippage
         try:
             TransactionCosts.SLIPPAGE_PCT = _orig_slip
         except Exception:
             pass
+        # Coverage proof (spec §1/§13): requested vs actual data window.
+        try:
+            _present = sorted({str(h.get("trade_date", ""))[:10] for h in (historical or []) if h.get("trade_date")})
+            _bt = sum(1 for h in (historical or []) if h.get("bar_time"))
+            import datetime as _cdt
+            _s = _cdt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+            _e = _cdt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+            _req, _d = [], _s
+            while _d <= _e:
+                if _d.weekday() < 5:
+                    _req.append(_d.strftime("%Y-%m-%d"))
+                _d += _cdt.timedelta(days=1)
+            _have = set(_present)
+            _miss = [d for d in _req if d not in _have]
+            _inrng = [d for d in _present if str(start_date)[:10] <= d <= str(end_date)[:10]]
+            self._cov = {
+                "requested_start": str(start_date)[:10], "requested_end": str(end_date)[:10],
+                "data_start": _inrng[0] if _inrng else "", "data_end": _inrng[-1] if _inrng else "",
+                "trading_days": len(_req), "days_with_data": len([d for d in _req if d in _have]),
+                "candles": len(historical or []), "intraday_candles": _bt,
+                "missing_days_count": len(_miss), "missing_days": _miss[:25],
+            }
+        except Exception:
+            try:
+                self._cov = {"trading_days": 0, "days_with_data": 0, "candles": len(historical or []),
+                             "missing_days_count": 0, "missing_days": []}
+            except Exception:
+                self._cov = {}
         return self._build_result(symbol, start_date, end_date, entries, exits)
 
     def _pre_calc(self, historical, closes, highs, lows, ind_list):
@@ -1177,11 +1258,18 @@ class BacktestEngine:
         # Real signal-bar time when known (intraday); daily bars honestly
         # keep the configured session entry time.
         entry_clock = getattr(self, '_cur_bar_time', '') or entry_time
+        try:
+            _sig_inds = list(getattr(self, "_ind_ids", []) or [])
+        except Exception:
+            _sig_inds = []
         return {
             "date": date, "strike": str(strike), "price": round(premium, 2),
             "quantity": qty, "costs": costs, "time": entry_clock,
             "total_cost": round(premium * qty + costs["total"], 2),
             "type": txn_type, "legs": [{"option_type": option_type, "strike": strike, "type": txn_type, "lots": lots}],
+            "expiry": str(getattr(self, "bt_expiry", "") or ""),
+            "prem_src": self._prem_source(date, strike, option_type),
+            "signal": {"side": txn_type, "indicators": _sig_inds},
         }
 
     def _enter_spread(self, date, spot, symbol, legs, strike_sel, delta_target, otm_dist):
@@ -1351,6 +1439,40 @@ class BacktestEngine:
         opt_low = min(prem_high, prem_low)
         return self._check_sl_tp_levels(txn_type, sl_level, tp_level, opt_high, opt_low)
 
+    def _prem_source(self, date, strike, option_type) -> str:
+        """Premium kahan se aaya: db / db_near / live / model / spot (EQ).
+        Per-trade 1 query (per-bar nahi) - sasta aur precise. Spec §7 labeling."""
+        try:
+            if str(option_type or "").upper() == "EQ":
+                return "spot"
+            if getattr(self, "is_live", False):
+                return "live"
+            if getattr(self, "_skip_db", False):
+                return "model"
+            from core.models.database import Database as _DB
+            _db = _DB.get_instance()
+            try:
+                row = _db.fetch_one(
+                    "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+                    [getattr(self, "bt_symbol", ""), str(date or "")[:10], float(strike or 0), option_type])
+                if row and (float(row.get("open_price") or 0) > 0 or float(row.get("close_price") or 0) > 0):
+                    return "db"
+            except Exception:
+                pass
+            try:
+                from utils.helpers import get_strike_step as _step
+                _st = _step(getattr(self, "bt_symbol", "") or "") or 0
+                row2 = _db.fetch_one(
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
+                    [getattr(self, "bt_symbol", ""), option_type, float(strike or 0), _st, str(date or "")[:10], float(strike or 0)])
+                if row2 and float(row2.get("close_price") or 0) > 0:
+                    return "db_near"
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return "model"
+
     def _check_sl_tp_levels(self, txn_type, sl_level, tp_level, opt_high, opt_low):
         """Shared hit comparison for DB-range and model-range callers."""
         try:
@@ -1428,8 +1550,8 @@ class BacktestEngine:
                             float(entry["strike"]), option_type)
                         exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, 
                             "SELL" if txn_type == "buy" else "BUY", self.is_live)
-                        self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff", 
-                            last_date, qty, txn_type)
+                        self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff",
+                            last_date, qty, txn_type, trigger="expiry")
             except Exception:
                 pass
         return None
@@ -1716,9 +1838,9 @@ class BacktestEngine:
         except Exception:
             return 0.0
 
-    def _close_position(self, entries, exits, entry, exit_prem, reason, exit_date, qty, txn_type):
+    def _close_position(self, entries, exits, entry, exit_prem, reason, exit_date, qty, txn_type, trigger=""):
         if entry.get("is_spread"):
-            self._close_spread(entries, exits, entry, reason, exit_date)
+            self._close_spread(entries, exits, entry, reason, exit_date, trigger=trigger)
             return
         # Floor at option tick size only. Never floor to spot-based levels:
         # SL/TP exits (e.g. 9.30 on a far-OTM option) must execute exactly,
@@ -1743,13 +1865,19 @@ class BacktestEngine:
             or getattr(self, '_early_exit_time', None)
             or getattr(self, '_exit_time', '15:14')
         )
+        try:
+            _elegs = entry.get("legs", [{}]) or [{}]
+            _eopt = str((_elegs[0] or {}).get("option_type", "") or "")
+        except Exception:
+            _eopt = ""
         exits.append({
             "date": exit_date, "strike": entry["strike"], "price": round(exit_prem, 2),
             "quantity": qty, "exit_costs": exit_costs, "reason": reason, "pnl": round(pnl, 2),
-            "time": exit_clock,
+            "time": exit_clock, "trigger": trigger or reason,
+            "prem_src": self._prem_source(exit_date, entry.get("strike", 0), _eopt),
         })
 
-    def _close_spread(self, entries, exits, entry, reason, exit_date):
+    def _close_spread(self, entries, exits, entry, reason, exit_date, trigger=""):
         exit_costs_total = 0.0
         exit_value = 0.0
         for leg in entry.get("legs", []):
@@ -1779,7 +1907,12 @@ class BacktestEngine:
             "date": exit_date, "strike": entry["strike"], "price": round(abs(exit_value), 2),
             "quantity": entry["quantity"], "exit_costs": {"total": round(exit_costs_total, 2)},
             "reason": reason, "pnl": round(pnl, 2), "is_spread": True,
-            "time": exit_clock,
+            "time": (
+                getattr(self, '_cur_bar_time', '')
+                or getattr(self, '_early_exit_time', None)
+                or getattr(self, '_exit_time', '15:14')
+            ),
+            "trigger": trigger or reason, "prem_src": "spread",
         })
 
     def _close_spot_for_date(self, bar_date):
@@ -1837,19 +1970,41 @@ class BacktestEngine:
                         "exit_time": exit_time_str,
                         "option_type": "Spread",
                         "strike": entry.get("strike", ""),
+                        "expiry": entry.get("expiry", ""),
                         "position": legs_str,
                         "quantity": entry.get("quantity", 0),
                         "lots": entry.get("legs", [{}])[0].get("lots", 1) if entry.get("legs") else 1,
                         "entry_price": entry.get("price", 0),
                         "exit_price": exit.get("price", 0),
+                        "gross_pnl": None,
+                        "slippage": None,
                         "pnl": pnl,
                         "pnl_formatted": f"₹{pnl:,.2f}",
                         "exit_reason": exit.get("reason", ""),
                         "reason": exit.get("reason", ""),
+                        "trigger": exit.get("trigger", "") or exit.get("reason", ""),
+                        "entry_src": "spread",
+                        "exit_src": exit.get("prem_src", "spread"),
+                        "signal_side": "",
+                        "signal_indicators": [],
+                        "validation": None,
+                        "vix": None,
                         "is_spread": True,
                     })
                 else:
                     leg_info = entry.get("legs", [{}])[0] if entry.get("legs") else {}
+                    try:
+                        _gq = int(entry.get("quantity", 0) or 0)
+                        _ge = float(entry.get("price", 0) or 0)
+                        _gx = float(exit.get("price", 0) or 0)
+                        _gross = ((_gx - _ge) if entry.get("type") == "buy" else (_ge - _gx)) * _gq
+                        _slip = _gross - float(pnl or 0)
+                    except Exception:
+                        _gross, _slip = 0.0, 0.0
+                    try:
+                        _sig = entry.get("signal", {}) or {}
+                    except Exception:
+                        _sig = {}
                     trade_list.append({
                         "index": total_trades,
                         "symbol": symbol,
@@ -1859,15 +2014,25 @@ class BacktestEngine:
                         "exit_time": exit_time_str,
                         "option_type": leg_info.get("option_type", "CE"),
                         "strike": entry.get("strike", ""),
+                        "expiry": entry.get("expiry", ""),
                         "position": "Sell" if entry.get("type") == "sell" else "Buy",
                         "quantity": entry.get("quantity", 0),
                         "lots": leg_info.get("lots", 1),
                         "entry_price": entry.get("price", 0),
                         "exit_price": exit.get("price", 0),
+                        "gross_pnl": round(_gross, 2),
+                        "slippage": round(_slip, 2),
                         "pnl": pnl,
                         "pnl_formatted": f"₹{pnl:,.2f}",
                         "exit_reason": exit.get("reason", ""),
                         "reason": exit.get("reason", ""),
+                        "trigger": exit.get("trigger", "") or exit.get("reason", ""),
+                        "entry_src": entry.get("prem_src", ""),
+                        "exit_src": exit.get("prem_src", ""),
+                        "signal_side": _sig.get("side", ""),
+                        "signal_indicators": _sig.get("indicators", []) or [],
+                        "validation": None,
+                        "vix": None,
                     })
             equity.append(capital)
         total_return = capital - self.initial_capital
@@ -1956,6 +2121,10 @@ class BacktestEngine:
                 "expectancy": round(expectancy, 2),
                 "max_win_streak": max_win_streak,
                 "max_loss_streak": max_loss_streak,
+                "signals_evaluated": int(getattr(self, "_n_eval", 0) or 0),
+                "signals_generated": int(getattr(self, "_n_sig", 0) or 0),
+                "rejected": dict(getattr(self, "_rej", {}) or {}),
+                "coverage": dict(getattr(self, "_cov", {}) or {}),
                 "total_brokerage": round(total_brokerage, 2),
                 "equity_curve": equity,
                 "trade_list": trade_list,

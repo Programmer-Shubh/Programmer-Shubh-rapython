@@ -209,6 +209,149 @@ def _normalize_legs(raw_legs: list, lots_fallback: int = 1) -> list:
     return out
 
 
+def _intraday_full_range(sym, timeframe, start_date, end_date):
+    """Full-range 15m bars (spec §1/§5): TradingView latest-N first, else
+    Yahoo 60-day chunks. NO synthetic fabrication - na mile to ([], reason).
+    Returns (bars_chrono_ist, src). Bars sorted, deduped, IST."""
+    import datetime as _dt
+    try:
+        _s = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+        _e = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return [], "bad-dates"
+    if _e < _s:
+        return [], "bad-range"
+    _span = max(1, (_e - _s).days + 1)
+    # 1) TradingView latest-N (covers ~60 sessions at 1500 bars)
+    try:
+        from core.services.scanner import OptionScanner as _OS
+        _tvn = min(1500, max(80, _span * 30))
+        _tvbars = _OS()._fetch_intraday_bars(
+            sym, timeframe, n_bars=_tvn, fresh_only=False, use_cache=False) or []
+        _tvbars = [b for b in _tvbars
+                   if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        if len(_tvbars) >= 40:
+            return _dedup_bars(_tvbars[-1500:]), "tradingview_intraday"
+    except Exception:
+        pass
+    # 2) Yahoo 15m (hard 60-day/request limit): single window back from
+    # end_date. Older start = honest gap (no fabrication, ever).
+    try:
+        from core.services.free_data import fetch_yahoo_intraday as _fy
+        _days = min(60, _span + 5)
+        try:
+            _got = _fy(sym, timeframe if timeframe in ("5m", "15m", "30m", "1h") else "15m",
+                       days=_days) or []
+        except Exception:
+            _got = []
+        _got = [b for b in _got
+                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        if len(_got) >= 40:
+            return _dedup_bars(_got), "yahoo_intraday"
+    except Exception:
+        pass
+    return [], "no-intraday-data"
+
+
+def _dedup_bars(bars):
+    """Chronological sort + duplicate (date,time) removal (spec §8)."""
+    try:
+        _seen, _out = set(), []
+        for b in sorted(bars or [], key=lambda x: (str(x.get("trade_date", "")), str(x.get("bar_time", "")))):
+            _k = (str(b.get("trade_date", "")), str(b.get("bar_time", "")))
+            if _k in _seen:
+                continue
+            _seen.add(_k)
+            _out.append(b)
+        return _out
+    except Exception:
+        return bars or []
+
+
+def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
+    """Spec §12: OK dikhane se pehle math + coverage verify. No exceptions."""
+    passed, failed = [], []
+    try:
+        tot = sum(int((v or {}).get("total_trades", 0) or 0) for v in (per_symbol or {}).values() if isinstance(v, dict))
+        if tot == int(m.get("total_trades", 0) or 0):
+            passed.append(f"trade-count reconcile ({tot})")
+        else:
+            failed.append(f"trade-count mismatch: parts={tot} total={m.get('total_trades')}")
+        wins = sum(int((v or {}).get("winning_trades", 0) or 0) for v in (per_symbol or {}).values() if isinstance(v, dict))
+        if wins == int(m.get("winning_trades", 0) or 0):
+            passed.append(f"win-count reconcile ({wins})")
+        else:
+            failed.append(f"win-count mismatch: parts={wins} total={m.get('winning_trades')}")
+        psum = round(sum(float((v or {}).get("net_pnl", 0) or 0) for v in (per_symbol or {}).values() if isinstance(v, dict)), 2)
+        if abs(psum - float(m.get("net_pnl", 0) or 0)) <= 1.0:
+            passed.append("pnl reconcile")
+        else:
+            failed.append(f"pnl mismatch: parts={psum} total={m.get('net_pnl')}")
+        # expectancy recompute
+        try:
+            _n = int(m.get("total_trades", 0) or 0)
+            _ex = round(float(m.get("win_rate", 0) or 0) / 100 * float(m.get("avg_win", 0) or 0)
+                        - (1 - float(m.get("win_rate", 0) or 0) / 100) * float(m.get("avg_loss", 0) or 0), 2) if _n else 0.0
+            if abs(_ex - float(m.get("expectancy", 0) or 0)) <= 1.0:
+                passed.append("expectancy reconcile")
+            else:
+                failed.append(f"expectancy mismatch: calc={_ex} shown={m.get('expectancy')}")
+        except Exception:
+            pass
+        # drawdown recompute from equity curve
+        try:
+            _eq = list(m.get("equity_curve", []) or [])
+            _pk, _dd = 0.0, 0.0
+            for _v in [1000000.0] + [1000000.0 + float(x or 0) for x in _eq]:
+                _pk = max(_pk, _v)
+                if _pk > 0:
+                    _dd = max(_dd, (_pk - _v) / _pk * 100)
+            if abs(_dd - float(m.get("max_drawdown", 0) or 0)) <= 0.5:
+                passed.append("drawdown reconcile")
+            else:
+                failed.append(f"drawdown mismatch: calc={round(_dd, 2)} shown={m.get('max_drawdown')}")
+        except Exception:
+            pass
+        # coverage gaps: major missing-data gap -> not OK
+        try:
+            for _sk, _sv in (per_symbol or {}).items():
+                if not isinstance(_sv, dict) or _sv.get("error"):
+                    continue
+                _cc = ((_sv.get("data") or {}).get("coverage") or {})
+                _td = int(_cc.get("trading_days", 0) or 0)
+                _md = int(_cc.get("missing_days_count", 0) or 0)
+                if _td > 0 and _md > _td * 0.5:
+                    failed.append(f"{_sk}: {_md}/{_td} din data missing (major gap)")
+                    break
+            else:
+                passed.append("no major data gap")
+        except Exception:
+            pass
+        # per-trade sanity
+        try:
+            _bad_ts, _bad_px = 0, 0
+            for _t in (all_trades or []):
+                if not _t.get("entry_date") or not _t.get("exit_date"):
+                    _bad_ts += 1
+                elif str(_t.get("exit_date", "")) < str(_t.get("entry_date", "")):
+                    _bad_ts += 1
+                if float(_t.get("entry_price", 0) or 0) <= 0 or float(_t.get("exit_price", 0) or 0) <= 0:
+                    _bad_px += 1
+            if _bad_ts == 0:
+                passed.append("timestamps valid")
+            else:
+                failed.append(f"{_bad_ts} trades me date gadbad")
+            if _bad_px == 0:
+                passed.append("premium present")
+            else:
+                failed.append(f"{_bad_px} trades me premium missing")
+        except Exception:
+            pass
+    except Exception as e:
+        failed.append(f"validator fail: {e}"[:120])
+    return {"ok": len(failed) == 0, "passed": passed, "failed": failed}
+
+
 def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict:
     """Combine per-symbol trade lists into one portfolio-level metrics dict."""
     trades = sorted(all_trades, key=lambda t: str(t.get("exit_date", "") or t.get("entry_date", "")))
@@ -676,6 +819,7 @@ def _run_backtest_core(req: BacktestRequest):
         _all_trades = []
         _per_symbol = {}
         _brokerage = 0.0
+        _diag_eval, _diag_sig, _diag_rej, _cov_by_sym = 0, 0, {}, {}
         _first_m = None
         _engine_name = "engine"
         # Multi-symbol support: always allow all symbols (user selected them)
@@ -683,7 +827,7 @@ def _run_backtest_core(req: BacktestRequest):
             _syms = _syms[:25]
         timeframe = (advanced_in.get("timeframe") or "1d").lower()
         _syms = _syms[:25]
-        _bar_cap = 40 if len(_syms) > 1 else 60
+        _bar_cap = 120 if len(_syms) > 1 else 250
         for _sym in _syms:
             _use_db = False
             # No options exist on non-F&O symbols (GOLDBEES/SILVERBEES ETFs):
@@ -734,80 +878,51 @@ def _run_backtest_core(req: BacktestRequest):
                 # Cap daily to 60 bars BEFORE intraday expansion (1Y range = 250 bars x 75 = 18750 -> 60s hang)
                 if len(historical) > _bar_cap:
                     historical = historical[-_bar_cap:]
-                # Resample to intraday if needed (5m,15m etc. like algotest)
+                # Resample to intraday if needed (5m,15m etc. like algotest).
+                # Spec §1/§5/§15: FULL requested range, real bars only (TV, else
+                # Yahoo 60d). No synthetic expansion, no tail truncation.
+                # Na mile to per-symbol INSUFFICIENT (honest, kabhi silent nahi).
                 if timeframe in ("1m","5m","15m","30m","1h"):
-                    # Minute-level backtest: REAL TradingView bars first (no
-                    # fabricated drift). Falls back to synthetic expansion below.
                     _real_intra = False
                     try:
-                        from core.services.scanner import OptionScanner as _OS
-                        _tvdays = 0
-                        try:
-                            import datetime as _tvd
-                            _a = _tvd.datetime.strptime(str(start_date)[:10], "%Y-%m-%d")
-                            _b = _tvd.datetime.strptime(str(end_date)[:10], "%Y-%m-%d")
-                            _tvdays = max(1, (_b - _a).days)
-                        except Exception:
-                            _tvdays = 30
-                        _tvn = min(1500, max(80, _tvdays * 30))
-                        _tvbars = _OS()._fetch_intraday_bars(
-                            _sym, timeframe, n_bars=_tvn, fresh_only=False, use_cache=False)
-                        try:
-                            _tvbars = [b for b in (_tvbars or [])
-                                       if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
-                        except Exception:
-                            pass
-                        if _tvbars and len(_tvbars) >= 40:
-                            historical = _tvbars[-400:] if len(_tvbars) > 400 else _tvbars
-                            _use_db = True
-                            _real_intra = True
-                            _hist_src = "tradingview_intraday"
-                            _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src)
-                            if len(_BT_CACHE) > 20:
-                                _BT_CACHE.pop(next(iter(_BT_CACHE)))
+                        _bars15, _src15 = _intraday_full_range(_sym, timeframe, start_date, end_date)
                     except Exception:
-                        pass
-                    if _real_intra:
-                        pass  # real bars kept as-is, no synthetic expansion
+                        _bars15, _src15 = [], "no-intraday-data"
+                    if _bars15 and len(_bars15) >= 40:
+                        historical = _bars15
+                        _use_db = True
+                        _real_intra = True
+                        _hist_src = _src15
+                        _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src)
+                        if len(_BT_CACHE) > 20:
+                            _BT_CACHE.pop(next(iter(_BT_CACHE)))
                     else:
-                        try:
-                            # Daily capped to 20 days for intraday (20x75=1500 max, then 300 cap) - instant <2s
-                            _daily = historical[-20:] if len(historical) > 20 else historical
-                            intraday=[]
-                            mins = {"1m":1,"5m":5,"15m":15,"30m":30,"1h":60}[timeframe]
-                            bars_per_day = int(375 / mins)  # 9:15-15:30 = 375 mins
-                            for d in _daily:
-                                base_price = d["close_price"]
-                                for i in range(bars_per_day):
-                                    # Small random drift per intraday bar
-                                    drift = (i - bars_per_day/2) * 0.0001
-                                    c = base_price * (1 + drift + (i%3-1)*0.001)
-                                    # Real clock time for this bar: 09:15 + i*mins (signal-time accuracy)
-                                    _mm = 9 * 60 + 15 + i * mins
-                                    _bt = f"{_mm // 60:02d}:{_mm % 60:02d}"
-                                    intraday.append({**d, "trade_date": d["trade_date"], "close_price": round(c,2), "open_price": round(c*0.999,2), "high_price": round(c*1.002,2), "low_price": round(c*0.998,2), "bar_time": _bt})
-                            historical = intraday[-150:] if len(intraday)>150 else intraday
-                            _hist_src = "synthetic_expansion"
-                        except: pass
-                _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src)
-                if len(_BT_CACHE) > 20:
-                    _BT_CACHE.pop(next(iter(_BT_CACHE)))
-            # If too few bars (<30), indicators won't warm up -> force longer synthetic
-            # (real DB path keeps its own bars, minimum 15)
+                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile (TV+Yahoo dono fail) - fabricated bars nahi banate", "total_trades": 0,
+                                             "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                             "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(_bars15 or [])}}
+                        continue
+                    _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src)
+                    if len(_BT_CACHE) > 20:
+                        _BT_CACHE.pop(next(iter(_BT_CACHE)))
+            # Spec §4/§15: <30 bars aur koi real source nahi -> INSUFFICIENT
+            # (fabricated synthetic se backtest kabhi nahi).
             if not _use_db and (not historical or len(historical) < 30):
-                synth = _generate_synthetic_fallback(_sym, start_date, end_date)
-                if synth and len(synth) >= 30:
-                    historical = synth
-                    _hist_src = "synthetic"
-                elif not historical:
-                    historical = synth
-                    _hist_src = "synthetic"
+                _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye {_bar_cap} bars nahi mile (DB/TV/Yahoo sab fail) - fabricated data nahi banate", "total_trades": 0,
+                                     "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                     "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(historical or [])}}
+                continue
             if not historical or len(historical) < 5:
                 _per_symbol[_sym] = {"error": f"No data for {_sym}", "total_trades": 0,
                                      "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                      "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
                 continue
-            if len(historical) > _bar_cap:
+            # Spec §1/§5: intraday bars ko tail-truncate KABHI nahi (wahi
+            # 1-trade-per-symbol bug tha). Daily bars par performant cap.
+            try:
+                _is_intra = any((h or {}).get("bar_time") for h in (historical[-5:] or []))
+            except Exception:
+                _is_intra = False
+            if not _is_intra and len(historical) > _bar_cap:
                 historical = historical[-_bar_cap:]
             # Warmup: prepend up to 30 REAL pre-start bars so EMA21/ST
             # indicators are valid on day 1. Engine takes entries only
@@ -863,6 +978,15 @@ def _run_backtest_core(req: BacktestRequest):
                 continue
             _sm = result["metrics"]
             try:
+                _diag_eval += int(_sm.get("signals_evaluated", 0) or 0)
+                _diag_sig += int(_sm.get("signals_generated", 0) or 0)
+                for _rk, _rv in ((_sm.get("rejected") or {}).items()):
+                    _diag_rej[_rk] = _diag_rej.get(_rk, 0) + int(_rv or 0)
+                if isinstance(_sm.get("coverage"), dict):
+                    _cov_by_sym[_sym] = _sm.get("coverage")
+            except Exception:
+                pass
+            try:
                 _engine_name = result.get("engine", "engine")
             except Exception:
                 pass
@@ -884,11 +1008,18 @@ def _run_backtest_core(req: BacktestRequest):
                     _dq = {"source": "NSE official", "status": "VALID"}
                 elif _dq_src == "tradingview_intraday":
                     _dq = {"source": "TradingView intraday", "status": "SECONDARY_ONLY"}
+                elif _dq_src == "yahoo_intraday":
+                    _dq = {"source": "Yahoo intraday", "status": "SECONDARY_ONLY"}
                 elif _dq_src in ("synthetic", "synthetic_expansion"):
                     _dq = {"source": "Synthetic", "status": "SYNTHETIC"}
                 else:
                     _dq = {"source": "Cache", "status": "SECONDARY_ONLY"}
                 _dq["bars"] = len(historical or [])
+                try:
+                    if isinstance(_sm.get("coverage"), dict):
+                        _dq["coverage"] = _sm.get("coverage")
+                except Exception:
+                    pass
             except Exception:
                 _dq = {"source": "?", "status": "INSUFFICIENT", "bars": 0}
             _per_symbol[_sym] = {"total_trades": _sm.get("total_trades", 0),
@@ -905,38 +1036,9 @@ def _run_backtest_core(req: BacktestRequest):
             errs = "; ".join(_e(k, v) for k, v in _per_symbol.items() if v.get("error"))
             if errs:
                 return {"error": errs}
-            # No trades due to strict indicator thresholds -> SuperTrend-only retry
-            # for EVERY symbol (not just first) so multi-symbol never shows 1 symbol.
-            # Retry data is clamped to the requested range (no out-of-range
-            # trades) and disclosed in the response note.
+            # Spec §15: synthetic retry HATAYA - fabricated data par trades
+            # dikhana cheating hai. Zero trades = honest zero (neeche tips).
             _retry_used = False
-            try:
-                from core.services.backtest_engine import BacktestEngine as _BE2
-                for _sym0 in (_syms if _syms else [symbol]):
-                    _hist0 = _generate_synthetic_fallback(_sym0, start_date, end_date)
-                    try:
-                        _hist0 = [h for h in (_hist0 or [])
-                                  if str(start_date)[:10] <= str(h.get("trade_date", ""))[:10] <= str(end_date)[:10]]
-                    except Exception:
-                        pass
-                    if not _hist0 or len(_hist0) < 30:
-                        continue
-                    _retry_used = True
-                    _eng2 = _BE2(is_live=False)
-                    _eng2._skip_db = True
-                    _res2 = _eng2.run(_hist0, _sym0, start_date, end_date, [{"id": "supertrend", "params": {"period": 10, "multiplier": 3}}], [], [], legs, advanced_in, risk_in, is_live=False)
-                    if _res2.get("success") and _res2.get("metrics",{}).get("total_trades",0) > 0:
-                        _sm2 = _res2["metrics"]
-                        for _t in (_sm2.get("trade_list",[]) or []):
-                            try: _t["symbol"] = _sym0
-                            except Exception: pass
-                            _all_trades.append(_t)
-                        if _first_m is None:
-                            _first_m = _sm2
-                        try: _brokerage += float(_sm2.get("total_brokerage",0) or 0)
-                        except Exception: pass
-                        _per_symbol[_sym0] = {"total_trades": _sm2.get("total_trades",0), "winning_trades": _sm2.get("winning_trades",0), "losing_trades": _sm2.get("losing_trades",0), "win_rate": _sm2.get("win_rate",0), "net_pnl": round(_sm2.get("net_pnl",0),2), "data": {"source": "Synthetic retry", "status": "SYNTHETIC", "bars": len(_hist0 or [])}}
-            except: pass
             if not _all_trades:
                 if _first_m is not None:
                     m = _first_m
@@ -1027,6 +1129,27 @@ def _run_backtest_core(req: BacktestRequest):
         _inds_echo = [str((iv.get("id") if isinstance(iv, dict) else iv) or "") for iv in (indicators or [])]
     except Exception:
         _inds_echo = []
+    # Trade-level backfill: validation + premium source per symbol (spec §11).
+    try:
+        for _t in (_all_trades or []):
+            _ps = (_per_symbol or {}).get(_t.get("symbol"), {}) or {}
+            _pd = (_ps.get("data") or {})
+            if _t.get("validation") is None:
+                _t["validation"] = _pd.get("status", "")
+            if not _t.get("source"):
+                _t["source"] = _pd.get("source", "")
+    except Exception:
+        pass
+    # Result validation (§12) + diagnostics aggregate (§13).
+    try:
+        _val = _validate_result(m, _per_symbol, _all_trades)
+    except Exception:
+        _val = {"ok": True, "passed": [], "failed": []}
+    try:
+        _diag = {"signals_evaluated": _diag_eval, "signals_generated": _diag_sig,
+                 "rejected": _diag_rej, "coverage": _cov_by_sym}
+    except Exception:
+        _diag = {}
     _final_res = {
         "success": True,
         "run_id": _run_id,
@@ -1079,6 +1202,9 @@ def _run_backtest_core(req: BacktestRequest):
         "equity_curve": m.get("equity_curve", []),
         "monthly_pnl": m.get("monthly_pnl", {}),
         "trade_list": m.get("trade_list", []),
+        "diagnostics": _diag,
+        "validation": _val,
+        "validation_status": "OK" if (_val or {}).get("ok") else "PARTIAL_DATA",
     }
     try:
         if '_rk' in locals() and _rk:

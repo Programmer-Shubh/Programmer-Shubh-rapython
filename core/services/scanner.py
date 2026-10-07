@@ -1549,7 +1549,15 @@ class OptionScanner:
             except Exception:
                 now_ist = _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
             _now_naive = now_ist.replace(tzinfo=None)
-            cand_utc = idx.tz_localize("UTC").tz_convert("Asia/Kolkata") if idx.tz is None else idx.tz_convert("Asia/Kolkata")
+            # Aware index par tz_localize("UTC") CRASH karta hai (already tz-aware)
+            # -> cand_utc unbound -> UTC stamps leak. Dono case handle karo.
+            try:
+                if idx.tz is None:
+                    cand_utc = idx.tz_localize("UTC").tz_convert("Asia/Kolkata")
+                else:
+                    cand_utc = idx.tz_convert("Asia/Kolkata")
+            except Exception:
+                cand_utc = None
             try:
                 age_utc = (_now_naive - cand_utc[-1].replace(tzinfo=None).to_pydatetime()).total_seconds() / 60
             except Exception:
@@ -1558,7 +1566,10 @@ class OptionScanner:
                 except Exception:
                     age_utc = 9999
             try:
-                _naive_idx = idx.tz_localize(None)
+                try:
+                    _naive_idx = idx.tz_localize(None)
+                except Exception:
+                    _naive_idx = idx.tz_convert(None) if idx.tz is not None else idx
                 _last_n = _naive_idx[-1].to_pydatetime() if hasattr(_naive_idx[-1], "to_pydatetime") else _naive_idx[-1]
                 age_naive = (_now_naive - _last_n).total_seconds() / 60
             except Exception:
@@ -1570,40 +1581,61 @@ class OptionScanner:
                 _naive_idx
             except NameError:
                 _naive_idx = idx
-            # tvDatafeed stamps are UTC -> IST convert (deterministic).
-            # Whichever set (UTC-converted vs naive) lands a majority of bars
-            # inside the NSE session (09:00-16:00 IST) wins - no more mixed
-            # UTC/IST bar_time leaking into backtest entry/exit clocks.
+            # tvDatafeed nologin stamps are US/EASTERN (server default), NOT UTC!
+            # (23:45 EDT = 09:15 IST session open.) Three candidates compete;
+            # whichever lands a majority of bars inside NSE session
+            # (09:00-16:00 IST) wins - no more wrong-zone bar_time clocks.
             def _in_session(hhmm: str) -> bool:
                 try:
                     return "09:00" <= hhmm <= "16:00"
                 except Exception:
                     return False
-            _cand_utc, _cand_naive = [], []
+            def _cands(key):
+                try:
+                    return key.to_pydatetime() if hasattr(key, "to_pydatetime") else key
+                except Exception:
+                    return key
+            _sets = {"utc": [], "east": [], "naive": []}
             for k in range(len(df)):
                 try:
                     _tsu = cand_utc[k]
-                    _pu = _tsu.to_pydatetime() if hasattr(_tsu, "to_pydatetime") else _tsu
-                    _pu = _pu.replace(tzinfo=None)
-                    _cand_utc.append((_pu.strftime("%Y-%m-%d"), _pu.strftime("%H:%M")))
+                    _pu = _cands(_tsu).replace(tzinfo=None)
+                    _sets["utc"].append((_pu.strftime("%Y-%m-%d"), _pu.strftime("%H:%M")))
                 except Exception:
-                    _cand_utc.append(("", ""))
+                    _sets["utc"].append(("", ""))
                 try:
-                    _tsn = _naive_idx[k]
-                    _pn = _tsn.to_pydatetime() if hasattr(_tsn, "to_pydatetime") else _tsn
-                    _pn = _pn.replace(tzinfo=None)
-                    _cand_naive.append((_pn.strftime("%Y-%m-%d"), _pn.strftime("%H:%M")))
+                    _raw = _naive_idx[k]
+                    _pr = _cands(_raw).replace(tzinfo=None)
+                    _sets["naive"].append((_pr.strftime("%Y-%m-%d"), _pr.strftime("%H:%M")))
                 except Exception:
-                    _cand_naive.append(("", ""))
+                    _sets["naive"].append(("", ""))
+                try:
+                    import datetime as _dte
+                    _pe = _cands(_naive_idx[k]).replace(tzinfo=None)
+                    _ee = _dte.datetime(_pe.year, _pe.month, _pe.day, _pe.hour, _pe.minute)
+                    try:
+                        _ee = _ee.replace(tzinfo=_dte.timezone.utc)
+                    except Exception:
+                        pass
+                    # interpret naive numbers as US/Eastern -> IST
+                    from zoneinfo import ZoneInfo as _ZI
+                    try:
+                        _el = _pe.replace(tzinfo=_ZI("US/Eastern")).astimezone(_ZI("Asia/Kolkata")).replace(tzinfo=None)
+                    except Exception:
+                        _el = _pe + _dte.timedelta(hours=9, minutes=30)
+                    _sets["east"].append((_el.strftime("%Y-%m-%d"), _el.strftime("%H:%M")))
+                except Exception:
+                    _sets["east"].append(("", ""))
             try:
-                _utc_score = sum(1 for _, t in _cand_utc if t and _in_session(t))
-                _nv_score = sum(1 for _, t in _cand_naive if t and _in_session(t))
-                _use_utc_set = _utc_score >= _nv_score
+                _scores = {name: sum(1 for _, t in vals if t and _in_session(t))
+                           for name, vals in _sets.items()}
+                _best = max(_scores, key=lambda n: (_scores[n], {"utc": 1, "east": 2, "naive": 0}[n]))
+                _chosen = _sets[_best]
             except Exception:
-                _use_utc_set = use_utc
+                _chosen = _sets["utc"] if use_utc else _sets["naive"]
             for k in range(len(df)):
                 try:
-                    _dt_s, _tm_s = (_cand_utc[k] if _use_utc_set else _cand_naive[k])
+                    _dt_s, _tm_s = _chosen[k]
                     if not _dt_s:
                         continue
                     bars.append({
@@ -1618,6 +1650,16 @@ class OptionScanner:
                 except Exception:
                     continue
             bars = [b for b in bars if b["close_price"] > 0][-n_bars:]
+            # Session filter: exchange bandh (09:00-15:45 IST ke bahar) me
+            # trading impossible - aise bars indicator/signal bigadte hain.
+            # (Yahoo/synthetic paths pehle se session-only hain.)
+            try:
+                _sess = [b for b in bars
+                         if "09:00" <= str(b.get("bar_time", "09:15")) <= "15:45"]
+                if len(_sess) >= 35:
+                    bars = _sess
+            except Exception:
+                pass
             if len(bars) >= 35:
                 if use_cache:
                     try:
