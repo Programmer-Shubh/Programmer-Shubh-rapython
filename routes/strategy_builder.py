@@ -1354,10 +1354,39 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     return _final_res
 
 
+_BT_ACTIVE = {"n": 0}
+_BUSY_MSG = "busy: ek backtest pehle se chal raha hai - khatm hone do, phir Run dabao"
+
+
+def _bt_acquire() -> bool:
+    try:
+        with _BT_JOBS_LOCK:
+            if _BT_ACTIVE["n"] >= 1:
+                return False
+            _BT_ACTIVE["n"] += 1
+            return True
+    except Exception:
+        return True
+
+
+def _bt_release():
+    try:
+        with _BT_JOBS_LOCK:
+            _BT_ACTIVE["n"] = max(0, _BT_ACTIVE["n"] - 1)
+    except Exception:
+        pass
+
+
 @router.post("/run")
 def run_backtest(req: BacktestRequest):
-    # Sync path (kept for backward compat + fast cached runs)
-    return _run_backtest_core(req)
+    # Sync path (kept for backward compat + fast cached runs).
+    # Single-flight: pileup = OOM/timeout on free tier.
+    if not _bt_acquire():
+        return {"error": _BUSY_MSG}
+    try:
+        return _run_backtest_core(req)
+    finally:
+        _bt_release()
 
 
 _BT_RUNNING = {}
@@ -1372,6 +1401,14 @@ def _bt_req_hash(req_dict: dict) -> str:
 
 
 def _bt_worker(job_id: str, req_dict: dict):
+    if not _bt_acquire():
+        try:
+            with _BT_JOBS_LOCK:
+                _BT_JOBS[job_id]["status"] = "error"
+                _BT_JOBS[job_id]["error"] = _BUSY_MSG
+        except Exception:
+            pass
+        return
     try:
         with _BT_JOBS_LOCK:
             _BT_JOBS[job_id]["status"] = "running"
@@ -1402,6 +1439,7 @@ def _bt_worker(job_id: str, req_dict: dict):
                     _BT_RUNNING.pop(_h, None)
             except Exception:
                 pass
+        _bt_release()
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1417,6 +1455,7 @@ def _bt_worker(job_id: str, req_dict: dict):
                     pass
         except Exception:
             pass
+        _bt_release()
 
 
 @router.post("/run-async")
