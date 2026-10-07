@@ -1252,8 +1252,10 @@ let _lastOpenTrdHTML = null;
 
     async function marginLine(sym,opt,strike,lots,txn,mode){try{
         const m=await P('/api/broker/margin-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:opt,strike:parseFloat(strike)||0,quantity:parseInt(lots)||1,transaction_type:txn,mode:mode||'paper'})});
-        if(m&&m.required!=null)return 'Margin req: ₹'+Number(m.required).toLocaleString('en-IN')+' ('+(m.source==='dhan-official'?'Dhan official':'estimate')+')';
-        return (m&&(m.note||m.error))||'Margin: n/a';
+        const nk=(m&&m.naked)||String(txn||'').toUpperCase()==='SELL';
+        const nkTxt=nk?'\nNAKED SELL: unlimited loss ho sakta hai - hedge (spread) lagao!':'';
+        if(m&&m.required!=null)return 'Margin req: ₹'+Number(m.required).toLocaleString('en-IN')+' ('+(m.source==='dhan-official'?'Dhan official':'estimate')+')'+nkTxt;
+        return ((m&&(m.note||m.error))||'Margin: n/a')+nkTxt;
     }catch(e){return 'Margin: n/a';}}
     function rSymsRestore(){try{const saved=JSON.parse(localStorage.getItem('rSyms')||'[]');if(!saved.length)return false;const b=document.getElementById('r-syms');if(!b)return false;let hit=false;b.querySelectorAll('input').forEach(i=>{i.checked=saved.includes(i.value);if(i.checked)hit=true;});return hit;}catch(e){return false;}}
     function _unifiedBody(){
@@ -1313,7 +1315,7 @@ let _lastOpenTrdHTML = null;
             const covTxt=Object.keys(cov).map(k=>{const c=cov[k]||{};return `${k}: ${c.days_with_data||0}/${c.trading_days||0}d, ${c.candles||0} candles`;}).join(' | ')||'—';
             const rej=Object.entries(dg.rejected||{}).map(([k,v])=>`${k}: ${v}`).join(', ')||'koi nahi';
             const vBadge=vv.ok==null?'':(vv.ok?'<span class="badge bg-success">Math OK</span>':'<span class="badge bg-warning text-dark">PARTIAL DATA</span>');
-            return `<div class="alert alert-light border py-2 mb-2 small"><strong><i class="bi bi-activity"></i> Diagnostics:</strong> Signals evaluated ${dg.signals_evaluated||0} → generated ${dg.signals_generated||0} | Rejected (${rej})<br>Coverage: ${covTxt} ${vBadge}${(vv.failed||[]).length?` <span class="text-danger">${vv.failed.join('; ')}</span>`:''}</div>`;
+            return `<div class="alert alert-light border py-2 mb-2 small"><strong><i class="bi bi-activity"></i> Diagnostics:</strong> Signals evaluated ${dg.signals_evaluated||0} → generated ${dg.signals_generated||0} (BUY ${dg.signals_buy||0} / SELL ${dg.signals_sell||0}) | Rejected (${rej})<br>Coverage: ${covTxt} ${vBadge}${(vv.failed||[]).length?` <span class="text-danger">${vv.failed.join('; ')}</span>`:''}</div>`;
         }catch(e){return '';}}
     async function _renderBacktestResult(r){
         // Shared renderer: direct (saved-strategy) + normal dono yahi render karte hain
@@ -1342,7 +1344,8 @@ let _lastOpenTrdHTML = null;
                 const tips=(r.suggestions||[]).map(t=>`<li>${t}</li>`).join('');
                 zeroH=`<div class="alert alert-warning py-2 mb-2 small"><strong><i class="bi bi-exclamation-triangle"></i> 0 trades — wajah:</strong> ${r.note||'Is period/setting me koi entry signal nahi bana (honest zero).'}${tips?`<ul class="mb-0 mt-1">${tips}</ul>`:''}</div>`;
             }
-            document.getElementById('bt-metrics').innerHTML=zeroH+`
+            const nkH=r.naked_warning?`<div class="alert alert-danger py-2 mb-2 small"><strong><i class="bi bi-exclamation-triangle-fill"></i> Naked Short Warning:</strong> ${r.naked_warning}</div>`:'';
+            document.getElementById('bt-metrics').innerHTML=zeroH+nkH+`
 <div class="alert alert-secondary py-1 px-2 mb-2 small text-muted">${_pinfo}</div>${diagHtml(r)}
 <div class="row g-2 mb-2">
 <div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
@@ -1388,24 +1391,11 @@ let _lastOpenTrdHTML = null;
             const pb=document.getElementById('bt-progress'); if(pb) pb.classList.remove('hidden');
             const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width=pct+'%'; bar.textContent=pct+'%'; }
             const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Backtest chal raha hai... '+s+'s';
-            // Instant skeleton: show last cached result instantly as estimate
-            try{
-                const cached=localStorage.getItem('lastBacktestResult');
-                if(cached && s<15){
-                    const c=JSON.parse(cached);
-                    const m=c.metrics||{};
-                    document.getElementById('bt-metrics').innerHTML=`<div class="row"><div class="col"><div class="card stat-card" style="opacity:0.6"><div class="label">Est. Net P&L</div><div class="value">${(m.net_pnl||0).toLocaleString()}</div><small>Estimated - live update...</small></div></div><div class="col"><div class="card stat-card" style="opacity:0.6"><div class="label">Est. Win Rate</div><div class="value">${m.win_rate||0}%</div></div></div><div class="col"><div class="card stat-card" style="opacity:0.6"><div class="label">Trades</div><div class="value">${m.total_trades||0}</div></div></div></div><p class="text-muted small p-2"><span class="spinner"></span> Live calculation... ${s}s</p>`;
-                    return;
-                }
-            }catch(e){}
+            // Honest spinner only: purane run ke numbers ya random dummy KABHI
+            // nahi dikhate (wahi summary-vs-list mismatch ka kaaran tha).
             document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Backtest chal raha hai... '+s+'s (page band mat karo)</p>';
         };
         _btSpin();
-        // Instant dummy 0s - Algotech-like
-        try{
-            const _dummy={metrics:{net_pnl: 4200 + Math.floor(Math.random()*3000), total_trades: 10 + Math.floor(Math.random()*6), win_rate: (52+Math.random()*10).toFixed(1)}, symbol: body.symbol||'NIFTY'};
-            document.getElementById('bt-metrics').innerHTML=`<div class="row"><div class="col"><div class="card stat-card" style="opacity:0.7;border:1px dashed #0d6efd"><div class="label">Instant Preview</div><div class="value">₹${_dummy.metrics.net_pnl.toLocaleString()}</div><small>Est. — live 1-2s...</small></div></div><div class="col"><div class="card stat-card" style="opacity:0.7"><div class="label">Est. Trades</div><div class="value">${_dummy.metrics.total_trades}</div></div></div><div class="col"><div class="card stat-card" style="opacity:0.7"><div class="label">Est. Win%</div><div class="value">${_dummy.metrics.win_rate}%</div></div></div></div>`;
-        }catch(e){}
         // Fast path: try sync first (cached 10-symbol ~1.7s), fallback to async only if sync times out
         try{
             // Try sync with 8s timeout — most backtests finish in <2s
@@ -1489,7 +1479,8 @@ let _lastOpenTrdHTML = null;
                 zeroH=`<div class="alert alert-warning py-2 mb-2 small"><strong><i class="bi bi-exclamation-triangle"></i> 0 trades — wajah:</strong> ${r.note||'Is period/setting me koi entry signal nahi bana (honest zero).'}${tips?`<ul class="mb-0 mt-1">${tips}</ul>`:''}</div>`;
             }
             const diagH=diagHtml(r);
-            document.getElementById('bt-metrics').innerHTML=perSymH+zeroH+`
+            const nkH2=r.naked_warning?`<div class="alert alert-danger py-2 mb-2 small"><strong><i class="bi bi-exclamation-triangle-fill"></i> Naked Short Warning:</strong> ${r.naked_warning}</div>`:'';
+            document.getElementById('bt-metrics').innerHTML=perSymH+zeroH+nkH2+`
 <div class="alert alert-secondary py-1 px-2 mb-2 small text-muted">${_pinfo}</div>${diagH}
 <div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> strategy 4 Key Metrics:</strong><span>Win Prob: <strong>${ZN(m.win_rate+'%')}</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${_zt?'N/A':F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${ZN(m.expectancy)}</strong> ${_zt?'':(m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>')}</span><span class="ms-auto badge bg-info">Slippage ${(parseFloat(document.getElementById('s-slippage')?.value)||0.50)}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
 <div class="row g-2 mb-2">
@@ -1518,11 +1509,11 @@ let _lastOpenTrdHTML = null;
             else{document.getElementById('bt-charts').classList.remove('hidden');Plotly.newPlot('mo-chart',[{x:Object.keys(r.monthly_pnl),y:Object.values(r.monthly_pnl),type:'bar',marker:{color:Object.values(r.monthly_pnl).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
             if(r.trade_list&&r.trade_list.length){
                 document.getElementById('bt-trades').classList.remove('hidden');
-                let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Type</th><th>Strike</th><th>B/S</th><th>Qty</th><th>Lots</th><th>Entry Price</th><th>Exit Price</th><th>Exit Reason</th><th>Vix</th><th>P/L</th></tr></thead><tbody>';
+                let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Type</th><th>Strike</th><th>B/S</th><th>Qty</th><th>Lots</th><th>Entry Price</th><th>Exit Price</th><th>Gross</th><th>Slip</th><th>Exit Reason</th><th>Vix</th><th>P/L</th></tr></thead><tbody>';
                 let tradeIdx=0;
                 r.trade_list.forEach(t=>{
-                    if(t.is_group){h+=`<tr class="table-active"><td>${++tradeIdx}</td><td>${t.symbol||''}</td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="text-muted small">${t.exit_reason||''}</td><td class="text-muted small">${t.vix||'12.0'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`}
-                    else{const _trig=(t.trigger&&t.trigger!==t.exit_reason)?`<br><small class="text-info">${t.trigger}</small>`:'';const _src=(t.entry_src||t.exit_src||t.source||t.validation)?`Entry ${t.entry_src||'-'} → Exit ${t.exit_src||'-'} | ${t.source||''} ${t.validation||''} | ${t.signal_side||''} ${(t.signal_indicators||[]).join(',')}`:'';h+=`<tr><td>${++tradeIdx}</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike}</td><td>${t.position||'Sell'}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+t.entry_price.toFixed(2):'-'}</td><td>${t.exit_price?'₹'+t.exit_price.toFixed(2):'-'}</td><td class="text-muted small" title="${_src}">${t.exit_reason||'-'}${_trig}</td><td class="text-muted small">${t.vix||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;}});
+                    if(t.is_group){h+=`<tr class="table-active"><td>${++tradeIdx}</td><td>${t.symbol||''}</td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="text-muted small">${t.exit_reason||''}</td><td class="text-muted small">${t.vix||'12.0'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`}
+                    else{const _trig=(t.trigger&&t.trigger!==t.exit_reason)?`<br><small class="text-info">${t.trigger}</small>`:'';const _src=(t.entry_src||t.exit_src||t.source||t.validation)?`Entry ${t.entry_src||'-'} → Exit ${t.exit_src||'-'} | ${t.source||''} ${t.validation||''} | ${t.signal_side||''} ${(t.signal_indicators||[]).join(',')}`:'';const _gr=t.gross_pnl!=null?`<td class="${C(t.gross_pnl)}">${F(t.gross_pnl)}</td>`:'<td>-</td>';const _sl=t.slippage!=null?`<td class="text-muted small">${F(t.slippage)}</td>`:'<td>-</td>';h+=`<tr><td>${++tradeIdx}</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date}</td><td>${t.entry_time||'9:35:00 AM'}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike}</td><td>${t.position||'Sell'}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+t.entry_price.toFixed(2):'-'}</td><td>${t.exit_price?'₹'+t.exit_price.toFixed(2):'-'}</td>${_gr}${_sl}<td class="text-muted small" title="${_src}">${t.exit_reason||'-'}${_trig}</td><td class="text-muted small">${t.vix||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td></tr>`;}});
                 h+='</tbody></table>';
                 document.getElementById('bt-tl').innerHTML=h;
             }else{

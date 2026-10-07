@@ -253,6 +253,20 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
     return [], "no-intraday-data"
 
 
+def _yahoo_full_range(sym, start_date, end_date):
+    """Yahoo daily, poora requested range (60-day cut ke saath). Single source,
+    koi date-merge nahi. Returns bars (khali = unavailable)."""
+    try:
+        from core.services.free_data import fetch_yahoo_daily as _fyd
+        from core.services.data_validator import yahoo_60d_filter as _f60
+        bars = _f60(_fyd(sym, start_date, end_date) or [])
+        bars = [b for b in (bars or [])
+                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        return bars
+    except Exception:
+        return []
+
+
 def _dedup_bars(bars):
     """Chronological sort + duplicate (date,time) removal (spec §8)."""
     try:
@@ -820,6 +834,7 @@ def _run_backtest_core(req: BacktestRequest):
         _per_symbol = {}
         _brokerage = 0.0
         _diag_eval, _diag_sig, _diag_rej, _cov_by_sym = 0, 0, {}, {}
+        _diag_buy, _diag_sell = 0, 0
         _first_m = None
         _engine_name = "engine"
         # Multi-symbol support: always allow all symbols (user selected them)
@@ -859,6 +874,7 @@ def _run_backtest_core(req: BacktestRequest):
                 pass
             # Data provenance (spec): har symbol ka bars-kahan-se-aaya record.
             _hist_src = "nse_official_db"
+            _hist_status = "VALID"
             if _db_hist and len(_db_hist) >= 15:
                 historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
                 _use_db = True
@@ -869,12 +885,27 @@ def _run_backtest_core(req: BacktestRequest):
                     historical = _ce[1]
                     try:
                         _hist_src = _ce[2] if len(_ce) > 2 else "cache"
+                        _hist_status = _ce[3] if len(_ce) > 3 else ""
                     except Exception:
                         _hist_src = "cache"
                 else:
-                    # Fallback instant: synthetic only, no DB/network - <50ms
-                    historical = _generate_synthetic_fallback(_sym, start_date, end_date)
-                    _hist_src = "synthetic"
+                    # Spec: DB<15 to Yahoo full-range (single source, 60d-cut).
+                    # Na mile to INSUFFICIENT - synthetic fabrication kabhi nahi.
+                    _yb = _yahoo_full_range(_sym, start_date, end_date)
+                    if _yb and len(_yb) >= 15:
+                        historical = _yb
+                        _hist_src = "yahoo_daily"
+                        try:
+                            from core.services.data_validator import validate_symbol as _vs
+                            _q = _vs(_yb, "yahoo", _db_hist or None, "nse_official_db")
+                            _hist_status = str(_q.get("status", "SECONDARY_ONLY"))
+                        except Exception:
+                            _hist_status = "SECONDARY_ONLY"
+                    else:
+                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, Yahoo fail) - fabricated data nahi banate", "total_trades": 0,
+                                             "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                             "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
+                        continue
                 # Cap daily to 60 bars BEFORE intraday expansion (1Y range = 250 bars x 75 = 18750 -> 60s hang)
                 if len(historical) > _bar_cap:
                     historical = historical[-_bar_cap:]
@@ -893,7 +924,8 @@ def _run_backtest_core(req: BacktestRequest):
                         _use_db = True
                         _real_intra = True
                         _hist_src = _src15
-                        _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src)
+                        _hist_status = "SECONDARY_ONLY"
+                        _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
                         if len(_BT_CACHE) > 20:
                             _BT_CACHE.pop(next(iter(_BT_CACHE)))
                     else:
@@ -901,7 +933,7 @@ def _run_backtest_core(req: BacktestRequest):
                                              "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                              "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(_bars15 or [])}}
                         continue
-                    _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src)
+                    _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
                     if len(_BT_CACHE) > 20:
                         _BT_CACHE.pop(next(iter(_BT_CACHE)))
             # Spec §4/§15: <30 bars aur koi real source nahi -> INSUFFICIENT
@@ -980,6 +1012,8 @@ def _run_backtest_core(req: BacktestRequest):
             try:
                 _diag_eval += int(_sm.get("signals_evaluated", 0) or 0)
                 _diag_sig += int(_sm.get("signals_generated", 0) or 0)
+                _diag_buy += int(_sm.get("signals_buy", 0) or 0)
+                _diag_sell += int(_sm.get("signals_sell", 0) or 0)
                 for _rk, _rv in ((_sm.get("rejected") or {}).items()):
                     _diag_rej[_rk] = _diag_rej.get(_rk, 0) + int(_rv or 0)
                 if isinstance(_sm.get("coverage"), dict):
@@ -1010,10 +1044,18 @@ def _run_backtest_core(req: BacktestRequest):
                     _dq = {"source": "TradingView intraday", "status": "SECONDARY_ONLY"}
                 elif _dq_src == "yahoo_intraday":
                     _dq = {"source": "Yahoo intraday", "status": "SECONDARY_ONLY"}
+                elif _dq_src == "yahoo_daily":
+                    _dq = {"source": "Yahoo daily", "status": "SECONDARY_ONLY"}
                 elif _dq_src in ("synthetic", "synthetic_expansion"):
                     _dq = {"source": "Synthetic", "status": "SYNTHETIC"}
                 else:
                     _dq = {"source": "Cache", "status": "SECONDARY_ONLY"}
+                try:
+                    _hs = str(_hist_status or "")
+                    if _hs and _dq_src in ("yahoo_daily", "yahoo_intraday", "tradingview_intraday"):
+                        _dq["status"] = _hs
+                except Exception:
+                    pass
                 _dq["bars"] = len(historical or [])
                 try:
                     if isinstance(_sm.get("coverage"), dict):
@@ -1129,6 +1171,15 @@ def _run_backtest_core(req: BacktestRequest):
         _inds_echo = [str((iv.get("id") if isinstance(iv, dict) else iv) or "") for iv in (indicators or [])]
     except Exception:
         _inds_echo = []
+    # Naked-short alert: single-leg SELL (no hedge leg) = unlimited risk.
+    # Block nahi karte (legit strategies hain), par result me chetavni pakki.
+    try:
+        _legs_tx = [str((l or {}).get("transaction", "")).lower() for l in (legs or []) if isinstance(l, dict)]
+        _naked_warning = ("NAKED SELL: single-leg short (hedge nahi) - unlimited loss possible. "
+                          "Spread/hedge lagao ya chhota size rakho."
+                          if _legs_tx and all(t == "sell" for t in _legs_tx) else "")
+    except Exception:
+        _naked_warning = ""
     # Trade-level backfill: validation + premium source per symbol (spec §11).
     try:
         for _t in (_all_trades or []):
@@ -1147,6 +1198,7 @@ def _run_backtest_core(req: BacktestRequest):
         _val = {"ok": True, "passed": [], "failed": []}
     try:
         _diag = {"signals_evaluated": _diag_eval, "signals_generated": _diag_sig,
+                 "signals_buy": _diag_buy, "signals_sell": _diag_sell,
                  "rejected": _diag_rej, "coverage": _cov_by_sym}
     except Exception:
         _diag = {}
@@ -1205,6 +1257,7 @@ def _run_backtest_core(req: BacktestRequest):
         "diagnostics": _diag,
         "validation": _val,
         "validation_status": "OK" if (_val or {}).get("ok") else "PARTIAL_DATA",
+        "naked_warning": _naked_warning,
     }
     try:
         if '_rk' in locals() and _rk:

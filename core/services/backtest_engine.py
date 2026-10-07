@@ -122,6 +122,8 @@ class BacktestEngine:
         # Kabhi inflate nahi karte - sirf gintee, signal logic untouched.
         self._n_eval = 0
         self._n_sig = 0
+        self._n_sig_buy = 0
+        self._n_sig_sell = 0
         self._rej = {}
         self._cov_days = set()
         self._cov_bars = 0
@@ -359,6 +361,10 @@ class BacktestEngine:
                         self._cov_days.add(str(cur_date)[:10])
                         if buy_sig or sell_sig:
                             self._n_sig += 1
+                        if buy_sig:
+                            self._n_sig_buy = self._n_sig_buy + 1 if hasattr(self, "_n_sig_buy") else 1
+                        if sell_sig:
+                            self._n_sig_sell = self._n_sig_sell + 1 if hasattr(self, "_n_sig_sell") else 1
                 except Exception:
                     pass
                 # For spreads (multi-leg like Bear Call Spread), allow entry on either signal to avoid 0 trades when single indicator rare
@@ -2123,6 +2129,8 @@ class BacktestEngine:
                 "max_loss_streak": max_loss_streak,
                 "signals_evaluated": int(getattr(self, "_n_eval", 0) or 0),
                 "signals_generated": int(getattr(self, "_n_sig", 0) or 0),
+                "signals_buy": int(getattr(self, "_n_sig_buy", 0) or 0),
+                "signals_sell": int(getattr(self, "_n_sig_sell", 0) or 0),
                 "rejected": dict(getattr(self, "_rej", {}) or {}),
                 "coverage": dict(getattr(self, "_cov", {}) or {}),
                 "total_brokerage": round(total_brokerage, 2),

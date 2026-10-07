@@ -198,6 +198,8 @@ def test_equity_backtest():
 
 
 def test_equity_non_fno_allowed():
+    # Spec: no real data -> honest INSUFFICIENT (synthetic fabrication banned).
+    # GOLDBEES has no real bars locally, so the run must refuse, not fabricate.
     r = _run_backtest_core(BacktestRequest(
         symbol="GOLDBEES", symbols=["GOLDBEES"], start_date="2026-08-01", end_date="2026-08-20",
         indicators=[{"id": "supertrend", "params": {"period": 10, "multiplier": 3}}],
@@ -205,7 +207,16 @@ def test_equity_non_fno_allowed():
                "strike_selection": "atm", "otm_distance": 0}],
         advanced={"trade_mode": "intraday", "timeframe": "1d"},
         risk={"max_trades_per_day": 5, "daily_stop_loss": 1500, "daily_take_profit": 3000}))
-    assert not r.get("error"), r.get("error")
+    assert r.get("error") and "INSUFFICIENT" in r.get("error"), r
+    # ...while a data-rich EQ symbol still trades honestly.
+    r2 = _run_backtest_core(BacktestRequest(
+        symbol="RELIANCE", symbols=["RELIANCE"], start_date="2026-08-01", end_date="2026-08-20",
+        indicators=[{"id": "supertrend", "params": {"period": 10, "multiplier": 3}}],
+        legs=[{"option_type": "EQ", "transaction": "buy", "lots": 10,
+               "strike_selection": "atm", "otm_distance": 0}],
+        advanced={"trade_mode": "intraday", "timeframe": "1d"},
+        risk={"max_trades_per_day": 5, "daily_stop_loss": 1500, "daily_take_profit": 3000}))
+    assert not r2.get("error"), r2.get("error")
 
 
 def test_costs_sane():
