@@ -243,11 +243,23 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
 
 def _yahoo_full_range(sym, start_date, end_date):
     """Yahoo daily, poora requested range (60-day cut ke saath). Single source,
-    koi date-merge nahi. Returns bars (khali = unavailable)."""
+    koi date-merge nahi. 1 retry (transient throttle). Returns bars ([] = fail)."""
     try:
         from core.services.free_data import fetch_yahoo_daily as _fyd
         from core.services.data_validator import yahoo_60d_filter as _f60
-        bars = _f60(_fyd(sym, start_date, end_date) or [])
+        bars = []
+        for _attempt in (1, 2):
+            try:
+                bars = _f60(_fyd(sym, start_date, end_date) or [])
+                if bars and len(bars) >= 5:
+                    break
+            except Exception:
+                bars = []
+            try:
+                import time as _ts
+                _ts.sleep(2)
+            except Exception:
+                pass
         bars = [b for b in (bars or [])
                 if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
         return bars

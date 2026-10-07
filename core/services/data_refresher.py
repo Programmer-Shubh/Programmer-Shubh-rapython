@@ -14,7 +14,15 @@ EXTRA_SYMBOLS = ["RELIANCE", "HDFCBANK", "ICICIBANK", "TCS", "INFY", "ITC", "SBI
                  "TATAMOTORS", "TATASTEEL", "HCLTECH", "JSWSTEEL", "COALINDIA", "DRREDDY", "CIPLA",
                  "ADANIENT", "SBILIFE", "BPCL", "GRASIM", "TECHM", "DIVISLAB", "EICHERMOT", "BRITANNIA",
                  "HINDALCO", "VEDL", "INDUSINDBK", "SHREECEM", "NESTLEIND", "BAJAJFINSV", "HEROMOTOCO",
-                 "APOLLOHOSP", "UPL"]
+                 "APOLLOHOSP", "UPL",
+                 # OTM-filter universe (nightly seeding taaki INSUFFICIENT na aaye)
+                 "SENSEX", "ABB", "ALKEM", "AMBER", "APLAPOLLO", "ASIANPAINT",
+                 "BAJAJ-AUTO", "BAJAJHLDNG", "BOSCHLTD", "CUMMINSIND", "DIXON",
+                 "FORCEMOT", "GLENMARK", "GODFRYPHLP", "HAL", "HDFCAMC",
+                 "INDIGO", "LAURUSLABS", "LTM", "LUPIN", "MANKIND", "MAZDOCK",
+                 "MPHASIS", "OFSS", "PAGEIND", "PERSISTENT", "PIIND", "POLYCAB",
+                 "POWERINDIA", "RADICO", "SIEMENS", "SOLARINDS", "SRF", "TITAN",
+                 "TORNTPHARM", "TVSMOTOR", "WAAREEENER", "ANANDRATHI"]
 ALL_SYMBOLS = INDEX_SYMBOLS + EXTRA_SYMBOLS
 # Bandwidth saver: market-hours gate + 15-min cycle keeps Render
 # Service-Initiated egress to ~20MB/week (was 1.25GB: 5-min full-chain
