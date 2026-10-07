@@ -13,7 +13,7 @@ reportlab>=4.1.0
 backtrader>=1.9.78.123
 pyotp>=2.9.0
 nsefin>=0.1.5
-nsepython>=3.0.0
+nsepython==2.97
 tvdatafeed-enhanced>=2.2.0
 openchart>=0.0.5
 vectorbt>=0.26.0
