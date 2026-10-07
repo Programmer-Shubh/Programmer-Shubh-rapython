@@ -843,6 +843,26 @@ def _run_backtest_core(req: BacktestRequest):
         timeframe = (advanced_in.get("timeframe") or "1d").lower()
         _syms = _syms[:25]
         _bar_cap = 120 if len(_syms) > 1 else 250
+        # Intraday bars parallel prefetch (network-bound, 4 workers): 25 symbols
+        # ka fetch-time ~4x kam. Engine runs serial hi rehte hain (GIL/DB-safe).
+        # Results same - sirf fetch parallel, koi signal logic nahi badalta.
+        _pre15 = {}
+        if timeframe in ("1m", "5m", "15m", "30m", "1h") and len(_syms) > 1:
+            try:
+                from concurrent.futures import ThreadPoolExecutor as _TPE
+                def _one(_s):
+                    try:
+                        return _s, _intraday_full_range(_s, timeframe, start_date, end_date)
+                    except Exception:
+                        return _s, ([], "prefetch-fail")
+                with _TPE(max_workers=4) as _ex:
+                    for _s, _r in _ex.map(_one, list(_syms)):
+                        try:
+                            _pre15[_s] = _r
+                        except Exception:
+                            pass
+            except Exception:
+                _pre15 = {}
         for _sym in _syms:
             _use_db = False
             # No options exist on non-F&O symbols (GOLDBEES/SILVERBEES ETFs):
@@ -916,7 +936,10 @@ def _run_backtest_core(req: BacktestRequest):
                 if timeframe in ("1m","5m","15m","30m","1h"):
                     _real_intra = False
                     try:
-                        _bars15, _src15 = _intraday_full_range(_sym, timeframe, start_date, end_date)
+                        if _sym in _pre15:
+                            _bars15, _src15 = _pre15[_sym]
+                        else:
+                            _bars15, _src15 = _intraday_full_range(_sym, timeframe, start_date, end_date)
                     except Exception:
                         _bars15, _src15 = [], "no-intraday-data"
                     if _bars15 and len(_bars15) >= 40:
@@ -1064,12 +1087,24 @@ def _run_backtest_core(req: BacktestRequest):
                     pass
             except Exception:
                 _dq = {"source": "?", "status": "INSUFFICIENT", "bars": 0}
+            try:
+                _wz = ""
+                if int(_sm.get("total_trades", 0) or 0) == 0:
+                    _ev = int(_sm.get("signals_evaluated", 0) or 0)
+                    _gb = int(_sm.get("signals_buy", 0) or 0)
+                    _gs = int(_sm.get("signals_sell", 0) or 0)
+                    _ritems = [f"{k}:{v}" for k, v in ((_sm.get("rejected") or {}).items())]
+                    _rj = ", ".join(_ritems) if _ritems else "opposite-side signals (yeh direction entry nahi deta)"
+                    _wz = (f"0 trades: {_ev} bars check, {_gb} BUY/{_gs} SELL signals; "
+                           f"wajah: {_rj}.")
+            except Exception:
+                _wz = ""
             _per_symbol[_sym] = {"total_trades": _sm.get("total_trades", 0),
                                  "winning_trades": _sm.get("winning_trades", 0),
                                  "losing_trades": _sm.get("losing_trades", 0),
                                  "win_rate": _sm.get("win_rate", 0),
                                  "net_pnl": round(_sm.get("net_pnl", 0), 2),
-                                 "data": _dq}
+                                 "data": _dq, "why_zero": _wz}
         if not _all_trades:
             # Skip the "SYM: " prefix when the message already names the symbol
             def _e(k, v):

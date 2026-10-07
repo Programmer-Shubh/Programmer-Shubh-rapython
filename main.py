@@ -110,6 +110,20 @@ async def _startup_background():
             import time as _t
             _t.sleep(90)
             try:
+                # Heavy imports (pandas/tvDatafeed ~20s first time) background
+                # me pehle se load - taaki pehla backtest tez chale.
+                import numpy  # noqa
+            except Exception:
+                pass
+            try:
+                import pandas  # noqa
+            except Exception:
+                pass
+            try:
+                import tvDatafeed  # noqa
+            except Exception:
+                pass
+            try:
                 from routes.scanner import warm_opp_cache_once
                 warm_opp_cache_once()
             except: pass
