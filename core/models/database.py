@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 
 try:
@@ -32,6 +33,12 @@ class Database:
         return cls._instance
 
     def __init__(self):
+        # Per-thread persistent connections (was: NEW connect + TLS/auth +
+        # PRAGMAs on EVERY query - hundreds per backtest = minutes on cloud).
+        try:
+            self._local = threading.local()
+        except Exception:
+            self._local = None
         # Check for external DB first (Render Postgres, Supabase, Turso)
         pg_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or os.environ.get("SUPABASE_DB_URL")
         if pg_url and pg_url.startswith(("postgres://", "postgresql://")) and HAS_PSYCOPG2:
@@ -158,6 +165,31 @@ class Database:
         }
 
     def _conn(self):
+        # Reuse this thread's connection when healthy (no per-query handshake).
+        try:
+            _lc = getattr(self, "_local", None)
+            if _lc is not None:
+                c = getattr(_lc, "conn", None)
+                if c is not None:
+                    try:
+                        if self._is_postgres():
+                            if getattr(c, "closed", 0) == 0:
+                                return c
+                        else:
+                            c.execute("SELECT 1").fetchone()
+                            return c
+                    except Exception:
+                        pass
+                    try:
+                        c.close()
+                    except Exception:
+                        pass
+                    try:
+                        _lc.conn = None
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         if self._is_postgres():
             try:
                 # Fix URL (encode raw @ in password) before connecting
@@ -168,6 +200,11 @@ class Database:
                 # EVERY DB-backed API and all buttons look dead.
                 conn = psycopg2.connect(fixed_url, connect_timeout=10)
                 conn.autocommit = False
+                try:
+                    if getattr(self, "_local", None) is not None:
+                        self._local.conn = conn
+                except Exception:
+                    pass
                 return conn
             except Exception as e:
                 # Fall through to SQLite below (sticky flag routes later
@@ -184,6 +221,15 @@ class Database:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        try:
+            conn.execute("PRAGMA busy_timeout=5000")
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_local", None) is not None:
+                self._local.conn = conn
+        except Exception:
+            pass
         return conn
 
     def _adapt_query(self, query):

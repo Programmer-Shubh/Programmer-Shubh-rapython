@@ -1447,37 +1447,52 @@ class BacktestEngine:
 
     def _prem_source(self, date, strike, option_type) -> str:
         """Premium kahan se aaya: db / db_near / live / model / spot (EQ).
-        Per-trade 1 query (per-bar nahi) - sasta aur precise. Spec §7 labeling."""
+        Per (date,strike) memoize - same contract dobara puche to DB nahi.
+        Spec §7 labeling."""
+        try:
+            _ck = (str(date or "")[:10], float(strike or 0), str(option_type or "").upper())
+            _memo = getattr(self, "_prem_src_cache", None)
+            if isinstance(_memo, dict) and _ck in _memo:
+                return _memo[_ck]
+        except Exception:
+            _memo = None
+        _src = "model"
         try:
             if str(option_type or "").upper() == "EQ":
-                return "spot"
-            if getattr(self, "is_live", False):
-                return "live"
-            if getattr(self, "_skip_db", False):
-                return "model"
-            from core.models.database import Database as _DB
-            _db = _DB.get_instance()
-            try:
-                row = _db.fetch_one(
-                    "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-                    [getattr(self, "bt_symbol", ""), str(date or "")[:10], float(strike or 0), option_type])
-                if row and (float(row.get("open_price") or 0) > 0 or float(row.get("close_price") or 0) > 0):
-                    return "db"
-            except Exception:
-                pass
-            try:
-                from utils.helpers import get_strike_step as _step
-                _st = _step(getattr(self, "bt_symbol", "") or "") or 0
-                row2 = _db.fetch_one(
-                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
-                    [getattr(self, "bt_symbol", ""), option_type, float(strike or 0), _st, str(date or "")[:10], float(strike or 0)])
-                if row2 and float(row2.get("close_price") or 0) > 0:
-                    return "db_near"
-            except Exception:
-                pass
+                _src = "spot"
+            elif getattr(self, "is_live", False):
+                _src = "live"
+            elif not getattr(self, "_skip_db", False):
+                from core.models.database import Database as _DB
+                _db = _DB.get_instance()
+                try:
+                    row = _db.fetch_one(
+                        "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+                        [getattr(self, "bt_symbol", ""), str(date or "")[:10], float(strike or 0), option_type])
+                    if row and (float(row.get("open_price") or 0) > 0 or float(row.get("close_price") or 0) > 0):
+                        _src = "db"
+                except Exception:
+                    pass
+                if _src == "model":
+                    try:
+                        from utils.helpers import get_strike_step as _step
+                        _st = _step(getattr(self, "bt_symbol", "") or "") or 0
+                        row2 = _db.fetch_one(
+                            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
+                            [getattr(self, "bt_symbol", ""), option_type, float(strike or 0), _st, str(date or "")[:10], float(strike or 0)])
+                        if row2 and float(row2.get("close_price") or 0) > 0:
+                            _src = "db_near"
+                    except Exception:
+                        pass
         except Exception:
             pass
-        return "model"
+        try:
+            if isinstance(_memo, dict):
+                _memo[_ck] = _src
+                self._prem_src_cache = _memo
+        except Exception:
+            pass
+        return _src
 
     def _check_sl_tp_levels(self, txn_type, sl_level, tp_level, opt_high, opt_low):
         """Shared hit comparison for DB-range and model-range callers."""
@@ -2166,3 +2181,4 @@ class BacktestEngine:
         self.ohlc_cache = {}
         self.bt_symbol = ""
         self.bt_expiry = ""
+        self._prem_src_cache = {}
