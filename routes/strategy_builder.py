@@ -702,7 +702,7 @@ def _dummy_trades_all_symbols(syms, start_date, end_date, legs, indicators):
     _rnd.shuffle(trades)
     return trades, per_sym
 
-def _run_backtest_core(req: BacktestRequest):
+def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     import time as _t0m, hashlib, json
     _t0 = _t0m.time()
     # Algotest-like instant: result cache keyed by request hash (10min TTL)
@@ -823,6 +823,16 @@ def _run_backtest_core(req: BacktestRequest):
         _brokerage = 0.0
         _diag_eval, _diag_sig, _diag_rej, _cov_by_sym = 0, 0, {}, {}
         _diag_buy, _diag_sell = 0, 0
+
+        def _fire_prog(_s, _extra=0):
+            if not progress_cb:
+                return
+            try:
+                _dn = len([k for k, v in (_per_symbol or {}).items()
+                           if isinstance(v, dict) and ("total_trades" in v or v.get("error"))]) + int(_extra or 0)
+                progress_cb(min(_dn, len(_syms or [])), len(_syms or []), _s)
+            except Exception:
+                pass
         _first_m = None
         _engine_name = "engine"
         # Multi-symbol support: always allow all symbols (user selected them)
@@ -864,10 +874,12 @@ def _run_backtest_core(req: BacktestRequest):
                 if _n_legs > 1 and _has_eq:
                     _per_symbol[_sym] = {"error": "EQ (equity) legs sirf single-leg me - option spreads ke saath mix nahi hote.", "total_trades": 0,
                                          "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
+                    _fire_prog(_sym)
                     continue
                 if _has_opt_legs and not _isopt(_sym):
                     _per_symbol[_sym] = {"error": f"{_sym} me options nahi hain (F&O me listed nahi) - option backtest/trade impossible. Spot/Equity par chalao.", "total_trades": 0,
                                          "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
+                    _fire_prog(_sym)
                     continue
             except Exception:
                 pass
@@ -918,6 +930,7 @@ def _run_backtest_core(req: BacktestRequest):
                     _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile - fabricated bars nahi banate", "total_trades": 0,
                                          "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                          "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(_bars15 or [])}}
+                    _fire_prog(_sym)
                     continue
             else:
                 # DAILY: NSE official DB (>=15) else Yahoo full-range, else out.
@@ -952,6 +965,7 @@ def _run_backtest_core(req: BacktestRequest):
                         _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, Yahoo fail) - fabricated data nahi banate", "total_trades": 0,
                                              "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                              "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
+                        _fire_prog(_sym)
                         continue
                     _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
                     if len(_BT_CACHE) > 20:
@@ -962,11 +976,13 @@ def _run_backtest_core(req: BacktestRequest):
                 _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye {_bar_cap} bars nahi mile (DB/TV/Yahoo sab fail) - fabricated data nahi banate", "total_trades": 0,
                                      "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                      "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(historical or [])}}
+                _fire_prog(_sym)
                 continue
             if not historical or len(historical) < 5:
                 _per_symbol[_sym] = {"error": f"No data for {_sym}", "total_trades": 0,
                                      "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                      "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
+                _fire_prog(_sym)
                 continue
             # Spec §1/§5: intraday bars ko tail-truncate KABHI nahi (wahi
             # 1-trade-per-symbol bug tha). Daily bars par performant cap.
@@ -1027,6 +1043,7 @@ def _run_backtest_core(req: BacktestRequest):
                                      "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                      "data": {"source": str(_hist_src or ""), "status": "INSUFFICIENT",
                                               "bars": len(historical or [])}}
+                _fire_prog(_sym)
                 continue
             _sm = result["metrics"]
             try:
@@ -1034,6 +1051,8 @@ def _run_backtest_core(req: BacktestRequest):
                 _diag_sig += int(_sm.get("signals_generated", 0) or 0)
                 _diag_buy += int(_sm.get("signals_buy", 0) or 0)
                 _diag_sell += int(_sm.get("signals_sell", 0) or 0)
+                if progress_cb:
+                    _fire_prog(_sym, _extra=1)
                 for _rk, _rv in ((_sm.get("rejected") or {}).items()):
                     _diag_rej[_rk] = _diag_rej.get(_rk, 0) + int(_rv or 0)
                 if isinstance(_sm.get("coverage"), dict):
@@ -1311,7 +1330,22 @@ def _bt_worker(job_id: str, req_dict: dict):
         with _BT_JOBS_LOCK:
             _BT_JOBS[job_id]["status"] = "running"
         req = BacktestRequest(**req_dict)
-        result = _run_backtest_core(req)
+        try:
+            _total_syms = len(req.symbols or []) or 1
+        except Exception:
+            _total_syms = 1
+
+        def _prog(done, total, sym):
+            try:
+                with _BT_JOBS_LOCK:
+                    _j = _BT_JOBS.get(job_id)
+                    if _j is not None:
+                        _j["progress"] = {"done": int(done or 0), "total": int(total or _total_syms),
+                                          "symbol": str(sym or "")}
+            except Exception:
+                pass
+
+        result = _run_backtest_core(req, progress_cb=_prog)
         with _BT_JOBS_LOCK:
             _BT_JOBS[job_id]["status"] = "done"
             _BT_JOBS[job_id]["result"] = result
@@ -1354,6 +1388,8 @@ def backtest_result(job_id: str):
         if not job:
             return {"status": "unknown", "error": "job not found (server restarted? re-run backtest)"}
         out = {"status": job["status"], "elapsed_s": round(_bt_time.time() - job.get("started_at", _bt_time.time()), 1)}
+        if job.get("progress"):
+            out["progress"] = job["progress"]
         if job["status"] == "done":
             out["result"] = job["result"]
         elif job["status"] == "error":

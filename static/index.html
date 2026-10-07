@@ -1396,9 +1396,22 @@ let _lastOpenTrdHTML = null;
             document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Backtest chal raha hai... '+s+'s (page band mat karo)</p>';
         };
         _btSpin();
-        // Fast path: try sync first (cached 10-symbol ~1.7s), fallback to async only if sync times out
+        // Smart routing: chhota run = sync (8s cap), bada run (4+ symbols ya
+        // lamba intraday range) = seedha async (8s waste + duplicate server
+        // compute nahi). Bada run sync me kabhi 8s me nahi hota.
+        let _bigRun=false;
         try{
-            // Try sync with 8s timeout — most backtests finish in <2s
+            const _nSym=(body.symbols||[]).length;
+            const _tf=String((body.advanced||{}).timeframe||'1d');
+            let _days=0;
+            try{_days=Math.max(0,(new Date(body.end_date)-new Date(body.start_date))/86400000);}catch(e){}
+            _bigRun=_nSym>3||(_days>30&&['1m','5m','15m','30m','1h'].includes(_tf));
+        }catch(e){}
+        // Fast path: try sync first (cached/small runs finish in <2s), fallback to async only if sync times out
+        try{
+            // Try sync with 8s timeout — most backtests finish in <2s.
+            // Bada run seedha async (sync attempt me 8s waste nahi).
+            if(_bigRun) throw new Error('big-run-async-direct');
             const ctrl=new AbortController(); const tmo=setTimeout(()=>ctrl.abort(),8000);
             try{
                 r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
@@ -1406,11 +1419,12 @@ let _lastOpenTrdHTML = null;
                 if(r && !r.error){ _usedAsync=true; }
                 else throw new Error(r.error||'sync failed');
             }catch(se){
-                clearTimeout(tmo);
+                try{if(typeof tmo!=='undefined')clearTimeout(tmo);}catch(e){}
                 // Timeout (abort) ho ya instant fail - DONO me async job + poll.
                 // Pehle abort seedha sync-retry me girta tha: 3 andhe attempts,
                 // spinner frozen, server par 4x duplicate compute. Ab kabhi nahi.
                 if(String((se&&se.message)||'').includes('abort')) lastErr='8s me na hua - background job me chala rahe hain...';
+                if(String((se&&se.message)||'')==='big-run-async-direct') lastErr='bada run - seedha background job me...';
                 // Sync failed or slow — fallback to async (submit bhi 20s cap
                 // ke saath, taaki koi await hamesha-ke-liye na atke)
                 const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),20000);
@@ -1420,13 +1434,14 @@ let _lastOpenTrdHTML = null;
                 if(sub && sub.job_id){
                     _usedAsync=true;
                     let _netFails=0;
-                    for(let p=0;p<100;p++){
-                        await new Promise(res=>setTimeout(res,700));
+                    for(let p=0;p<120;p++){
+                        await new Promise(res=>setTimeout(res,700+Math.min(p*50,1800)));
                     _btSpin();
                     let st=null;
                     try{ st=await A('/api/backtest/result/'+sub.job_id); _netFails=0; }
-                    catch(pe){ lastErr=pe.message||''; if(++_netFails>10){ lastErr='server se sampark toot gaya (10 fails) — dobara Run dabao'; break; } continue; }
+                    catch(pe){ lastErr=pe.message||''; if(++_netFails>30){ lastErr='server se sampark toot gaya (30 fails) — dobara Run dabao'; break; } try{const _pb=document.getElementById('bt-progress-text');if(_pb)_pb.textContent+=' (retry '+_netFails+')';}catch(e){} continue; }
                     if(!st) continue;
+                    try{const _pr=st.progress||null;if(_pr&&_pr.total){const _pb2=document.getElementById('bt-progress-text');if(_pb2)_pb2.textContent='Backtest chal raha hai... '+Math.round((Date.now()-_btStart)/1000)+'s (symbol '+_pr.done+'/'+_pr.total+')';}}catch(e){}
                     if(st.status==='done'){ r=st.result||null; lastErr=''; try{ const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width='100%'; bar.textContent='100%'; } const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Done!'; setTimeout(()=>{ const pb=document.getElementById('bt-progress'); if(pb) pb.classList.add('hidden'); },2000);}catch(e){} break; }
                     if(st.status==='error'){ lastErr=st.error||'worker failed'; break; }
                     if(st.status==='unknown'){ lastErr='server restart ho gaya, job wipe — dobara Run Backtest dabao'; break; }
