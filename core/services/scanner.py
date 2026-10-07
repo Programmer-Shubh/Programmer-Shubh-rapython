@@ -414,7 +414,7 @@ class OptionScanner:
             else:
                 sig, opt = "BUY PE", "PE"
             try:
-                sug = self._suggest_option(sym, close, opt)
+                sug = self._suggest_option_floor(sym, close, opt, "BUY", 20.0)
             except Exception:
                 sug = {}
             if not (sug or {}).get("strike"):
@@ -599,14 +599,14 @@ class OptionScanner:
             if s.get('direction')=='bearish':
                 ns=dict(s); ns['signal_type']='SELL CE'; ns['direction']='bearish'; ns['transaction_type']='SELL'
                 ns['reasons']=list(s.get('reasons') or [])
-                ns['option_suggestion']=self._suggest_option(s['symbol'], s['price'], 'CE')
+                ns['option_suggestion']=self._suggest_option_floor(s['symbol'], s['price'], 'CE', 'SELL', 20.0)
                 if ns['option_suggestion'].get('strike'):
                     ce_sell.append(ns)
             # Bullish signals can be PE Sell (support)
             if s.get('direction')=='bullish':
                 ns=dict(s); ns['signal_type']='SELL PE'; ns['direction']='bullish'; ns['transaction_type']='SELL'
                 ns['reasons']=list(s.get('reasons') or [])
-                ns['option_suggestion']=self._suggest_option(s['symbol'], s['price'], 'PE')
+                ns['option_suggestion']=self._suggest_option_floor(s['symbol'], s['price'], 'PE', 'SELL', 20.0)
                 if ns['option_suggestion'].get('strike'):
                     pe_sell.append(ns)
         ce_sell = sorted(ce_sell, key=lambda x: x['score'], reverse=True)[:top_n]
@@ -1186,6 +1186,44 @@ class OptionScanner:
             strike = atm_strike
         
         return {'strike': strike, 'premium': premium, 'expiry': expiry, 'spot': spot}
+
+    def _suggest_option_floor(self, symbol: str, spot: float, option_type: str,
+                                side: str = "BUY", min_prem: float = 20.0) -> dict:
+        """Dashboard suggestions sirf >= min_prem premium wale (order floor se
+        match - click karne par floor-error kabhi nahi). BUY: ITM ki taraf max
+        2 steps chalke premium uthao; SELL: OTM hi rehta hai (ITM short never),
+        na mile to strike 0 (caller skip karta hai)."""
+        try:
+            sug = self._suggest_option(symbol, spot, option_type) or {}
+        except Exception:
+            sug = {}
+        try:
+            if sug.get("strike") and float(sug.get("premium") or 0) >= float(min_prem or 0):
+                return sug
+        except Exception:
+            pass
+        if str(side or "").upper() != "BUY":
+            return {"strike": 0, "premium": 0, "expiry": sug.get("expiry", ""), "spot": spot}
+        try:
+            from utils.helpers import get_strike_step, model_premium
+            step = get_strike_step(symbol) or 0
+            base = int(sug.get("strike") or 0)
+            if step <= 0 or base <= 0 or spot <= 0:
+                return {"strike": 0, "premium": 0, "expiry": sug.get("expiry", ""), "spot": spot}
+            for k in (1, 2):
+                s2 = base - k * step if option_type == "CE" else base + k * step
+                if s2 <= 0 or abs(s2 - spot) / spot > 0.06:
+                    break
+                try:
+                    px = float(model_premium(spot, s2, 7, option_type, symbol=symbol) or 0)
+                except Exception:
+                    px = 0
+                if px >= float(min_prem or 0):
+                    return {"strike": s2, "premium": round(px, 2),
+                            "expiry": sug.get("expiry", ""), "spot": spot}
+        except Exception:
+            pass
+        return {"strike": 0, "premium": 0, "expiry": sug.get("expiry", "") if isinstance(sug, dict) else "", "spot": spot}
 
     def _row_live_spot(self, symbol: str, fallback: float):
         """Live spot for scanner ROWS (CACHE-ONLY, no network - serial live x50 hung scanner).
@@ -1850,9 +1888,11 @@ class OptionScanner:
                 if prev <= 0:
                     prev = spot * (0.99 + (hash(sym) % 20) * 0.001)  # synthetic 1-2% variance if still 0
                 change_pct = (spot - prev) / prev * 100 if prev else 0
-                # Option suggestion for trading
+                # Option suggestion for trading (premium>=20 floor, else skip mover)
                 opt_type = 'CE' if change_pct >= 0 else 'PE'
-                opt = self._suggest_option(sym, spot, opt_type)
+                opt = self._suggest_option_floor(sym, spot, opt_type, 'BUY', 20.0)
+                if not opt.get('strike'):
+                    continue
                 movers.append({
                     'symbol': sym,
                     'spot': round(spot,2),
