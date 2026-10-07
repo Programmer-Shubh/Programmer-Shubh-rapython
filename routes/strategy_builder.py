@@ -823,6 +823,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         _brokerage = 0.0
         _diag_eval, _diag_sig, _diag_rej, _cov_by_sym = 0, 0, {}, {}
         _diag_buy, _diag_sell = 0, 0
+        _phase_ms = {}
 
         def _fire_prog(_s, _extra=0):
             if not progress_cb:
@@ -942,8 +943,17 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     try:
                         if _sym in _pre15:
                             _bars15, _src15 = _pre15[_sym]
+                            try:
+                                _phase_ms[_sym] = {"fetch_ms": 0, "prefetched": True}
+                            except Exception:
+                                pass
                         else:
-                            _bars15, _src15 = _intraday_full_range(_sym, timeframe, start_date, end_date)
+                            try:
+                                _t_pf = _bt_t.time()
+                                _bars15, _src15 = _intraday_full_range(_sym, timeframe, start_date, end_date)
+                                _phase_ms[_sym] = {"fetch_ms": int((_bt_t.time() - _t_pf) * 1000)}
+                            except Exception:
+                                _bars15, _src15 = [], "no-intraday-data"
                     except Exception:
                         _bars15, _src15 = [], "no-intraday-data"
                 if _bars15 and len(_bars15) >= 40:
@@ -1067,12 +1077,21 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     engine.prefetch_option_premiums(_sym, start_date, end_date)
                 except Exception:
                     pass
+            try:
+                _t_eng = _bt_t.time()
+            except Exception:
+                _t_eng = 0
             result = engine.run(
                 historical, _sym, start_date, end_date,
                 indicators, entry_conditions, exit_conditions,
                 legs, advanced_in, risk_sym,
                 is_live=False,
             )
+            try:
+                _phase_ms.setdefault(_sym, {}).update(
+                    {"engine_ms": int((_bt_t.time() - _t_eng) * 1000) if _t_eng else 0})
+            except Exception:
+                pass
             # Memory diet (free tier OOM se bachao): symbol ka raw bars +
             # engine scratch ab kaam ka nahi - turant chhodo. _BT_CACHE me
             # copy pehle se hai (dobara chahiye to wahan se).
@@ -1300,7 +1319,8 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     try:
         _diag = {"signals_evaluated": _diag_eval, "signals_generated": _diag_sig,
                  "signals_buy": _diag_buy, "signals_sell": _diag_sell,
-                 "rejected": _diag_rej, "coverage": _cov_by_sym}
+                 "rejected": _diag_rej, "coverage": _cov_by_sym,
+                 "phase_ms": _phase_ms}
     except Exception:
         _diag = {}
     _final_res = {
