@@ -871,31 +871,70 @@ def _run_backtest_core(req: BacktestRequest):
                     continue
             except Exception:
                 pass
-            # Algotest-style: REAL NSE history first (spot + option premiums from DB)
-            try:
-                _db_hist = _load_db_history(_sym, start_date, end_date)
-            except Exception:
-                _db_hist = []
-            if (not _db_hist or len(_db_hist) < 15):
-                # Fast fallback: synthetic (instant) — no live fetch during backtest to keep it <2s
-                # Real data will be backfilled by nightly job, not per-request
-                pass
-            # Data provenance (spec): har symbol ka bars-kahan-se-aaya record.
+            # Timeframe decides the data path FIRST (spec §5): intraday TF par
+            # hamesha intraday bars, daily TF par daily bars. Pehle DB>=15 hone
+            # par 15m strategy daily bars par chal jati thi (wahi 1-trade bug).
             _hist_src = "nse_official_db"
             _hist_status = "VALID"
-            if _db_hist and len(_db_hist) >= 15:
-                historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
-                _use_db = True
+            _ck = f"{_sym}_{start_date}_{end_date}_{timeframe}"
+            _ce = _BT_CACHE.get(_ck)
+            _cache_ok = False
+            try:
+                _cache_ok = bool(_ce and _bt_t.time() - _ce[0] < 300 and len(_ce[1] or []) >= 5)
+            except Exception:
+                _cache_ok = False
+            if timeframe in ("1m", "5m", "15m", "30m", "1h"):
+                # INTRADAY: cache (intraday only) -> prefetch -> direct fetch.
+                # Daily bars par 15m chalana galat resolution hai - kabhi nahi.
+                _bars15, _src15 = [], "no-intraday-data"
+                if _cache_ok:
+                    try:
+                        _ch = _ce[1]
+                        _has_bt = any((h or {}).get("bar_time") for h in (_ch[-5:] or []))
+                        if _has_bt:
+                            _bars15 = _ch
+                            _hist_src = _ce[2] if len(_ce) > 2 else "cache"
+                            _hist_status = _ce[3] if len(_ce) > 3 else "SECONDARY_ONLY"
+                    except Exception:
+                        pass
+                if not _bars15:
+                    try:
+                        if _sym in _pre15:
+                            _bars15, _src15 = _pre15[_sym]
+                        else:
+                            _bars15, _src15 = _intraday_full_range(_sym, timeframe, start_date, end_date)
+                    except Exception:
+                        _bars15, _src15 = [], "no-intraday-data"
+                if _bars15 and len(_bars15) >= 40:
+                    historical = _bars15
+                    _use_db = True
+                    _hist_src = _src15 if _src15 else _hist_src
+                    if _hist_src in ("yahoo_intraday",):
+                        _hist_status = "SECONDARY_ONLY"
+                    _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
+                    if len(_BT_CACHE) > 20:
+                        _BT_CACHE.pop(next(iter(_BT_CACHE)))
+                else:
+                    _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile - fabricated bars nahi banate", "total_trades": 0,
+                                         "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                         "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(_bars15 or [])}}
+                    continue
             else:
-                _ck = f"{_sym}_{start_date}_{end_date}_{timeframe}"
-                _ce = _BT_CACHE.get(_ck)
-                if _ce and _bt_t.time() - _ce[0] < 300:
+                # DAILY: NSE official DB (>=15) else Yahoo full-range, else out.
+                try:
+                    _db_hist = _load_db_history(_sym, start_date, end_date)
+                except Exception:
+                    _db_hist = []
+                if _cache_ok and not (_db_hist and len(_db_hist) >= 15):
                     historical = _ce[1]
                     try:
                         _hist_src = _ce[2] if len(_ce) > 2 else "cache"
                         _hist_status = _ce[3] if len(_ce) > 3 else ""
                     except Exception:
                         _hist_src = "cache"
+                elif _db_hist and len(_db_hist) >= 15:
+                    historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
+                    _use_db = True
                 else:
                     # Spec: DB<15 to Yahoo full-range (single source, 60d-cut).
                     # Na mile to INSUFFICIENT - synthetic fabrication kabhi nahi.
@@ -913,36 +952,6 @@ def _run_backtest_core(req: BacktestRequest):
                         _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, Yahoo fail) - fabricated data nahi banate", "total_trades": 0,
                                              "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                              "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
-                        continue
-                # Cap daily to 60 bars BEFORE intraday expansion (1Y range = 250 bars x 75 = 18750 -> 60s hang)
-                if len(historical) > _bar_cap:
-                    historical = historical[-_bar_cap:]
-                # Resample to intraday if needed (5m,15m etc. like algotest).
-                # Spec §1/§5/§15: FULL requested range, real bars only (TV, else
-                # Yahoo 60d). No synthetic expansion, no tail truncation.
-                # Na mile to per-symbol INSUFFICIENT (honest, kabhi silent nahi).
-                if timeframe in ("1m","5m","15m","30m","1h"):
-                    _real_intra = False
-                    try:
-                        if _sym in _pre15:
-                            _bars15, _src15 = _pre15[_sym]
-                        else:
-                            _bars15, _src15 = _intraday_full_range(_sym, timeframe, start_date, end_date)
-                    except Exception:
-                        _bars15, _src15 = [], "no-intraday-data"
-                    if _bars15 and len(_bars15) >= 40:
-                        historical = _bars15
-                        _use_db = True
-                        _real_intra = True
-                        _hist_src = _src15
-                        _hist_status = "SECONDARY_ONLY"
-                        _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
-                        if len(_BT_CACHE) > 20:
-                            _BT_CACHE.pop(next(iter(_BT_CACHE)))
-                    else:
-                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile (TV+Yahoo dono fail) - fabricated bars nahi banate", "total_trades": 0,
-                                             "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
-                                             "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(_bars15 or [])}}
                         continue
                     _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
                     if len(_BT_CACHE) > 20:
