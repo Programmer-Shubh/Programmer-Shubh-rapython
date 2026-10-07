@@ -953,7 +953,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     if _hist_src in ("yahoo_intraday",):
                         _hist_status = "SECONDARY_ONLY"
                     _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
-                    if len(_BT_CACHE) > 20:
+                    if len(_BT_CACHE) > 12:
                         _BT_CACHE.pop(next(iter(_BT_CACHE)))
                 else:
                     _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile - fabricated bars nahi banate", "total_trades": 0,
@@ -1003,7 +1003,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         _fire_prog(_sym)
                         continue
                     _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
-                    if len(_BT_CACHE) > 20:
+                    if len(_BT_CACHE) > 12:
                         _BT_CACHE.pop(next(iter(_BT_CACHE)))
             # Spec §4/§15: <30 bars aur koi real source nahi -> INSUFFICIENT
             # (fabricated synthetic se backtest kabhi nahi).
@@ -1073,6 +1073,21 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 legs, advanced_in, risk_sym,
                 is_live=False,
             )
+            # Memory diet (free tier OOM se bachao): symbol ka raw bars +
+            # engine scratch ab kaam ka nahi - turant chhodo. _BT_CACHE me
+            # copy pehle se hai (dobara chahiye to wahan se).
+            try:
+                _pre15.pop(_sym, None)
+                del engine
+                try:
+                    _gc_n = (_gc_n + 1) if "_gc_n" in dir() else 1
+                except Exception:
+                    _gc_n = 1
+                if _gc_n % 5 == 0:
+                    import gc as _gc
+                    _gc.collect()
+            except Exception:
+                pass
             if not result.get("success"):
                 _per_symbol[_sym] = {"error": result.get("error", "Backtest failed"), "total_trades": 0,
                                      "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
@@ -1348,7 +1363,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     try:
         if '_rk' in locals() and _rk:
             _BT_RESULT_CACHE[_rk]=(_t0m.time(), _final_res)
-            if len(_BT_RESULT_CACHE)>50:
+            while len(_BT_RESULT_CACHE) > 15:
                 _BT_RESULT_CACHE.pop(next(iter(_BT_RESULT_CACHE)))
     except: pass
     return _final_res
@@ -1470,8 +1485,8 @@ def run_backtest_async(req: BacktestRequest):
         req_dict = req.dict() if hasattr(req, "dict") else dict(req)
     _rh = _bt_req_hash(req_dict)
     with _BT_JOBS_LOCK:
-        # prune old jobs (keep last 20)
-        while len(_BT_JOBS) >= 20:
+        # prune old jobs (keep last 8 - results bade hote hain, OOM se bachao)
+        while len(_BT_JOBS) >= 8:
             oldest = min(_BT_JOBS.items(), key=lambda kv: kv[1].get("started_at", 0))[0]
             _BT_JOBS.pop(oldest, None)
         if _rh:

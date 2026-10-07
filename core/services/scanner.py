@@ -1591,7 +1591,7 @@ class OptionScanner:
                 if use_cache:
                     try:
                         self._INTRA_CACHE[ck] = (_tm.time(), bars)
-                        if len(self._INTRA_CACHE) > 30:
+                        if len(self._INTRA_CACHE) > 12:
                             self._INTRA_CACHE.pop(next(iter(self._INTRA_CACHE)))
                     except Exception:
                         pass
