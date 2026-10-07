@@ -127,22 +127,29 @@ def symbols_otm(min_premium: float = 20.0, otm_to: int = 6, dte: int = 28):
                 _src[sym] = "db"
             else:
                 _missing.append(sym)
-        # Live fallback SIRF master list tak (52 symbols, parallel, tez).
-        # Poore 200+ universe par live-fetch timeout karta hai. Baaki naam
-        # nightly seeding ke baad DB se khud jud jayenge.
+        # Live fallback SIRF master list tak, Yahoo v8 PARALLEL me
+        # (shared session, 10 workers - purana serial NSE-chain minutes
+        # lagata tha). Baaki naam nightly seeding ke baad DB se khud jud jayenge.
         _master_set = set(master)
         _miss_master = [s for s in _missing if s in _master_set]
         if _miss_master:
             try:
-                _live = LiveMarketData().get_live_spots_parallel(_miss_master, max_workers=8) or {}
-                for _ms in _miss_master:
+                from concurrent.futures import ThreadPoolExecutor as _TPE
+                from core.services.free_data import _yahoo_fallback_quote as _yq1
+                def _one(_s):
                     try:
-                        _lv = float(((_live.get(_ms) or {}).get("spot")) or 0)
+                        _q = _yq1(_s, timeout=6) or {}
+                        return _s, float(_q.get("spot") or 0)
                     except Exception:
-                        _lv = 0
-                    if _lv > 0:
-                        _spots[_ms] = _lv
-                        _src[_ms] = "live"
+                        return _s, 0
+                with _TPE(max_workers=10) as _ex:
+                    for _ms, _lv in _ex.map(_one, _miss_master):
+                        try:
+                            if _lv and float(_lv) > 0:
+                                _spots[_ms] = float(_lv)
+                                _src[_ms] = "yahoo"
+                        except Exception:
+                            pass
             except Exception:
                 pass
         for sym in _uni:
