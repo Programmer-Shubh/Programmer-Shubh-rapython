@@ -1002,6 +1002,38 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 elif _db_hist and len(_db_hist) >= 15:
                     historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
                     _use_db = True
+                    # Coverage <70% ho to Yahoo full-range se compare karo -
+                    # jo zyada din cover kare wahi single source (no-merge).
+                    try:
+                        import datetime as _cdt
+                        _cs = _cdt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+                        _ce2 = _cdt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                        _rq, _dd = [], _cs
+                        while _dd <= _ce2:
+                            if _dd.weekday() < 5:
+                                _rq.append(_dd.strftime("%Y-%m-%d"))
+                            _dd += _cdt.timedelta(days=1)
+                        _have = {str(h.get("trade_date", ""))[:10] for h in (historical or [])}
+                        _cov0 = sum(1 for _d in _rq if _d in _have)
+                        if _rq and _cov0 < len(_rq) * 0.7:
+                            try:
+                                _ybc = _preY.get(_sym) if _sym in _preY else _yahoo_full_range(_sym, start_date, end_date)
+                            except Exception:
+                                _ybc = []
+                            _yhave = {str(h.get("trade_date", ""))[:10] for h in (_ybc or [])}
+                            _cov1 = sum(1 for _d in _rq if _d in _yhave)
+                            if _ybc and len(_ybc) >= 15 and _cov1 > _cov0:
+                                historical = _ybc
+                                _use_db = False
+                                _hist_src = "yahoo_daily"
+                                try:
+                                    from core.services.data_validator import validate_symbol as _vs2
+                                    _q2 = _vs2(_ybc, "yahoo", _db_hist or None, "nse_official_db")
+                                    _hist_status = str(_q2.get("status", "SECONDARY_ONLY"))
+                                except Exception:
+                                    _hist_status = "SECONDARY_ONLY"
+                    except Exception:
+                        pass
                 else:
                     # Spec: DB<15 to Yahoo full-range (prefetched parallel, else direct).
                     # Na mile to INSUFFICIENT - synthetic fabrication kabhi nahi.
