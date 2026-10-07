@@ -115,10 +115,15 @@ def symbols_otm(min_premium: float = 20.0):
                 _src[sym] = "db"
             else:
                 _missing.append(sym)
-        if _missing:
+        # Live fallback SIRF master list tak (52 symbols, parallel, tez).
+        # Poore 200+ universe par live-fetch timeout karta hai. Baaki naam
+        # nightly seeding ke baad DB se khud jud jayenge.
+        _master_set = set(master)
+        _miss_master = [s for s in _missing if s in _master_set]
+        if _miss_master:
             try:
-                _live = LiveMarketData().get_live_spots_parallel(_missing, max_workers=8) or {}
-                for _ms in _missing:
+                _live = LiveMarketData().get_live_spots_parallel(_miss_master, max_workers=8) or {}
+                for _ms in _miss_master:
                     try:
                         _lv = float(((_live.get(_ms) or {}).get("spot")) or 0)
                     except Exception:
