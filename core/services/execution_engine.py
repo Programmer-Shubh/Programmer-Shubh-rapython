@@ -23,16 +23,15 @@ def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500
         if sel == "otm": strike = atm + (otm*step if leg["option_type"]=="CE" else -otm*step)
         elif sel == "itm": strike = atm + (-otm*step if leg["option_type"]=="CE" else otm*step)
         else: strike = atm
-        # premium via nse_client or Black-Scholes fallback handled in trade route
-        from core.models.bhavcopy_model import BhavcopyModel
-        bhav = BhavcopyModel()
-        # reuse paper_trade route logic via direct DB insert with costs
-        from routes.option_chain import TradeRequest
-        # fallback premium: unified model (same IV/floor as order entry + LTP)
+        # premium via unified model (per-symbol IV, floor 1.5 — backtest parity).
+        # DTE: weekly legs -> 7, monthly -> 28 (pehle hardcoded 7 tha, monthly
+        # paper entry backtest se sasta/mahanga padta tha).
         premium = 0
         try:
             from utils.helpers import model_premium, model_iv
-            premium = model_premium(spot, strike, 7, leg["option_type"], symbol=symbol)
+            _exp_hint = str((leg.get("expiry") or "")).lower()
+            _dte = 28 if _exp_hint == "monthly" else 7
+            premium = model_premium(spot, strike, _dte, leg["option_type"], symbol=symbol)
         except Exception:
             premium = max(spot*0.02, 1.5) if spot > 0 else 0
         adj = TransactionCosts.apply_fill_slippage(premium, leg["transaction"].upper(), is_live=False)

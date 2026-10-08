@@ -389,6 +389,7 @@ def place_trade(req: TradeRequest):
         # Strategy expiry: auto-rollover to next weekly expiry by default so
         # paper trading keeps running instead of blocking on a past end_date.
         _rolled_to = ""
+        _strike_snapped = None
         if req.strategy_id:
             try:
                 from core.models.database import Database as _DB
@@ -512,6 +513,10 @@ def place_trade(req: TradeRequest):
                         _snapped = _atm0
                         # try to preserve OTM vs ATM intent (if original was below ATM for PE / above for CE small drift, keep near ATM)
                         req.strike = float(_snapped)
+                        # Parity note: backtest ATM par chalta hai, paper bhi ab
+                        # ATM par — strike alag hone se winrate gap aata tha.
+                        # Response me flag taaki UI/paper-detail me dikhe.
+                        _strike_snapped = {"from": _orig, "to": float(_snapped)}
                     except Exception:
                         return {"error": f"Strike {req.strike} ATM {_atm0} se bahut door hai (spot {_spot0:,.2f}) - ATM ke 2-3 strike upar-neeche chunho"}
         except Exception:
@@ -699,6 +704,8 @@ def place_trade(req: TradeRequest):
             pass
         if _rolled_to:
             _resp["rolled_to"] = _rolled_to
+        if _strike_snapped:
+            _resp["strike_snapped"] = _strike_snapped
         return _resp
     except Exception as e:
         import traceback

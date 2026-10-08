@@ -15,7 +15,7 @@ class BacktestEngine:
         self.premium_cache = {}
         self.bt_symbol = ""
         self.bt_expiry = ""
-        self.implied_volatility = 0.14
+        self.implied_volatility = None  # None = per-symbol model_iv (unified)
         self.is_live = is_live  # Unified switch: False=backtest, True=live/paper
         self._skip_db = False  # True => synthetic-only fast path, no DB roundtrips
         self._cur_close = 0.0
@@ -28,7 +28,11 @@ class BacktestEngine:
         self.premium_cache = {}
         self.bt_symbol = symbol
         self.bt_expiry = legs[0].get("expiry_date", "") if legs else ""
-        self.implied_volatility = advanced_options.get("implied_volatility", 0.14)
+        # Unified pricer: paper/live/chain/scan sab model_premium(model_iv)
+        # use karte hain. Backtest me custom IV floor (0.18/0.20) alag premium
+        # deta tha -> wahi winrate divergence. None = per-symbol NSE-typical
+        # (NIFTY 0.13, stocks 0.30); explicit advanced value ho to wahi.
+        self.implied_volatility = advanced_options.get("implied_volatility") or None
         # Quantman: slippage override (user enters estimated slippage % like 0.05, 0.1)
         _orig_slip = TransactionCosts.SLIPPAGE_PCT
         if advanced_options.get("slippage_pct") is not None:
@@ -400,18 +404,17 @@ class BacktestEngine:
                         can_enter = False
                 # Min premium filter: skip SELL entries with premium below threshold
                 if can_enter and min_premium > 0:
-                    # Estimate entry premium for this strike
+                    # Estimate entry premium for this strike (unified pricer)
                     try:
-                        from utils.helpers import black_scholes as _bs
+                        from utils.helpers import model_premium as _bsmp
                         spot_est = float(cur.get("open_price", 0) or cur.get("close_price", 0))
                         strike_est = float(legs[0].get("strike", 0) or 0)
                         if strike_est == 0:
                             strike_est = round(spot_est / get_strike_step(symbol)) * get_strike_step(symbol)
                         opt_type = legs[0].get("option_type", option_type)
-                        t = 5 / 365
-                        iv = float(self.implied_volatility or 0.14)
-                        est_prem = _bs(spot_est, strike_est, t, iv, opt_type)
-                        if est_prem < min_premium:
+                        est_prem = _bsmp(spot_est, strike_est, 5, opt_type,
+                                         symbol=symbol, iv=(self.implied_volatility or None))
+                        if (est_prem or 0) < min_premium:
                             can_enter = False
                     except Exception:
                         pass
@@ -704,7 +707,9 @@ class BacktestEngine:
             up = bb.get("upper", []) or []; lo = bb.get("lower", []) or []
             sq = bb.get("squeeze", []) or []; vs = bb.get("vol_spike", []) or []
             for i in range(per+1, n):
-                if not sq[i] or not vs[i]:
+                # Squeeze pichhli bar + breakout/volume is bar (calc parity -
+                # breakout bar apni window chaudi karke squeeze khatm kar deta hai)
+                if i <= 0 or not sq[i-1] or not vs[i]:
                     continue
                 c = closes[i]
                 if c > (up[i] or 0) and up[i]:
@@ -914,6 +919,79 @@ class BacktestEngine:
                 if _avv is not None and _pdv is not None and _mdv is not None:
                     _cv.append(modes.get("adx", "both") != "bearish"
                                and _avv >= _thr and _pdv > _mdv)
+            # Extended votes: har supported indicator vote deta hai (abstain =
+            # no vote). Pehle ye 13 ids _cv me the hi nahi aur neeche score
+            # gate (score<30 -> False) unhe akela select karne par kabhi fire
+            # nahi hone deta tha (ema/vwap/kama/hmm/ml/oi/heikin/rangebo/
+            # robot/utbot/pma/pni = hamesha 0 signals = "indicator kaam nahi
+            # kar raha"). Single select -> majority-of-1 se fire karega.
+            if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) \
+                    and pre_calc["ema"][effective_idx] is not None:
+                _cv.append(modes.get("ema", "both") != "bearish"
+                           and _cc > pre_calc["ema"][effective_idx])
+            if "vwap" in pre_calc:
+                _vw = pre_calc["vwap"]
+                _vv = (_vw.get("vwap", []) if isinstance(_vw, dict) else [])
+                if effective_idx < len(_vv) and _vv[effective_idx] is not None:
+                    _cv.append(modes.get("vwap", "both") != "bearish"
+                               and _cc > _vv[effective_idx])
+            if "kama" in pre_calc and effective_idx < len(pre_calc["kama"]) \
+                    and pre_calc["kama"][effective_idx] is not None:
+                _cv.append(modes.get("kama", "both") != "bearish"
+                           and _cc > pre_calc["kama"][effective_idx])
+            if "hmm_regime" in pre_calc:
+                _sq = pre_calc["hmm_regime"].get("state_sequence", [])
+                if effective_idx < len(_sq) and _sq[effective_idx] is not None:
+                    _cv.append(modes.get("hmm_regime", "both") != "bearish"
+                               and _sq[effective_idx] == "Bullish")
+            if "ml_rsi" in pre_calc:
+                _ms = pre_calc["ml_rsi"].get("signal", [])
+                if effective_idx < len(_ms) and _ms[effective_idx] is not None:
+                    _cv.append(modes.get("ml_rsi", "both") != "bearish"
+                               and _ms[effective_idx] == 1)
+            if "ml_signal" in pre_calc:
+                _mp = pre_calc["ml_signal"].get("probability", [])
+                if effective_idx < len(_mp) and _mp[effective_idx] is not None:
+                    _cv.append(modes.get("ml_signal_filter", "both") != "bearish"
+                               and _mp[effective_idx] > 0.60)
+            if "oi" in pre_calc:
+                _os = pre_calc["oi"].get("signal", [])
+                if effective_idx < len(_os) and _os[effective_idx] is not None:
+                    _cv.append(modes.get("open_interest", "both") != "bearish"
+                               and _os[effective_idx] == 1)
+            if "heikin" in pre_calc:
+                _hs = pre_calc["heikin"].get("signal", [])
+                _ha_ids = pre_calc.get("heikin_ids", {"heikin_ashi"})
+                _use_bull = ("heikin_bullish" in _ha_ids) or ("heikin_ashi" in _ha_ids)
+                _blk = modes.get("heikin_bullish", modes.get("heikin_ashi", "both"))
+                if effective_idx < len(_hs) and _hs[effective_idx] is not None:
+                    _cv.append(_use_bull and _blk != "bearish"
+                               and _hs[effective_idx] == 1)
+            if "rangebo" in pre_calc:
+                _rs = pre_calc["rangebo"].get("signal", [])
+                if effective_idx < len(_rs) and _rs[effective_idx] is not None:
+                    _cv.append(modes.get("range_breakout", "both") != "bearish"
+                               and _rs[effective_idx] == 1)
+            if "robot_conf" in pre_calc:
+                _rb = pre_calc["robot_conf"].get("buy", [])
+                if effective_idx < len(_rb) and _rb[effective_idx] is not None:
+                    _cv.append(modes.get("robot_confluence", "both") != "bearish"
+                               and bool(_rb[effective_idx]))
+            if "utbot" in pre_calc:
+                _up = pre_calc["utbot"].get("pos", [])
+                if 0 < effective_idx < len(_up) and _up[effective_idx] is not None:
+                    _cv.append(modes.get("utbot", "both") != "bearish"
+                               and _up[effective_idx] == 1 and _up[effective_idx - 1] != 1)
+            if "pma" in pre_calc:
+                _pv = pre_calc["pma"].get("pma", [])
+                if effective_idx < len(_pv) and _pv[effective_idx] is not None:
+                    _cv.append(modes.get("predicted_moving_average", "both") != "bearish"
+                               and _cc > _pv[effective_idx])
+            if "pni" in pre_calc:
+                _pn = pre_calc["pni"].get("pma", [])
+                if effective_idx < len(_pn) and _pn[effective_idx] is not None:
+                    _cv.append(modes.get("predicted_neural_index", "both") != "bearish"
+                               and _cc > _pn[effective_idx])
             if _cv:
                 import math as _math
                 _need = 1 if len(_cv) == 1 else max(2, _math.ceil(len(_cv) / 2))
@@ -1145,6 +1223,77 @@ class BacktestEngine:
                 if _avv is not None and _pdv is not None and _mdv is not None:
                     _cv.append(modes.get("adx", "both") != "bullish"
                                and _avv >= _thr and _mdv > _pdv)
+            # Extended votes (buy-side mirror): single-select ye ids bhi fire
+            # karein. Pehle sell-side me ye votes missing the (score gate ke
+            # neeche standalone tak pahunchte hi nahi the) -> PE legs par ye
+            # indicators kabhi signal nahi dete the.
+            if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) \
+                    and pre_calc["ema"][effective_idx] is not None:
+                _cv.append(modes.get("ema", "both") != "bullish"
+                           and _cc < pre_calc["ema"][effective_idx])
+            if "vwap" in pre_calc:
+                _vw = pre_calc["vwap"]
+                _vv = (_vw.get("vwap", []) if isinstance(_vw, dict) else [])
+                if effective_idx < len(_vv) and _vv[effective_idx] is not None:
+                    _cv.append(modes.get("vwap", "both") != "bullish"
+                               and _cc < _vv[effective_idx])
+            if "kama" in pre_calc and effective_idx < len(pre_calc["kama"]) \
+                    and pre_calc["kama"][effective_idx] is not None:
+                _cv.append(modes.get("kama", "both") != "bullish"
+                           and _cc < pre_calc["kama"][effective_idx])
+            if "hmm_regime" in pre_calc:
+                _sq = pre_calc["hmm_regime"].get("state_sequence", [])
+                if effective_idx < len(_sq) and _sq[effective_idx] is not None:
+                    _cv.append(modes.get("hmm_regime", "both") != "bullish"
+                               and _sq[effective_idx] == "Bearish")
+            if "ml_rsi" in pre_calc:
+                _ms = pre_calc["ml_rsi"].get("signal", [])
+                if effective_idx < len(_ms) and _ms[effective_idx] is not None:
+                    _cv.append(modes.get("ml_rsi", "both") != "bullish"
+                               and _ms[effective_idx] == -1)
+            if "ml_signal" in pre_calc:
+                _mp = pre_calc["ml_signal"].get("probability", [])
+                if effective_idx < len(_mp) and _mp[effective_idx] is not None:
+                    _cv.append(modes.get("ml_signal_filter", "both") != "bullish"
+                               and _mp[effective_idx] < 0.40)
+            if "oi" in pre_calc:
+                _os = pre_calc["oi"].get("signal", [])
+                if effective_idx < len(_os) and _os[effective_idx] is not None:
+                    _cv.append(modes.get("open_interest", "both") != "bullish"
+                               and _os[effective_idx] == -1)
+            if "heikin" in pre_calc:
+                _hs = pre_calc["heikin"].get("signal", [])
+                _ha_ids = pre_calc.get("heikin_ids", {"heikin_ashi"})
+                _use_bear = ("heikin_bearish" in _ha_ids) or ("heikin_ashi" in _ha_ids)
+                _blk = modes.get("heikin_bearish", modes.get("heikin_ashi", "both"))
+                if effective_idx < len(_hs) and _hs[effective_idx] is not None:
+                    _cv.append(_use_bear and _blk != "bullish"
+                               and _hs[effective_idx] == -1)
+            if "rangebo" in pre_calc:
+                _rs = pre_calc["rangebo"].get("signal", [])
+                if effective_idx < len(_rs) and _rs[effective_idx] is not None:
+                    _cv.append(modes.get("range_breakout", "both") != "bullish"
+                               and _rs[effective_idx] == -1)
+            if "robot_conf" in pre_calc:
+                _rb = pre_calc["robot_conf"].get("sell", [])
+                if effective_idx < len(_rb) and _rb[effective_idx] is not None:
+                    _cv.append(modes.get("robot_confluence", "both") != "bullish"
+                               and bool(_rb[effective_idx]))
+            if "utbot" in pre_calc:
+                _up = pre_calc["utbot"].get("pos", [])
+                if 0 < effective_idx < len(_up) and _up[effective_idx] is not None:
+                    _cv.append(modes.get("utbot", "both") != "bullish"
+                               and _up[effective_idx] == -1 and _up[effective_idx - 1] != -1)
+            if "pma" in pre_calc:
+                _pv = pre_calc["pma"].get("pma", [])
+                if effective_idx < len(_pv) and _pv[effective_idx] is not None:
+                    _cv.append(modes.get("predicted_moving_average", "both") != "bullish"
+                               and _cc < _pv[effective_idx])
+            if "pni" in pre_calc:
+                _pn = pre_calc["pni"].get("pma", [])
+                if effective_idx < len(_pn) and _pn[effective_idx] is not None:
+                    _cv.append(modes.get("predicted_neural_index", "both") != "bullish"
+                               and _cc < _pn[effective_idx])
             if _cv:
                 import math as _math
                 _need = 1 if len(_cv) == 1 else max(2, _math.ceil(len(_cv) / 2))
@@ -1373,11 +1522,16 @@ class BacktestEngine:
         step = get_strike_step(symbol)
         best = round(spot / step) * step
         best_diff = 1.0
+        try:
+            from utils.helpers import model_iv as _miv
+            _iv = float(self.implied_volatility or _miv(symbol) or 0.25)
+        except Exception:
+            _iv = float(self.implied_volatility or 0.25)
         for offset in range(-1000, 1001, int(step)):
             test = round(spot / step) * step + offset
             if test <= 0:
                 continue
-            delta = abs(self.indicators.calculate_delta(spot, test, self.implied_volatility, 15 / 365, option_type))
+            delta = abs(self.indicators.calculate_delta(spot, test, _iv, 15 / 365, option_type))
             diff = abs(delta - abs(target_delta))
             if diff < best_diff:
                 best_diff = diff
@@ -1463,7 +1617,12 @@ class BacktestEngine:
                 t = max(0.003, (d2 - d1).days / 365)
         except Exception:
             pass
-        iv = float(getattr(self, "implied_volatility", 0.14) or 0.14)
+        # Unified IV: explicit advanced value else per-symbol model_iv (paper parity)
+        try:
+            from utils.helpers import model_iv as _miv2
+            iv = float(getattr(self, "implied_volatility", None) or _miv2(getattr(self, "bt_symbol", "")) or 0.25)
+        except Exception:
+            iv = float(getattr(self, "implied_volatility", None) or 0.25)
         if _bs and strike > 0:
             try:
                 prem_high = _bs(high_spot, strike, t, iv, option_type.upper()[:2])
@@ -1732,23 +1891,22 @@ class BacktestEngine:
                     return float(row_retry["close_price"])
             except Exception:
                 pass
-        # Black-Scholes fallback — same fix as option_chain/scanner
+        # Black-Scholes fallback — UNIFIED pricer (paper/live/chain/scanner
+        # parity): model_premium(per-symbol NSE-typical IV, real DTE). Pehle
+        # yahan custom floor (index 0.18/stock 0.20) tha jo live rate se alag
+        # premium deta tha -> backtest profit, paper loss (divergence #1).
         if spot and spot > 0 and strike and strike > 0:
-            dte = max(self._days_to_expiry(date, self._get_expiry_type()) / 365.0, 1/365)
-            iv = self.implied_volatility
-            if self.bt_symbol in ('NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'):
-                iv = max(iv, 0.18)
-            else:
-                iv = max(iv, 0.20)
-            from utils.helpers import black_scholes
-            raw = black_scholes(spot, strike, dte, iv, option_type)
-            # Quantman: only floor deep OTM Rs1 (like option_chain Rs0.99 guard), not Rs5 — preserves spread credit
-            if raw <= 1.5:
-                raw2 = black_scholes(spot, strike, dte, max(iv, 0.22), option_type)
-                raw = raw2 if raw2 > 1.5 else round(spot * 0.01, 2)
-            val = max(round(raw, 2), 1.5)
-            self.premium_cache[key] = val
-            return val
+            dte_days = max(self._days_to_expiry(date, self._get_expiry_type()), 1)
+            try:
+                from utils.helpers import model_premium as _mp
+                val = _mp(float(spot), float(strike), dte_days, option_type,
+                           symbol=self.bt_symbol, iv=(self.implied_volatility or None))
+            except Exception:
+                val = 0
+            if val and float(val) > 0:
+                val = round(float(val), 2)
+                self.premium_cache[key] = val
+                return val
         self.premium_cache[key] = 5.0
         return 5.0
 
@@ -1813,22 +1971,21 @@ class BacktestEngine:
                     return val
             except Exception:
                 pass
-        # Black-Scholes fallback — same fix as option_chain/scanner: premium <=5 → BS 22% → spot*0.02, and post-slippage floor
+        # Black-Scholes fallback — UNIFIED pricer (entry parity): model_premium
+        # (per-symbol IV, real DTE). Exit alag formula se nikalta tha to
+        # entry/exit mismatch se fake winrate banta tha.
         if spot and spot > 0 and strike and strike > 0:
-            dte = max(self._days_to_expiry(date, self._get_expiry_type()) / 365.0, 1/365)
-            iv = self.implied_volatility
-            if self.bt_symbol in ('NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'):
-                iv = max(iv, 0.18)
-            else:
-                iv = max(iv, 0.20)
-            from utils.helpers import black_scholes
-            raw = black_scholes(spot, strike, dte, iv, option_type)
-            if raw <= 1.5:
-                raw2 = black_scholes(spot, strike, dte, max(iv, 0.22), option_type)
-                raw = raw2 if raw2 > 1.5 else round(spot * 0.01, 2)
-            val = max(round(raw, 2), 1.5)
-            self.premium_cache[key] = val
-            return val
+            dte_days = max(self._days_to_expiry(date, self._get_expiry_type()), 1)
+            try:
+                from utils.helpers import model_premium as _mp2
+                val = _mp2(float(spot), float(strike), dte_days, option_type,
+                            symbol=self.bt_symbol, iv=(self.implied_volatility or None))
+            except Exception:
+                val = 0
+            if val and float(val) > 0:
+                val = round(float(val), 2)
+                self.premium_cache[key] = val
+                return val
         self.premium_cache[key] = 5.0
         return 5.0
 

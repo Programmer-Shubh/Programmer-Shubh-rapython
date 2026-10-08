@@ -1197,8 +1197,11 @@ let _lastOpenTrdHTML = null;
                     const isLive=t.trade_mode==='live';
                     const cur = (t.current_price!=null? t.current_price : t.entry_price);
                     const pnl = (t.pnl!=null? t.pnl : 0);
+                    // Net (exit slippage + costs adjusted) — backtest net se
+                    // compare karne layak realistic figure (gross ke neeche).
+                    const pnlNet = (t.pnl_net!=null? t.pnl_net : pnl);
                     const typeBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
-                h+=`<tr><td>${t.entry_date||t.symbol}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>${t.quantity}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${cur.toFixed(2)}</td><td><input type="number" value="${t.tp}" style="width:70px;font-size:11px" onchange="updateTP(${t.id},this.value)"></td><td><input type="number" value="${t.sl}" style="width:70px;font-size:11px" onchange="updateSL(${t.id},this.value)"></td><td class="${C(pnl)}">${F(pnl)}<br><small>${(pnl/(t.entry_price*t.quantity*(t.lot_size||50))*100||0).toFixed(1)}%</small></td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td>${B((t.trade_type||'intraday').toUpperCase(),(t.trade_type||'intraday')==='positional'?'ce':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-info" onclick="openTradeTV('${t.symbol}')">Chart</button> <button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-warning" onclick="closeTrade(${t.id},${cur})">Exit</button></td></tr>`;
+                h+=`<tr><td>${t.entry_date||t.symbol}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>${t.quantity}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${cur.toFixed(2)}</td><td><input type="number" value="${t.tp}" style="width:70px;font-size:11px" onchange="updateTP(${t.id},this.value)"></td><td><input type="number" value="${t.sl}" style="width:70px;font-size:11px" onchange="updateSL(${t.id},this.value)"></td><td class="${C(pnl)}">${F(pnl)}<br><small>${(pnl/(t.entry_price*t.quantity*(t.lot_size||50))*100||0).toFixed(1)}%</small><br><small class="text-muted" title="Exit slippage + costs adjusted (backtest-net parity)">net ${F(pnlNet)}</small></td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td>${B((t.trade_type||'intraday').toUpperCase(),(t.trade_type||'intraday')==='positional'?'ce':'buy')}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-info" onclick="openTradeTV('${t.symbol}')">Chart</button> <button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-warning" onclick="closeTrade(${t.id},${cur})">Exit</button></td></tr>`;
                 });
                 h+='</table>';document.getElementById('open-trd').innerHTML=h;_lastOpenTrdHTML=h;
             }else{
@@ -1288,8 +1291,13 @@ let _lastOpenTrdHTML = null;
         return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
     }
     async function runBacktest(opts){
-        // opts.direct: saved-strategy endpoint ka ready result - dobara fetch nahi, sidha render
-        if(opts&&opts.direct){try{await _renderBacktestResult(opts.direct);}catch(e){alert('Backtest failed: '+(e.message||e));}return;}
+        // opts.direct: saved-strategy endpoint ka ready result - dobara fetch nahi, sidha render.
+        // Har EXPLICIT click (Backtest Detail / Backtest button) ek naya
+        // request-seq bump karta hai: purana slow response kabhi naya result
+        // overwrite nahi karega, aur dubara click hamesha dobara render karega.
+        window._btSeq=(window._btSeq||0)+1;
+        const _mySeq=window._btSeq;
+        if(opts&&opts.direct){try{await _renderBacktestResult(opts.direct,_mySeq);}catch(e){alert('Backtest failed: '+(e.message||e));}return;}
         // Anti-pileup: Auto mode fires on every keystroke; a slow run must
         // not stack 10 overlapping runs (spinner forever, results never
         // settle). Latest request wins: queue one rerun max.
@@ -1312,7 +1320,7 @@ let _lastOpenTrdHTML = null;
             document.getElementById('bt-trades').classList.add('hidden');
         }catch(e){}
         try{
-            await _runBacktestInner();
+            await _runBacktestInner(_mySeq);
         }finally{
             window._btRunning=false;
             if(window._btQueued){ window._btQueued=false; setTimeout(()=>{try{runBacktest();}catch(e){}},200); }
@@ -1326,19 +1334,32 @@ let _lastOpenTrdHTML = null;
             const vBadge=vv.ok==null?'':(vv.ok?'<span class="badge bg-success">Math OK</span>':'<span class="badge bg-warning text-dark">PARTIAL DATA</span>');
             return `<div class="alert alert-light border py-2 mb-2 small"><strong><i class="bi bi-activity"></i> Diagnostics:</strong> Signals evaluated ${dg.signals_evaluated||0} → generated ${dg.signals_generated||0} (BUY ${dg.signals_buy||0} / SELL ${dg.signals_sell||0}) | Rejected (${rej})<br>Coverage: ${covTxt} ${vBadge}${(vv.failed||[]).length?` <span class="text-danger">${vv.failed.join('; ')}</span>`:''}</div>`;
         }catch(e){return '';}}
-    async function _renderBacktestResult(r){
-        // Shared renderer: direct (saved-strategy) + normal dono yahi render karte hain
+    async function _renderBacktestResult(r, _seq){
+        // Shared FULL renderer: direct (saved-strategy Backtest Detail) + normal
+        // dono yahi render karte hain — metrics + per-symbol + equity/monthly
+        // charts + trade list. Pehle ye sirf metrics dikhata tha, isliye charts
+        // /trades blank rehte the (wahi "results display nahi ho rahe" bug).
+        // Debug checkpoints (user ne console.log manga tha):
+        //  [BT-direct] click -> fetch -> keys -> rendered run
         const _restore=()=>{};
         try{
-            if(!r) throw new Error('No response');
-            if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';return;}
+            try{console.log('[BT-direct] render start, keys=',r?Object.keys(r):null);}catch(e){}
+            // Stale-drop: is render ke baad koi NAYA click/request aa chuka ho
+            // to ye purana result screen par mat lagao (repeat-click overwrite bug).
+            // Same-run double-fire (<1.5s) bhi dobara render nahi karta.
             try{
-                if(r.run_id){
-                    if(window._btRenderedId===r.run_id) return;
-                    window._btRenderedId=r.run_id;
-                }
+                if(typeof _seq==='number'&&window._btSeq!==_seq){try{console.log('[BT-direct] stale drop, newer request exists');}catch(e){}return;}
+                if(r&&r.run_id&&window._btRenderedId===r.run_id&&Date.now()-(window._btRenderedAt||0)<1500){try{console.log('[BT-direct] duplicate run_id, skip',r.run_id);}catch(e){}return;}
+                if(r&&r.run_id){window._btRenderedId=r.run_id;window._btRenderedAt=Date.now();}
             }catch(e){}
+            if(!r) throw new Error('No response (empty body)');
+            // 1) onClick/data check: strategy id se aaya result hai ya error?
+            if(r.error){try{console.log('[BT-direct] backend error:',r.error);}catch(e){}document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';try{document.getElementById('bt-tl').innerHTML='<p class="text-muted small p-2">No trades (error).</p>';}catch(e){}try{document.getElementById('bt-trades').classList.add('hidden');}catch(e){}try{document.getElementById('bt-charts').classList.add('hidden');}catch(e){}try{document.getElementById('bt-results').scrollIntoView({behavior:'smooth'});}catch(e){}return;}
+            // (stale/duplicate guard upar render-start par ho chuka hai)
+            // 2) state/store check: metrics object bana ya undefined?
             const m=r.metrics||r; window._lastBacktestMetrics=m;
+            try{console.log('[BT-direct] metrics:',{trades:m.total_trades,win:m.win_rate,net:m.net_pnl,tl:(r.trade_list||[]).length,eq:(r.equity_curve||[]).length});}catch(e){}
+            if(!m||typeof m.total_trades==='undefined'){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Render error: metrics missing (keys: '+Object.keys(r).join(',')+')</p>';return;}
             const _zt=(m.total_trades||0)===0;
             const ZN=(v)=>_zt?'N/A':v;
             const _p=(r.params||{});
@@ -1368,10 +1389,53 @@ let _lastOpenTrdHTML = null;
 <div class="col"><div class="card stat-card-sm"><div class="label">Max DD</div><div class="value price-down">${m.max_drawdown}%</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Expectancy</div><div class="value ${m.expectancy>=0?'price-up':'price-down'}">${ZN(m.expectancy)}</div></div></div>
 </div>`;
+            // 3) UI/mapping check: per-symbol + charts + trade-list (null-safe).
+            // Ye block pehle missing tha — sirf metrics render hota tha.
+            try{
+                let perSymH='';
+                if(r.symbols&&r.symbols.length>1&&r.per_symbol){
+                    perSymH='<div class="card mb-2"><div class="card-body p-2"><table class="bt-table"><thead><tr><th>Symbol</th><th>Trades</th><th>Win %</th><th>Net P&L</th><th>Status</th></tr></thead><tbody>';
+                    r.symbols.forEach(sx=>{const pm=(r.per_symbol||{})[sx]||{};const st=pm.error?`<span class="text-danger small">${pm.error}</span>`:'<span class="text-success small">OK</span>';perSymH+=`<tr><td><strong>${sx}</strong></td><td>${pm.total_trades||0}</td><td>${pm.win_rate||0}%</td><td class="${C(pm.net_pnl||0)}">${F(pm.net_pnl||0)}</td><td>${st}</td></tr>`;});
+                    perSymH+='</tbody></table></div></div>';
+                    document.getElementById('bt-metrics').innerHTML=perSymH+document.getElementById('bt-metrics').innerHTML;
+                }
+            }catch(e){try{console.log('[BT-direct] per-symbol render fail',e.message);}catch(_){}}
+            try{
+                const _eq=r.equity_curve||[]; const _mo=r.monthly_pnl||{};
+                if(_eq&&_eq.length){document.getElementById('bt-charts').classList.remove('hidden');Plotly.newPlot('eq-chart',[{y:_eq,type:'scatter',line:{color:'#0d6efd',width:2}}],{title:'Equity Curve',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
+                else{try{Plotly.purge('eq-chart');}catch(e){}try{document.getElementById('bt-charts').classList.add('hidden');}catch(e){}}
+                if(_mo&&Object.keys(_mo).length){document.getElementById('bt-charts').classList.remove('hidden');Plotly.newPlot('mo-chart',[{x:Object.keys(_mo),y:Object.values(_mo),type:'bar',marker:{color:Object.values(_mo).map(v=>v>=0?'#198754':'#dc3545')}}],{title:'Monthly P&L',paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{color:'#212529'},margin:{t:30,b:30,l:50,r:20}});}
+            }catch(e){try{console.log('[BT-direct] chart render fail',e.message);}catch(_){}}
+            try{
+                const _tl=r.trade_list||[];
+                try{console.log('[BT-direct] trade_list rows=',_tl.length);}catch(e){}
+                if(_tl&&_tl.length){
+                    document.getElementById('bt-trades').classList.remove('hidden');
+                    let h='<table class="bt-table"><thead><tr><th>#</th><th>Symbol</th><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Type</th><th>Strike</th><th>B/S</th><th>Qty</th><th>Lots</th><th>Entry Price</th><th>Exit Price</th><th>Gross</th><th>Slip</th><th>Exit Reason</th><th>P/L</th></tr></thead><tbody>';
+                    let tradeIdx=0;
+                    _tl.forEach(t=>{
+                        try{
+                            const _gr=t.gross_pnl!=null?`<td class="${C(t.gross_pnl)}">${F(t.gross_pnl)}</td>`:'<td>-</td>';
+                            const _sl=t.slippage!=null?`<td class="text-muted small">${F(t.slippage)}</td>`:'<td>-</td>';
+                            h+=`<tr><td>${++tradeIdx}</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date||''}</td><td>${t.entry_time||''}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike||''}</td><td>${t.position||''}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+Number(t.entry_price).toFixed(2):'-'}</td><td>${t.exit_price?'₹'+Number(t.exit_price).toFixed(2):'-'}</td>${_gr}${_sl}<td class="text-muted small">${t.exit_reason||t.reason||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted||F(t.pnl||0)}</td></tr>`;
+                        }catch(_e){}
+                    });
+                    h+='</tbody></table>';
+                    document.getElementById('bt-tl').innerHTML=h;
+                }else{
+                    try{document.getElementById('bt-tl').innerHTML='<p class="text-muted small p-2">No trades in this run.</p>';}catch(e){}
+                    try{document.getElementById('bt-trades').classList.add('hidden');}catch(e){}
+                }
+            }catch(e){try{console.log('[BT-direct] trade-list render fail',e.message);}catch(_){}}
+            try{const _pb=document.getElementById('bt-progress');if(_pb)_pb.classList.add('hidden');}catch(e){}
+            try{document.getElementById('bt-results').scrollIntoView({behavior:'smooth'});}catch(e){}
+            try{console.log('[BT-direct] rendered run',r.run_id);}catch(e){}
             try{localStorage.setItem('lastBacktestResult',JSON.stringify({metrics:m}));}catch(e){}
         }catch(e){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Render error: '+e.message+'</p>';}
     }
-    async function _runBacktestInner(){
+    async function _runBacktestInner(_seq){
+        // _seq: is run ke baad naya click/request aaya ho to ye purana result
+        // screen par mat lagao (repeat-click overwrite bug).
         // Immediate visible feedback FIRST - proves the click fired. Entry is
         // fully null-guarded: a missing button/element can never silently kill it.
         const btn=document.getElementById('s-run');
@@ -1509,11 +1573,13 @@ let _lastOpenTrdHTML = null;
             _restore();
             if(r.error){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';document.getElementById('bt-charts').classList.add('hidden');document.getElementById('bt-trades').classList.add('hidden');try{document.getElementById('bt-tl').innerHTML='';}catch(e){}return;}
             // Stale-response guard: an older/slower run must never overwrite
-            // a newer run's screen. Backend binds every result to a run_id.
+            // a newer run's screen. Backend binds every result to a run_id,
+            // plus request-seq: is response ke baad naya click aaya to drop.
             try{
+                if(typeof _seq==='number'&&window._btSeq!==_seq){try{console.log('[BT] stale inner drop');}catch(e){}_restore();return;}
                 if(r.run_id){
-                    if(window._btRenderedId===r.run_id){_restore();return;}
-                    window._btRenderedId=r.run_id;
+                    if(window._btRenderedId===r.run_id&&Date.now()-(window._btRenderedAt||0)<1500){_restore();return;}
+                    window._btRenderedId=r.run_id;window._btRenderedAt=Date.now();
                 }
             }catch(e){}
             const m=r.metrics||r; window._lastBacktestMetrics=m;
@@ -1798,10 +1864,12 @@ let _lastOpenTrdHTML = null;
     }
     async function backtestStrat(id){try{
         try{console.log('[BT] Backtest Detail click, strategy id=',id);}catch(e){}
-        go('strategy',document.querySelectorAll('.nav button')[3]);
+        // Robust tab-nav: hardcoded button index ki jagah Strategy tab dhundho
+        try{const _nb=document.querySelector('.nav button[onclick*="strategy"]');go('strategy',_nb||document.querySelectorAll('.nav button')[3]);}catch(e){try{go('strategy',null);}catch(_){}}
         // Pehle saved-config endpoint (exact DB config, form-loss proof), fail par purana form-flow
         try{
             document.getElementById('bt-results').classList.remove('hidden');
+            try{document.getElementById('bt-results').scrollIntoView({behavior:'smooth'});}catch(e){}
             document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Saved strategy backtest chal raha hai...</p>';
             // 45s cap: latke to form-flow (async+progress wala) pakdega.
             // Bina cap ke hang = hamesha-spinner (wahi shikayat).
@@ -1810,8 +1878,8 @@ let _lastOpenTrdHTML = null;
             try{ r=await P('/api/strategies/'+id+'/backtest',{method:'POST',signal:_sctl.signal}); }
             catch(_te){ r={error:'timeout'}; }
             finally{clearTimeout(_stmo);}
-            if(r&&!r.error&&r.metrics){
-                try{console.log('[BT] direct result:',r.run_id,'trades=',(r.metrics||{}).total_trades,'keys=',Object.keys(r));}catch(e){}
+            if(r&&!r.error&&(r.metrics||r.trade_list)){
+                try{console.log('[BT] direct result:',r.run_id,'trades=',((r.metrics||{}).total_trades),'keys=',Object.keys(r));}catch(e){}
                 try{const s=await A('/api/strategies/'+id);if(s&&!s.error)_loadStratToForm(s);}catch(e){}
                 // NOTE: _btRenderedId yahan set MAT karo - renderer khud set
                 // karta hai; pehle set karne se wo "already shown" samajhkar
@@ -2063,10 +2131,31 @@ let _lastOpenTrdHTML = null;
     }
     async function delRobotSaved(id){ if(!confirm('Delete this saved strategy?')) return; try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadRobotSaved();}catch(e){alert('Error: '+e.message);} }
     async function backtestFromRobot(id){
-        // Re-run backtest for a saved strategy and show results (no form disturbance alert)
+        // Saved-robot Backtest button: EXACT saved config par backend endpoint
+        // (form round-trip me kho jaane wale entry/exit conditions, indicators,
+        // lots se zero-metrics aata tha). backtestStrat() jaisa hi flow.
         try{
+            try{console.log('[BT] Robot Backtest click, strategy id=',id);}catch(e){}
+            try{
+                document.getElementById('bt-results').classList.remove('hidden');
+                document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Saved strategy backtest chal raha hai...</p>';
+                const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),45000);
+                let r=null;
+                try{ r=await P('/api/strategies/'+id+'/backtest',{method:'POST',signal:_sctl.signal}); }
+                catch(_te){ r={error:'timeout'}; }
+                finally{clearTimeout(_stmo);}
+                if(r&&!r.error&&(r.metrics||r.trade_list)){
+                    try{console.log('[BT] robot direct result:',r.run_id,'trades=',((r.metrics||{}).total_trades));}catch(e){}
+                    try{const s=await A('/api/strategies/'+id);if(s&&!s.error&&typeof _loadStratToForm==='function')_loadStratToForm(s);}catch(e){}
+                    window._directBT=r; await runBacktest({direct:r});
+                    return;
+                }
+                if(r&&r.error&&r.error!=='timeout'){ throw new Error(r.error); }
+            }catch(_de){ try{console.log('[BT] robot direct fail, form fallback:',(_de.message||_de));}catch(e){} }
+            // Fallback: purana form-flow (poori saved config form me load karke)
             const s=await A('/api/strategies/'+id);
             if(s.error){ alert(s.error); return; }
+            try{if(typeof _loadStratToForm==='function'){_loadStratToForm(s);}else{
             document.getElementById('r-name').value=s.name||'';
             (function(){const b=document.getElementById('r-syms');const v=s.symbol||'BANKNIFTY';if(b){b.querySelectorAll('input').forEach(i=>{i.checked=(i.value===v);});}const s0=document.getElementById('r-sym');if(s0)s0.value=v;})();
             const legs=_parseJsonField(s.legs,[]);
@@ -2078,6 +2167,9 @@ let _lastOpenTrdHTML = null;
             if(ao.trade_mode) document.getElementById('r-type').value=ao.trade_mode;
             if(s.start_date) document.getElementById('r-start').value=s.start_date;
             if(s.end_date) document.getElementById('r-end').value=s.end_date;
+            try{window._stratEntryConds=_parseJsonField(s.entry_conditions,[]);}catch(e){}
+            try{window._stratExitConds=_parseJsonField(s.exit_conditions,[]);}catch(e){}
+            }}catch(e){}
             await runBacktest();
             try{document.getElementById('bt-results').scrollIntoView({behavior:'smooth'});}catch(e){}
         }catch(e){ alert('Error: '+e.message); }

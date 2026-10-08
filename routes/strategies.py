@@ -288,6 +288,8 @@ def strategy_trades(strat_id: int, unlinked: int = 0):
                     "entry_price": t.get("entry_price"),
                     "current_price": p.get("current_price"),
                     "unrealized_pnl": p.get("unrealized_pnl"),
+                    "unrealized_net": p.get("unrealized_net", p.get("unrealized_pnl")),
+                    "est_exit_costs": p.get("est_exit_costs", 0),
                     "trade_mode": t.get("trade_mode"),
                     "status": t.get("status"),
                     "entry_date": t.get("entry_date", ""),
@@ -419,11 +421,25 @@ def strategy_backtest(strat_id: int):
         if not legs:
             return {"error": "Is strategy me koi leg nahi - pehle leg add karke save karo"}
         from routes.strategy_builder import BacktestRequest, _run_backtest_core
+        # Empty dates (purani rows) -> last 60 days IST (stale hardcoded
+        # 2026-08 default par INSUFFICIENT aata tha, button "dead" lagta tha).
+        _sd = (row.get("start_date") or "")[:10]
+        _ed = (row.get("end_date") or "")[:10]
+        if not _sd or not _ed:
+            try:
+                from datetime import datetime as _dti, timedelta as _tdi, timezone as _tzi
+                _ist = _tzi(_tdi(hours=5, minutes=30))
+                _now = _dti.now(_ist).date()
+                _ed = _ed or _now.strftime("%Y-%m-%d")
+                _sd = _sd or (_now - _tdi(days=60)).strftime("%Y-%m-%d")
+            except Exception:
+                _sd = _sd or "2026-08-01"
+                _ed = _ed or "2026-08-20"
         req = BacktestRequest(
             symbol=(row.get("symbol") or "NIFTY"),
             symbols=[],
-            start_date=(row.get("start_date") or ""),
-            end_date=(row.get("end_date") or ""),
+            start_date=_sd,
+            end_date=_ed,
             indicators=indicators or [],
             entry_conditions=entry_conditions or [],
             exit_conditions=exit_conditions or [],

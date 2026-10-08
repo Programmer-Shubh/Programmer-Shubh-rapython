@@ -61,10 +61,18 @@ def get_open_trades():
         pass
     positions = trade_model.get_open_positions_with_pnl(auto_exit=False)
     total_pnl = sum(p["unrealized_pnl"] for p in positions)
+    # Realistic total (exit slippage + costs net) — backtest net se compare
+    # karne ke liye; gross total_pnl backward-compat ke liye rakha hai.
+    try:
+        total_net = round(sum(float(p.get("unrealized_net", p["unrealized_pnl"])) for p in positions), 2)
+    except Exception:
+        total_net = round(total_pnl, 2)
     return {
         "count": len(positions),
         "total_pnl": round(total_pnl, 2),
         "total_pnl_formatted": format_currency(total_pnl),
+        "total_net": total_net,
+        "total_net_formatted": format_currency(total_net),
         "positions": [
             {
                 "id": t["trade"]["id"],
@@ -77,6 +85,8 @@ def get_open_trades():
                 "entry_price": t["trade"]["entry_price"],
                 "current_price": t["current_price"],
                 "pnl": t["unrealized_pnl"],
+                "pnl_net": t.get("unrealized_net", t["unrealized_pnl"]),
+                "est_exit_costs": t.get("est_exit_costs", 0),
                 "sl": t["trade"]["stop_loss"],
                 "tp": t["trade"]["target"],
                 "trade_mode": t["trade"].get("trade_mode", "paper"),

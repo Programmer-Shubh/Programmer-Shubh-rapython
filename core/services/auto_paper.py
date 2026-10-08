@@ -223,14 +223,19 @@ def _intraday_signal(sid, s, today):
         try:
             # Bandwidth saver: 15m bars shared across strategies, 15-min TTL
             # (was: fresh fetch per strategy per 5-min run).
-            _ic = _INTRA_CACHE.get(sym)
+            _tf0 = str((adv or {}).get("timeframe") or "15m").lower()
+            if _tf0 not in ("1m", "5m", "15m", "30m", "1h"):
+                _tf0 = "15m"
+            _ick = (sym, _tf0)
+            _ic = _INTRA_CACHE.get(_ick)
             if _ic and time.time() - _ic[0] < _INTRA_TTL:
                 bars = _ic[1]
             else:
                 from core.services.scanner import OptionScanner
-                bars = OptionScanner()._fetch_intraday_bars(sym, "15m")
+                _tf = _tf0
+                bars = OptionScanner()._fetch_intraday_bars(sym, _tf)
                 try:
-                    _INTRA_CACHE[sym] = (time.time(), bars)
+                    _INTRA_CACHE[_ick] = (time.time(), bars)
                     if len(_INTRA_CACHE) > 20:
                         _INTRA_CACHE.pop(next(iter(_INTRA_CACHE)))
                 except Exception:
@@ -263,8 +268,16 @@ def _intraday_signal(sid, s, today):
         if not isinstance(adv, dict):
             adv = {}
         adv = dict(adv)
-        adv["trade_mode"] = "intraday"
-        adv["timeframe"] = "15m"
+        # Saved config parity: backtest jis trade_mode/timeframe par chala,
+        # paper bhi usi par (pehle hamesha intraday/15m force hota tha ->
+        # positional-1d backtest vs intraday paper kabhi match nahi hota tha).
+        # Sirf missing ho to intraday/15m default.
+        _saved_mode = str(adv.get("trade_mode") or "").lower()
+        if _saved_mode not in ("intraday", "positional", "btst"):
+            adv["trade_mode"] = "intraday"
+        _saved_tf = str(adv.get("timeframe") or "").lower()
+        if _saved_tf not in ("1m", "5m", "15m", "30m", "1h", "1d"):
+            adv["timeframe"] = "15m"
         try:
             risk = _js.loads(s.get("risk_management") or "{}")
         except Exception:
@@ -366,7 +379,8 @@ def _execute_legs(s, legs, db, tm, today):
             if isinstance(res, dict) and res.get("trade_id"):
                 placed.append({"strategy": s.get("name"), "trade_id": res["trade_id"],
                                "entry": res.get("entry_price"),
-                               "rolled_to": res.get("rolled_to", "")})
+                               "rolled_to": res.get("rolled_to", ""),
+                               "strike_snapped": res.get("strike_snapped") or None})
             elif isinstance(res, dict) and res.get("error"):
                 notes.append(f"{s.get('name')}: {str(res['error'])[:100]}")
                 break

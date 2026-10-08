@@ -305,20 +305,22 @@ class IndicatorEngine:
         mid = []
         upper = []
         lower = []
+        prev_atr = None
         for i in range(n):
             if i >= period - 1:
                 window_prices = prices[i - period + 1:i + 1]
                 window_highs = highs[i - period + 1:i + 1]
                 window_lows = lows[i - period + 1:i + 1]
                 sma = sum(window_prices) / period
-                # Use lookahead high/low for volatility estimation
-                max_h = max(window_highs)
-                min_l = min(window_lows)
-                # Adaptive volatility: use ATR-like measure
-                atr = max(max_h - min_l, (sum(window_prices) / period) * 0.02)
+                # ATR-like measure: MEAN of per-bar true ranges (not the whole
+                # window high-low range - woh trend me ±25% bands banata tha
+                # jo price kabhi chhuta hi nahi tha = indicator hamesha dead).
+                bar_ranges = [max(window_highs[j] - window_lows[j], 0.0)
+                              for j in range(period)]
+                atr = max(sum(bar_ranges) / max(period, 1),
+                          (sum(window_prices) / period) * 0.02)
                 # AI adjustment: volatility expansion factor based on recent volatility change
-                if i >= period * 2:
-                    prev_atr = max(window_prices[:period]) - min(window_lows[:period])
+                if prev_atr is not None:
                     vol_ratio = atr / max(prev_atr, 0.001)
                     # Expand/contract bands based on volatility regime
                     if vol_ratio > 1.2:
@@ -329,6 +331,7 @@ class IndicatorEngine:
                         band_wide = atr * 1.0
                 else:
                     band_wide = atr * 1.0
+                prev_atr = atr
                 mid.append(sma)
                 upper.append(sma + band_wide)
                 lower.append(sma - band_wide)
@@ -613,7 +616,21 @@ class IndicatorEngine:
             avg5 = sum(vols[max(0,i-5):i]) / max(1, min(5, i))
             if vols[i] >= 2 * avg5 and avg5 > 0:
                 vol_spike[i] = True
-        return {"upper": upper, "lower": lower, "squeeze": squeeze, "vol_spike": vol_spike, "signal": [1 if squeeze[i] and vol_spike[i] and closes[i] > upper[i] else -1 if squeeze[i] and vol_spike[i] and closes[i] < lower[i] else 0 for i in range(n)]}
+        # Signal: squeeze PHLE (bar i-1) + breakout/volume AB (bar i).
+        # Pehle teeno same bar par mange jate the - breakout bar apni hi
+        # window chaudi karke squeeze khatm kar deta tha, isliye signal
+        # kabhi banta hi nahi tha (hamesha 0 = "indicator kaam nahi karta").
+        sig = [0] * n
+        for i in range(1, n):
+            if not squeeze[i - 1] or not vol_spike[i]:
+                continue
+            up = upper[i] if upper[i] is not None else upper[i - 1]
+            lo = lower[i] if lower[i] is not None else lower[i - 1]
+            if up is not None and closes[i] > up:
+                sig[i] = 1
+            elif lo is not None and closes[i] < lo:
+                sig[i] = -1
+        return {"upper": upper, "lower": lower, "squeeze": squeeze, "vol_spike": vol_spike, "signal": sig}
 
     def calculate_adx(self, data: List[Dict], period: int = 14) -> Dict:
         """Wilder's ADX with +DI/-DI. adx[i] = trend strength (0-100);

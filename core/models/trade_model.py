@@ -336,6 +336,24 @@ class TradeModel:
                 pnl = (current_price - entry) * qty * lot
             else:
                 pnl = (entry - current_price) * qty * lot
+            # Realistic net: backtest net PnL me exit slippage + exit costs
+            # pehle se kat-ti hai, par open PnL gross dikhta tha -> paper
+            # khula rehne par profitable, close par loss (divergence #2).
+            # unrealized_pnl (gross, backward-compat) ke saath unrealized_net
+            # + est_exit_costs bhi bhejo taaki UI realistic figure dikhaye.
+            try:
+                from core.services.transaction_costs import TransactionCosts as _TC
+                _exit_side = "SELL" if t["transaction_type"] == "BUY" else "BUY"
+                _slip_exit = _TC.apply_fill_slippage(float(current_price or 0), _exit_side, is_live=True)
+                _exit_costs = _TC.calculate(float(_slip_exit or 0) * qty * lot,
+                                            t["transaction_type"] == "BUY", is_live=True)["total"]
+                _entry_costs = float(t.get("total_cost") or 0)
+                if t["transaction_type"] == "BUY":
+                    _net = (float(_slip_exit or 0) - entry) * qty * lot - _entry_costs - float(_exit_costs or 0)
+                else:
+                    _net = (entry - float(_slip_exit or 0)) * qty * lot - _entry_costs - float(_exit_costs or 0)
+            except Exception:
+                _net, _exit_costs = pnl, 0.0
             # Clamp flicker vs PRE-tick value: if current jumps >80%, keep prev
             # (prevent 150->49 flash). Uses prev, not the raw value just cached
             # by get_option_premium() above.
@@ -351,6 +369,8 @@ class TradeModel:
                 "trade": t,
                 "current_price": round(current_price, 2),
                 "unrealized_pnl": round(pnl, 2),
+                "unrealized_net": round(_net, 2),
+                "est_exit_costs": round(_exit_costs, 2),
                 "unrealized_pct": round((pnl / (entry * qty * lot)) * 100, 2) if entry > 0 else 0,
                 "invalid": False,
             })
