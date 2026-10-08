@@ -1794,7 +1794,13 @@ let _lastOpenTrdHTML = null;
         try{
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Saved strategy backtest chal raha hai...</p>';
-            const r=await P('/api/strategies/'+id+'/backtest',{method:'POST'});
+            // 45s cap: latke to form-flow (async+progress wala) pakdega.
+            // Bina cap ke hang = hamesha-spinner (wahi shikayat).
+            const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),45000);
+            let r=null;
+            try{ r=await P('/api/strategies/'+id+'/backtest',{method:'POST',signal:_sctl.signal}); }
+            catch(_te){ r={error:'timeout'}; }
+            finally{clearTimeout(_stmo);}
             if(r&&!r.error&&r.metrics){
                 try{const s=await A('/api/strategies/'+id);if(s&&!s.error)_loadStratToForm(s);}catch(e){}
                 window._btRenderedId=r.run_id;
