@@ -1364,7 +1364,13 @@ let _lastOpenTrdHTML = null;
             const ZN=(v)=>_zt?'N/A':v;
             const _p=(r.params||{});
             const _pleg=(_p.legs||[]).map(l=>((l.transaction||'').toUpperCase()+' '+(l.option_type||'').toUpperCase())).join(' + ')||'-';
-            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'');
+            // Saved-result identity: config same rahe to backend WAHI saved
+            // result bhejta hai (same run_id). Naya data/config par naya run
+            // chahiye to ↻ Naya run dabao (force refresh).
+            try{if(r.strategy_id)window._lastBTStratId=r.strategy_id;}catch(e){}
+            const _storedBadge=r.stored?(' • <span class="badge bg-success">Saved result'+(r.stored_at?(' • '+r.stored_at):'')+'</span>'):(r.stored===false&&r.strategy_id?(' • <span class="badge bg-info">Naya run (saved)</span>'):'');
+            const _refreshBtn=r.strategy_id?(' <button class="btn btn-sm btn-outline-primary ms-1" style="font-size:11px;padding:0 6px" title="Config same hai to saved, naya chahiye to force" onclick="backtestStrat('+(r.strategy_id)+',true)">↻ Naya run</button>'):'';
+            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'')+_storedBadge+_refreshBtn;
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
             const pnl = m.final_capital - m.initial_capital;
@@ -1862,11 +1868,12 @@ let _lastOpenTrdHTML = null;
             try{window._stratExitConds=Array.isArray(s.exit_conditions)?s.exit_conditions:JSON.parse(s.exit_conditions||'[]');}catch(e){window._stratExitConds=[];}
         }catch(e){}
     }
-    async function backtestStrat(id){try{
-        try{console.log('[BT] Backtest Detail click, strategy id=',id);}catch(e){}
+    async function backtestStrat(id, force){try{
+        try{console.log('[BT] Backtest Detail click, strategy id=',id,'force=',!!force);}catch(e){}
         // Robust tab-nav: hardcoded button index ki jagah Strategy tab dhundho
         try{const _nb=document.querySelector('.nav button[onclick*="strategy"]');go('strategy',_nb||document.querySelectorAll('.nav button')[3]);}catch(e){try{go('strategy',null);}catch(_){}}
-        // Pehle saved-config endpoint (exact DB config, form-loss proof), fail par purana form-flow
+        // Pehle saved-config endpoint (exact DB config, form-loss proof), fail par purana form-flow.
+        // force=true (?refresh=1) par saved result BYPASS karke naya run.
         try{
             document.getElementById('bt-results').classList.remove('hidden');
             try{document.getElementById('bt-results').scrollIntoView({behavior:'smooth'});}catch(e){}
@@ -1875,7 +1882,7 @@ let _lastOpenTrdHTML = null;
             // Bina cap ke hang = hamesha-spinner (wahi shikayat).
             const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),45000);
             let r=null;
-            try{ r=await P('/api/strategies/'+id+'/backtest',{method:'POST',signal:_sctl.signal}); }
+            try{ r=await P('/api/strategies/'+id+'/backtest'+(force?'?refresh=1':''),{method:'POST',signal:_sctl.signal}); }
             catch(_te){ r={error:'timeout'}; }
             finally{clearTimeout(_stmo);}
             if(r&&!r.error&&(r.metrics||r.trade_list)){
@@ -2130,10 +2137,11 @@ let _lastOpenTrdHTML = null;
         }catch(e){ document.getElementById('robot-saved').innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>'; console.error(e); }
     }
     async function delRobotSaved(id){ if(!confirm('Delete this saved strategy?')) return; try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadRobotSaved();}catch(e){alert('Error: '+e.message);} }
-    async function backtestFromRobot(id){
+    async function backtestFromRobot(id, force){
         // Saved-robot Backtest button: EXACT saved config par backend endpoint
         // (form round-trip me kho jaane wale entry/exit conditions, indicators,
         // lots se zero-metrics aata tha). backtestStrat() jaisa hi flow.
+        // Config same rahe to SAVED wahi result; force=true par naya run.
         try{
             try{console.log('[BT] Robot Backtest click, strategy id=',id);}catch(e){}
             try{
@@ -2141,7 +2149,7 @@ let _lastOpenTrdHTML = null;
                 document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Saved strategy backtest chal raha hai...</p>';
                 const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),45000);
                 let r=null;
-                try{ r=await P('/api/strategies/'+id+'/backtest',{method:'POST',signal:_sctl.signal}); }
+                try{ r=await P('/api/strategies/'+id+'/backtest'+(force?'?refresh=1':''),{method:'POST',signal:_sctl.signal}); }
                 catch(_te){ r={error:'timeout'}; }
                 finally{clearTimeout(_stmo);}
                 if(r&&!r.error&&(r.metrics||r.trade_list)){

@@ -375,12 +375,18 @@ def rollover_endpoint(strat_id: int):
 
 
 @router.post("/{strat_id}/backtest")
-def strategy_backtest(strat_id: int):
+def strategy_backtest(strat_id: int, refresh: int = 0):
     """Saved strategy ka backtest EXACT saved config par - form round-trip
     me kho jaane wale fields (entry/exit conditions, lots, mtd, checkbox
     indicators) se zero-metrics aata tha. Ye endpoint DB se sidha
-    BacktestRequest banakar chalata hai."""
+    BacktestRequest banakar chalata hai.
+
+    Wahi-result guarantee: pehli run ka poora result strategy ke saath DB me
+    save hota hai (last_backtest). Config same rahe to dobara click par WAHI
+    saved result turant milta hai (same run_id, same numbers) - naya run nahi.
+    Config badli ho ya ?refresh=1 ho to naya run + save."""
     import json as _js
+    import hashlib as _hl
     try:
         db = Database.get_instance()
         row = db.fetch_one("SELECT * FROM strategies WHERE id=?", [strat_id])
@@ -447,12 +453,64 @@ def strategy_backtest(strat_id: int):
             advanced=advanced or {},
             risk=risk or {},
         )
+        # Config hash (RESOLVED dates ke saath - empty dates ka fallback roz
+        # badalta hai): kuch bhi badla to naya run, warna SAVED wahi result
+        # (same run_id, same numbers, instant).
+        _cfg_hash = ""
+        try:
+            _cfg_hash = _hl.md5(_js.dumps({
+                "symbol": (row.get("symbol") or "NIFTY"),
+                "start_date": _sd,
+                "end_date": _ed,
+                "timeframe": (row.get("timeframe") or ""),
+                "indicators": indicators or [],
+                "entry_conditions": entry_conditions or [],
+                "exit_conditions": exit_conditions or [],
+                "legs": legs,
+                "advanced": advanced or {},
+                "risk": risk or {},
+            }, sort_keys=True, default=str).encode()).hexdigest()
+        except Exception:
+            _cfg_hash = ""
+        if not refresh and _cfg_hash:
+            try:
+                if str(row.get("last_backtest_hash") or "") == _cfg_hash and row.get("last_backtest"):
+                    _stored = _js.loads(row["last_backtest"])
+                    if isinstance(_stored, dict) and (_stored.get("metrics") or _stored.get("trade_list") is not None):
+                        _stored["stored"] = True
+                        _stored["stored_at"] = row.get("last_backtest_at") or ""
+                        _stored["strategy_id"] = strat_id
+                        _stored["strategy_name"] = row.get("name") or ""
+                        try:
+                            _stored["took_ms"] = 5
+                            _stored["cached"] = True
+                        except Exception:
+                            pass
+                        return _stored
+            except Exception:
+                pass
         res = _run_backtest_core(req)
         try:
             res["strategy_id"] = strat_id
             res["strategy_name"] = row.get("name") or ""
+            res["stored"] = False
         except Exception:
             pass
+        # Naya run save karo taaki agli baar WAHI result mile (error save nahi).
+        if isinstance(res, dict) and not res.get("error") and (res.get("metrics") or res.get("trade_list") is not None):
+            try:
+                from datetime import datetime as _dtn, timedelta as _tdn, timezone as _tzn
+                _now_s = (_dtn.now(_tzn(_tdn(hours=5, minutes=30)))).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                _now_s = ""
+            try:
+                db.execute(
+                    "UPDATE strategies SET last_backtest=?, last_backtest_hash=?, last_backtest_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    [_js.dumps(res, default=str), _cfg_hash, _now_s, strat_id],
+                )
+                res["stored_at"] = _now_s
+            except Exception:
+                pass
         return res
     except Exception as e:
         import traceback

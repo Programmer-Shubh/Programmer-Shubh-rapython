@@ -308,6 +308,9 @@ class Database:
                     advanced_options TEXT DEFAULT '{}',
                     risk_management TEXT DEFAULT '{}',
                     status TEXT DEFAULT 'active',
+                    last_backtest TEXT DEFAULT NULL,
+                    last_backtest_hash TEXT DEFAULT NULL,
+                    last_backtest_at TEXT DEFAULT NULL,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 );
@@ -460,6 +463,9 @@ class Database:
                     advanced_options TEXT DEFAULT '{}',
                     risk_management TEXT DEFAULT '{}',
                     status TEXT DEFAULT 'active',
+                    last_backtest TEXT DEFAULT NULL,
+                    last_backtest_hash TEXT DEFAULT NULL,
+                    last_backtest_at TEXT DEFAULT NULL,
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
@@ -502,6 +508,14 @@ class Database:
                 cols = {str(r["column_name"]).lower() for r in rows}
                 if "status" not in cols:
                     self.execute("ALTER TABLE strategies ADD COLUMN status TEXT DEFAULT 'active'")
+                for _cc, _ct in (("last_backtest", "TEXT DEFAULT NULL"),
+                                 ("last_backtest_hash", "TEXT DEFAULT NULL"),
+                                 ("last_backtest_at", "TEXT DEFAULT NULL")):
+                    if _cc not in cols:
+                        try:
+                            self.execute(f"ALTER TABLE strategies ADD COLUMN {_cc} {_ct}")
+                        except Exception:
+                            pass
             except Exception:
                 pass
             try:
@@ -528,14 +542,30 @@ class Database:
                 pass
             return
         # SQLite migrations (original)
+        # NOTE: fetch_all returns DICTS (not tuples) - r[1] raises KeyError
+        # (purana bug: saari SQLite migrations silently skip ho rahi thin).
+        def _colnames(table):
+            try:
+                return {(r["name"] if isinstance(r, dict) else r[1])
+                        for r in self.fetch_all(f"PRAGMA table_info({table})")}
+            except Exception:
+                return set()
         try:
-            cols = {r[1] for r in self.fetch_all("PRAGMA table_info(strategies)")}
+            cols = _colnames("strategies")
             if "status" not in cols:
                 self.execute("ALTER TABLE strategies ADD COLUMN status TEXT DEFAULT 'active'")
+            for _cc, _ct in (("last_backtest", "TEXT DEFAULT NULL"),
+                             ("last_backtest_hash", "TEXT DEFAULT NULL"),
+                             ("last_backtest_at", "TEXT DEFAULT NULL")):
+                if _cc not in cols:
+                    try:
+                        self.execute(f"ALTER TABLE strategies ADD COLUMN {_cc} {_ct}")
+                    except Exception:
+                        pass
         except Exception:
             pass
         try:
-            cols = {r[1] for r in self.fetch_all("PRAGMA table_info(paper_trades)")}
+            cols = _colnames("paper_trades")
             if "entry_iv" not in cols:
                 self.execute("ALTER TABLE paper_trades ADD COLUMN entry_iv REAL DEFAULT NULL")
             if "trade_type" not in cols:
@@ -543,13 +573,13 @@ class Database:
         except Exception:
             pass
         try:
-            cols = {r[1] for r in self.fetch_all("PRAGMA table_info(paper_trades)")}
+            cols = _colnames("paper_trades")
             if "broker_order_id" not in cols:
                 self.execute("ALTER TABLE paper_trades ADD COLUMN broker_order_id TEXT DEFAULT ''")
         except Exception:
             pass
         try:
-            cols = {r[1] for r in self.fetch_all("PRAGMA table_info(auto_trades)")}
+            cols = _colnames("auto_trades")
             if "trade_type" not in cols:
                 self.execute("ALTER TABLE auto_trades ADD COLUMN trade_type TEXT DEFAULT 'intraday'")
         except Exception:
