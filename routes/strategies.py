@@ -21,6 +21,122 @@ class StrategyRequest(BaseModel):
     advanced_options: dict = {}
     risk_management: dict = {}
     status: str = "active"
+    # Frontend apna abhi-chalaya backtest result bhej sakta hai taaki save ke
+    # saath hi result bhi save ho - Backtest Detail phir dobara run nahi karega.
+    last_backtest: Optional[dict] = None
+
+
+def _norm_legs_for_hash(legs):
+    """Hash/compare ke liye legs normalize (backtest endpoint jaisa)."""
+    import copy as _cp
+    out = []
+    try:
+        for _l in (_cp.deepcopy(legs) or []):
+            if isinstance(_l, dict):
+                _l.setdefault("lots", 1)
+                _l.setdefault("expiry", "weekly")
+                _l.setdefault("strike_selection", "atm")
+                _l.setdefault("otm_distance", 0)
+                out.append({k: _l.get(k) for k in
+                            ("option_type", "transaction", "position", "lots",
+                             "strike_selection", "otm_distance", "expiry",
+                             "delta_target", "offset") if _l.get(k) is not None})
+    except Exception:
+        pass
+    return out
+
+
+def _canonical_config_hash(symbol, start_date, end_date, timeframe,
+                           indicators, entry_conditions, exit_conditions,
+                           legs, advanced, risk) -> str:
+    """Saved-config ka stable hash (RAW dates - taaki repeat click par wahi
+    saved result mile, roz naya run na ho). backtest endpoint + save dono
+    yahi use karte hain."""
+    import json as _js
+    import hashlib as _hl
+    try:
+        adv = dict(advanced or {})
+        if timeframe and not adv.get("timeframe"):
+            adv["timeframe"] = timeframe
+        return _hl.md5(_js.dumps({
+            "symbol": (symbol or "NIFTY"),
+            "start_date": (start_date or "")[:10],
+            "end_date": (end_date or "")[:10],
+            "timeframe": (timeframe or ""),
+            "indicators": indicators or [],
+            "entry_conditions": entry_conditions or [],
+            "exit_conditions": exit_conditions or [],
+            "legs": _norm_legs_for_hash(legs),
+            "advanced": adv,
+            "risk": risk or {},
+        }, sort_keys=True, default=str).encode()).hexdigest()
+    except Exception:
+        return ""
+
+
+def _result_matches_config(res: dict, symbol, start_date, end_date,
+                           indicators, legs) -> bool:
+    """Frontend-bheja result kya isi saved config se bana hai? (params echo
+    vs saved config). Mismatch par attach mat karo - galat result card par
+    dikhega. Returns True only on clear match."""
+    try:
+        if not isinstance(res, dict):
+            return False
+        m = res.get("metrics") or {}
+        if not isinstance(m, dict) or "total_trades" not in m:
+            return False
+        p = res.get("params") or {}
+        if not isinstance(p, dict):
+            return False
+        syms = p.get("symbols") or ([res.get("symbol")] if res.get("symbol") else [])
+        if str(symbol or "").upper() not in [str(x or "").upper() for x in syms]:
+            return False
+        if str(p.get("start_date") or "")[:10] != str(start_date or "")[:10]:
+            return False
+        if str(p.get("end_date") or "")[:10] != str(end_date or "")[:10]:
+            return False
+        plegs = p.get("legs") or []
+        if len(plegs) != len(legs or []):
+            return False
+        for _pl, _sl in zip(plegs, legs or []):
+            if not isinstance(_pl, dict) or not isinstance(_sl, dict):
+                return False
+            if str(_pl.get("option_type") or "").upper() != str(_sl.get("option_type") or "").upper():
+                return False
+            _st = str(_sl.get("transaction") or _sl.get("position") or "").lower()
+            if str(_pl.get("transaction") or "").lower() != _st:
+                return False
+        pinds = set()
+        for _iv in (p.get("indicators") or []):
+            pinds.add(str(_iv or ""))
+        sinds = set()
+        for _iv in (indicators or []):
+            sinds.add(str((_iv.get("id") if isinstance(_iv, dict) else _iv) or ""))
+        if pinds != sinds:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _bt_summary(row) -> dict:
+    """List/cards ke liye halka summary (poora JSON nahi - list halki rahe)."""
+    import json as _js
+    try:
+        raw = row.get("last_backtest") or ""
+        if not raw:
+            return {}
+        _r = _js.loads(raw) if isinstance(raw, str) else raw
+        _m = (_r or {}).get("metrics") or {}
+        if not isinstance(_m, dict) or "total_trades" not in _m:
+            return {}
+        return {"trades": int(_m.get("total_trades") or 0),
+                "win_rate": float(_m.get("win_rate") or 0),
+                "net_pnl": float(_m.get("net_pnl") or 0),
+                "run_id": (_r or {}).get("run_id") or "",
+                "stored_at": row.get("last_backtest_at") or ""}
+    except Exception:
+        return {}
 
 
 def _ist_today():
@@ -113,6 +229,17 @@ def list_strategies():
         r["exit_conditions"] = json.loads(r.get("exit_conditions") or "[]")
         r["advanced_options"] = json.loads(r.get("advanced_options") or "{}")
         r["risk_management"] = json.loads(r.get("risk_management") or "{}")
+        # Saved backtest: poora JSON list me nahi (payload bhari), sirf
+        # summary - card par result pehle se dikhega, dobara run nahi.
+        try:
+            r["bt"] = _bt_summary(r)
+            for _drop in ("last_backtest", "last_backtest_hash"):
+                try:
+                    r.pop(_drop, None)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         _apply_expiry_status(r)
     return {"strategies": rows, "count": len(rows)}
 
@@ -130,6 +257,15 @@ def get_strategy(strat_id: int):
     row["exit_conditions"] = json.loads(row.get("exit_conditions") or "[]")
     row["advanced_options"] = json.loads(row.get("advanced_options") or "{}")
     row["risk_management"] = json.loads(row.get("risk_management") or "{}")
+    try:
+        row["bt"] = _bt_summary(row)
+        for _drop in ("last_backtest", "last_backtest_hash"):
+            try:
+                row.pop(_drop, None)
+            except Exception:
+                pass
+    except Exception:
+        pass
     _apply_expiry_status(row)
     return row
 
@@ -153,6 +289,49 @@ def save_strategy(req: StrategyRequest):
         "risk_management": json.dumps(req.risk_management),
         "status": req.status,
     }
+    # Saved-result attach/clear: frontend ne abhi-chalaya result bheja ho AUR
+    # wo isi config se bana ho to save ke saath result bhi save (Backtest
+    # Detail phir dobara run nahi karega). Config badli ho aur koi result na
+    # aaya ho to purana saved result saaf (stale card nahi dikhega).
+    try:
+        _new_hash = _canonical_config_hash(
+            req.symbol, req.start_date, req.end_date, req.timeframe,
+            req.indicators, req.entry_conditions, req.exit_conditions,
+            req.legs, req.advanced_options, req.risk_management)
+    except Exception:
+        _new_hash = ""
+    _attach_res, _clear_stored = None, False
+    try:
+        if isinstance(req.last_backtest, dict) and _result_matches_config(
+                req.last_backtest, req.symbol, req.start_date, req.end_date,
+                req.indicators, req.legs):
+            _attach_res = req.last_backtest
+        elif req.id:
+            # No valid attach (bheja hi nahi ya mismatch): config badli ho to
+            # purana saved result saaf - stale card kabhi nahi dikhega.
+            _old = db.fetch_one(
+                "SELECT last_backtest_hash FROM strategies WHERE id=?", [req.id])
+            _old_hash = str((_old or {}).get("last_backtest_hash") or "")
+            if _old_hash and _new_hash and _old_hash != _new_hash:
+                _clear_stored = True
+    except Exception:
+        pass
+    try:
+        from datetime import datetime as _dtn, timedelta as _tdn, timezone as _tzn
+        _now_s = _dtn.now(_tzn(_tdn(hours=5, minutes=30))).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        _now_s = ""
+    if _attach_res is not None:
+        try:
+            data["last_backtest"] = json.dumps(_attach_res, default=str)
+            data["last_backtest_hash"] = _new_hash
+            data["last_backtest_at"] = _now_s
+        except Exception:
+            pass
+    elif _clear_stored:
+        data["last_backtest"] = None
+        data["last_backtest_hash"] = None
+        data["last_backtest_at"] = None
     if req.id:
         sets = ", ".join(f"{k}=?" for k in data)
         vals = list(data.values()) + [req.id]
@@ -386,7 +565,6 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
     saved result turant milta hai (same run_id, same numbers) - naya run nahi.
     Config badli ho ya ?refresh=1 ho to naya run + save."""
     import json as _js
-    import hashlib as _hl
     try:
         db = Database.get_instance()
         row = db.fetch_one("SELECT * FROM strategies WHERE id=?", [strat_id])
@@ -453,25 +631,12 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
             advanced=advanced or {},
             risk=risk or {},
         )
-        # Config hash (RESOLVED dates ke saath - empty dates ka fallback roz
-        # badalta hai): kuch bhi badla to naya run, warna SAVED wahi result
-        # (same run_id, same numbers, instant).
-        _cfg_hash = ""
-        try:
-            _cfg_hash = _hl.md5(_js.dumps({
-                "symbol": (row.get("symbol") or "NIFTY"),
-                "start_date": _sd,
-                "end_date": _ed,
-                "timeframe": (row.get("timeframe") or ""),
-                "indicators": indicators or [],
-                "entry_conditions": entry_conditions or [],
-                "exit_conditions": exit_conditions or [],
-                "legs": legs,
-                "advanced": advanced or {},
-                "risk": risk or {},
-            }, sort_keys=True, default=str).encode()).hexdigest()
-        except Exception:
-            _cfg_hash = ""
+        # Config hash (RAW dates - stable: repeat click par wahi saved result,
+        # roz naya run nahi. Save-time hash bhi raw dates par hai).
+        _cfg_hash = _canonical_config_hash(
+            row.get("symbol"), row.get("start_date"), row.get("end_date"),
+            row.get("timeframe"), indicators, entry_conditions,
+            exit_conditions, legs, advanced, risk)
         if not refresh and _cfg_hash:
             try:
                 if str(row.get("last_backtest_hash") or "") == _cfg_hash and row.get("last_backtest"):
