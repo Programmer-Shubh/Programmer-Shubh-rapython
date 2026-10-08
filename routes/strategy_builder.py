@@ -241,9 +241,22 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
     return [], "no-intraday-data"
 
 
-def _yahoo_full_range(sym, start_date, end_date):
-    """Yahoo daily, poora requested range (60-day cut ke saath). Single source,
-    koi date-merge nahi. 1 retry (transient throttle). Returns bars ([] = fail)."""
+def _daily_fallback_range(sym, start_date, end_date):
+    """Daily fallback, poora requested range: nsepython (NSE official) pehle,
+    phir Yahoo (60-day cut). Single source jo pehle 15+ bars de (koi date-merge
+    nahi). Returns (bars, src) - src: nsepython_daily / yahoo_daily / ""."""
+    try:
+        from core.services.historical_fetcher import _fetch_nsepython_historical as _fnp
+        try:
+            _nb = _fnp(sym, start_date, end_date) or []
+        except Exception:
+            _nb = []
+        _nb = [b for b in (_nb or [])
+               if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        if _nb and len(_nb) >= 15:
+            return _nb, "nsepython_daily"
+    except Exception:
+        pass
     try:
         from core.services.free_data import fetch_yahoo_daily as _fyd
         from core.services.data_validator import yahoo_60d_filter as _f60
@@ -262,7 +275,18 @@ def _yahoo_full_range(sym, start_date, end_date):
                 pass
         bars = [b for b in (bars or [])
                 if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
-        return bars
+        if bars:
+            return bars, "yahoo_daily"
+    except Exception:
+        pass
+    return [], ""
+
+
+def _yahoo_full_range(sym, start_date, end_date):
+    """Backward-compat wrapper (sirf bars). Naya code _daily_fallback_range use kare."""
+    try:
+        _b, _s = _daily_fallback_range(sym, start_date, end_date)
+        return _b
     except Exception:
         return []
 
@@ -890,13 +914,14 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     from concurrent.futures import ThreadPoolExecutor as _TPE2
                     def _oneY(_s):
                         try:
-                            return _s, _yahoo_full_range(_s, start_date, end_date)
+                            _b, _src = _daily_fallback_range(_s, start_date, end_date)
+                            return _s, (_b or [], _src or "")
                         except Exception:
-                            return _s, []
+                            return _s, ([], "")
                     with _TPE2(max_workers=6) as _ex2:
                         for _s, _r in _ex2.map(_oneY, _needY):
                             try:
-                                _preY[_s] = _r or []
+                                _preY[_s] = _r
                             except Exception:
                                 pass
                 except Exception:
@@ -1035,23 +1060,27 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     except Exception:
                         pass
                 else:
-                    # Spec: DB<15 to Yahoo full-range (prefetched parallel, else direct).
-                    # Na mile to INSUFFICIENT - synthetic fabrication kabhi nahi.
+                    # Spec: DB<15 to NSE-official/Yahoo fallback (prefetched parallel,
+                    # else direct). Na mile to INSUFFICIENT - fabrication kabhi nahi.
                     try:
-                        _yb = _preY.get(_sym) if _sym in _preY else _yahoo_full_range(_sym, start_date, end_date)
+                        if _sym in _preY:
+                            _yb, _ysrc = _preY[_sym]
+                        else:
+                            _yb, _ysrc = _daily_fallback_range(_sym, start_date, end_date)
                     except Exception:
-                        _yb = []
+                        _yb, _ysrc = [], ""
                     if _yb and len(_yb) >= 15:
                         historical = _yb
-                        _hist_src = "yahoo_daily"
+                        _hist_src = _ysrc or "yahoo_daily"
                         try:
                             from core.services.data_validator import validate_symbol as _vs
-                            _q = _vs(_yb, "yahoo", _db_hist or None, "nse_official_db")
+                            _q = _vs(_yb, "yahoo" if "yahoo" in _hist_src else "nsepython",
+                                     _db_hist or None, "nse_official_db")
                             _hist_status = str(_q.get("status", "SECONDARY_ONLY"))
                         except Exception:
                             _hist_status = "SECONDARY_ONLY"
                     else:
-                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, Yahoo fail) - fabricated data nahi banate", "total_trades": 0,
+                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, NSE/Yahoo fail) - fabricated data nahi banate", "total_trades": 0,
                                              "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                              "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
                         _fire_prog(_sym)
@@ -1062,7 +1091,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             # Spec §4/§15: <30 bars aur koi real source nahi -> INSUFFICIENT
             # (fabricated synthetic se backtest kabhi nahi).
             if not _use_db and (not historical or len(historical) < 30):
-                _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye {_bar_cap} bars nahi mile (DB/TV/Yahoo sab fail) - fabricated data nahi banate", "total_trades": 0,
+                _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 30+ real bars nahi mile (DB/NSE/Yahoo sab fail) - fabricated data nahi banate", "total_trades": 0,
                                      "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                      "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(historical or [])}}
                 _fire_prog(_sym)
@@ -1198,13 +1227,15 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     _dq = {"source": "Yahoo intraday", "status": "SECONDARY_ONLY"}
                 elif _dq_src == "yahoo_daily":
                     _dq = {"source": "Yahoo daily", "status": "SECONDARY_ONLY"}
+                elif _dq_src == "nsepython_daily":
+                    _dq = {"source": "NSE official", "status": "VALID"}
                 elif _dq_src in ("synthetic", "synthetic_expansion"):
                     _dq = {"source": "Synthetic", "status": "SYNTHETIC"}
                 else:
                     _dq = {"source": "Cache", "status": "SECONDARY_ONLY"}
                 try:
                     _hs = str(_hist_status or "")
-                    if _hs and _dq_src in ("yahoo_daily", "yahoo_intraday", "tradingview_intraday"):
+                    if _hs and _dq_src in ("yahoo_daily", "nsepython_daily", "yahoo_intraday", "tradingview_intraday"):
                         _dq["status"] = _hs
                 except Exception:
                     pass
