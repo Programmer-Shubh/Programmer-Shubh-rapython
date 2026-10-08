@@ -861,34 +861,43 @@ class BacktestEngine:
         # majority must agree. SuperTrend alone no longer fires entries by
         # itself - this is why RSI/volume/period changes now move results.
         # (Combos/EMA/VWAP/KAMA/etc below stay standalone: advanced use.)
+        # ABSTAIN rule (spec §6 fix): na-compute-hua indicator VETO nahi karta,
+        # vote hi nahi deta. Pehle missing value 0/999 bankar No-vote deti thi
+        # (chhoti series par ST akela kabhi pass nahi hota tha = 0 trades bug).
         try:
             _cv = []
             _ch = historical[effective_idx]
             _cc = _ch["close_price"]
-            if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
+            if ("supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"])
+                    and pre_calc["supertrend"][effective_idx] is not None):
                 _cv.append(modes.get("supertrend", "both") != "bearish"
                            and _cc > pre_calc["supertrend"][effective_idx])
             if "macd" in pre_calc:
                 _mm = pre_calc["macd"]
-                _mv = _mm["macd"][effective_idx] if effective_idx < len(_mm["macd"]) and _mm["macd"][effective_idx] is not None else 0
-                _sv = _mm["signal"][effective_idx] if effective_idx < len(_mm["signal"]) and _mm["signal"][effective_idx] is not None else 0
-                _pm = _mm["macd"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(_mm["macd"]) and _mm["macd"][effective_idx - 1] is not None else 0
-                _ps = _mm["signal"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(_mm["signal"]) and _mm["signal"][effective_idx - 1] is not None else 0
-                _cv.append(modes.get("macd", "both") != "bearish" and _mv > _sv and _pm <= _ps)
-            if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
-                _cv.append(modes.get("rsi", "both") != "bearish" and (pre_calc["rsi"][effective_idx] or 999) < 45)
+                _mv = _mm["macd"][effective_idx] if effective_idx < len(_mm["macd"]) else None
+                _sv = _mm["signal"][effective_idx] if effective_idx < len(_mm["signal"]) else None
+                _pm = _mm["macd"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(_mm["macd"]) else None
+                _ps = _mm["signal"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(_mm["signal"]) else None
+                if _mv is not None and _sv is not None and _pm is not None and _ps is not None:
+                    _cv.append(modes.get("macd", "both") != "bearish" and _mv > _sv and _pm <= _ps)
+            if ("rsi" in pre_calc and effective_idx < len(pre_calc["rsi"])
+                    and pre_calc["rsi"][effective_idx] is not None):
+                _cv.append(modes.get("rsi", "both") != "bearish" and pre_calc["rsi"][effective_idx] < 45)
             if "volume" in pre_calc:
                 _vs = pre_calc["volume"].get("signal", [])
-                _cv.append(modes.get("volume_indicator", "both") != "bearish"
-                           and effective_idx < len(_vs) and _vs[effective_idx] == 1)
+                if effective_idx < len(_vs) and _vs[effective_idx] is not None:
+                    _cv.append(modes.get("volume_indicator", "both") != "bearish"
+                               and _vs[effective_idx] == 1)
             if "dynamic_boll" in pre_calc:
                 _db = pre_calc["dynamic_boll"]
                 _lo = _db.get("lower", [])
-                _cv.append(effective_idx < len(_lo) and _lo[effective_idx] is not None and _cc < _lo[effective_idx])
+                if effective_idx < len(_lo) and _lo[effective_idx] is not None:
+                    _cv.append(_cc < _lo[effective_idx])
             if "neural" in pre_calc:
                 _ns = pre_calc["neural"].get("signal", [])
-                _cv.append(modes.get("neural_network", "both") != "bearish"
-                           and effective_idx < len(_ns) and _ns[effective_idx] == 1)
+                if effective_idx < len(_ns) and _ns[effective_idx] is not None:
+                    _cv.append(modes.get("neural_network", "both") != "bearish"
+                               and _ns[effective_idx] == 1)
             if "adx" in pre_calc and isinstance(pre_calc["adx"], dict):
                 _ad = pre_calc["adx"]
                 _av = _ad.get("adx", [])
@@ -899,10 +908,12 @@ class BacktestEngine:
                     _thr = float(pre_calc.get("adx_thr", 25) or 25)
                 except Exception:
                     pass
-                _cv.append(modes.get("adx", "both") != "bearish"
-                           and effective_idx < len(_av)
-                           and (_av[effective_idx] or 0) >= _thr
-                           and (_pd[effective_idx] if effective_idx < len(_pd) else 0) > (_md[effective_idx] if effective_idx < len(_md) else 0))
+                _avv = _av[effective_idx] if effective_idx < len(_av) else None
+                _pdv = _pd[effective_idx] if effective_idx < len(_pd) else None
+                _mdv = _md[effective_idx] if effective_idx < len(_md) else None
+                if _avv is not None and _pdv is not None and _mdv is not None:
+                    _cv.append(modes.get("adx", "both") != "bearish"
+                               and _avv >= _thr and _pdv > _mdv)
             if _cv:
                 import math as _math
                 _need = 1 if len(_cv) == 1 else max(2, _math.ceil(len(_cv) / 2))
@@ -911,11 +922,13 @@ class BacktestEngine:
                 return False
         except Exception:
             pass
-        # Calculate composite score for this bar
+        # Calculate composite score for this bar (missing values: no _max
+        # inflation, no crash - abstain rule yahan bhi).
         _score = 0
         _max = 0
         # Supertrend bullish +30
-        if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
+        if ("supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"])
+                and pre_calc["supertrend"][effective_idx] is not None):
             _max += 30
             if historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx]:
                 _score += 30
@@ -925,7 +938,8 @@ class BacktestEngine:
             if historical[effective_idx]["close_price"] > pre_calc["ema"][effective_idx]:
                 _score += 20
         # RSI <45 bullish +20, RSI >55 bearish handled in sell
-        if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
+        if ("rsi" in pre_calc and effective_idx < len(pre_calc["rsi"])
+                and pre_calc["rsi"][effective_idx] is not None):
             _max += 20
             if pre_calc["rsi"][effective_idx] < 45:
                 _score += 20
@@ -942,7 +956,8 @@ class BacktestEngine:
         # Also require at least 2 indicators to agree
         if _score < 30:
             return False
-        if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
+        if ("supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"])
+                and pre_calc["supertrend"][effective_idx] is not None):
             if modes.get("supertrend","both") != "bearish" and historical[effective_idx]["close_price"] > pre_calc["supertrend"][effective_idx]:
                 return True
         if "macd" in pre_calc:
@@ -953,7 +968,8 @@ class BacktestEngine:
             ps = m["signal"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(m["signal"]) and m["signal"][effective_idx - 1] is not None else 0
             if modes.get("macd","both") != "bearish" and mv > sv and pm <= ps:
                 return True
-        if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
+        if ("rsi" in pre_calc and effective_idx < len(pre_calc["rsi"])
+                and pre_calc["rsi"][effective_idx] is not None):
             if modes.get("rsi","both") != "bearish" and pre_calc["rsi"][effective_idx] < 45:
                 return True
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
@@ -979,7 +995,8 @@ class BacktestEngine:
                 return True
         if "ml_signal" in pre_calc:
             prob = pre_calc["ml_signal"].get("probability", [])
-            if effective_idx < len(prob) and prob[effective_idx] > 0.60:
+            if (effective_idx < len(prob) and prob[effective_idx] is not None
+                    and prob[effective_idx] > 0.60):
                 return True
         # VWAP support
         if "vwap" in pre_calc:
@@ -1076,35 +1093,42 @@ class BacktestEngine:
             sl2 = oc.get("sell", []) if isinstance(oc, dict) else []
             if modes.get("opp_combo", "both") != "bullish" and effective_idx < len(sl2) and sl2[effective_idx]:
                 return True
-        # CONFLUENCE mirror (sell): majority of selected UI-7 must agree.
+        # CONFLUENCE mirror (sell): majority of COMPUTABLE votes must agree.
+        # Abstain rule (buy side jaisa): missing value = no vote, never veto.
         try:
             _cv = []
             _ch = historical[effective_idx]
             _cc = _ch["close_price"]
-            if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
+            if ("supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"])
+                    and pre_calc["supertrend"][effective_idx] is not None):
                 _cv.append(modes.get("supertrend", "both") != "bullish"
                            and _cc < pre_calc["supertrend"][effective_idx])
             if "macd" in pre_calc:
                 _mm = pre_calc["macd"]
-                _mv = _mm["macd"][effective_idx] if effective_idx < len(_mm["macd"]) and _mm["macd"][effective_idx] is not None else 0
-                _sv = _mm["signal"][effective_idx] if effective_idx < len(_mm["signal"]) and _mm["signal"][effective_idx] is not None else 0
-                _pm = _mm["macd"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(_mm["macd"]) and _mm["macd"][effective_idx - 1] is not None else 0
-                _ps = _mm["signal"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(_mm["signal"]) and _mm["signal"][effective_idx - 1] is not None else 0
-                _cv.append(modes.get("macd", "both") != "bullish" and _mv < _sv and _pm >= _ps)
-            if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
-                _cv.append(modes.get("rsi", "both") != "bullish" and (pre_calc["rsi"][effective_idx] or 0) > 55)
+                _mv = _mm["macd"][effective_idx] if effective_idx < len(_mm["macd"]) else None
+                _sv = _mm["signal"][effective_idx] if effective_idx < len(_mm["signal"]) else None
+                _pm = _mm["macd"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(_mm["macd"]) else None
+                _ps = _mm["signal"][effective_idx - 1] if effective_idx > 0 and effective_idx - 1 < len(_mm["signal"]) else None
+                if _mv is not None and _sv is not None and _pm is not None and _ps is not None:
+                    _cv.append(modes.get("macd", "both") != "bullish" and _mv < _sv and _pm >= _ps)
+            if ("rsi" in pre_calc and effective_idx < len(pre_calc["rsi"])
+                    and pre_calc["rsi"][effective_idx] is not None):
+                _cv.append(modes.get("rsi", "both") != "bullish" and pre_calc["rsi"][effective_idx] > 55)
             if "volume" in pre_calc:
                 _vs = pre_calc["volume"].get("signal", [])
-                _cv.append(modes.get("volume_indicator", "both") != "bullish"
-                           and effective_idx < len(_vs) and _vs[effective_idx] == -1)
+                if effective_idx < len(_vs) and _vs[effective_idx] is not None:
+                    _cv.append(modes.get("volume_indicator", "both") != "bullish"
+                               and _vs[effective_idx] == -1)
             if "dynamic_boll" in pre_calc:
                 _db = pre_calc["dynamic_boll"]
                 _up = _db.get("upper", [])
-                _cv.append(effective_idx < len(_up) and _up[effective_idx] is not None and _cc > _up[effective_idx])
+                if effective_idx < len(_up) and _up[effective_idx] is not None:
+                    _cv.append(_cc > _up[effective_idx])
             if "neural" in pre_calc:
                 _ns = pre_calc["neural"].get("signal", [])
-                _cv.append(modes.get("neural_network", "both") != "bullish"
-                           and effective_idx < len(_ns) and _ns[effective_idx] == -1)
+                if effective_idx < len(_ns) and _ns[effective_idx] is not None:
+                    _cv.append(modes.get("neural_network", "both") != "bullish"
+                               and _ns[effective_idx] == -1)
             if "adx" in pre_calc and isinstance(pre_calc["adx"], dict):
                 _ad = pre_calc["adx"]
                 _av = _ad.get("adx", [])
@@ -1115,10 +1139,12 @@ class BacktestEngine:
                     _thr = float(pre_calc.get("adx_thr", 25) or 25)
                 except Exception:
                     pass
-                _cv.append(modes.get("adx", "both") != "bullish"
-                           and effective_idx < len(_av)
-                           and (_av[effective_idx] or 0) >= _thr
-                           and (_md[effective_idx] if effective_idx < len(_md) else 0) > (_pd[effective_idx] if effective_idx < len(_pd) else 0))
+                _avv = _av[effective_idx] if effective_idx < len(_av) else None
+                _pdv = _pd[effective_idx] if effective_idx < len(_pd) else None
+                _mdv = _md[effective_idx] if effective_idx < len(_md) else None
+                if _avv is not None and _pdv is not None and _mdv is not None:
+                    _cv.append(modes.get("adx", "both") != "bullish"
+                               and _avv >= _thr and _mdv > _pdv)
             if _cv:
                 import math as _math
                 _need = 1 if len(_cv) == 1 else max(2, _math.ceil(len(_cv) / 2))
@@ -1129,7 +1155,8 @@ class BacktestEngine:
             pass
         _score = 0
         _max = 0
-        if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
+        if ("supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"])
+                and pre_calc["supertrend"][effective_idx] is not None):
             _max += 30
             if historical[effective_idx]["close_price"] < pre_calc["supertrend"][effective_idx]:
                 _score += 30
@@ -1137,7 +1164,8 @@ class BacktestEngine:
             _max += 20
             if historical[effective_idx]["close_price"] < pre_calc["ema"][effective_idx]:
                 _score += 20
-        if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
+        if ("rsi" in pre_calc and effective_idx < len(pre_calc["rsi"])
+                and pre_calc["rsi"][effective_idx] is not None):
             _max += 20
             if pre_calc["rsi"][effective_idx] > 55:
                 _score += 20
@@ -1152,10 +1180,12 @@ class BacktestEngine:
         if _score < 30:
             return False
         sell = False
-        if "supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"]):
+        if ("supertrend" in pre_calc and effective_idx < len(pre_calc["supertrend"])
+                and pre_calc["supertrend"][effective_idx] is not None):
             if modes.get("supertrend","both") != "bullish":
                 sell = sell or (historical[effective_idx]["close_price"] < pre_calc["supertrend"][effective_idx])
-        if "rsi" in pre_calc and effective_idx < len(pre_calc["rsi"]):
+        if ("rsi" in pre_calc and effective_idx < len(pre_calc["rsi"])
+                and pre_calc["rsi"][effective_idx] is not None):
             if modes.get("rsi","both") != "bullish":
                 sell = sell or (pre_calc["rsi"][effective_idx] > 55)
         if "ema" in pre_calc and effective_idx < len(pre_calc["ema"]) and pre_calc["ema"][effective_idx] is not None:
@@ -1181,7 +1211,8 @@ class BacktestEngine:
                 sell = sell or True
         if "ml_signal" in pre_calc:
             prob = pre_calc["ml_signal"].get("probability", [])
-            if effective_idx < len(prob) and prob[effective_idx] < 0.40:
+            if (effective_idx < len(prob) and prob[effective_idx] is not None
+                    and prob[effective_idx] < 0.40):
                 sell = sell or True
         if "neural" in pre_calc:
             sig = pre_calc["neural"].get("signal", [])
