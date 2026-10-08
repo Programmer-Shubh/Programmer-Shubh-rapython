@@ -563,6 +563,7 @@
             </div>
             <div class="card mt-3" id="robot-saved-card" style="display:none">
                 <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Strategies</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
+                <div class="px-3 pt-2 small text-muted" id="ap-worker">Auto-paper worker: checking...</div>
                 <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p></div>
             </div>
             </div>
@@ -2015,7 +2016,19 @@ let _lastOpenTrdHTML = null;
         try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ let _m='Strategy "'+finalName+'" saved! ID: '+r.id; try{const _at=r.auto_trades||[]; if(_at.length)_m+='\nPaper trade lag gaya: Trade #'+_at[0].trade_id+' @ Rs'+_at[0].entry+' (Open Positions me dikhega)';}catch(e){} alert(_m); document.getElementById('r-name').value=''; loadRobotSaved(); } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
     }
      function _parseJsonField(v, fallback){ if(!v) return fallback; if(typeof v==='string'){ try{return JSON.parse(v);}catch(e){return fallback;} } return v; }
-      async function loadRobotSaved(){
+      async function loadApWorker(){
+        try{
+            const w=await A('/api/trades/auto-paper-status');
+            const wk=w.worker||{};
+            const last=(wk.last_daily||{}).placed;
+            const el=document.getElementById('ap-worker');
+            if(!el)return;
+            const mkt=wk.market_open===false?' (market band hai - subah khud lagenge)':wk.market_open?' (market khula hai)':'';
+            el.innerHTML='Auto-paper worker: '+(wk.server_ist?('server time '+wk.server_ist):'')+(last!=null?(', aakhri check me '+last+' trade lage'):'' )+mkt+' — signal mile to trade apne-aap lagta hai, button dabana zaroori nahi.';
+        }catch(e){try{document.getElementById('ap-worker').textContent='Auto-paper worker: status nahi mila';}catch(_){}}
+    }
+    async function loadRobotSaved(){
+        try{loadApWorker();}catch(e){}
         try{
             const r=await A('/api/strategies/list');
             const robots=(r.strategies||[]).filter(s=> (s.description==='robot') || (s.name||'').includes('_Robot_') || (s.name||'').includes('_Strategy_'));

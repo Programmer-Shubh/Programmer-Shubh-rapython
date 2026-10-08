@@ -85,6 +85,23 @@ def list_strategies():
         auto_rollover_expired()  # self-heal on every view
     except Exception:
         pass
+    try:
+        # Piggyback auto-paper: Render free tier par background threads so
+        # jate hain - user ke site kholte hi due trades apne-aap lagenge.
+        # Daemon thread (response nahi rukta); run_once khud throttled
+        # (20 min) + market-gated hai, to safe hai.
+        import threading as _th
+
+        def _ap_piggy():
+            try:
+                from core.services.auto_paper import run_once as _ap_run
+                _ap_run()
+            except Exception:
+                pass
+
+        _th.Thread(target=_ap_piggy, name="auto-paper-piggy", daemon=True).start()
+    except Exception:
+        pass
     rows = db.fetch_all(
         "SELECT * FROM strategies WHERE user_id=1 ORDER BY updated_at DESC"
     )
