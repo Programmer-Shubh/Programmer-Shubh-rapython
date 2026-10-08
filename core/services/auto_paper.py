@@ -239,6 +239,15 @@ def _intraday_signal(sid, s, today):
             bars = []
         if not bars or len(bars) < 40:
             return None, "no fresh 15m bars"
+        # No forming-bar signals: aakhri (adhuri) candle hatao - backtest bhi
+        # sirf closed bars par signal banata hai. Iske bina phantom-signal par
+        # live entry hoti jo backtest me kabhi nahi hoti (divergence ka kaaran).
+        try:
+            bars = list(bars[:-1]) if len(bars) > 41 else list(bars)
+        except Exception:
+            pass
+        if not bars or len(bars) < 40:
+            return None, "no fresh 15m bars"
         try:
             legs = _js.loads(s.get("legs") or "[]")
         except Exception:

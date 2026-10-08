@@ -1293,8 +1293,16 @@ let _lastOpenTrdHTML = null;
         // Anti-pileup: Auto mode fires on every keystroke; a slow run must
         // not stack 10 overlapping runs (spinner forever, results never
         // settle). Latest request wins: queue one rerun max.
-        if(window._btRunning){ window._btQueued=true; return; }
+        // Stuck-flag guard: purana run 120s se atka ho (tab hang/crash) to
+        // flag force-reset - warna button "dead" lagta hai, koi error nahi.
+        if(window._btRunning){
+            try{
+                if(Date.now()-(window._btStart||0)>120000){ window._btRunning=false; window._btQueued=false; }
+                else { window._btQueued=true; return; }
+            }catch(e){ window._btQueued=true; return; }
+        }
         window._btRunning=true;
+        try{ window._btStart=Date.now(); }catch(e){}
         // Fresh run token + wipe old trades/metrics FIRST: a new run must
         // never display the previous run's trades (stale TCS/SBIN rows).
         window._btRunId=(window._btRunId||0)+1;
@@ -1789,6 +1797,7 @@ let _lastOpenTrdHTML = null;
         }catch(e){}
     }
     async function backtestStrat(id){try{
+        try{console.log('[BT] Backtest Detail click, strategy id=',id);}catch(e){}
         go('strategy',document.querySelectorAll('.nav button')[3]);
         // Pehle saved-config endpoint (exact DB config, form-loss proof), fail par purana form-flow
         try{
@@ -1802,10 +1811,14 @@ let _lastOpenTrdHTML = null;
             catch(_te){ r={error:'timeout'}; }
             finally{clearTimeout(_stmo);}
             if(r&&!r.error&&r.metrics){
+                try{console.log('[BT] direct result:',r.run_id,'trades=',(r.metrics||{}).total_trades,'keys=',Object.keys(r));}catch(e){}
                 try{const s=await A('/api/strategies/'+id);if(s&&!s.error)_loadStratToForm(s);}catch(e){}
-                window._btRenderedId=r.run_id;
-                // Existing renderer reuse: result ko last-response ki tarah render karo
-                window._directBT=r; await runBacktest({direct:r}); return;
+                // NOTE: _btRenderedId yahan set MAT karo - renderer khud set
+                // karta hai; pehle set karne se wo "already shown" samajhkar
+                // kuch render nahi karta tha (blank result bug).
+                window._directBT=r; await runBacktest({direct:r});
+                try{console.log('[BT] rendered run',r.run_id);}catch(e){}
+                return;
             }
             if(r&&r.error){throw new Error(r.error);}
         }catch(_de){/* fallback neeche */}

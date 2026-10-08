@@ -24,14 +24,13 @@ class TransactionCosts:
 
     @classmethod
     def apply_fill_slippage(cls, price: float, side: str, is_live: bool = False) -> float:
-        """Apply slippage. In live mode, use minimal slippage.
+        """Apply slippage - SAME rate paper/live/backtest (spec: align execution
+        logic). Live fills slip at least as much as backtest assumes.
         side: "BUY" or "SELL" - indicates order side
         """
         if price <= 0:
             return price
-        # Live mode: minimal slippage (0.05%)
-        # Backtest mode: realistic 0.5% slippage per order
-        slippage = 0.0005 if is_live else cls.SLIPPAGE_PCT / 100
+        slippage = cls.SLIPPAGE_PCT / 100
         # Apply slippage: price moves against the order
         # For BUY: price increases (we pay more); for SELL: price decreases (we receive less)
         if side == "BUY":
