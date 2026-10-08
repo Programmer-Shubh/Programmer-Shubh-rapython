@@ -268,8 +268,18 @@ def _fetch_openchart_historical(symbol: str, start_date: str, end_date: str) -> 
 
         df = None
         try:
-            with ThreadPoolExecutor(max_workers=1) as _ex:
-                df = _ex.submit(_do).result(timeout=15)
+            from concurrent.futures import ThreadPoolExecutor as _TPE2
+            _ex = _TPE2(max_workers=1)
+            try:
+                df = _ex.submit(_do).result(timeout=12)
+            except Exception:
+                df = None
+            finally:
+                # Latke worker ka wait KABHI nahi (with-block hang karta tha)
+                try:
+                    _ex.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
         except Exception:
             df = None
         if df is None or getattr(df, "empty", True):
@@ -322,8 +332,17 @@ def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> 
 
         df = None
         try:
-            with _TPE(max_workers=1) as _ex:
+            _ex = _TPE(max_workers=1)
+            try:
                 df = _ex.submit(_do).result(timeout=15)
+            except Exception:
+                df = None
+            finally:
+                # Latke worker ka wait KABHI nahi (with-block 40s latkaya tha)
+                try:
+                    _ex.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
         except Exception:
             return []
         if df is None or getattr(df, "empty", True):

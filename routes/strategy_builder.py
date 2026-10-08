@@ -878,6 +878,34 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         timeframe = (advanced_in.get("timeframe") or "1d").lower()
         _syms = _syms[:25]
         _bar_cap = 120 if len(_syms) > 1 else 250
+        # Coverage rule (absolute 15/30 ki jagah): requested trading days ka
+        # 50%+ (min 10 bars) mile to chalao, warna INSUFFICIENT. Chhote range
+        # (15 din) me 14 real bars = poori coverage, rokna galat tha.
+        try:
+            import datetime as _cdt2
+            _rqs = _cdt2.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+            _rqe = _cdt2.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+            _req_days = []
+            _dd = _rqs
+            while _dd <= _rqe:
+                if _dd.weekday() < 5:
+                    _req_days.append(_dd.strftime("%Y-%m-%d"))
+                _dd += _cdt2.timedelta(days=1)
+        except Exception:
+            _req_days = []
+        _need_min = max(10, int(len(_req_days) * 0.5)) if _req_days else 10
+
+        def _cov_ok(_bars):
+            try:
+                _b = [str(h.get("trade_date", ""))[:10] for h in (_bars or []) if h.get("trade_date")]
+                if len(_b) < 10:
+                    return False
+                if not _req_days:
+                    return True
+                _hit = sum(1 for _d in _req_days if _d in set(_b))
+                return _hit >= max(10, int(len(_req_days) * 0.5))
+            except Exception:
+                return False
         # Intraday bars parallel prefetch (network-bound, 4 workers): 25 symbols
         # ka fetch-time ~4x kam. Engine runs serial hi rehte hain (GIL/DB-safe).
         # Results same - sirf fetch parallel, koi signal logic nahi badalta.
@@ -1042,9 +1070,12 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         _cov0 = sum(1 for _d in _rq if _d in _have)
                         if _rq and _cov0 < len(_rq) * 0.7:
                             try:
-                                _ybc = _preY.get(_sym) if _sym in _preY else _yahoo_full_range(_sym, start_date, end_date)
+                                if _sym in _preY:
+                                    _ybc, _ybsrc = _preY[_sym]
+                                else:
+                                    _ybc, _ybsrc = _daily_fallback_range(_sym, start_date, end_date)
                             except Exception:
-                                _ybc = []
+                                _ybc, _ybsrc = [], ""
                             _yhave = {str(h.get("trade_date", ""))[:10] for h in (_ybc or [])}
                             _cov1 = sum(1 for _d in _rq if _d in _yhave)
                             if _ybc and len(_ybc) >= 15 and _cov1 > _cov0:
@@ -1069,7 +1100,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                             _yb, _ysrc = _daily_fallback_range(_sym, start_date, end_date)
                     except Exception:
                         _yb, _ysrc = [], ""
-                    if _yb and len(_yb) >= 15:
+                    if _yb and _cov_ok(_yb):
                         historical = _yb
                         _hist_src = _ysrc or "yahoo_daily"
                         try:
@@ -1088,10 +1119,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
                     if len(_BT_CACHE) > 12:
                         _BT_CACHE.pop(next(iter(_BT_CACHE)))
-            # Spec §4/§15: <30 bars aur koi real source nahi -> INSUFFICIENT
-            # (fabricated synthetic se backtest kabhi nahi).
-            if not _use_db and (not historical or len(historical) < 30):
-                _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 30+ real bars nahi mile (DB/NSE/Yahoo sab fail) - fabricated data nahi banate", "total_trades": 0,
+            # Spec §4/§15: coverage na mile to INSUFFICIENT (fabrication kabhi
+            # nahi). Absolute 30-bar gate hataya - chhote range me 14 real bars
+            # = full coverage, rokna galat tha (BRITANNIA case).
+            if not _use_db and not _cov_ok(historical):
+                _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye kaafi real bars nahi (chahiye {_need_min}, mile {len(historical or [])}) - fabricated data nahi banate", "total_trades": 0,
                                      "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                      "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(historical or [])}}
                 _fire_prog(_sym)
