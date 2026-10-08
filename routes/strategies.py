@@ -75,7 +75,7 @@ def _canonical_config_hash(symbol, start_date, end_date, timeframe,
 
 
 def _result_matches_config(res: dict, symbol, start_date, end_date,
-                           indicators, legs) -> bool:
+                           indicators, legs, risk=None, advanced=None) -> bool:
     """Frontend-bheja result kya isi saved config se bana hai? (params echo
     vs saved config). Mismatch par attach mat karo - galat result card par
     dikhega. Returns True only on clear match."""
@@ -113,6 +113,38 @@ def _result_matches_config(res: dict, symbol, start_date, end_date,
         for _iv in (indicators or []):
             sinds.add(str((_iv.get("id") if isinstance(_iv, dict) else _iv) or ""))
         if pinds != sinds:
+            return False
+        # Risk/settings bhi match hone chahiye (SL/TP/mode badla ho to purana
+        # result attach mat karo). Saved risk/advanced vs result params echo.
+        try:
+            _rk = dict(risk or {})
+            _ad = dict(advanced or {})
+
+            def _f(x):
+                try:
+                    return float(x)
+                except Exception:
+                    return None
+
+            _psl, _ssl = _f(p.get("sl")), _f(_rk.get("daily_stop_loss"))
+            if _psl is not None and _ssl is not None and abs(_psl - _ssl) > 0.01:
+                return False
+            _ptp, _stp = _f(p.get("tp")), _f(_rk.get("daily_take_profit"))
+            if _ptp is not None and _stp is not None and abs(_ptp - _stp) > 0.01:
+                return False
+            try:
+                _pm = int(p.get("max_trades_per_day") or 0)
+                _sm = int(_rk.get("max_trades_per_day") or 0)
+                if _pm and _sm and _pm != _sm:
+                    return False
+            except Exception:
+                pass
+            for _k in ("trade_mode", "timeframe", "entry_time", "exit_time"):
+                _pv = str(p.get(_k) or "")
+                _sv = str(_ad.get(_k) or "")
+                if _pv and _sv and _pv != _sv:
+                    return False
+        except Exception:
             return False
         return True
     except Exception:
@@ -304,7 +336,8 @@ def save_strategy(req: StrategyRequest):
     try:
         if isinstance(req.last_backtest, dict) and _result_matches_config(
                 req.last_backtest, req.symbol, req.start_date, req.end_date,
-                req.indicators, req.legs):
+                req.indicators, req.legs, req.risk_management,
+                req.advanced_options):
             _attach_res = req.last_backtest
         elif req.id:
             # No valid attach (bheja hi nahi ya mismatch): config badli ho to
