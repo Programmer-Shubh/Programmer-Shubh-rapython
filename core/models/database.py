@@ -19,6 +19,11 @@ class Database:
     # SQLite until process restart (prevents %s/RealDictCursor crashes on
     # sqlite conns). Redeploy restarts the process and re-probes Postgres.
     _pg_failed = False
+    # Self-heal: a TRANSIENT timeout must not kill Postgres for days (Render
+    # SQLite is ephemeral - har deploy me wipe! - to lambi PG outage = data
+    # loss). _pg_failed_at ke 10 min baad next query PG dobara try karegi.
+    _pg_failed_at = 0.0
+    _PG_RETRY_SECS = 600
     # Last Postgres error (password-free) for /api/db-status diagnostics.
     _pg_last_error = ""
 
@@ -69,8 +74,28 @@ class Database:
             self._path = Database._db_path
 
     def _is_postgres(self):
-        if getattr(self, "_pg_failed", False) or Database._pg_failed:
-            return False
+        try:
+            if getattr(self, "_pg_failed", False) or Database._pg_failed:
+                # Self-heal window guzar gayi? Dobara probe karo (transient
+                # timeout permanent outage na bane).
+                try:
+                    import time as _t
+                    _at = getattr(self, "_pg_failed_at", 0) or Database._pg_failed_at
+                    if _t.time() - float(_at or 0) >= Database._PG_RETRY_SECS:
+                        self._pg_failed = False
+                        Database._pg_failed = False
+                        try:
+                            _lc = getattr(self, "_local", None)
+                            if _lc is not None:
+                                _lc.conn = None
+                        except Exception:
+                            pass
+                    else:
+                        return False
+                except Exception:
+                    return False
+        except Exception:
+            pass
         return bool(self._use_postgres and self._pg_url)
 
     def _fix_pg_url(self, url):
@@ -122,6 +147,12 @@ class Database:
         msg = str(e)[:300]
         host = self._redacted_host()
         print(f"Postgres connect failed (host={host}), falling back to SQLite: {msg}")
+        try:
+            import time as _t
+            self._pg_failed_at = _t.time()
+            Database._pg_failed_at = _t.time()
+        except Exception:
+            pass
         self._pg_failed = True
         Database._pg_failed = True
         Database._pg_last_error = (f"host={host} " if host else "") + msg
@@ -200,6 +231,19 @@ class Database:
                 # EVERY DB-backed API and all buttons look dead.
                 conn = psycopg2.connect(fixed_url, connect_timeout=10)
                 conn.autocommit = False
+                try:
+                    # Pooler default statement_timeout chhota hota hai -
+                    # bhari backfill/backtest queries beech me na marein.
+                    _sc = conn.cursor()
+                    try:
+                        _sc.execute("SET statement_timeout = '120s'")
+                    finally:
+                        try:
+                            _sc.close()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 try:
                     if getattr(self, "_local", None) is not None:
                         self._local.conn = conn
@@ -597,7 +641,14 @@ class Database:
             q = self._adapt_query(query)
             with self._conn() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute(q, params or [])
+                    try:
+                        cur.execute(q, params or [])
+                    except Exception:
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        raise
                     row = cur.fetchone()
                     return dict(row) if row else None
         else:
@@ -611,7 +662,14 @@ class Database:
             q = self._adapt_query(query)
             with self._conn() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute(q, params or [])
+                    try:
+                        cur.execute(q, params or [])
+                    except Exception:
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        raise
                     rows = cur.fetchall()
                     return [dict(r) for r in rows]
         else:
