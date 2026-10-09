@@ -1934,9 +1934,26 @@ let _lastOpenTrdHTML = null;
             }
             if(r&&r.error){throw new Error(r.error);}
         }catch(_de){/* fallback neeche */}
-        const s=await A('/api/strategies/'+id);if(s.error){try{_btnBusy(el,false);}catch(e){}alert(s.error);return;}
-        setTimeout(async()=>{try{_loadStratToForm(s);await runBacktest();}catch(e){alert('Backtest failed: '+e.message);}finally{try{_btnBusy(el,false);}catch(_){}}},300);
-    }catch(e){try{_btnBusy(el,false);}catch(_){}alert('Error: '+e.message);}}
+        // Fallback: pehle SAVED summary turant dikhao (kabhi blank nahi),
+        // phir form-run. Form-run fail bhi ho to summary REHNE do.
+        try{
+            const s2=await A('/api/strategies/'+id);
+            if(s2.error){try{_btnBusy(el,false);}catch(e){}alert(s2.error);return;}
+            try{
+                if(s2.bt&&s2.bt.trades!=null){
+                    document.getElementById('bt-metrics').innerHTML=
+                        '<div class="alert alert-success py-2 mb-2 small">Saved result: <strong>'+s2.bt.trades+' trades</strong> • '+F(s2.bt.net_pnl||0)+' • Win '+(s2.bt.win_rate||0)+'% <span class="text-muted">('+(s2.bt.stored_at||'saved')+')</span> — poora detail load ho raha hai...</div>'
+                        + document.getElementById('bt-metrics').innerHTML;
+                }
+            }catch(e){}
+            setTimeout(async()=>{try{_loadStratToForm(s2);await runBacktest();}catch(e){
+                try{
+                    document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Fresh run fail: '+(e.message||e)+' (saved result upar hai) <button class="btn btn-sm btn-primary ms-2" onclick="backtestStrat('+id+',true)">Retry Naya run</button></p>'+document.getElementById('bt-metrics').innerHTML;
+                }catch(_){ alert('Backtest failed: '+(e.message||e)); }
+                try{_btnBusy(el,false);}catch(_){}
+            }},300);
+        }catch(e){try{_btnBusy(el,false);}catch(_){}alert('Error: '+(e.message||e));}
+    }catch(e){try{_btnBusy(el,false);}catch(_){}alert('Error: '+(e.message||e));}}
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3"><div class="text-center p-4"><i class="bi bi-lightbulb" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">No strategies yet</p><small class="text-muted">Create your first strategy to get started</small></div></p>';return;}
     // Running status per strategy: count open paper/live trades by strategy_id
     let runMap={};try{const o=await A('/api/trades/open');(o.positions||[]).forEach(t=>{const sid=t.strategy_id||0;if(!sid)return;runMap[sid]=runMap[sid]||{paper:0,live:0};if((t.trade_mode||'paper')==='live')runMap[sid].live++;else runMap[sid].paper++;});}catch(e){}
