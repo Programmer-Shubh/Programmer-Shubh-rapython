@@ -140,7 +140,13 @@ class BacktestEngine:
         daily_pnl = 0.0
         kill_switch_on = False
         last_date = ""
-        min_bars = min(15, max(1, len(historical) - 2))
+        # Warmup gate: pehle 15 bars skip hote the -> 15-bar series me sirf
+        # 1 bar evaluate hota tha (aakhri bar me signal banta hi nahi), isliye
+        # HAR chhoti-window strategy me 0 trades aata tha. Abstain rule
+        # (na-compute-hua indicator vote nahi deta) ke saath 5 bars kaafi
+        # hain -jaldi bars par kuch computable nahi to signal nahi banta,
+        # fabrication nahi hota, par evaluable bars 1 se ~10 ho jate hain.
+        min_bars = min(5, max(1, len(historical) - 2))
         legs = legs if legs else [{"option_type": "CE", "lots": 1, "transaction": "buy"}]
         is_spread = len(legs) > 1
 

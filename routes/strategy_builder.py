@@ -1352,14 +1352,29 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     _zero_note = f"No data for: {', '.join(_err_syms)}. "
                     _zero_tips.append("Data wale symbols rakho (NIFTY/BANKNIFTY/RELIANCE me history hai) ya dates 17 Jun-21 Sep 2026 ke andar rakho")
                 if _ok_syms:
-                    _zero_note += (f"{', '.join(_ok_syms)} par is period me '{_leg_txt}' ke entry signals hi nahi bane. "
-                                   "Ye honest zero hai — signal nahi to trade nahi.")
-                    _zero_tips += [
-                        "Opposite side try karo (Buy ke bajaye Sell / CE ke bajaye PE)",
-                        "Indicators kam karo (sirf SuperTrend) ya Min Score ghatao",
-                        "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
-                        "Strategy Target/SL bahut tight to nahi — pehle bina SL/TP chalakar dekho",
-                    ]
+                    # Blocked entries (premium floor etc.) ko "signal nahi
+                    # bana" mat batao - signal BANA tha, entry RUKI thi.
+                    # (hhhh case: 6 BUY signals, par OTM put ₹4-18 < ₹20 floor.)
+                    _blocked = int((_diag_rej or {}).get("min_premium_lt_20", 0) or 0)
+                    _sigs = int(_diag_sig or 0)
+                    if _blocked > 0 and _sigs > 0:
+                        _zero_note += (f"{', '.join(_ok_syms)} par {_sigs} entry signals bane, par "
+                                       f"{_blocked} entries ₹20 premium floor se block hui (option bahut sasta/deep-OTM). "
+                                       f"'{_leg_txt}' ke liye ATM ke najdeek strike chuno - wahan premium floor se upar hoga. ")
+                        _zero_tips += [
+                            "ATM/ITM strike chuno (OTM door ke premium ₹20 se kam hote hain - wahi block ho rahe hain)",
+                            "Opposite side try karo (Buy ke bajaye Sell / CE ke bajaye PE)",
+                            "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
+                        ]
+                    else:
+                        _zero_note += (f"{', '.join(_ok_syms)} par is period me '{_leg_txt}' ke entry signals hi nahi bane. "
+                                       "Ye honest zero hai — signal nahi to trade nahi.")
+                        _zero_tips += [
+                            "Opposite side try karo (Buy ke bajaye Sell / CE ke bajaye PE)",
+                            "Indicators kam karo (sirf SuperTrend) ya Min Score ghatao",
+                            "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
+                            "Strategy Target/SL bahut tight to nahi — pehle bina SL/TP chalakar dekho",
+                        ]
                 _zero_tips = _zero_tips[:5]
         except Exception:
             pass
