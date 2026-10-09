@@ -184,7 +184,10 @@ async def add_cache_header(request, call_next):
             response.headers["Cache-Control"] = "public, max-age=3600, immutable"
             response.headers["X-Content-Type-Options"] = "nosniff"
         elif request.url.path == "/":
-            response.headers["Cache-Control"] = "public, max-age=60"
+            # App shell (index.html+JS): deploy ke baad purana page kabhi na
+            # chipke - hard refresh ki zaroorat khatm. Static assets cached.
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
     except:
         pass
     return response

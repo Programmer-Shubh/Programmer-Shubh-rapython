@@ -58,7 +58,12 @@ def _canonical_config_hash(symbol, start_date, end_date, timeframe,
         adv = dict(advanced or {})
         if timeframe and not adv.get("timeframe"):
             adv["timeframe"] = timeframe
+        try:
+            from core.services.backtest_engine import ENGINE_VERSION as _ev
+        except Exception:
+            _ev = "v1"
         return _hl.md5(_js.dumps({
+            "engine": _ev,
             "symbol": (symbol or "NIFTY"),
             "start_date": (start_date or "")[:10],
             "end_date": (end_date or "")[:10],

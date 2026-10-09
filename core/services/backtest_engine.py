@@ -7,6 +7,13 @@ from core.models.database import Database
 from utils.helpers import get_strike_step, get_lot_size, black_scholes, align_strike_price
 
 
+# Engine version: backtest LOGIC badalne par bump karo (gates/pricer/warmup).
+# Saved-result hash me shamil hai - purana saved result naye logic par
+# dobara nahi dikhega, ek fresh run hoga (stale "kuch nahi hua" khatm).
+# v2: confluence votes (13 ids) + dynaboll ATR + squeeze[i-1] + min_bars 5
+ENGINE_VERSION = "v2"
+
+
 class BacktestEngine:
     def __init__(self, is_live: bool = False):
         self.indicators = IndicatorEngine()
