@@ -598,12 +598,19 @@ class TradeModel:
         )
 
     def get_stats(self, user_id=1) -> dict:
-        open_row = self.db.fetch_one(
-            "SELECT COUNT(*) as c, COALESCE(SUM(quantity * entry_price), 0) as v FROM paper_trades WHERE user_id=? AND status='open'",
+        # Single audited standard (paper dashboard = closed-trades table):
+        # win = realized NET pnl STRICTLY greater than zero. Zero/NULL pnl
+        # counts as a loss (breakeven is not a win). Denominator = ALL closed
+        # trades (same set the history table is built from).
+        closed_row = self.db.fetch_one(
+            "SELECT COUNT(*) as c, COALESCE(SUM(pnl), 0) as total_pnl, "
+            "COALESCE(SUM(CASE WHEN COALESCE(pnl, 0) > 0 THEN 1 ELSE 0 END), 0) as wins, "
+            "COALESCE(SUM(CASE WHEN COALESCE(pnl, 0) > 0 THEN 0 ELSE 1 END), 0) as losses "
+            "FROM paper_trades WHERE user_id=? AND status='closed'",
             [user_id],
         )
-        closed_row = self.db.fetch_one(
-            "SELECT COUNT(*) as c, COALESCE(SUM(pnl), 0) as total_pnl, COALESCE(SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END), 0) as wins FROM paper_trades WHERE user_id=? AND status='closed'",
+        open_row = self.db.fetch_one(
+            "SELECT COUNT(*) as c, COALESCE(SUM(quantity * entry_price), 0) as v FROM paper_trades WHERE user_id=? AND status='open'",
             [user_id],
         )
         c = closed_row["c"] or 0
@@ -613,6 +620,8 @@ class TradeModel:
             "open_value": open_row["v"] or 0,
             "closed_count": c,
             "total_pnl": closed_row["total_pnl"] or 0,
+            "winning_trades": w,
+            "losing_trades": closed_row["losses"] or 0,
             "win_rate": round((w / c * 100), 1) if c > 0 else 0,
         }
 

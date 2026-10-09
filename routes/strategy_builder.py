@@ -1731,6 +1731,8 @@ def run_master_confluence(req: MasterConfluenceRequest):
         capital = 100000.0
         initial_capital = 100000.0
         wins = 0
+        gross_win = 0.0
+        gross_loss = 0.0
         total_pnl = 0.0
         max_dd = 0.0
         peak = initial_capital
@@ -1805,6 +1807,9 @@ def run_master_confluence(req: MasterConfluenceRequest):
                     capital += pnl
                     if pnl > 0:
                         wins += 1
+                        gross_win += pnl
+                    else:
+                        gross_loss += abs(pnl)
                     if capital > peak:
                         peak = capital
                     dd = (peak - capital) / peak * 100 if peak > 0 else 0
@@ -1928,7 +1933,7 @@ def run_master_confluence(req: MasterConfluenceRequest):
                 "total_return_pct": round((capital - initial_capital) / initial_capital * 100, 4),
                 "win_rate": round(win_rate, 2),
         "max_drawdown": round(max_dd, 2),
-                "profit_factor": round(wins / max(n - wins, 1) * 100, 2) if n > 0 else 0,
+                "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else (round(gross_win, 2) if wins > 0 else 0),
                 "sharpe_ratio": round(sharpe, 4),
                 "total_trades": n,
                 "winning_trades": wins,

@@ -321,10 +321,12 @@ def save_strategy(req: StrategyRequest):
         "risk_management": json.dumps(req.risk_management),
         "status": req.status,
     }
-    # Saved-result attach/clear: frontend ne abhi-chalaya result bheja ho AUR
-    # wo isi config se bana ho to save ke saath result bhi save (Backtest
-    # Detail phir dobara run nahi karega). Config badli ho aur koi result na
-    # aaya ho to purana saved result saaf (stale card nahi dikhega).
+    # Saved-result attach: frontend ne abhi-chalaya result bheja ho AUR wo
+    # isi config se bana ho to save ke saath result bhi save (Backtest Detail
+    # phir dobara run nahi karega).
+    # NOTE (user demand): config badalne par purana saved result SAAF NAHI
+    # hota - delete tak card par dikhega (kisi bhi computer par, DB me hai).
+    # Backtest Detail nayi config par khud fresh run karke overwrite kar dega.
     try:
         _new_hash = _canonical_config_hash(
             req.symbol, req.start_date, req.end_date, req.timeframe,
@@ -332,21 +334,13 @@ def save_strategy(req: StrategyRequest):
             req.legs, req.advanced_options, req.risk_management)
     except Exception:
         _new_hash = ""
-    _attach_res, _clear_stored = None, False
+    _attach_res = None
     try:
         if isinstance(req.last_backtest, dict) and _result_matches_config(
                 req.last_backtest, req.symbol, req.start_date, req.end_date,
                 req.indicators, req.legs, req.risk_management,
                 req.advanced_options):
             _attach_res = req.last_backtest
-        elif req.id:
-            # No valid attach (bheja hi nahi ya mismatch): config badli ho to
-            # purana saved result saaf - stale card kabhi nahi dikhega.
-            _old = db.fetch_one(
-                "SELECT last_backtest_hash FROM strategies WHERE id=?", [req.id])
-            _old_hash = str((_old or {}).get("last_backtest_hash") or "")
-            if _old_hash and _new_hash and _old_hash != _new_hash:
-                _clear_stored = True
     except Exception:
         pass
     try:
@@ -361,10 +355,6 @@ def save_strategy(req: StrategyRequest):
             data["last_backtest_at"] = _now_s
         except Exception:
             pass
-    elif _clear_stored:
-        data["last_backtest"] = None
-        data["last_backtest_hash"] = None
-        data["last_backtest_at"] = None
     if req.id:
         sets = ", ".join(f"{k}=?" for k in data)
         vals = list(data.values()) + [req.id]

@@ -184,10 +184,15 @@ def get_trade_history():
     trade_model = TradeModel()
     closed = trade_model.get_closed_trades()
     total_pnl = sum(t["pnl"] for t in closed)
+    _shown = closed[:50]
+    _w = sum(1 for t in _shown if float(t.get("pnl") or 0) > 0)
     return {
         "count": len(closed),
         "total_pnl": round(total_pnl, 2),
         "total_pnl_formatted": format_currency(total_pnl),
+        "winning_trades": _w,
+        "losing_trades": len(_shown) - _w,
+        "win_rate": round(_w / len(_shown) * 100, 1) if _shown else 0,
         "trades": [
             {
                 "id": t["id"],
