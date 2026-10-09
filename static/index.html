@@ -1369,8 +1369,9 @@ let _lastOpenTrdHTML = null;
             // chahiye to ↻ Naya run dabao (force refresh).
             try{if(r.strategy_id)window._lastBTStratId=r.strategy_id;}catch(e){}
             const _storedBadge=r.stored?(' • <span class="badge bg-success">Saved result'+(r.stored_at?(' • '+r.stored_at):'')+'</span>'):(r.stored===false&&r.strategy_id?(' • <span class="badge bg-info">Naya run (saved)</span>'):'');
+            const _localBadge=(r._localCache&&!r.stored)?(' • <span class="badge bg-secondary">Turant copy (server se pakka ho raha...)</span>'):'';
             const _refreshBtn=r.strategy_id?(' <button class="btn btn-sm btn-outline-primary ms-1" style="font-size:11px;padding:0 6px" title="Config same hai to saved, naya chahiye to force" onclick="backtestStrat('+(r.strategy_id)+',true)">↻ Naya run</button>'):'';
-            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'')+_storedBadge+_refreshBtn;
+            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'')+_storedBadge+_localBadge+_refreshBtn;
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
             const pnl = m.final_capital - m.initial_capital;
@@ -1439,6 +1440,14 @@ let _lastOpenTrdHTML = null;
             try{localStorage.setItem('lastBacktestResult',JSON.stringify({metrics:m}));}catch(e){}
             // Save ke saath result bhi save ho: Backtest Detail phir dobara run nahi karega
             try{window._lastFullBT=r;}catch(e){}
+            // Browser-cache: ye strategy ka result local me bhi rakho taaki
+            // agli click par server slow/fail ho tab bhi TURANT wahi result
+            // dikhe (kabhi blank/gayab nahi). Server wala aate hi overwrite.
+            try{
+                if(r&&r.strategy_id&&(r.metrics||r.trade_list)){
+                    try{localStorage.setItem('btSaved_'+r.strategy_id,JSON.stringify(r));}catch(_qe){}
+                }
+            }catch(e){}
         }catch(e){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Render error: '+e.message+'</p>';}
     }
     async function _runBacktestInner(_seq){
@@ -1883,7 +1892,26 @@ let _lastOpenTrdHTML = null;
         try{
             document.getElementById('bt-results').classList.remove('hidden');
             try{document.getElementById('bt-results').scrollIntoView({behavior:'smooth'});}catch(e){}
-            document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Saved strategy backtest chal raha hai...</p>';
+            // TURANT copy: browser-cache me is strategy ka result ho to click
+            // par 0 second me wahi dikhao (server slow/fail par bhi gayab nahi).
+            // Server wala aate hi overwrite kar dega.
+            if(!force){
+                try{
+                    const _lc=JSON.parse(localStorage.getItem('btSaved_'+id)||'null');
+                    if(_lc&&(_lc.metrics||_lc.trade_list)){
+                        _lc._localCache=true;
+                        try{console.log('[BT] instant local copy, run',_lc.run_id);}catch(e){}
+                        window._directBT=_lc;
+                        await runBacktest({direct:_lc});
+                    } else {
+                        document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Saved strategy backtest chal raha hai...</p>';
+                    }
+                }catch(_lce){
+                    document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Saved strategy backtest chal raha hai...</p>';
+                }
+            } else {
+                document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Naya backtest chal raha hai...</p>';
+            }
             // 45s cap: latke to form-flow (async+progress wala) pakdega.
             // Bina cap ke hang = hamesha-spinner (wahi shikayat).
             const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),45000);
@@ -2161,7 +2189,23 @@ let _lastOpenTrdHTML = null;
             try{console.log('[BT] Robot Backtest click, strategy id=',id);}catch(e){}
             try{
                 document.getElementById('bt-results').classList.remove('hidden');
-                document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Saved strategy backtest chal raha hai...</p>';
+                // TURANT copy: browser-cache ho to 0 second me wahi result (gayab nahi).
+                if(!force){
+                    try{
+                        const _lc=JSON.parse(localStorage.getItem('btSaved_'+id)||'null');
+                        if(_lc&&(_lc.metrics||_lc.trade_list)){
+                            _lc._localCache=true;
+                            window._directBT=_lc;
+                            await runBacktest({direct:_lc});
+                        } else {
+                            document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Saved strategy backtest chal raha hai...</p>';
+                        }
+                    }catch(_lce){
+                        document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Saved strategy backtest chal raha hai...</p>';
+                    }
+                } else {
+                    document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Naya backtest chal raha hai...</p>';
+                }
                 const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),45000);
                 let r=null;
                 try{ r=await P('/api/strategies/'+id+'/backtest'+(force?'?refresh=1':''),{method:'POST',signal:_sctl.signal}); }
