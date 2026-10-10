@@ -533,18 +533,9 @@
                         <div class="small text-muted mt-1">Greeks &amp; margin estimated via Black-Scholes (IV 20%, DTE from expiry). Live premiums from NSE/Stooq when available.</div>
                     </div>
                 </div>
-            <div class="card mt-3" id="quant-card">
-                <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-cpu"></i> Indicators</strong><small class="text-muted">Search me "Combo" likho — RSI+VWAP+ST+PCR combo yahin milega</small></div>
-                <div class="card-body p-2">
-                    <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
-                        <div style="min-width:180px;flex:1"><label class="form-label small">Search Indicator</label><input type="text" class="form-control form-control-sm" id="q-ind-search" placeholder="Type to search 90+ indicators..." oninput="renderQuantOptions()"></div>
-                        <div><label class="form-label small">Indicator</label><select class="form-select form-select-sm" id="q-ind-select" style="min-width:200px"></select></div>
-                        <div><button class="btn btn-sm btn-primary" onclick="addQuantIndicator()">+ Add Indicator</button></div>
-                    </div>
-                    <div style="overflow-x:auto"><table class="table table-sm mb-0" id="q-ind-table"><thead><tr><th>Indicator</th><th>Params</th><th>Candle Interval</th><th>Field</th><th>Signal</th><th></th></tr></thead><tbody></tbody></table></div>
-                    <small class="text-muted">Note: SuperTrend(10,3), RSI(14), EMA, MACD, Bollinger, VWAP, Volume, OI, <strong>Combo RSI+VWAP+ST+PCR</strong> (momentum) — candle 1m to 1h, Equity/Future field.</small>
-                </div>
-            </div>
+            <!-- Quant indicator table REMOVED (user demand): checkbox panel
+                 (Indicators - signal, upar) hi single source hai. Engine me
+                 saare ids ab bhi saved configs ke liye supported hain. -->
             <div class="row mt-3 align-items-end" style="display:none">
                 <div class="col-md-3"><label class="form-label"><i class="bi bi-calendar3"></i> Backtest Period <span class="badge bg-primary">Min 60 bars</span></label><div class="d-flex gap-1"><input type="date" class="form-control form-control-sm" id="s-start" value="2026-07-02"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-20"></div><div class="d-flex gap-1 mt-1"><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1M')">1M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('3M')">3M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('6M')">6M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1Y')">1Y</button></div></div>
                 <div class="col-md-3 d-flex gap-2">
@@ -1227,35 +1218,15 @@ let _lastOpenTrdHTML = null;
     async function updateSL(id,v){await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:parseFloat(v)})});}
     async function runSim(){alert('Simulation: Checking all open trades for SL/TP...');await loadTrades();}
 
-    // strategy-style indicator builder: Add -> params -> candle interval -> field
-    const QUANT_IND_DEFS=[
-        {id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',def:10},{key:'multiplier',label:'Multiplier',def:3}]},
-        {id:'rsi',name:'RSI',params:[{key:'period',label:'Period',def:14}]},
-        {id:'macd',name:'MACD',params:[{key:'fast',label:'Fast',def:12},{key:'slow',label:'Slow',def:26},{key:'signal',label:'Signal',def:9}]},
-        {id:'dynamic_bollinger',name:'Bollinger Bands',params:[{key:'period',label:'Period',def:20}]},
-        {id:'volume_indicator',name:'Volume SMA',params:[{key:'period',label:'Period',def:20}]},
-        {id:'neural_network',name:'Neural Network',params:[{key:'period',label:'Period',def:14}]},
-        {id:'comboA_ema_st_rsi',name:'Combo A — EMA9/21 + SuperTrend + RSI (55-65 / <45)',params:[{key:'ema_fast',label:'EMA Fast',def:9},{key:'ema_slow',label:'EMA Slow',def:21},{key:'st_period',label:'ST Period',def:10},{key:'st_mult',label:'ST Mult',def:3},{key:'rsi_period',label:'RSI Period',def:14}]},
-        {id:'comboB_bb_vol',name:'Combo B — BB Squeeze + Vol 2x Breakout',params:[{key:'period',label:'Period',def:20},{key:'mult',label:'Mult',def:2}]},
-        {id:'combo_rsi_vwap_pcr',name:'Combo RSI+VWAP+ST+PCR — Momentum (RSI70 cross + VWAP + ST + PCR>1 + Vol)',params:[{key:'rsi_period',label:'RSI Period',def:14},{key:'rsi_entry',label:'RSI Entry',def:70},{key:'rsi_exit',label:'RSI Exit',def:55},{key:'st_period',label:'ST Period',def:10},{key:'st_mult',label:'ST Mult',def:3},{key:'vwap_period',label:'VWAP Period',def:20},{key:'pcr_min',label:'PCR Min',def:1},{key:'vol_mult',label:'Vol Mult',def:1.5}]},
-    ];
-    const QUANT_CANDLES=[['1','1 minute'],['3','3 minutes'],['5','5 minutes'],['15','15 minutes'],['30','30 minutes'],['45','45 minutes'],['60','1 hour']];
-    let quantIndicators=[
-        {id:'rsi',name:'RSI',params:[{key:'period',label:'Period',val:14}],candle:'5',field:'equity',mode:'both'},
-        {id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',val:10},{key:'multiplier',label:'Multiplier',val:3}],candle:'5',field:'equity',mode:'both'},
-        {id:'combo_rsi_vwap_pcr',name:'Combo RSI+VWAP+ST+PCR',params:[{key:'rsi_period',label:'RSI Period',val:14},{key:'rsi_entry',label:'RSI Entry',val:70},{key:'rsi_exit',label:'RSI Exit',val:55},{key:'st_period',label:'ST Period',val:10},{key:'st_mult',label:'ST Mult',val:3},{key:'vwap_period',label:'VWAP Period',val:20},{key:'pcr_min',label:'PCR Min',val:1},{key:'vol_mult',label:'Vol Mult',val:1.5}],candle:'5',field:'equity',mode:'both'},
-    ];
-    function renderQuantOptions(){const q=(document.getElementById('q-ind-search').value||'').toLowerCase();const sel=document.getElementById('q-ind-select');sel.innerHTML='';QUANT_IND_DEFS.filter(d=>d.name.toLowerCase().includes(q)).forEach(d=>{sel.innerHTML+=`<option value="${d.id}">${d.name}</option>`;});}
-    function addQuantIndicator(){const id=document.getElementById('q-ind-select').value;const def=QUANT_IND_DEFS.find(d=>d.id===id);if(!def)return;quantIndicators.push({id:def.id,name:def.name,params:def.params.map(p=>({key:p.key,label:p.label,val:p.def})),candle:'5',field:'equity',mode:'both'});renderQuantTable();try{updateRunSummary();}catch(e){}}
-    function removeQuantIndicator(i){quantIndicators.splice(i,1);renderQuantTable();try{updateRunSummary();}catch(e){}}
-    function renderQuantTable(){const autoDir=autoMode();const autoBadge=autoDir==='bullish'?'<span class="badge bg-success">Auto: Bullish</span>':autoDir==='bearish'?'<span class="badge bg-danger">Auto: Bearish</span>':'<span class="badge bg-secondary">Auto: Both</span>';try{const b=document.getElementById('autoDirBadge');if(b){b.textContent='Auto: '+(autoDir==='both'?'Both':autoDir.charAt(0).toUpperCase()+autoDir.slice(1));b.className='badge ms-2 '+(autoDir==='bullish'?'bg-success':autoDir==='bearish'?'bg-danger':'bg-secondary');}}catch(e){}const tb=document.querySelector('#q-ind-table tbody');if(!tb)return;tb.innerHTML=quantIndicators.map((q,i)=>{const pHtml=(q.params||[]).map((p,pi)=>`<label class="small text-muted me-1">${p.label}<input type="number" class="form-control form-control-sm d-inline-block ms-1" style="width:60px" value="${p.val}" step="any" onchange="quantIndicators[${i}].params[${pi}].val=this.value"></label>`).join(' ');const cOpts=QUANT_CANDLES.map(c=>`<option value="${c[0]}" ${q.candle===c[0]?'selected':''}>${c[1]}</option>`).join('');return `<tr><td class="fw-bold small">${q.name}</td><td>${pHtml||'<span class="text-muted small">auto</span>'}</td><td><select class="form-select form-select-sm" onchange="quantIndicators[${i}].candle=this.value">${cOpts}</select></td><td><select class="form-select form-select-sm" onchange="quantIndicators[${i}].field=this.value"><option value="equity" ${q.field==='equity'?'selected':''}>Equity</option><option value="future" ${q.field==='future'?'selected':''}>Future</option></select></td><td>${autoBadge}</td><td><button class="btn btn-sm btn-danger" onclick="removeQuantIndicator(${i})"><i class="bi bi-x"></i></button></td></tr>`;}).join('')||'<tr><td colspan="6" class="text-muted small">No indicators — Add one above (backtest uses default RSI+SuperTrend).</td></tr>';}
+    // Quant indicator table REMOVED (user demand): upar checkbox panel
+    // (r-ind-*) hi single indicator source hai. Engine me saare ids saved
+    // configs ke liye ab bhi supported hain. collectIndicators [] deta hai
+    // taaki runs me checkbox ke alawa kuch mix na ho.
+    let quantIndicators=[];
+    function collectIndicators(){ return []; }
     // Auto direction from Position: Buy CE / Sell PE = Bullish, Sell CE / Buy PE = Bearish (strategy style)
     function autoMode(){try{let txn='',opt='';if(typeof stratLegs!=='undefined'&&stratLegs.length){txn=(stratLegs[0].transaction||'').toLowerCase();opt=(stratLegs[0].option_type||'').toUpperCase();}else{const ro=(document.getElementById('r-order')||{}).value||'';if(ro==='AUTO'){return 'both';}const pp=ro.split('-');opt=pp[0]||'';txn=(pp[1]||'').toLowerCase();}if(opt==='EQ')return txn==='buy'?'bullish':'bearish';if((txn==='buy'&&opt==='CE')||(txn==='sell'&&opt==='PE'))return 'bullish';return 'bearish';}catch(e){return 'both';}}
-    setTimeout(()=>{try{renderQuantOptions();renderQuantTable();const sp=document.getElementById('s-position'),so=document.getElementById('s-opt');if(sp)sp.addEventListener('change',renderQuantTable);if(so)so.addEventListener('change',renderQuantTable);const ro=document.getElementById('r-order');if(ro)ro.addEventListener('change',renderQuantTable);const rs=document.getElementById('r-strike');if(rs)rs.addEventListener('change',renderQuantTable);}catch(e){}},500);
-    function collectIndicators(){
-        const autoDir=autoMode();
-        return quantIndicators.map(q=>{const p={};(q.params||[]).forEach(pr=>{const v=parseFloat(pr.val);p[pr.key]=isNaN(v)?0:v;});p.mode=autoDir;p.candle=q.candle||'5';p.field=q.field||'equity';return {id:q.id,params:p};});
-    }
+    function refreshAutoBadge(){try{const autoDir=autoMode();const b=document.getElementById('autoDirBadge');if(b){b.textContent='Auto: '+(autoDir==='both'?'Both':autoDir.charAt(0).toUpperCase()+autoDir.slice(1));b.className='badge ms-2 '+(autoDir==='bullish'?'bg-success':autoDir==='bearish'?'bg-danger':'bg-secondary');}}catch(e){}}
     function rSyms(){const b=document.getElementById('r-syms');if(b){const v=[...b.querySelectorAll('input:checked')].map(o=>o.value).filter(Boolean).slice(0,25);if(v.length)return v;}const s=document.getElementById('r-sym');if(s)return [...s.selectedOptions].map(o=>o.value).filter(Boolean).slice(0,25);return ['NIFTY'];}
     function tickAllSyms(){try{const b=document.getElementById('r-syms');if(!b)return;const all=[...b.querySelectorAll('input')].slice(0,25);all.forEach(i=>{i.checked=true;});try{rSymsRefresh();updateRunSummary();}catch(e){}try{const c=document.getElementById('r-sym-count');if(c)c.textContent=all.length;}catch(e){}}catch(e){}}
     function rSymsRefresh(){try{const c=document.getElementById('r-sym-count');if(c)c.textContent=rSyms().length;try{localStorage.setItem('rSyms',JSON.stringify(rSyms()));}catch(e){}}catch(e){}}
@@ -1278,7 +1249,7 @@ let _lastOpenTrdHTML = null;
         const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||3000;
         const mtd=parseInt(document.getElementById('r-mtd').value)||5;
-        const indicators=robotCollectIndicators().concat(collectIndicators());
+        const indicators=robotCollectIndicators();
         let legs=(typeof stratLegs!=='undefined'&&stratLegs.length)?JSON.parse(JSON.stringify(stratLegs)):[];
         if(!legs.length){
             const order=document.getElementById('r-order').value;
@@ -1728,7 +1699,7 @@ let _lastOpenTrdHTML = null;
             return `<tr><td>${i+1}</td><td><select class="form-select form-select-sm" onchange="updLeg(${i},'transaction',this.value)"><option value="buy" ${l.transaction==='buy'?'selected':''}>BUY</option><option value="sell" ${l.transaction==='sell'?'selected':''}>SELL</option></select></td><td><select class="form-select form-select-sm" onchange="updLeg(${i},'option_type',this.value)"><option value="CE" ${l.option_type==='CE'?'selected':''}>CE</option><option value="PE" ${l.option_type==='PE'?'selected':''}>PE</option><option value="EQ" ${l.option_type==='EQ'?'selected':''}>EQ (Equity)</option></select></td><td><select class="form-select form-select-sm" onchange="updLegStrike(${i},this.value)"><option value="atm" ${cur==='atm'?'selected':''}>ATM</option><option value="otm1" ${cur==='otm1'?'selected':''}>OTM 1</option><option value="otm2" ${cur==='otm2'?'selected':''}>OTM 2</option><option value="otm3" ${cur==='otm3'?'selected':''}>OTM 3</option><option value="otm4" ${cur==='otm4'?'selected':''}>OTM 4</option><option value="otm5" ${cur==='otm5'?'selected':''}>OTM 5</option><option value="otm6" ${cur==='otm6'?'selected':''}>OTM 6</option><option value="itm1" ${cur==='itm1'?'selected':''}>ITM 1</option><option value="itm2" ${cur==='itm2'?'selected':''}>ITM 2</option><option value="itm3" ${cur==='itm3'?'selected':''}>ITM 3</option><option value="itm4" ${cur==='itm4'?'selected':''}>ITM 4</option><option value="itm5" ${cur==='itm5'?'selected':''}>ITM 5</option><option value="itm6" ${cur==='itm6'?'selected':''}>ITM 6</option></select></td><td><input type="number" class="form-control form-control-sm" value="${l.lots}" min="1" max="10" style="width:60px" onchange="updLeg(${i},'lots',this.value)"></td><td><select class="form-select form-select-sm" onchange="updLeg(${i},'expiry',this.value)"><option value="weekly" ${l.expiry==='weekly'?'selected':''}>Weekly</option><option value="monthly" ${l.expiry==='monthly'?'selected':''}>Monthly</option></select></td><td><button class="btn btn-sm btn-danger" onclick="removeLeg(${i})"><i class="bi bi-x"></i></button></td></tr>`;
         }).join('');
         updatePayoff();
-        try{if(typeof renderQuantTable==='function')renderQuantTable();}catch(e){}
+        try{if(typeof refreshAutoBadge==='function')refreshAutoBadge();}catch(e){}
         try{if(typeof updateRunSummary==='function')updateRunSummary();}catch(e){}
     }
     let _autoBT=null; function toggleAutoBacktest(on){ if(on){ if(!_autoBT) _autoBT=setTimeout(()=>{try{if(document.getElementById('r-auto')?.checked) runBacktest();}catch(e){}},800); } else { if(_autoBT) clearTimeout(_autoBT); _autoBT=null; } }
@@ -1848,8 +1819,7 @@ let _lastOpenTrdHTML = null;
         document.getElementById('s-reentry-tp').value='RE ASAP';
         document.getElementById('s-trail').value='Lock';
         clearLegs();
-        // reset to quant default: RSI + SuperTrend + Combo
-        try{quantIndicators=[{id:'rsi',name:'RSI',params:[{key:'period',label:'Period',val:14}],candle:'5',field:'equity',mode:'both'},{id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',val:10},{key:'multiplier',label:'Multiplier',val:3}],candle:'5',field:'equity',mode:'both'},{id:'combo_rsi_vwap_pcr',name:'Combo RSI+VWAP+ST+PCR',params:[{key:'rsi_period',label:'RSI Period',val:14},{key:'rsi_entry',label:'RSI Entry',val:70},{key:'rsi_exit',label:'RSI Exit',val:55},{key:'st_period',label:'ST Period',val:10},{key:'st_mult',label:'ST Mult',val:3},{key:'vwap_period',label:'VWAP Period',val:20},{key:'pcr_min',label:'PCR Min',val:1},{key:'vol_mult',label:'Vol Mult',val:1.5}],candle:'5',field:'equity',mode:'both'}];renderQuantTable();}catch(e){}
+        try{if(typeof refreshAutoBadge==='function')refreshAutoBadge();}catch(e){}
     }
 
     function _loadStratToForm(s){
@@ -1879,7 +1849,7 @@ let _lastOpenTrdHTML = null;
             if(s.legs)try{stratLegs=Array.isArray(s.legs)?s.legs:JSON.parse(s.legs);try{stratLegs.forEach(l=>{l.lots=l.lots||1;l.expiry=l.expiry||'weekly';l.strike_selection=l.strike_selection||'atm';l.otm_distance=l.otm_distance||0;});}catch(e){}renderLegs();}catch(e){}
             // Saved indicators khaali hon to table mat wipe karo (warna "No
             // indicators" reh jata hai) - purani rows hi rehne do.
-            if(s.indicators)try{const inds=Array.isArray(s.indicators)?s.indicators:JSON.parse(s.indicators);if(inds&&inds.length){quantIndicators=inds.map(iv=>({id:iv.id||iv, name:iv.id||iv, params:Object.entries(iv.params||{}).filter(([k])=>!['mode','candle','field'].includes(k)).map(([k,v])=>({key:k,label:k,val:v})), candle:(iv.params&&iv.params.candle)||'5',field:(iv.params&&iv.params.field)||'equity',mode:(iv.params&&iv.params.mode)||'both'}));renderQuantTable();}}catch(e){}
+            // (quant table removed: checkboxes neeche saved list se restore hote hain)
             // Checkbox indicators bhi saved list se restore karo (warna form ka purana tick + quant duplicate/mismatch)
             try{
                 const _savedIds=new Set((Array.isArray(s.indicators)?s.indicators:JSON.parse(s.indicators||'[]')).map(iv=>iv.id||iv));
@@ -2082,6 +2052,7 @@ let _lastOpenTrdHTML = null;
             }
             const inds=robotCollectIndicators().length;
             el.innerHTML='Chalega: <strong>'+symTxt+'</strong> | '+legTxt+' | '+inds+' indicator(s) | <span class="badge bg-success">Multi-symbol ON</span>';
+            try{if(typeof refreshAutoBadge==='function')refreshAutoBadge();}catch(e){}
         }catch(e){}}
     async function robotBacktest(){return runBacktest();}
         function isMarketOpenIST(){
@@ -2170,12 +2141,11 @@ let _lastOpenTrdHTML = null;
         const customName=(document.getElementById('r-name')?.value||'').trim();
         const finalName=customName||(sym+'_Strategy_'+_ordTxt);
         const rType=(document.getElementById('r-type')?.value||'intraday').toLowerCase();
-        // Indicators: manual Run (_unifiedBody) ke EXACT same union -
-        // warna run-result save se match nahi hota aur attach fail hota tha.
-        // Dedupe (last-wins = engine jaisa, warna har save par list badhti).
+        // Indicators: sirf checkbox panel (quant table removed).
+        // Dedupe (last-wins = engine jaisa).
         const _saveInds=[]; try{
             const _seen={};
-            robotCollectIndicators().concat(collectIndicators()).forEach(iv=>{ if(iv&&iv.id) _seen[iv.id]=iv; });
+            robotCollectIndicators().forEach(iv=>{ if(iv&&iv.id) _seen[iv.id]=iv; });
             Object.keys(_seen).forEach(k=>_saveInds.push(_seen[k]));
         }catch(e){ try{ _saveInds.push(...robotCollectIndicators()); }catch(_){} }
         const body={name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:sl, daily_take_profit:tp, max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5}, last_backtest:(window._lastFullBT||null)};
