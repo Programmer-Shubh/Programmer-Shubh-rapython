@@ -15,11 +15,14 @@ LOG_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 
-def check_stoploss_target():
-    """Intra-candle SL/TP check - conservative approach synced with backtest.
-    Uses same pct logic as BacktestEngine._check_sl_tp (backtest_engine.py:387) with is_live=True.
-    For live, current LTP is treated as both High/Low - hit if level breached (conservative).
-    """
+def check_stoploss_target(confirm_secs=5):
+    """Intra-candle SL/TP check - same levels as backtest (shared helper
+    utils.helpers.sltp_premium_level - BacktestEngine._check_sl_tp parity).
+    For live, current LTP is treated as both High/Low - hit if level breached.
+    confirm_secs: breach par itne second baad dobara quote karke pakka karo
+      (single bad-tick/spread spike par kaatna band - wahi backtest-vs-paper
+      gap tha: backtest smooth bar me tikta, paper ek tick par kat-ta).
+      0 = purana turant-close behavior. TP single touch par (favourable)."""
     trade_model = TradeModel()
     open_trades = trade_model.get_open_trades()
     closed = []
@@ -36,35 +39,35 @@ def check_stoploss_target():
             continue
         entry = float(trade["entry_price"])
         is_buy = trade["transaction_type"] == "BUY"
-        # Backtest-parity levels (BacktestEngine._check_sl_tp): rupee SL/TP
-        # (>20) convert to premium points via TOTAL units, NOT percent.
-        # Old code did (sl/entry)*100 -> SL 1500 on 22.84 premium became level
-        # 1523 (never hit), so open positions never exited. Fixed here.
-        units = int(trade.get("quantity", 1) or 1) * int(trade.get("lot_size", 0) or 0)
-        if units <= 0:
-            units = 1
-
-        def _level(amt, is_sl):
-            amt = float(amt or 0)
-            if amt <= 0:
-                return 0
-            if amt > 20:
-                pts = amt / max(units, 1)
-                if is_buy:
-                    lvl = (entry - pts) if is_sl else (entry + pts)
-                else:
-                    lvl = (entry + pts) if is_sl else (entry - pts)
-                return max(0.05, lvl)
-            if is_buy:
-                return entry * (1 - amt / 100) if is_sl else entry * (1 + amt / 100)
-            return entry * (1 + amt / 100) if is_sl else entry * (1 - amt / 100)
-
-        sl_level = _level(sl, True)
-        tp_level = _level(tp, False)
+        # Shared levels (utils.helpers.sltp_premium_level): backtest se identical.
+        # Old inline copy yahan duplicate thi (drift ka khatra) - ab single source.
+        from utils.helpers import sltp_premium_level as _lvl
+        _qty = int(trade.get("quantity", 1) or 1)
+        _lot = int(trade.get("lot_size", 0) or 0)
+        sl_level = _lvl(entry, sl, _qty, _lot, trade["transaction_type"], True)
+        tp_level = _lvl(entry, tp, _qty, _lot, trade["transaction_type"], False)
         # Conservative intra-candle: current is proxy for High/Low - hit if breached
         hit_sl = (current <= sl_level) if is_buy else (current >= sl_level) if sl_level > 0 else False
         hit_tp = (current >= tp_level) if is_buy else (current <= tp_level) if tp_level > 0 else False
-        # SL has priority (worst case) same as backtest
+        # Re-quote confirmation (SL only): ek akeli tick (bad print / wide
+        # spread spike, khaas taur par illiquid OTM me) par mat kaato - kuch
+        # second baad dobara quote lo, ab bhi breach to pakka. TP single
+        # touch par (favourable, backtest bar-touch jaisa).
+        if hit_sl and confirm_secs and confirm_secs > 0:
+            try:
+                import time as _t
+                _t.sleep(min(float(confirm_secs), 15))
+                requote = trade_model.get_option_premium(
+                    trade["symbol"], trade["option_type"],
+                    trade["strike_price"], trade["expiry_date"])
+                if requote is not None and requote > 0:
+                    current = float(requote)
+                    hit_sl = (current <= sl_level) if is_buy else (current >= sl_level) if sl_level > 0 else False
+                    hit_tp = (current >= tp_level) if is_buy else (current <= tp_level) if tp_level > 0 else False
+            except Exception:
+                pass
+        # SL has priority (worst case) same as backtest (confirmation ke BAAD,
+        # taaki un-confirmed SL TP ko na kha jaye).
         if hit_sl and hit_tp:
             hit_tp = False
         if hit_sl or hit_tp:

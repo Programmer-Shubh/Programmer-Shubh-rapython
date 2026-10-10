@@ -276,23 +276,16 @@ class TradeModel:
                 tp = float(t.get("target", 0) or 0)
                 should_exit = False
                 exit_reason = "manual"
-                # Quantman-style SL/TP: handle both premium levels and total P&L amounts
-                # If SL is large (e.g., 500) and entry is 1 with lot 50, treat SL as total P&L: premium level = entry +/- SL/(qty*lot)
-                # This fixes ₹1 -> ₹26 not cutting loss when SL=500 (was treated as premium 500, never hit)
+                # Shared SL/TP math (utils.helpers.sltp_premium_level): backtest
+                # + paper monitor se identical levels (parity). Purana local
+                # rule (5x-entry premium guess) hataya - wahi divergence tha.
                 def _to_premium_level(entry_p, level, qty_l, lot_l, is_sl):
-                    if level <= 0:
-                        return 0
-                    # If level is within 5x entry, treat as premium level directly (e.g., entry 120, SL 100)
-                    if 0 < level < entry_p * 5 or level < 50:
-                        return level
-                    # Else treat as total P&L amount: convert to premium
-                    # For BUY: SL premium = entry - level/(qty*lot), TP = entry + level/(qty*lot)
-                    # For SELL: SL premium = entry + level/(qty*lot), TP = entry - level/(qty*lot)
-                    per_share = level / max(qty_l * lot_l, 1)
-                    if t["transaction_type"] == "BUY":
-                        return entry_p - per_share if is_sl else entry_p + per_share
-                    else:
-                        return entry_p + per_share if is_sl else entry_p - per_share
+                    try:
+                        from utils.helpers import sltp_premium_level as _lvl
+                        return _lvl(entry_p, level, qty_l, lot_l,
+                                    t.get("transaction_type", "BUY"), is_sl)
+                    except Exception:
+                        return 0.0
                 try:
                     sl_level = _to_premium_level(entry, sl, qty, lot, True)
                     tp_level = _to_premium_level(entry, tp, qty, lot, False)
@@ -544,10 +537,13 @@ class TradeModel:
             pass
         lot = int(trade.get("lot_size") or get_lot_size(trade.get("symbol","NIFTY")))
         qty = int(trade["quantity"] or 1)
-        is_sell = trade["transaction_type"] == "BUY"
-        closing_side = "SELL" if is_sell else "BUY"
+        # Exit side: BUY position SELL karke nikalta hai (STT lagta hai),
+        # SELL position BUY karke (STT nahi). Naam saaf rakho (pehle is_sell
+        # naam se ulta lagta tha - math sahi tha, padhna mushkil tha).
+        exit_is_sell = trade["transaction_type"] == "BUY"
+        closing_side = "SELL" if exit_is_sell else "BUY"
         exit_price = max(0.01, TransactionCosts.apply_fill_slippage(exit_price, closing_side, is_live=True))
-        exit_costs = TransactionCosts.calculate(exit_price * qty * lot, is_sell, is_live=True)
+        exit_costs = TransactionCosts.calculate(exit_price * qty * lot, exit_is_sell, is_live=True)
         if trade["transaction_type"] == "BUY":
             gross_pnl = (exit_price - trade["entry_price"]) * qty * lot
         else:

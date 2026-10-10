@@ -327,3 +327,38 @@ def model_premium(spot: float, strike: float, expiry_days: float, option_type: s
     if not bs or bs <= 0:
         return 0
     return max(round(float(bs), 2), OPTION_MODEL_MIN)
+
+
+def sltp_premium_level(entry_price: float, amount: float, quantity: int,
+                       lot_size: int, transaction_type: str, is_sl: bool) -> float:
+    """SINGLE source of truth for SL/TP premium levels (backtest engine,
+    paper SL monitor, open-position auto-exit - sab yahi use karte hain taaki
+    paper wahi level par kate jahan backtest kat-ta hai).
+    UI me SL/TP RUPEES-total me hote hain (e.g. 1500):
+      - amount > 20  -> rupees total -> premium points = amount/(qty*lot).
+        BUY: SL = entry-pts, TP = entry+pts.
+        SELL: SL = entry+pts, TP = entry-pts (floor 0.05).
+      - amount <= 20 -> legacy percent of premium (purane backtests parity).
+        BUY: SL = entry*(1-amt%), TP = entry*(1+amt%).
+        SELL: SL = entry*(1+amt%), TP = entry*(1-amt%).
+    amount <= 0 -> 0 (disabled). Win = net pnl strictly > 0 (kahin aur)."""
+    try:
+        entry = float(entry_price or 0)
+        amt = float(amount or 0)
+        if amt <= 0 or entry <= 0:
+            return 0.0
+        txn = str(transaction_type or "BUY").upper()
+        is_buy = txn != "SELL"
+        units = max(int(quantity or 1) * int(lot_size or 0), 1)
+        if amt > 20:
+            pts = amt / units
+            if is_buy:
+                lvl = (entry - pts) if is_sl else (entry + pts)
+            else:
+                lvl = (entry + pts) if is_sl else (entry - pts)
+            return max(0.05, lvl)
+        if is_buy:
+            return entry * (1 - amt / 100) if is_sl else entry * (1 + amt / 100)
+        return entry * (1 + amt / 100) if is_sl else entry * (1 - amt / 100)
+    except Exception:
+        return 0.0

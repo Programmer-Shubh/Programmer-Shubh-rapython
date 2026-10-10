@@ -1627,25 +1627,13 @@ class BacktestEngine:
         # Overall SL/TP from UI are RUPEES per trade (e.g. 1500). Convert to premium points.
         # Old bug: (sl_amt / entry_price)*100 treated Rs as % of premium, giving 3000%
         # levels that never hit, so Sell trades bled -23k instead of -1500 exit.
+        # Shared helper (utils.helpers.sltp_premium_level): paper SL monitor
+        # bilkul wahi level par kat-ta hai (parity). qty yahan TOTAL units
+        # hai (lots x lot), isliye lot_size=1.
+        from utils.helpers import sltp_premium_level as _lvl
+
         def _to_level(amt, is_sl):
-            if amt is None or float(amt) <= 0:
-                return 0
-            amt = float(amt)
-            if amt > 20:
-                # Rupees -> points
-                points = amt / max(qty, 1)
-                if txn_type == "buy":
-                    lvl = (entry_price - points) if is_sl else (entry_price + points)
-                else:
-                    lvl = (entry_price + points) if is_sl else (entry_price - points)
-                # Target for Sell can't go below tick; SL always above entry
-                return max(0.05, lvl)
-            # <=20: legacy percent of premium
-            pct = amt
-            if txn_type == "buy":
-                return entry_price * (1 - pct / 100) if is_sl else entry_price * (1 + pct / 100)
-            else:
-                return entry_price * (1 + pct / 100) if is_sl else entry_price * (1 - pct / 100)
+            return _lvl(entry_price, amt, qty, 1, txn_type, is_sl)
 
         sl_level = _to_level(sl_amt, True)
         tp_level = _to_level(tp_amt, False)
