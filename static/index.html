@@ -473,6 +473,9 @@
                         <div class="col-md-4"><label class="small"><input type="checkbox" id="r-ind-macd"> MACD(<input type="number" id="r-p-mf" value="12" min="2" max="30" style="width:38px;font-size:11px">,<input type="number" id="r-p-ms" value="26" min="2" max="60" style="width:38px;font-size:11px">,<input type="number" id="r-p-mg" value="9" min="2" max="30" style="width:38px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="Bollinger Bands: Volatility squeeze breakout"><input type="checkbox" id="r-ind-bb" checked> <strong>Bollinger</strong>(<input type="number" id="r-p-bb" value="20" min="2" max="50" style="width:40px;font-size:11px">,<input type="number" id="r-p-bbstd" value="2.0" min="1" max="3" step="0.1" style="width:40px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="Neural Network: ML price prediction signal"><input type="checkbox" id="r-ind-nn"> <strong>Neural</strong>(<input type="number" id="r-p-nn" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
+                        <div class="col-md-4"><label class="small" title="RSI: momentum filter (oversold bounce <45 / overbought >55)"><input type="checkbox" id="r-ind-rsi"> <strong>RSI</strong>(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
+                        <div class="col-md-4"><label class="small" title="VWAP: intraday price anchor (upar=bullish, neeche=bearish)"><input type="checkbox" id="r-ind-vwap"> <strong>VWAP</strong>(<input type="number" id="r-p-vwap" value="20" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
+                        <div class="col-md-4"><label class="small" title="Combo: RSI70 cross + SuperTrend + VWAP + PCR>=min + Volume spike (strict, quality entries)"><input type="checkbox" id="r-ind-rvp"> <strong>Combo RVP</strong>(RSI<input type="number" id="r-p-rvpe" value="70" min="50" max="90" step="1" style="width:42px;font-size:11px">,PCR<input type="number" id="r-p-rvpp" value="1.0" min="0.5" max="2" step="0.1" style="width:42px;font-size:11px">)</label></div>
                     </div>
                     </div>
                     <div class="slab-sec" style="background:linear-gradient(135deg,#fff8e1 0%,#ffffff 100%); border:1px solid #ffe082"><div class="slab-sec-title"><i class="bi bi-sliders"></i> Overall Strategy Settings</div>
@@ -1877,7 +1880,7 @@ let _lastOpenTrdHTML = null;
             // Checkbox indicators bhi saved list se restore karo (warna form ka purana tick + quant duplicate/mismatch)
             try{
                 const _savedIds=new Set((Array.isArray(s.indicators)?s.indicators:JSON.parse(s.indicators||'[]')).map(iv=>iv.id||iv));
-                const _map={'r-ind-adx':'adx','r-ind-supertrend':'supertrend','r-ind-macd':'macd','r-ind-bb':'dynamic_bollinger','r-ind-nn':'neural_network'};
+                const _map={'r-ind-adx':'adx','r-ind-supertrend':'supertrend','r-ind-macd':'macd','r-ind-bb':'dynamic_bollinger','r-ind-nn':'neural_network','r-ind-rsi':'rsi','r-ind-vwap':'vwap','r-ind-rvp':'combo_rsi_vwap_pcr'};
                 Object.keys(_map).forEach(cid=>{try{const el=document.getElementById(cid);if(el)el.checked=_savedIds.has(_map[cid]);}catch(e){}});
             }catch(e){}
             // Entry/exit conditions form me rakh do taaki dobara Run par same rahe (engine AND-logic use karta hai)
@@ -2135,6 +2138,9 @@ let _lastOpenTrdHTML = null;
         if(document.getElementById('r-ind-macd')?.checked) indicators.push({id:'macd',params:{fast:parseInt(document.getElementById('r-p-mf')?.value)||12,slow:parseInt(document.getElementById('r-p-ms')?.value)||26,signal:parseInt(document.getElementById('r-p-mg')?.value)||9}});
         if(document.getElementById('r-ind-bb')?.checked) indicators.push({id:'dynamic_bollinger',params:{period:parseInt(document.getElementById('r-p-bb')?.value)||20}});
         if(document.getElementById('r-ind-nn')?.checked) indicators.push({id:'neural_network',params:{period:parseInt(document.getElementById('r-p-nn')?.value)||14}});
+        if(document.getElementById('r-ind-rsi')?.checked) indicators.push({id:'rsi',params:{period:parseInt(document.getElementById('r-p-rsi')?.value)||14}});
+        if(document.getElementById('r-ind-vwap')?.checked) indicators.push({id:'vwap',params:{period:parseInt(document.getElementById('r-p-vwap')?.value)||20,multiplier:2.0}});
+        if(document.getElementById('r-ind-rvp')?.checked) indicators.push({id:'combo_rsi_vwap_pcr',params:{rsi_period:parseInt(document.getElementById('r-p-rsi')?.value)||14,rsi_entry:parseFloat(document.getElementById('r-p-rvpe')?.value)||70,rsi_exit:55,st_period:parseInt(document.getElementById('r-p-st')?.value)||10,st_mult:parseFloat(document.getElementById('r-p-stm')?.value)||3,vwap_period:parseInt(document.getElementById('r-p-vwap')?.value)||20,pcr_min:parseFloat(document.getElementById('r-p-rvpp')?.value)||1.0,vol_mult:1.5}});
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         return indicators;
     }
