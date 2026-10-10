@@ -530,8 +530,8 @@
                         <div class="small text-muted mt-1">Greeks &amp; margin estimated via Black-Scholes (IV 20%, DTE from expiry). Live premiums from NSE/Stooq when available.</div>
                     </div>
                 </div>
-            <div class="card mt-3" style="display:none">
-                <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-cpu"></i> Indicators</strong><small class="text-muted">Signal auto from Position (Buy CE/Sell PE=Bullish) — only set inputs</small></div>
+            <div class="card mt-3" id="quant-card">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-cpu"></i> Indicators</strong><small class="text-muted">Search me "Combo" likho — RSI+VWAP+ST+PCR combo yahin milega</small></div>
                 <div class="card-body p-2">
                     <div class="d-flex gap-2 flex-wrap align-items-end mb-2">
                         <div style="min-width:180px;flex:1"><label class="form-label small">Search Indicator</label><input type="text" class="form-control form-control-sm" id="q-ind-search" placeholder="Type to search 90+ indicators..." oninput="renderQuantOptions()"></div>
@@ -539,7 +539,7 @@
                         <div><button class="btn btn-sm btn-primary" onclick="addQuantIndicator()">+ Add Indicator</button></div>
                     </div>
                     <div style="overflow-x:auto"><table class="table table-sm mb-0" id="q-ind-table"><thead><tr><th>Indicator</th><th>Params</th><th>Candle Interval</th><th>Field</th><th>Signal</th><th></th></tr></thead><tbody></tbody></table></div>
-                    <small class="text-muted">Note: SuperTrend(10,3), RSI(14), EMA, MACD, Bollinger, VWAP, Volume, OI — candle 1m to 1h, Equity/Future field.</small>
+                    <small class="text-muted">Note: SuperTrend(10,3), RSI(14), EMA, MACD, Bollinger, VWAP, Volume, OI, <strong>Combo RSI+VWAP+ST+PCR</strong> (momentum) — candle 1m to 1h, Equity/Future field.</small>
                 </div>
             </div>
             <div class="row mt-3 align-items-end" style="display:none">
@@ -562,7 +562,7 @@
                 <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-info-circle"></i> Live Strategy Status</span><button class="btn btn-sm btn-outline-secondary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect Brokers</button></div>
                 <div class="card-body" id="robot-status"><p class="text-muted small">Strategy stopped. Select symbol + order + SL/Target then Start Strategy for paper trading. Market hours: Mon-Fri 9:15-15:30 IST — Paper trades can queue outside hours.</p></div>
             </div>
-            <div class="card mt-3" id="robot-saved-card" style="display:none">
+            <div class="card mt-3" id="robot-saved-card">
                 <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Strategies</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
                 <div class="px-3 pt-2 small text-muted" id="ap-worker">Auto-paper worker: checking...</div>
                 <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p></div>
