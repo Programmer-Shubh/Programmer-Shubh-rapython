@@ -612,11 +612,13 @@ class OptionScanner:
             except Exception:
                 pass
             # Volume: absolute 500k gate (purana contract) + relative spike note.
+            # vol 0 (data missing) par "vol n/a" REHNE do - "vol 0" mat likho.
             try:
-                _v20 = [v for v in vols[max(0, i - 20):i] if v and v > 0]
-                _sma = sum(_v20) / len(_v20) if _v20 else 0
-                vratio = (vol / _sma) if _sma > 0 and vol > 0 else 0
-                vol_txt = f"vol {int(vol):,}" + (f" ({vratio:.1f}xSMA20)" if vratio else "")
+                if vol > 0:
+                    _v20 = [v for v in vols[max(0, i - 20):i] if v and v > 0]
+                    _sma = sum(_v20) / len(_v20) if _v20 else 0
+                    vratio = (vol / _sma) if _sma > 0 else 0
+                    vol_txt = f"vol {int(vol):,}" + (f" ({vratio:.1f}xSMA20)" if vratio else "")
             except Exception:
                 pass
             # PCR sentiment extremes (map mila to): call-buying trap / put-trap BLOCK.
