@@ -1877,7 +1877,9 @@ let _lastOpenTrdHTML = null;
                 if(_rm.max_trades_per_day)try{document.getElementById('r-mtd').value=_rm.max_trades_per_day;}catch(e){}
             }catch(e){}
             if(s.legs)try{stratLegs=Array.isArray(s.legs)?s.legs:JSON.parse(s.legs);try{stratLegs.forEach(l=>{l.lots=l.lots||1;l.expiry=l.expiry||'weekly';l.strike_selection=l.strike_selection||'atm';l.otm_distance=l.otm_distance||0;});}catch(e){}renderLegs();}catch(e){}
-            if(s.indicators)try{const inds=Array.isArray(s.indicators)?s.indicators:JSON.parse(s.indicators);quantIndicators=inds.map(iv=>({id:iv.id||iv, name:iv.id||iv, params:Object.entries(iv.params||{}).filter(([k])=>!['mode','candle','field'].includes(k)).map(([k,v])=>({key:k,label:k,val:v})), candle:(iv.params&&iv.params.candle)||'5',field:(iv.params&&iv.params.field)||'equity',mode:(iv.params&&iv.params.mode)||'both'}));renderQuantTable();}catch(e){}
+            // Saved indicators khaali hon to table mat wipe karo (warna "No
+            // indicators" reh jata hai) - purani rows hi rehne do.
+            if(s.indicators)try{const inds=Array.isArray(s.indicators)?s.indicators:JSON.parse(s.indicators);if(inds&&inds.length){quantIndicators=inds.map(iv=>({id:iv.id||iv, name:iv.id||iv, params:Object.entries(iv.params||{}).filter(([k])=>!['mode','candle','field'].includes(k)).map(([k,v])=>({key:k,label:k,val:v})), candle:(iv.params&&iv.params.candle)||'5',field:(iv.params&&iv.params.field)||'equity',mode:(iv.params&&iv.params.mode)||'both'}));renderQuantTable();}}catch(e){}
             // Checkbox indicators bhi saved list se restore karo (warna form ka purana tick + quant duplicate/mismatch)
             try{
                 const _savedIds=new Set((Array.isArray(s.indicators)?s.indicators:JSON.parse(s.indicators||'[]')).map(iv=>iv.id||iv));
