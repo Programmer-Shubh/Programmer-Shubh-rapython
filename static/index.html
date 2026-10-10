@@ -1234,6 +1234,7 @@ let _lastOpenTrdHTML = null;
         {id:'neural_network',name:'Neural Network',params:[{key:'period',label:'Period',def:14}]},
         {id:'comboA_ema_st_rsi',name:'Combo A — EMA9/21 + SuperTrend + RSI (55-65 / <45)',params:[{key:'ema_fast',label:'EMA Fast',def:9},{key:'ema_slow',label:'EMA Slow',def:21},{key:'st_period',label:'ST Period',def:10},{key:'st_mult',label:'ST Mult',def:3},{key:'rsi_period',label:'RSI Period',def:14}]},
         {id:'comboB_bb_vol',name:'Combo B — BB Squeeze + Vol 2x Breakout',params:[{key:'period',label:'Period',def:20},{key:'mult',label:'Mult',def:2}]},
+        {id:'combo_rsi_vwap_pcr',name:'Combo RSI+VWAP+ST+PCR — Momentum (RSI70 cross + VWAP + ST + PCR>1 + Vol)',params:[{key:'rsi_period',label:'RSI Period',def:14},{key:'rsi_entry',label:'RSI Entry',def:70},{key:'rsi_exit',label:'RSI Exit',def:55},{key:'st_period',label:'ST Period',def:10},{key:'st_mult',label:'ST Mult',def:3},{key:'vwap_period',label:'VWAP Period',def:20},{key:'pcr_min',label:'PCR Min',def:1},{key:'vol_mult',label:'Vol Mult',def:1.5}]},
     ];
     const QUANT_CANDLES=[['1','1 minute'],['3','3 minutes'],['5','5 minutes'],['15','15 minutes'],['30','30 minutes'],['45','45 minutes'],['60','1 hour']];
     let quantIndicators=[

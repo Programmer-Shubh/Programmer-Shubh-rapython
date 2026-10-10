@@ -618,6 +618,13 @@ class BacktestEngine:
                     result["opp_combo"] = self._calc_opp_combo(historical, closes, params)
                 except Exception:
                     result["opp_combo"] = {"buy": [], "sell": []}
+            elif iid == "combo_rsi_vwap_pcr":
+                # RSI Momentum + VWAP anchor + SuperTrend + PCR + Volume.
+                # Dashboard opportunity + backtest dono me same calc.
+                try:
+                    result["combo_rvp"] = self._calc_combo_rsi_vwap_pcr(historical, closes, params)
+                except Exception:
+                    result["combo_rvp"] = {"buy": [], "sell": []}
         return result
 
     def _calc_opp_combo(self, historical, closes, params):
@@ -677,6 +684,55 @@ class BacktestEngine:
         except Exception:
             pass
         return {"buy": buy, "sell": sell}
+
+    def _historical_pcr_map(self, symbol, historical):
+        """Ek grouped query me poori window ka date->PCR (put OI / call OI).
+        OI na ho to {} (calc 1.0 neutral leta hai)."""
+        out = {}
+        try:
+            if getattr(self, "_skip_db", False):
+                return out
+            if not historical:
+                return out
+            _s = str((historical[0] or {}).get("trade_date", ""))[:10]
+            _e = str((historical[-1] or {}).get("trade_date", ""))[:10]
+            if not _s or not _e:
+                return out
+            from core.models.database import Database
+            rows = Database.get_instance().fetch_all(
+                "SELECT trade_date, option_type, SUM(COALESCE(oi,0)) as s "
+                "FROM bhavcopy_data WHERE symbol=? AND option_type IN ('CE','PE') "
+                "AND trade_date BETWEEN ? AND ? GROUP BY trade_date, option_type",
+                [symbol, _s, _e])
+            _per = {}
+            for r in rows or []:
+                try:
+                    _per.setdefault(str(r.get("trade_date", ""))[:10], {})[str(r.get("option_type") or "")] = float(r.get("s") or 0)
+                except Exception:
+                    continue
+            for _d, _v in _per.items():
+                try:
+                    _ce = float((_v or {}).get("CE", 0) or 0)
+                    _pe = float((_v or {}).get("PE", 0) or 0)
+                    if _ce > 0:
+                        out[_d] = round(_pe / _ce, 2)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return out
+
+    def _calc_combo_rsi_vwap_pcr(self, historical, closes, params):
+        """RSI+VWAP+ST+PCR combo (dashboard parity): PCR map ek query me."""
+        try:
+            _pcr = self._historical_pcr_map(getattr(self, "bt_symbol", ""), historical)
+        except Exception:
+            _pcr = {}
+        try:
+            return self.indicators.calculate_rsi_vwap_pcr_combo(
+                historical, closes, params or {}, _pcr)
+        except Exception:
+            return {"buy": [], "sell": []}
 
     def _calc_comboA_ema_st_rsi(self, historical, closes, highs, lows, params):
         """Combo A: EMA9/21 + SuperTrend + RSI Momentum (user spec).
@@ -874,6 +930,12 @@ class BacktestEngine:
             oc = pre_calc["opp_combo"]
             bl = oc.get("buy", []) if isinstance(oc, dict) else []
             if modes.get("opp_combo", "both") != "bearish" and effective_idx < len(bl) and bl[effective_idx]:
+                return True
+        # RSI+VWAP+ST+PCR combo: standalone gate (paancho shartein calc me).
+        if "combo_rvp" in pre_calc:
+            rc = pre_calc["combo_rvp"]
+            bl = rc.get("buy", []) if isinstance(rc, dict) else []
+            if modes.get("combo_rsi_vwap_pcr", "both") != "bearish" and effective_idx < len(bl) and bl[effective_idx]:
                 return True
         # CONFLUENCE for the 7 UI indicators: every selected one votes,
         # majority must agree. SuperTrend alone no longer fires entries by
@@ -1183,6 +1245,12 @@ class BacktestEngine:
             oc = pre_calc["opp_combo"]
             sl2 = oc.get("sell", []) if isinstance(oc, dict) else []
             if modes.get("opp_combo", "both") != "bullish" and effective_idx < len(sl2) and sl2[effective_idx]:
+                return True
+        # RSI+VWAP+ST+PCR combo: standalone gate (mirror).
+        if "combo_rvp" in pre_calc:
+            rc = pre_calc["combo_rvp"]
+            sl2 = rc.get("sell", []) if isinstance(rc, dict) else []
+            if modes.get("combo_rsi_vwap_pcr", "both") != "bullish" and effective_idx < len(sl2) and sl2[effective_idx]:
                 return True
         # CONFLUENCE mirror (sell): majority of COMPUTABLE votes must agree.
         # Abstain rule (buy side jaisa): missing value = no vote, never veto.

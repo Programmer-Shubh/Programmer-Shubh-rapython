@@ -632,6 +632,144 @@ class IndicatorEngine:
                 sig[i] = -1
         return {"upper": upper, "lower": lower, "squeeze": squeeze, "vol_spike": vol_spike, "signal": sig}
 
+    def calculate_rsi_vwap_pcr_combo(self, data: List[Dict], closes: List[float],
+                                       params: Dict = None, pcr_by_date: Dict = None) -> Dict:
+        """RSI Momentum + VWAP anchor + SuperTrend + PCR + Volume combo.
+
+        ENTRY (Call-buy side, sab ek saath):
+          1. RSI(14) momentum: (a) `rsi_entry` (70) ke UPAR fresh cross
+             (ignition), YA (b) RSI 70-85 me aur rising + SuperTrend HALI me
+             green hua (early-trend riding). Dono fresh-event anchored -
+             purana 85+ chase kabhi nahi (RSI>85 BLOCK).
+          2. Close > SuperTrend(period, mult) - trend green.
+          3. Close > VWAP(period) - intraday anchor ke upar.
+          4. PCR >= pcr_min (1.0) - put support hai, call buying safe.
+          5. Volume > vol_mult x SMA(vol_period) - participation.
+        EXIT (long se niklo jab KOI ek):
+          RSI < rsi_exit (55) / Close < SuperTrend (flip) / Close < VWAP.
+        SELL side mirror: RSI 30 ke NEECHE cross + ST red + VWAP neeche +
+        PCR <= pcr_bear_max (0.8) + volume spike. Cover: RSI > 45 / ST flip
+        green / VWAP upar.
+        pcr_by_date: {YYYY-MM-DD: pcr} - na mile to 1.0 neutral (vote skip nahi,
+        neutral treat). Returns per-bar buy/sell/exit arrays + series."""
+        params = dict(params or {})
+        rp = max(2, int(params.get("rsi_period", 14) or 14))
+        rsi_entry = float(params.get("rsi_entry", 70) or 70)
+        rsi_exit = float(params.get("rsi_exit", 55) or 55)
+        rsi_os = float(params.get("rsi_oversold", 30) or 30)
+        stp = max(2, int(params.get("st_period", 10) or 10))
+        stm = float(params.get("st_mult", 3.0) or 3.0)
+        vwp = max(2, int(params.get("vwap_period", 20) or 20))
+        pcr_min = float(params.get("pcr_min", 1.0) or 1.0)
+        pcr_bear = float(params.get("pcr_bear_max", 0.8) or 0.8)
+        vm = float(params.get("vol_mult", 1.5) or 1.5)
+        vp = max(2, int(params.get("vol_period", 20) or 20))
+        fb = max(1, min(3, int(params.get("fresh_bars", 2) or 2)))
+        # Volume participation: spike USI ya pichhle `vol_confirm` bars me
+        # (ignition bar par hi spike zaroori nahi - 3-4 din ki participation
+        # kaafi; same-bar-zid par combo kabhi fire nahi hota tha).
+        vcb = max(1, min(5, int(params.get("vol_confirm_bars", 4) or 4)))
+        n = len(closes)
+        buy = [False] * n
+        sell = [False] * n
+        exit_buy = [False] * n
+        exit_sell = [False] * n
+        rsi = self.calculate_rsi(closes, rp) if n >= rp + 1 else [50.0] * n
+        try:
+            st = self.calculate_supertrend(data, stp, stm) or [0.0] * n
+        except Exception:
+            st = [0.0] * n
+        try:
+            _vw = self.calculate_vwap(data, vwp, 2.0) or {}
+            vw = _vw.get("vwap", [None] * n) if isinstance(_vw, dict) else [None] * n
+        except Exception:
+            vw = [None] * n
+        vols = [float((d or {}).get("volume", 0) or 0) for d in (data or [])]
+        if len(vols) < n:
+            vols = vols + [0.0] * (n - len(vols))
+        pcr_s = []
+        for idx in range(n):
+            try:
+                _d = str((data[idx] or {}).get("trade_date", ""))[:10] if idx < len(data or []) else ""
+                _p = float((pcr_by_date or {}).get(_d, 1.0)) if _d else 1.0
+            except Exception:
+                _p = 1.0
+            pcr_s.append(_p if _p > 0 else 1.0)
+        rsi_cover = 100.0 - float(rsi_exit or 55)
+        start = max(rp, stp, vwp, vp) + 1
+        for i in range(max(start, 1), n):
+            try:
+                c = float(closes[i] or 0)
+                if c <= 0:
+                    continue
+                # RSI cross events (fresh window me)
+                cross_up = cross_dn = False
+                for k in range(max(1, i - fb + 1), i + 1):
+                    try:
+                        _rk = float(rsi[k]) if rsi[k] is not None else None
+                        _rp0 = float(rsi[k - 1]) if rsi[k - 1] is not None else None
+                        if _rk is None or _rp0 is None:
+                            continue
+                        if _rp0 <= rsi_entry and _rk > rsi_entry:
+                            cross_up = True
+                        if _rp0 >= rsi_os and _rk < rsi_os:
+                            cross_dn = True
+                    except Exception:
+                        continue
+                stv = st[i] if i < len(st) else None
+                vwv = vw[i] if i < len(vw) else None
+                if stv is None or vwv is None:
+                    continue
+                _vsma = sum(vols[max(0, i - vp):i]) / max(1, min(vp, i))
+                try:
+                    vok = False
+                    for _vk in range(max(1, i - vcb + 1), i + 1):
+                        _sma_k = sum(vols[max(0, _vk - vp):_vk]) / max(1, min(vp, _vk))
+                        if _sma_k > 0 and vols[_vk] > vm * _sma_k:
+                            vok = True
+                            break
+                except Exception:
+                    vok = False
+                _pcr = pcr_s[i] if i < len(pcr_s) else 1.0
+                _rsi_now = float(rsi[i]) if rsi[i] is not None else 50.0
+                _rsi_prev = float(rsi[i - 1]) if i > 0 and rsi[i - 1] is not None else _rsi_now
+                # ST fresh flip (pichhle fresh window me red->green)
+                st_fresh_up = st_fresh_dn = False
+                try:
+                    for k in range(max(1, i - fb + 1), i + 1):
+                        _sk = st[k] if k < len(st) else None
+                        _sp0 = st[k - 1] if k - 1 < len(st) else None
+                        if _sk is None or _sp0 is None:
+                            continue
+                        if closes[k - 1] <= _sp0 and closes[k] > _sk:
+                            st_fresh_up = True
+                        if closes[k - 1] >= _sp0 and closes[k] < _sk:
+                            st_fresh_dn = True
+                except Exception:
+                    pass
+                # RSI momentum: ignition cross YA (70-85 riding + rising + fresh ST).
+                # RSI>85 chase kabhi nahi; mirror me RSI<15 kabhi nahi.
+                rsi_mom_up = bool(cross_up) or (
+                    rsi_entry <= _rsi_now <= 85.0 and _rsi_now >= _rsi_prev and st_fresh_up)
+                rsi_mom_dn = bool(cross_dn) or (
+                    15.0 <= _rsi_now <= rsi_os and _rsi_now <= _rsi_prev and st_fresh_dn)
+                # BUY: paancho ek saath
+                if (rsi_mom_up and c > stv and c > vwv and _pcr >= pcr_min and vok):
+                    buy[i] = True
+                # SELL mirror
+                if (rsi_mom_dn and c < stv and c < vwv and _pcr <= pcr_bear and vok):
+                    sell[i] = True
+                # EXITS (koi ek kaafi - jaldi niklo, late mat karo)
+                if _rsi_now < rsi_exit or c < stv or c < vwv:
+                    exit_buy[i] = True
+                if _rsi_now > rsi_cover or c > stv or c > vwv:
+                    exit_sell[i] = True
+            except Exception:
+                continue
+        return {"buy": buy, "sell": sell, "exit_buy": exit_buy,
+                "exit_sell": exit_sell, "rsi": rsi, "vwap": vw,
+                "supertrend": st, "pcr": pcr_s}
+
     def calculate_adx(self, data: List[Dict], period: int = 14) -> Dict:
         """Wilder's ADX with +DI/-DI. adx[i] = trend strength (0-100);
         +DI > -DI = bulls stronger. Best setting: period 14, trend gate 25."""

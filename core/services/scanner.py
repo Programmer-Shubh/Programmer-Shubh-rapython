@@ -369,6 +369,44 @@ class OptionScanner:
     # Dashboard Trade Opportunity ka EKLOTA filter: sirf ye 3.
     SMV_VOL_MIN = 500000
 
+    def _pcr_map_recent(self, days: int = 7):
+        """Ek query me sab symbols ka latest PCR (put OI / call OI).
+        Fresh (<=5 din purana) hi map me - stale PCR se galat sentiment nahi.
+        Returns {SYM: pcr_float}."""
+        out = {}
+        try:
+            import datetime as _dt
+            _end = _dt.date.today().strftime("%Y-%m-%d")
+            _start = (_dt.date.today() - _dt.timedelta(days=max(2, int(days or 7)))).strftime("%Y-%m-%d")
+            rows = self.db.fetch_all(
+                "SELECT symbol, trade_date, option_type, SUM(COALESCE(oi,0)) as s "
+                "FROM bhavcopy_data WHERE option_type IN ('CE','PE') "
+                "AND trade_date BETWEEN ? AND ? "
+                "GROUP BY symbol, trade_date, option_type",
+                [_start, _end])
+            _per = {}
+            for r in rows or []:
+                try:
+                    _per.setdefault(str(r.get("symbol") or "").upper(), {})\
+                        .setdefault(str(r.get("trade_date") or "")[:10], {})[str(r.get("option_type") or "")] = float(r.get("s") or 0)
+                except Exception:
+                    continue
+            for _sym, _dates in _per.items():
+                try:
+                    _dmax = max(_dates.keys())
+                    _age = (_dt.date.today() - _dt.date(*map(int, _dmax.split("-")))).days
+                    if _age > 5:
+                        continue
+                    _ce = float((_dates[_dmax] or {}).get("CE", 0) or 0)
+                    _pe = float((_dates[_dmax] or {}).get("PE", 0) or 0)
+                    if _ce > 0 and _pe >= 0:
+                        out[_sym] = round(_pe / _ce, 2)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return out
+
     def _smv_signals(self, symbols=None):
         """Gate-driven opportunity backbone: har symbol par _smv_gate, pass
         hone par BUY CE (bullish) / BUY PE (bearish) signal. Score = 70 +
@@ -387,6 +425,11 @@ class OptionScanner:
         index_priority = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
         ordered = index_priority + [s for s in symbols if s not in index_priority]
         ordered = ordered[:60]
+        # PCR sentiment map: poore scan ke liye EK query (per-symbol nahi).
+        try:
+            _pcr_map = self._pcr_map_recent(7)
+        except Exception:
+            _pcr_map = {}
         out = []
         for sym in ordered:
             try:
@@ -396,7 +439,7 @@ class OptionScanner:
             if not data or len(data) < 26:
                 continue
             try:
-                gd, gr = self._smv_gate(sym, data)
+                gd, gr = self._smv_gate(sym, data, _pcr_map)
             except Exception:
                 continue
             if not gd:
@@ -427,11 +470,23 @@ class OptionScanner:
         out.sort(key=lambda x: x.get("score", 0), reverse=True)
         return out
 
-    def _smv_gate(self, symbol: str, data=None):
+    def _smv_gate(self, symbol: str, data=None, pcr_map=None):
         """SuperTrend side + MACD side + Volume>500000 - teeno agree to signal.
-        Baaki sab indicator filters (RSI/EMA/VWAP/combos/AI-gate) dashboard
-        opportunity me istemal nahi hote. Returns (direction, reasons) or (None, why).
-        Volume data missing (0) ho to volume-check skip (saza nahi) - ST+MACD decide karenge."""
+        FALSE-SIGNAL FILTERS (accuracy upgrade):
+          1. Freshness: ST flip ya MACD cross pichhle 2 bars me hona chahiye
+             ("fresh") - 20 din purane trend par late entry nahi. Bina fresh
+             ke score 70 (neeche), fresh par 80-90.
+          2. RSI extremes: bullish + RSI>=80 (overbought chase) BLOCK;
+             bearish + RSI<=20 BLOCK.
+          3. VWAP overextended: close VWAP+2sig se upar (bullish) ya -2sig se
+             neeche (bearish) to BLOCK (mean-reversion trap).
+          4. MACD whipsaw: crossover zero-line ke GALAT side ho to "weak turn"
+             (bullish cross macd<0, bearish cross macd>0) - full points nahi.
+          5. ST se 10%+ door (gap/corrupt chase) BLOCK.
+          6. PCR extremes: bullish + PCR<0.7 (heavy call writing) BLOCK;
+             bearish + PCR>1.5 BLOCK. PCR na mile to neutral (skip, saza nahi).
+        Returns (direction, reasons) or (None, why). Reasons logical clear
+        text me hote hain (dashboard par wahi dikhte hain)."""
         try:
             if data is None:
                 data = self._get_historical(symbol)
@@ -463,26 +518,161 @@ class OptionScanner:
                 vol_txt = f"vol {int(vol):,}"
             if not vol_ok:
                 return None, f"volume kam ({int(vol):,}<500000)"
-            # Fresh crossover notes (jaankari, shart nahi)
+            # Fresh triggers: ST flip ya MACD cross PICHLE 2 BARS me (0=abhi,
+            # 1=ek bar pehle). Purana trend = late entry = "fresh" shabd nahi,
+            # taaki score (cross-ginti) stale setup ko 70 par rakhe.
+            def _st_side(k):
+                try:
+                    _v = st[k] if k < len(st) else None
+                    if not _v:
+                        return None
+                    return closes[k] > _v
+                except Exception:
+                    return None
+
+            def _macd_side(k):
+                try:
+                    _mv = m[k] if k < len(m) else None
+                    _sv = s[k] if k < len(s) else None
+                    if _mv is None or _sv is None:
+                        return None
+                    return _mv > _sv
+                except Exception:
+                    return None
+
+            _now_st = _st_side(i)
+            _now_mc = _macd_side(i)
+            st_fresh_age, mc_fresh_age = None, None
             try:
-                stp = st[prev] if prev < len(st) else None
-                st_cross = bool(stp) and ((closes[prev] <= stp) if st_bull else (closes[prev] >= stp))
+                for _age in (0, 1):
+                    _k = i - _age
+                    _ps = _st_side(_k - 1) if _k - 1 >= 0 else None
+                    _cs = _st_side(_k)
+                    if _ps is not None and _cs is not None and _ps != _cs and _cs == st_bull:
+                        st_fresh_age = _age
+                        break
             except Exception:
-                st_cross = False
+                pass
             try:
-                mp = m[prev] if prev < len(m) else None
-                sp = s[prev] if prev < len(s) else None
-                macd_cross = (mp is not None and sp is not None
-                              and ((mp <= sp) if macd_bull else (mp >= sp)))
+                for _age in (0, 1):
+                    _k = i - _age
+                    _pm = _macd_side(_k - 1) if _k - 1 >= 0 else None
+                    _cm = _macd_side(_k)
+                    if _pm is not None and _cm is not None and _pm != _cm and _cm == macd_bull:
+                        mc_fresh_age = _age
+                        break
             except Exception:
-                macd_cross = False
+                pass
+            st_cross = st_fresh_age is not None
+            macd_cross = mc_fresh_age is not None
+            # MACD whipsaw filter: crossover zero-line ke SAHI side ho to hi
+            # "crossover" (full). Galat side = weak turn (aadhe points).
+            # Bullish cross macd<0 (bear zone bounce) ya bearish cross macd>0
+            # aksar trap hota hai.
+            try:
+                _mv0 = float(mv or 0)
+            except Exception:
+                _mv0 = 0.0
+            macd_strong = (_mv0 >= 0) if macd_bull else (_mv0 <= 0)
+            # RSI momentum guard (14): overbought chase / oversold knife BLOCK.
+            try:
+                _rsi = self.indicators.calculate_rsi(closes, 14) or []
+                rsi_now = float(_rsi[i]) if i < len(_rsi) and _rsi[i] is not None else 50.0
+            except Exception:
+                rsi_now = 50.0
+            if st_bull and macd_bull and rsi_now >= 80:
+                return None, f"RSI {rsi_now:.0f} overbought - chase mat karo (80+ BLOCK)"
+            if (not st_bull) and (not macd_bull) and rsi_now <= 20:
+                return None, f"RSI {rsi_now:.0f} oversold - knife mat pakdo (20- BLOCK)"
+            # VWAP anchor (20): 2-sigma se bahar = overextended mean-reversion
+            # trap. VWAP na bane to skip (saza nahi).
+            vwap_txt, vwap_block = "", False
+            try:
+                _vw = self.indicators.calculate_vwap(data, 20, 2.0) or {}
+                _vv = (_vw.get("vwap", []) or [])
+                _u2 = (_vw.get("upper2", []) or [])
+                _l2 = (_vw.get("lower2", []) or [])
+                if i < len(_vv) and _vv[i]:
+                    if _vv[i] and close > _vv[i]:
+                        vwap_txt = "VWAP ke upar (anchor ok)"
+                    elif _vv[i]:
+                        vwap_txt = "VWAP ke neeche"
+                    if i < len(_u2) and _u2[i] and close > _u2[i] and st_bull and macd_bull:
+                        vwap_block = True
+                    if i < len(_l2) and _l2[i] and close < _l2[i] and (not st_bull) and (not macd_bull):
+                        vwap_block = True
+            except Exception:
+                pass
+            if vwap_block:
+                return None, "VWAP se 2-sigma bahar (overextended) - mean-reversion trap"
+            # ST se 10%+ door = gap-chase (ya corrupt), BLOCK.
+            try:
+                if stv and abs(close - stv) / max(abs(stv), 1e-9) > 0.10:
+                    return None, "SuperTrend se 10%+ door (gap-chase) - entry mat karo"
+            except Exception:
+                pass
+            # Volume: absolute 500k gate (purana contract) + relative spike note.
+            try:
+                _v20 = [v for v in vols[max(0, i - 20):i] if v and v > 0]
+                _sma = sum(_v20) / len(_v20) if _v20 else 0
+                vratio = (vol / _sma) if _sma > 0 and vol > 0 else 0
+                vol_txt = f"vol {int(vol):,}" + (f" ({vratio:.1f}xSMA20)" if vratio else "")
+            except Exception:
+                pass
+            # PCR sentiment extremes (map mila to): call-buying trap / put-trap BLOCK.
+            pcr_txt = ""
+            try:
+                _pcr = None
+                if isinstance(pcr_map, dict):
+                    _pcr = pcr_map.get(symbol.upper())
+                if _pcr is not None:
+                    _pcrf = float(_pcr)
+                    pcr_txt = f"PCR {_pcrf:.2f}"
+                    if st_bull and macd_bull and _pcrf < 0.7:
+                        return None, f"PCR {_pcrf:.2f} heavy call writing - call buying trap"
+                    if (not st_bull) and (not macd_bull) and _pcrf > 1.5:
+                        return None, f"PCR {_pcrf:.2f} heavy put support - put buying trap"
+            except Exception:
+                pass
             if st_bull and macd_bull:
-                rs = [f"SuperTrend bullish{' (fresh cross)' if st_cross else ''}",
-                      f"MACD bullish{' (crossover)' if macd_cross else ''}", vol_txt]
+                rs = []
+                if st_cross:
+                    rs.append(f"ST bullish (fresh cross breakout, {st_fresh_age} bar pehle)")
+                else:
+                    rs.append("ST bullish (purana trend - late entry savdhaan)")
+                if macd_cross and macd_strong:
+                    _mc_age = f" {mc_fresh_age} bar pehle" if mc_fresh_age else ""
+                    rs.append(f"MACD bullish (crossover above zero{_mc_age})")
+                elif macd_cross:
+                    rs.append("MACD bullish (weak turn - zero ke neeche, aadhe points)")
+                else:
+                    rs.append("MACD bullish (purana - late entry savdhaan)")
+                rs.append(vol_txt)
+                rs.append(f"RSI {rsi_now:.0f} (momentum ok, overbought nahi)")
+                if vwap_txt:
+                    rs.append(vwap_txt)
+                if pcr_txt:
+                    rs.append(pcr_txt + " (sentiment ok)")
                 return "bullish", rs
             if (not st_bull) and (not macd_bull):
-                rs = [f"SuperTrend bearish{' (fresh cross)' if st_cross else ''}",
-                      f"MACD bearish{' (crossover)' if macd_cross else ''}", vol_txt]
+                rs = []
+                if st_cross:
+                    rs.append(f"ST bearish (fresh cross breakdown, {st_fresh_age} bar pehle)")
+                else:
+                    rs.append("ST bearish (purana trend - late entry savdhaan)")
+                if macd_cross and macd_strong:
+                    _mc_age = f" {mc_fresh_age} bar pehle" if mc_fresh_age else ""
+                    rs.append(f"MACD bearish (crossover below zero{_mc_age})")
+                elif macd_cross:
+                    rs.append("MACD bearish (weak turn - zero ke upar, aadhe points)")
+                else:
+                    rs.append("MACD bearish (purana - late entry savdhaan)")
+                rs.append(vol_txt)
+                rs.append(f"RSI {rsi_now:.0f} (momentum ok, oversold nahi)")
+                if vwap_txt:
+                    rs.append(vwap_txt)
+                if pcr_txt:
+                    rs.append(pcr_txt + " (sentiment ok)")
                 return "bearish", rs
             return None, "ST/MACD direction mismatch"
         except Exception as e:
@@ -579,6 +769,19 @@ class OptionScanner:
         # Dashboard Trade Opportunity backbone = SIRF ST+MACD+Vol500k gate.
         # Purane engines (scan/VWAP/PA/SD/intraday/tick/combo/AI-gate) hata diye.
         base = self._smv_signals(symbols)
+        # RSI+VWAP+ST+PCR momentum combo: paancho shartein ek saath (score 100,
+        # alag entry - primary picker combo ko prefer karta hai). Backtest ke
+        # combo_rsi_vwap_pcr se SAME niyam (parity).
+        try:
+            _combo = self._combo_rvp_signals(symbols, None)
+            _seen = {(x.get("symbol"), x.get("signal_type")) for x in base}
+            for _cs in (_combo or []):
+                _k = (_cs.get("symbol"), _cs.get("signal_type"))
+                if _k not in _seen:
+                    base.append(_cs)
+                    _seen.add(_k)
+        except Exception:
+            pass
         try:
             _dbg["base"] = len(base)
             _dbg["real_gate_fail"] = sum(1 for v in (getattr(self, "_REAL_CACHE", {}) or {}).values() if isinstance(v, tuple) and not v[1])
@@ -650,6 +853,125 @@ class OptionScanner:
         except Exception:
             pass
         return {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell, "min_score": min_score}
+
+    def _combo_rvp_signals(self, symbols=None, pcr_map=None):
+        """RSI Momentum + VWAP anchor + SuperTrend + PCR + Volume combo
+        (backtest combo_rsi_vwap_pcr ke SAME niyam - dashboard parity).
+        Score: RSI cross 25 + ST 20 + VWAP 15 + PCR 20 + Vol 20 = 100.
+        Signal sirf jab RSI-leg AUR ST-leg dono hon AND total >= 70
+        (warna NONE - honest). PCR na mile to uske 20 nahi milte.
+        Returns opportunity dicts (combo=True, ai=True)."""
+        if symbols is None:
+            symbols = list(FNO_SYMBOLS)
+        else:
+            symbols = list(symbols)
+        try:
+            db_syms = self.db.fetch_all("SELECT DISTINCT symbol FROM bhavcopy_data WHERE option_type IS NULL ORDER BY symbol")
+            for r in (db_syms or []):
+                if r["symbol"] not in symbols:
+                    symbols.append(r["symbol"])
+        except Exception:
+            pass
+        ordered = ["NIFTY", "BANKNIFTY", "FINNIFTY"] + [s for s in symbols if s not in ("NIFTY", "BANKNIFTY", "FINNIFTY")]
+        ordered = ordered[:60]
+        if not isinstance(pcr_map, dict):
+            try:
+                pcr_map = self._pcr_map_recent(7)
+            except Exception:
+                pcr_map = {}
+        out = []
+        for sym in ordered:
+            try:
+                data = self._get_historical(sym)
+            except Exception:
+                continue
+            if not data or len(data) < 30:
+                continue
+            try:
+                gd = self._combo_rvp_one(sym, data, pcr_map)
+            except Exception:
+                continue
+            if gd:
+                out.append(gd)
+        out.sort(key=lambda x: x.get("score", 0), reverse=True)
+        return out
+
+    def _combo_rvp_one(self, symbol: str, data, pcr_map=None):
+        """Ek symbol par combo score. Returns opportunity dict ya None."""
+        try:
+            closes = [float(d.get("close_price", 0) or 0) for d in data]
+            if len(closes) < 30 or closes[-1] <= 0:
+                return None
+            try:
+                _pcr_by_date = None
+                if isinstance(pcr_map, dict) and symbol.upper() in (pcr_map or {}):
+                    _pd = str((data[-1] or {}).get("trade_date", ""))[:10]
+                    _pv = float((pcr_map or {}).get(symbol.upper()) or 0)
+                    if _pv > 0 and _pd:
+                        _pcr_by_date = {_pd: _pv}
+            except Exception:
+                _pcr_by_date = None
+            from core.services.indicator_engine import IndicatorEngine as _IE
+            _ie = getattr(self, "indicators", None) or _IE()
+            res = _ie.calculate_rsi_vwap_pcr_combo(
+                data, closes,
+                {"rsi_period": 14, "rsi_entry": 70, "rsi_exit": 55,
+                 "st_period": 10, "st_mult": 3.0, "vwap_period": 20,
+                 "pcr_min": 1.0, "vol_mult": 1.5, "vol_period": 20,
+                 "fresh_bars": 2},
+                _pcr_by_date)
+            i = len(data) - 1
+            close = closes[i]
+            rsi = res.get("rsi", []) or []
+            vw = res.get("vwap", []) or []
+            st = res.get("supertrend", []) or []
+            pcr_s = res.get("pcr", []) or []
+            _r = float(rsi[i]) if i < len(rsi) and rsi[i] is not None else 50.0
+            _st = st[i] if i < len(st) else 0
+            _vw = vw[i] if i < len(vw) else 0
+            _pcr = float(pcr_s[i]) if i < len(pcr_s) and pcr_s[i] else 0
+            vols = [float(d.get("volume", 0) or 0) for d in data]
+            _sma = sum([v for v in vols[max(0, i - 20):i] if v > 0]) / max(1, len([v for v in vols[max(0, i - 20):i] if v > 0]))
+            _vr = (vols[i] / _sma) if _sma > 0 and vols[i] > 0 else 0
+            buy = bool((res.get("buy", []) or [])[i]) if i < len(res.get("buy", []) or []) else False
+            sell = bool((res.get("sell", []) or [])[i]) if i < len(res.get("sell", []) or []) else False
+            if buy:
+                reasons = [
+                    f"RSI {_r:.0f} momentum ignition (70 cross, fresh)",
+                    f"SuperTrend green ({_st:,.0f} ke upar)" if _st else "SuperTrend green",
+                    f"VWAP anchor ke upar ({_vw:,.0f})" if _vw else "VWAP ke upar",
+                    f"PCR {_pcr:.2f} >= 1.0 (put support, call safe)" if _pcr else "PCR neutral",
+                    f"Volume {_vr:.1f}x spike (participation)" if _vr else "Volume ok",
+                ]
+                sug = self._suggest_option_floor(symbol, close, "CE", "BUY", 20.0)
+                if not (sug or {}).get("strike"):
+                    return None
+                return {"symbol": symbol, "signal_type": "BUY CE", "direction": "bullish",
+                        "score": 100, "price": close, "reasons": ["RSI+VWAP+ST+PCR combo: " + "; ".join(reasons)],
+                        "indicators": {"rsi": round(_r, 1), "vwap": round(_vw, 2) if _vw else 0,
+                                       "supertrend": round(_st, 2) if _st else 0, "pcr": _pcr,
+                                       "vol_ratio": round(_vr, 2)},
+                        "option_suggestion": sug, "ai": True, "combo": True}
+            if sell:
+                reasons = [
+                    f"RSI {_r:.0f} breakdown (30 cross, fresh)",
+                    f"SuperTrend red ({_st:,.0f} ke neeche)" if _st else "SuperTrend red",
+                    f"VWAP anchor ke neeche ({_vw:,.0f})" if _vw else "VWAP ke neeche",
+                    f"PCR {_pcr:.2f} <= 0.8 (call writing, put safe)" if _pcr else "PCR neutral",
+                    f"Volume {_vr:.1f}x spike (participation)" if _vr else "Volume ok",
+                ]
+                sug = self._suggest_option_floor(symbol, close, "PE", "BUY", 20.0)
+                if not (sug or {}).get("strike"):
+                    return None
+                return {"symbol": symbol, "signal_type": "BUY PE", "direction": "bearish",
+                        "score": 100, "price": close, "reasons": ["RSI+VWAP+ST+PCR combo: " + "; ".join(reasons)],
+                        "indicators": {"rsi": round(_r, 1), "vwap": round(_vw, 2) if _vw else 0,
+                                       "supertrend": round(_st, 2) if _st else 0, "pcr": _pcr,
+                                       "vol_ratio": round(_vr, 2)},
+                        "option_suggestion": sug, "ai": True, "combo": True}
+        except Exception:
+            pass
+        return None
 
     def _ai_fallback_signal(self, result: dict) -> dict:
         """AI-enhanced fallback using 5 advanced indicators when VWAP signals are insufficient.
