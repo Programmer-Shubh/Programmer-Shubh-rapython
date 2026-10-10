@@ -1243,6 +1243,7 @@ let _lastOpenTrdHTML = null;
     let quantIndicators=[
         {id:'rsi',name:'RSI',params:[{key:'period',label:'Period',val:14}],candle:'5',field:'equity',mode:'both'},
         {id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',val:10},{key:'multiplier',label:'Multiplier',val:3}],candle:'5',field:'equity',mode:'both'},
+        {id:'combo_rsi_vwap_pcr',name:'Combo RSI+VWAP+ST+PCR',params:[{key:'rsi_period',label:'RSI Period',val:14},{key:'rsi_entry',label:'RSI Entry',val:70},{key:'rsi_exit',label:'RSI Exit',val:55},{key:'st_period',label:'ST Period',val:10},{key:'st_mult',label:'ST Mult',val:3},{key:'vwap_period',label:'VWAP Period',val:20},{key:'pcr_min',label:'PCR Min',val:1},{key:'vol_mult',label:'Vol Mult',val:1.5}],candle:'5',field:'equity',mode:'both'},
     ];
     function renderQuantOptions(){const q=(document.getElementById('q-ind-search').value||'').toLowerCase();const sel=document.getElementById('q-ind-select');sel.innerHTML='';QUANT_IND_DEFS.filter(d=>d.name.toLowerCase().includes(q)).forEach(d=>{sel.innerHTML+=`<option value="${d.id}">${d.name}</option>`;});}
     function addQuantIndicator(){const id=document.getElementById('q-ind-select').value;const def=QUANT_IND_DEFS.find(d=>d.id===id);if(!def)return;quantIndicators.push({id:def.id,name:def.name,params:def.params.map(p=>({key:p.key,label:p.label,val:p.def})),candle:'5',field:'equity',mode:'both'});renderQuantTable();try{updateRunSummary();}catch(e){}}
@@ -1847,8 +1848,8 @@ let _lastOpenTrdHTML = null;
         document.getElementById('s-reentry-tp').value='RE ASAP';
         document.getElementById('s-trail').value='Lock';
         clearLegs();
-        // reset to quant default: RSI + SuperTrend
-        try{quantIndicators=[{id:'rsi',name:'RSI',params:[{key:'period',label:'Period',val:14}],candle:'5',field:'equity',mode:'both'},{id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',val:10},{key:'multiplier',label:'Multiplier',val:3}],candle:'5',field:'equity',mode:'both'}];renderQuantTable();}catch(e){}
+        // reset to quant default: RSI + SuperTrend + Combo
+        try{quantIndicators=[{id:'rsi',name:'RSI',params:[{key:'period',label:'Period',val:14}],candle:'5',field:'equity',mode:'both'},{id:'supertrend',name:'SuperTrend',params:[{key:'period',label:'Period',val:10},{key:'multiplier',label:'Multiplier',val:3}],candle:'5',field:'equity',mode:'both'},{id:'combo_rsi_vwap_pcr',name:'Combo RSI+VWAP+ST+PCR',params:[{key:'rsi_period',label:'RSI Period',val:14},{key:'rsi_entry',label:'RSI Entry',val:70},{key:'rsi_exit',label:'RSI Exit',val:55},{key:'st_period',label:'ST Period',val:10},{key:'st_mult',label:'ST Mult',val:3},{key:'vwap_period',label:'VWAP Period',val:20},{key:'pcr_min',label:'PCR Min',val:1},{key:'vol_mult',label:'Vol Mult',val:1.5}],candle:'5',field:'equity',mode:'both'}];renderQuantTable();}catch(e){}
     }
 
     function _loadStratToForm(s){
