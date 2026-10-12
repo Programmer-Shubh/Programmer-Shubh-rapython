@@ -1483,19 +1483,44 @@ class OptionScanner:
                 row = None
         
         premium = float(row['close_price']) if row and row['close_price'] else None
-        # Always use weekly expiry for dashboard (chain's weekly premium ~471,
-        # not far 2027-03-30 which inflates to 3362). Keeps suggestion == entry.
-        import datetime as _dt2
-        weekly_exp = (_dt2.datetime.now() + _dt2.timedelta(days=7)).strftime("%Y-%m-%d")
-        expiry = weekly_exp
+        # Expiry: REAL weekly expiry (order entry ke SAME normalizer se), taaki
+        # suggestion aur order same DTE par price hon. Pehle fake today+7 tha
+        # jabki order real Thursday-DTE par chalta tha (suggestion >=20 dikhta,
+        # order <20 nikalta -> floor error). resolve_weekly_expiry order wali hai.
+        try:
+            from core.services.contract_pricer import resolve_weekly_expiry as _rw, dte_to_expiry as _dte
+            expiry = _rw(symbol) or ""
+        except Exception:
+            expiry = ""
+        if not expiry:
+            import datetime as _dt2
+            expiry = (_dt2.datetime.now() + _dt2.timedelta(days=7)).strftime("%Y-%m-%d")
+        try:
+            from core.services.contract_pricer import dte_to_expiry as _dte2
+            _edays = _dte2(expiry, 7)
+        except Exception:
+            _edays = 7
         # Mirror order entry exactly: DB premium below 10 for an ATM strike is
         # treated as stale -> shared unified model (IV 25%, floor 1.5).
         # Same model as entry and open-position LTP, so the shown rate is the
         # rate the trade gets. No spot*0.02 flat, no >5 gate.
+        # Stale-DB guard: MAX(date) 3+ din purana ho to DB premium IGNORE
+        # (order aaj ke live/model par chalta hai - purana 25 vs live 15.9
+        # mismatch khatm). Same real DTE dono taraf.
+        try:
+            _tdate = str(trade_date or "")
+            import datetime as _dt3
+            _ist3 = (_dt3.datetime.utcnow() + _dt3.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
+            _d0 = _dt3.datetime.strptime(_tdate[:10], "%Y-%m-%d")
+            _d1 = _dt3.datetime.strptime(_ist3, "%Y-%m-%d")
+            if (_d1 - _d0).days > 3:
+                premium = None
+        except Exception:
+            pass
         if premium is None or premium < 10:
             try:
                 from utils.helpers import model_premium
-                premium = model_premium(spot, strike, 7, option_type, symbol=symbol)
+                premium = model_premium(spot, strike, _edays, option_type, symbol=symbol)
             except Exception:
                 premium = 0
             if not premium or premium <= 0:
@@ -1530,16 +1555,23 @@ class OptionScanner:
             return {"strike": 0, "premium": 0, "expiry": sug.get("expiry", ""), "spot": spot}
         try:
             from utils.helpers import get_strike_step, model_premium
+            from core.services.contract_pricer import dte_to_expiry as _dtew
             step = get_strike_step(symbol) or 0
             base = int(sug.get("strike") or 0)
             if step <= 0 or base <= 0 or spot <= 0:
                 return {"strike": 0, "premium": 0, "expiry": sug.get("expiry", ""), "spot": spot}
+            # Order-entry parity: walk strikes on the SAME real DTE (sug expiry),
+            # warna DTE=7 wala premium floor paas karke order me fail hota tha.
+            try:
+                _wed = _dtew(sug.get("expiry", ""), 7)
+            except Exception:
+                _wed = 7
             for k in (1, 2):
                 s2 = base - k * step if option_type == "CE" else base + k * step
                 if s2 <= 0 or abs(s2 - spot) / spot > 0.06:
                     break
                 try:
-                    px = float(model_premium(spot, s2, 7, option_type, symbol=symbol) or 0)
+                    px = float(model_premium(spot, s2, _wed, option_type, symbol=symbol) or 0)
                 except Exception:
                     px = 0
                 if px >= float(min_prem or 0):

@@ -408,26 +408,19 @@ def place_trade(req: TradeRequest):
         # Expiry normalize: dashboard forms send today/''/'Live' - a same-day
         # expiry collapses model DTE to 1 while the chain shows weekly, so
         # entry price never matches chain LTP. Normalize to the live weekly
-        # expiry (NSE when reachable, else today+7) for pricing AND storage,
-        # so positions keep pricing with the same DTE as the chain.
+        # expiry for pricing AND storage. Shared helper (contract_pricer.
+        # resolve_weekly_expiry) = scanner suggestion wali SAME expiry, taaki
+        # suggestion premium == order premium (floor-error khatm).
         try:
             import datetime as _nx
             _ist_t = (_nx.datetime.utcnow() + _nx.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
             _exp = str(req.expiry or "").strip()[:10]
             if (not _exp) or (_exp.lower() in ("live", "live data")) or (_exp < _ist_t and "-" in _exp) or (_exp == _ist_t):
-                _weekly = ""
                 try:
-                    from core.services.contract_pricer import _nse_map as _nxmap
-                    _ne, _nm = _nxmap(req.symbol)
-                    try:
-                        from routes.strategies import _norm_exp as _nxnorm
-                        _ne = _nxnorm(_ne)
-                    except Exception:
-                        pass
-                    if _ne and _ne >= _ist_t:
-                        _weekly = _ne
+                    from core.services.contract_pricer import resolve_weekly_expiry as _rwe
+                    _weekly = _rwe(req.symbol) or ""
                 except Exception:
-                    pass
+                    _weekly = ""
                 if not _weekly:
                     _weekly = (_nx.datetime.strptime(_ist_t, "%Y-%m-%d") + _nx.timedelta(days=7)).strftime("%Y-%m-%d")
                 req.expiry = _weekly
@@ -605,22 +598,18 @@ def place_trade(req: TradeRequest):
                 except Exception:
                     pass
             if spot_est > 0 and req.strike > 0:
-                # Unified model premium (IV 25%, floor 1.5) - same as open positions
+                # Unified model premium - SAME real-DTE formula as scanner
+                # suggestion (contract_pricer.dte_to_expiry): suggestion floor
+                # paas karke order floor par fail hona khatm.
                 try:
-                    expiry_days = 7
                     if req.expiry and "monthly" in req.expiry.lower():
                         expiry_days = 28
-                    # Try parse expiry date if it's YYYY-MM-DD
-                    elif req.expiry and "-" in req.expiry:
+                    else:
                         try:
-                            import datetime as _dt
-                            exp_d = _dt.datetime.strptime(req.expiry, "%Y-%m-%d")
-                            today = _dt.datetime.now()
-                            diff = (exp_d - today).days
-                            if diff > 0:
-                                expiry_days = min(45, max(2, diff))
+                            from core.services.contract_pricer import dte_to_expiry as _dte
+                            expiry_days = _dte(req.expiry, 7)
                         except Exception:
-                            pass
+                            expiry_days = 7
                     premium = model_premium(spot_est, req.strike, expiry_days, req.option_type, symbol=req.symbol)
                 except Exception:
                     premium = max(round(spot_est * 0.015, 2), 1.5)
@@ -648,15 +637,14 @@ def place_trade(req: TradeRequest):
                         except Exception:
                             spot_chk = 0
                     if spot_chk > 0:
-                        expiry_days = 7
                         if req.expiry and "monthly" in req.expiry.lower():
                             expiry_days = 28
-                        elif req.expiry and "-" in req.expiry:
+                        else:
                             try:
-                                import datetime as _dt2
-                                exp_d2 = _dt2.datetime.strptime(req.expiry, "%Y-%m-%d")
-                                expiry_days = max(2, min(45, (exp_d2 - _dt2.datetime.now()).days))
-                            except: pass
+                                from core.services.contract_pricer import dte_to_expiry as _dte2
+                                expiry_days = _dte2(req.expiry, 7)
+                            except Exception:
+                                expiry_days = 7
                         # Use same model as scanner — ensures 105 vs 1.50 mismatch never happens for any symbol
                         premium = model_premium(spot_chk, req.strike, expiry_days, req.option_type, symbol=req.symbol)
                 except Exception:

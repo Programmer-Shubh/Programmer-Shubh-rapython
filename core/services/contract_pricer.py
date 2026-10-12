@@ -32,6 +32,46 @@ def _ist_today():
     return datetime.now(ist).strftime("%Y-%m-%d")
 
 
+def resolve_weekly_expiry(symbol: str = "") -> str:
+    """Next weekly expiry YYYY-MM-DD shared by scanner suggestion AND order
+    entry (pehle dono alag-alag expiry/DTE par price karte the - suggestion
+    DTE=7 par >=20 dikhata, order real DTE=2 par <20 nikalta -> floor error).
+    NSE map (same-day reachable) else IST today+7."""
+    try:
+        _ne, _nm = _nse_map((symbol or "").upper())
+        try:
+            from routes.strategies import _norm_exp as _nxnorm
+            _ne = _nxnorm(_ne)
+        except Exception:
+            pass
+        if _ne and _ne >= _ist_today():
+            return _ne[:10]
+    except Exception:
+        pass
+    try:
+        import datetime as _dt
+        return (_dt.datetime.strptime(_ist_today(), "%Y-%m-%d") + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
+    except Exception:
+        return ""
+
+
+def dte_to_expiry(expiry_ymd: str, default: int = 7, cap: int = 45) -> int:
+    """Real calendar days from NOW to expiry (min 1). Scanner suggestion aur
+    order entry dono yahi DTE use karte hain - model premium identical."""
+    try:
+        import datetime as _dt
+        _exp = str(expiry_ymd or "").strip()[:10]
+        if _exp and "-" in _exp:
+            _ed = _dt.datetime.strptime(_exp, "%Y-%m-%d")
+            _diff = (_ed - _dt.datetime.now()).days
+            if _diff > 30:
+                return int(default)
+            return max(1, min(int(cap), _diff))
+    except Exception:
+        pass
+    return int(default)
+
+
 def _real_token(tok):
     return bool(tok) and not str(tok).startswith(("SIM-", "ANG-"))
 
