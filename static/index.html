@@ -325,7 +325,7 @@
                     <span class="d-flex gap-2 align-items-center">
                         <label class="badge bg-success" style="font-size:13px"><input type="radio" name="dash-mode" value="paper" checked onchange="setDashMode('paper')"> Paper</label>
                         <label class="badge" style="font-size:13px;color:#842029;background:#f8d7da;border:1px solid #f5c2c7"><input type="radio" name="dash-mode" value="live" onchange="setDashMode('live')"> Live</label>
-                        <button class="btn btn-sm btn-primary" onclick="loadOpps()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                        <button class="btn btn-sm btn-primary" onclick="loadOpps(true)"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                     </span>
                 </div>
                 <div class="card-body p-2">
@@ -406,6 +406,7 @@
                         <div class="col-md-2"><label class="form-label small">Start Date</label><input type="date" id="r-start" class="form-control form-control-sm" value="2026-08-02"></div>
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
+                        <div class="col-md-2"><label class="form-label small" title="Auto paper: aaj ka signal na mile to kitne din purana signal chalega (0 = sirf aaj)">Signal Lookback (din)</label><input type="number" id="r-slb" class="form-control form-control-sm" value="0" min="0" max="15"></div>
                         <div class="col-md-2"><label class="form-label small">Chart Timeframe</label><select id="r-timeframe" class="form-select form-select-sm"><option value="1d">Daily</option><option value="5m">5 Minute</option><option value="15m" selected>15 Minute</option><option value="30m">30 Minute</option><option value="1h">1 Hour</option><option value="1m">1 Minute</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Momentum</label><input type="range" class="form-range" id="s-momentum" min="0" max="20" value="0"></div>
 
@@ -985,7 +986,19 @@
     }
     function singleBtn(sym,action,type,strike,exp,label,cls){return `<button class="btn btn-sm ${cls}" onclick="quickStrat('${sym}','${action}','${type}',${strike},'${exp}')">${label}</button>`;}
     function stratBtns(x){const sig=(x.signal_type||x.type||'').toUpperCase();const opt=x.option_suggestion||{};const sym=x.symbol,strike=opt.strike||0,exp=opt.expiry||''; if(sig.includes('SELL')&&sig.includes('CE')) return singleBtn(sym,'SELL','CE',strike,exp,'Sell CE','btn-sell'); if(sig.includes('SELL')&&sig.includes('PE')) return singleBtn(sym,'SELL','PE',strike,exp,'Sell PE','btn-sell'); if(sig.includes('CE')) return singleBtn(sym,'BUY','CE',strike,exp,'Buy CE','btn-buy'); if(sig.includes('PE')) return singleBtn(sym,'BUY','PE',strike,exp,'Buy PE','btn-buy'); const bull=(x.direction==='bullish')||(!x.direction&&sig.includes('CE')); return bull?singleBtn(sym,'BUY','CE',strike,exp,'Buy CE','btn-buy'):singleBtn(sym,'BUY','PE',strike,exp,'Buy PE','btn-buy');}
-    async function loadOpps(){
+    async function loadOpps(force){
+        // force=true (Refresh button): server cache bypass (?refresh=1) taaki
+        // 120s purani list wapas na mile. Auto loads cached (tez).
+        // In-flight guard: ek scan chal raha ho to dobara nahi (race me purana
+        // response naya result overwrite kar deta tha).
+        if(window._oppLoading){ try{console.log('[Opps] already loading, skip');}catch(e){} return; }
+        window._oppLoading=true;
+        const _rbtn=document.querySelector('button[onclick^="loadOpps"]');
+        let _rorig='';
+        try{
+            if(_rbtn){_rorig=_rbtn.innerHTML;_rbtn.innerHTML='<span class="spinner"></span> ...';_rbtn.disabled=true;}
+        }catch(e){}
+        const done=()=>{ window._oppLoading=false; try{if(_rbtn){_rbtn.innerHTML=_rorig;_rbtn.disabled=false;}}catch(e){} };
         // Single Top-5: best-condition setup per symbol (highest AI+combo+score
         // across all engines - ST/MACD/PA/Supply-Demand/intraday/tick).
         const el=document.getElementById('opp-top5');
@@ -1020,7 +1033,7 @@
             const _to=setTimeout(()=>{try{_ctl.abort();}catch(e){}},80000);
             let r;
             try{
-                const _resp=await fetch('/api/scanner/opportunities-4part?min_score=70',{signal:_ctl.signal});
+                const _resp=await fetch('/api/scanner/opportunities-4part?min_score=70'+(force?'&refresh=1':''),{signal:_ctl.signal});
                 r=await _resp.json();
             }finally{
                 try{clearTimeout(_to);}catch(e){}
@@ -1030,15 +1043,16 @@
             // sirf CE SELL (bearish) + PE SELL (bullish decay) dikhao. API me
             // chaaro parts ab bhi aate hain (doosre consumers ke liye).
             const all=[...(r.ce_sell||[]),...(r.pe_sell||[])];
-            if(!all.length){ if(el) el.innerHTML='<p class="text-muted small p-2">No SELL setups right now (CE SELL = bearish, PE SELL = bullish decay) — <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps()">Retry</button></p>'; _done=true; return; }
+            if(!all.length){ if(el) el.innerHTML='<p class="text-muted small p-2">No SELL setups right now (CE SELL = bearish, PE SELL = bullish decay) — <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps(true)">Retry</button></p>'; _done=true; done(); return; }
             renderTop(all);
-            _done=true;
+            _done=true; done();
             if(r.dummy){ setTimeout(()=>{ try{ loadOpps(); }catch(e){} }, 2500); }
         }catch(e){
-            if(el) el.innerHTML='<p class="text-danger small">Load failed ('+((e&&e.name==='AbortError')?'timeout':String((e&&e.message)||e).slice(0,120))+') <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps()">Retry</button></p>';
+            done();
+            if(el) el.innerHTML='<p class="text-danger small">Load failed ('+((e&&e.name==='AbortError')?'timeout':String((e&&e.message)||e).slice(0,120))+') <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps(true)">Retry</button></p>';
         }finally{
             if(!_done&&el&&/Loading\.\.\./.test(el.innerHTML||'')){
-                el.innerHTML='<p class="text-muted small p-2">No data — <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps()">Retry</button></p>';
+                el.innerHTML='<p class="text-muted small p-2">No data — <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadOpps(true)">Retry</button></p>';
             }
         }
     }
@@ -1255,6 +1269,7 @@ let _lastOpenTrdHTML = null;
         const sl=parseFloat(document.getElementById('r-sl').value)||1500;
         const tp=parseFloat(document.getElementById('r-tp').value)||3000;
         const mtd=parseInt(document.getElementById('r-mtd').value)||5;
+        const slb=Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0));
         const indicators=robotCollectIndicators();
         let legs=(typeof stratLegs!=='undefined'&&stratLegs.length)?JSON.parse(JSON.stringify(stratLegs)):[];
         if(!legs.length){
@@ -1271,7 +1286,7 @@ let _lastOpenTrdHTML = null;
         const exitTime=document.getElementById('r-exit').value||'15:05';
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const qSlip=parseFloat(document.getElementById('s-slippage')?.value)||0.50;
-        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp}};
+        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:document.getElementById('s-trail').value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,implied_volatility:0.14+momentum*0.002,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry').value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp,signal_lookback_days:slb}};
     }
     async function runBacktest(opts){
         // opts.direct: saved-strategy endpoint ka ready result - dobara fetch nahi, sidha render.
@@ -1801,7 +1816,7 @@ let _lastOpenTrdHTML = null;
     }
      document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta'); scheduleAutoBT();});
     document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); scheduleAutoBT(); });
-    ['r-order','r-strike','r-lots','r-expiry','r-type','r-sl','r-tp','r-mtd','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
+    ['r-order','r-strike','r-lots','r-expiry','r-type','r-sl','r-tp','r-mtd','r-slb','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
     document.getElementById('r-syms')?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();});
     // Indicator inputs auto
     document.addEventListener('change',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-ind-')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
@@ -1818,6 +1833,7 @@ let _lastOpenTrdHTML = null;
         document.getElementById('r-lots').value=1;
         document.getElementById('r-sl').value=1500;
         document.getElementById('r-tp').value=3000;
+        try{document.getElementById('r-slb').value=0;}catch(e){}
         try{document.getElementById('s-sl').value=1500;document.getElementById('s-tp').value=3000;}catch(e){}
         document.getElementById('s-lock-profit').value=0;
         document.getElementById('s-lock-amount').value=1;
@@ -1851,6 +1867,7 @@ let _lastOpenTrdHTML = null;
                 if(_rm.daily_stop_loss)document.getElementById('r-sl').value=_rm.daily_stop_loss;
                 if(_rm.daily_take_profit)document.getElementById('r-tp').value=_rm.daily_take_profit;
                 if(_rm.max_trades_per_day)try{document.getElementById('r-mtd').value=_rm.max_trades_per_day;}catch(e){}
+                try{if(_rm.signal_lookback_days!=null)document.getElementById('r-slb').value=_rm.signal_lookback_days;}catch(e){}
             }catch(e){}
             if(s.legs)try{stratLegs=Array.isArray(s.legs)?s.legs:JSON.parse(s.legs);try{stratLegs.forEach(l=>{l.lots=l.lots||1;l.expiry=l.expiry||'weekly';l.strike_selection=l.strike_selection||'atm';l.otm_distance=l.otm_distance||0;});}catch(e){}renderLegs();}catch(e){}
             // Saved indicators khaali hon to table mat wipe karo (warna "No
@@ -2156,7 +2173,7 @@ let _lastOpenTrdHTML = null;
             robotCollectIndicators().forEach(iv=>{ if(iv&&iv.id) _seen[iv.id]=iv; });
             Object.keys(_seen).forEach(k=>_saveInds.push(_seen[k]));
         }catch(e){ try{ _saveInds.push(...robotCollectIndicators()); }catch(_){} }
-        const body={name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:sl, daily_take_profit:tp, max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5}, last_backtest:(window._lastFullBT||null)};
+        const body={name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:sl, daily_take_profit:tp, max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5, signal_lookback_days:Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0))}, last_backtest:(window._lastFullBT||null)};
         try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ let _m='Strategy "'+finalName+'" saved! ID: '+r.id; try{const _at=r.auto_trades||[]; if(_at.length)_m+='\nPaper trade lag gaya: Trade #'+_at[0].trade_id+' @ Rs'+_at[0].entry+' (Open Positions me dikhega)';}catch(e){} try{ if(window._lastFullBT&&(window._lastFullBT.metrics||window._lastFullBT.trade_list)){ _m+='\nResult saath me saved - Backtest Detail dobara run nahi karega.'; } else { _m+='\n(Tip: pehle Run Backtest karke phir Save dabao to result saath save hoga.)'; } }catch(e){} alert(_m); document.getElementById('r-name').value=''; loadRobotSaved(); try{if(typeof loadStrats==='function')loadStrats();}catch(e){} } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
     }
      function _parseJsonField(v, fallback){ if(!v) return fallback; if(typeof v==='string'){ try{return JSON.parse(v);}catch(e){return fallback;} } return v; }
@@ -2240,6 +2257,7 @@ let _lastOpenTrdHTML = null;
             const rm=_parseJsonField(s.risk_management,{});
             document.getElementById('r-sl').value=rm.daily_stop_loss||1500;
             document.getElementById('r-tp').value=rm.daily_take_profit||3000;
+            try{if(rm.signal_lookback_days!=null)document.getElementById('r-slb').value=rm.signal_lookback_days;}catch(e){}
             const ao=_parseJsonField(s.advanced_options,{});
             if(ao.trade_mode) document.getElementById('r-type').value=ao.trade_mode;
             if(s.start_date) document.getElementById('r-start').value=s.start_date;

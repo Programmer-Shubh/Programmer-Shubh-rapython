@@ -378,10 +378,34 @@ def _dummy_4part(min_score=80):
     return {"ce_buy": ce_buy, "pe_buy": pe_buy, "ce_sell": ce_sell, "pe_sell": pe_sell, "min_score": min_score, "dummy": True}
 
 @router.get("/opportunities-4part")
-def opportunities_4part(min_score: int = 80, debug: int = 0):
-    """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, Score>=80 - instant after open (stale-while-revalidate + dummy instant)"""
+def opportunities_4part(min_score: int = 80, debug: int = 0, refresh: int = 0):
+    """4-part dashboard: CE Buy / PE Buy / CE Sell / PE Sell, Score>=80 - instant after open (stale-while-revalidate + dummy instant).
+    refresh=1 (manual Refresh button): cache BYPASS karke real scan - warna
+    button dabane par 120s purani list wapas milti thi ('kaam nahi kar raha')."""
     try: min_score=int(min_score)
     except: min_score=80
+    try: refresh=int(refresh or 0)
+    except: refresh=0
+    if refresh:
+        # Manual refresh: real scan synchronously (history 10-min cached hai,
+        # to tez; cold par client 80s me abort karke Retry dikhata hai).
+        try:
+            s = OptionScanner()
+            real = s.get_4_part_opportunities(min_score=min_score)
+            _cache_set(f"opp4_{min_score}", real)
+            if debug:
+                return _attach_opp_debug(real, s, min_score)
+            return real
+        except Exception as e:
+            k = f"opp4_{min_score}"
+            cached = _cache_get(k)
+            if cached:
+                return cached[1]
+            dummy = _dummy_4part(min_score)
+            _cache_set(k, dummy)
+            if debug:
+                return _attach_opp_debug(dummy, None, min_score)
+            return dummy
     if _rate_limit(f"opp4_{min_score}", 2.0):
         k=f"opp4_{min_score}"; cached=_cache_get(k)
         if cached and _t.time()-cached[0] < 120: return cached[1]
