@@ -59,7 +59,11 @@ class IndicatorEngine:
     def calculate_supertrend(self, data: List[Dict], period=10, multiplier=3.0) -> List[float]:
         n = len(data)
         atr = [0.0] * n
-        supertrend = [0.0] * n
+        # Warmup bars are None (NOT 0.0): 0.0 passes `is not None` gates and
+        # reads as "price above SuperTrend" (close > 0 always) = phantom
+        # bullish signals on the first `period` bars of every warmup-less
+        # series. None abstains honestly everywhere (engine + scanner).
+        supertrend = [None] * n
         for i in range(1, n):
             tr = max(
                 data[i]["high_price"] - data[i]["low_price"],
@@ -275,7 +279,7 @@ class IndicatorEngine:
             else:
                 trends.append("Sideways")
         # Pad to length n
-        state_sequence = trends + ["Sideways"] * (n - len(trends))
+        state_sequence = trends[:n]
         # Calculate probabilities based on how long the trend has persisted
         regime_probs = []
         for i in range(n):

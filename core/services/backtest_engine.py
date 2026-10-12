@@ -469,11 +469,14 @@ class BacktestEngine:
                     elif can_enter and i - pending_entry_signal >= max(1, latency):
                         pending_entry = i
                         pending_entry_signal = None
-                # SQUARE OFF ON EXPIRY DAY - automatic square-off to avoid delivery risk
-                if not self.is_live:
-                    self._square_off_expiry(historical, entries, exits, symbol, option_type, txn_type, qty, risk_management)
                 if has_open and pending_exit is None and (exit_sig or time_exit):
                     pending_exit = "condition" if exit_sig else "time"
+
+        # Expiry-day square-off on the LAST bar only (never a future price -
+        # _square_off_expiry no-ops for any other cur_date).
+        if not self.is_live and historical:
+            self._square_off_expiry(historical, entries, exits, symbol, option_type, txn_type, qty, risk_management,
+                                    cur_date=historical[-1]["trade_date"])
 
         while len(exits) < len(entries):
             idx = len(exits)
@@ -1793,12 +1796,17 @@ class BacktestEngine:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _square_off_expiry(self, historical, entries, exits, symbol, option_type, txn_type, qty, risk_management):
+    def _square_off_expiry(self, historical, entries, exits, symbol, option_type, txn_type, qty, risk_management, cur_date=None):
         """Automatically square off all open option positions on expiry day at market close.
-        This prevents physical delivery risk and is critical for F&O options."""
+        This prevents physical delivery risk and is critical for F&O options.
+        LAST-BAR ONLY (cur_date must equal the window's last date): an earlier
+        revision ran this on EVERY bar, closing positions at the FUTURE last-bar
+        price days early (look-ahead) and freeing bogus re-entries."""
         import datetime
         # Find the last bar's date
         last_date = historical[-1]["trade_date"] if historical else ""
+        if cur_date and cur_date != last_date:
+            return None
         # Check if any position is open and we're on or near expiry
         open_positions = len(entries) - len(exits)
         if open_positions > 0:
@@ -1815,12 +1823,10 @@ class BacktestEngine:
                         last_day -= datetime.timedelta(days=1)
                     is_expiry = (last_day.strftime("%Y-%m-%d") == last_date)
                 else:
-                    # Weekly: next Thursday from bar date
-                    days_ahead = 3 - bar_dt.weekday()
-                    if days_ahead <= 0:
-                        days_ahead += 7
-                    exp_thu = (bar_dt + datetime.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
-                    is_expiry = (exp_thu == last_date)
+                    # Weekly: the window's last bar IS the expiry Thursday.
+                    # (Old math asked for the NEXT Thursday, so expiry day
+                    # itself never matched - dead for the common case.)
+                    is_expiry = (bar_dt.weekday() == 3)
                 
                 if is_expiry:
                     # Square off all positions at close price (last bar's close)
@@ -2277,8 +2283,14 @@ class BacktestEngine:
                         _gx = float(exit.get("price", 0) or 0)
                         _gross = ((_gx - _ge) if entry.get("type") == "buy" else (_ge - _gx)) * _gq
                         _slip = _gross - float(pnl or 0)
+                        # Structured diagnostics: gross vs all-in charges vs net
+                        # (audit trail per trade - parity reviews).
+                        try:
+                            _chg = float((entry.get("costs") or {}).get("total", 0) or 0) + float((exit.get("exit_costs") or {}).get("total", 0) or 0)
+                        except Exception:
+                            _chg = 0.0
                     except Exception:
-                        _gross, _slip = 0.0, 0.0
+                        _gross, _slip, _chg = 0.0, 0.0, 0.0
                     try:
                         _sig = entry.get("signal", {}) or {}
                     except Exception:
@@ -2300,6 +2312,7 @@ class BacktestEngine:
                         "exit_price": exit.get("price", 0),
                         "gross_pnl": round(_gross, 2),
                         "slippage": round(_slip, 2),
+                        "charges": round(_chg, 2),
                         "pnl": pnl,
                         "pnl_formatted": f"₹{pnl:,.2f}",
                         "exit_reason": exit.get("reason", ""),

@@ -33,12 +33,14 @@ class HistoricalReplayEngine:
         self.risk_management = {}
         self.pending_entry = None
         self.pending_exit = None
+        self.pending_entry_signal = None
         self.pending_auto_buy = None
         self.daily_trades = 0
         self.daily_pnl = 0.0
         self.kill_switch_on = False
         self.last_date = ""
         self.entry_bars = []
+        self._exits = []
         
     def configure(self, symbol: str, start_date: str, end_date: str, 
                   ind_list: list, entry_conditions: list, exit_conditions: list,
@@ -85,10 +87,56 @@ class HistoricalReplayEngine:
             r['open_price'] = float(r.get('open_price', 0) or 0)
             r['volume'] = float(r.get('volume', 0) or 0)
         return rows
+
+    def _sync_exit(self, open_trade_idx):
+        """Copy the engine-computed exit (pnl/costs/dates) back onto the trade.
+        _close_position appends to the exits list WITHOUT mutating the entry -
+        reading trade['pnl'] without this sync is always 0 (parity killer)."""
+        try:
+            if open_trade_idx < len(self._exits) and self.trades[open_trade_idx].get("exit_date") is None:
+                ex = self._exits[open_trade_idx]
+                self.trades[open_trade_idx]["exit_date"] = ex.get("date", "")
+                self.trades[open_trade_idx]["exit_price"] = ex.get("price", 0)
+                self.trades[open_trade_idx]["exit_time"] = ex.get("time", "")
+                self.trades[open_trade_idx]["pnl"] = ex.get("pnl", 0)
+                self.trades[open_trade_idx]["exit_costs"] = ex.get("exit_costs", {})
+                self.trades[open_trade_idx]["exit_reason"] = ex.get("reason", "")
+                return True
+        except Exception:
+            pass
+        return False
     
     def run_replay(self) -> Dict:
-        """Run the historical replay - executes trades bar by bar."""
+        """Run the historical replay - executes trades bar by bar.
+        Parity contract: identical bars + config as BacktestEngine.run MUST
+        yield identical trades/net/wins (covered by test_bt_paper_parity).
+        Engine state is mirrored here (symbol/IV/expiry-hint/session clocks)
+        because _enter/_exit/_check price off it - a missing mirror silently
+        reprices everything (e.g. IV 0.25 default vs NIFTY 0.13)."""
         self._reset()
+        # Mirror BacktestEngine.run() setup (same fields, same values)
+        try:
+            self.bt_engine._reset()
+            self.bt_engine.premium_cache = {}
+            self.bt_engine.bt_symbol = self.symbol
+            self.bt_engine.bt_expiry = ""
+            self.bt_engine.implied_volatility = self.advanced_options.get("implied_volatility") or None
+            self.bt_engine.is_live = False
+            self.bt_engine._cur_close = 0.0
+            # _skip_db untouched (default False = DB premiums when present,
+            # else model). Callers forcing model-only (compare endpoint,
+            # synthetic tests) set bt_engine._skip_db=True themselves.
+            self.bt_engine._expiry_hint = self.advanced_options.get("expiry", "weekly")
+            if self.legs and any(l.get("expiry") == "monthly" for l in self.legs):
+                self.bt_engine._expiry_hint = "monthly"
+            self.bt_engine._entry_time = self.advanced_options.get("entry_time", "09:35")
+            self.bt_engine._exit_time = self.advanced_options.get("exit_time", "15:14")
+            self.bt_engine._early_exit_time = self.advanced_options.get("early_exit_time", "15:10")
+            _tm = str(self.advanced_options.get("trade_mode", self.advanced_options.get("trade_type", "positional")) or "positional").lower()
+            self.bt_engine._eq_intraday = (_tm == "intraday")
+        except Exception:
+            pass
+        self._exits = []
         
         # Extract config
         leg = self.legs[0] if self.legs else {"option_type": "CE", "lots": 1, "transaction": "buy"}
@@ -116,7 +164,9 @@ class HistoricalReplayEngine:
         entry_time = self.advanced_options.get("entry_time", "09:35")
         exit_time = self.advanced_options.get("exit_time", "15:14")
         
-        min_bars = min(15, max(1, len(self.historical_data) - 2))
+        # Engine parity: same warmup gate (pehle 15 tha, engine 5 hai -
+        # mismatch par replay kam bars evaluate karta tha = alag trades).
+        min_bars = min(5, max(1, len(self.historical_data) - 2))
         
         for i in range(min_bars, len(self.historical_data)):
             cur = self.historical_data[i]
@@ -211,15 +261,12 @@ class HistoricalReplayEngine:
                 exec_bar = self.historical_data[i]
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
                 exit_prem = self.bt_engine._exit_premium(cur_date, spot, float(entry["strike"]), option_type)
-                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, 
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem,
                     "SELL" if txn_type == "buy" else "BUY", False)
-                self.bt_engine._close_position(self.trades, [], entry, exit_prem, 
+                self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem,
                     self.pending_exit, cur_date, qty, txn_type)
-                # Update trade with exit info
-                if self.trades[open_trade_idx].get("exit_date") is None:
-                    self.trades[open_trade_idx]["exit_date"] = cur_date
-                    self.trades[open_trade_idx]["exit_price"] = exit_prem
-                    self.trades[open_trade_idx]["exit_time"] = exit_time
+                # Engine-computed exit wapas trade par (bina sync pnl hamesha 0)
+                self._sync_exit(open_trade_idx)
                 self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
                 if (daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
                     self.kill_switch_on = True
@@ -236,15 +283,14 @@ class HistoricalReplayEngine:
                     if hit:
                         from core.services.transaction_costs import TransactionCosts as _TC
                         exit_prem = _TC.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", False)
-                        self.bt_engine._close_position(self.trades, [], entry, exit_prem, 
+                        self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem,
                             hit["reason"], cur_date, qty, txn_type)
-                if self.trades[open_trade_idx].get("exit_date") is None:
-                    self.trades[open_trade_idx]["exit_date"] = cur_date
-                    self.trades[open_trade_idx]["exit_price"] = exit_prem
-                    self.trades[open_trade_idx]["exit_time"] = exit_time
-                self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
-                if (daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
-                    self.kill_switch_on = True
+                        # SIRF hit par sync+pnl (bina hit force-close BUG tha -
+                        # har open trade pehli SL-check bar me mar jata tha)
+                        self._sync_exit(open_trade_idx)
+                        self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
+                        if (daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
+                            self.kill_switch_on = True
             
             # Strategy-wise MTM SL/TP — unrealized MTM of ALL open positions +
             # realized daily_pnl. Limit hit => square-off everything at once.
@@ -261,11 +307,12 @@ class HistoricalReplayEngine:
                         open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
                         entry = self.trades[open_trade_idx]
                         if entry.get("is_spread"):
-                            self.bt_engine._close_spread(self.trades, [], entry, "strategy_sl_tp", cur_date)
+                            self.bt_engine._close_spread(self.trades, self._exits, entry, "strategy_sl_tp", cur_date)
                         else:
                             exit_prem = self.bt_engine._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
                             exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", False)
-                            self.bt_engine._close_position(self.trades, [], entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type)
+                            self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type)
+                        self._sync_exit(open_trade_idx)
                         self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
                     self.kill_switch_on = True
             
@@ -275,18 +322,15 @@ class HistoricalReplayEngine:
                 open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
                 entry = self.trades[open_trade_idx]
                 if entry.get("is_spread"):
-                    self.bt_engine._close_spread(self.trades, [], entry, "expiry_squareoff", cur_date)
+                    self.bt_engine._close_spread(self.trades, self._exits, entry, "expiry_squareoff", cur_date)
                 else:
                     exit_prem = self.bt_engine._close_premium(cur_date, float(cur["close_price"]),
                         float(entry["strike"]), option_type)
                     exit_prem = TransactionCosts.apply_fill_slippage(exit_prem,
                         "SELL" if txn_type == "buy" else "BUY", False)
-                    self.bt_engine._close_position(self.trades, [], entry, exit_prem,
+                    self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem,
                         "expiry_squareoff", cur_date, qty, txn_type)
-                if self.trades[open_trade_idx].get("exit_date") is None:
-                    self.trades[open_trade_idx]["exit_date"] = cur_date
-                    self.trades[open_trade_idx]["exit_price"] = exit_prem
-                    self.trades[open_trade_idx]["exit_time"] = exit_time
+                self._sync_exit(open_trade_idx)
                 self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
                 if (daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
                     self.kill_switch_on = True
@@ -299,20 +343,17 @@ class HistoricalReplayEngine:
                 open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
                 entry = self.trades[open_trade_idx]
                 if entry.get("is_spread"):
-                    self.bt_engine._close_spread(self.trades, [], entry, "intraday", cur_date)
+                    self.bt_engine._close_spread(self.trades, self._exits, entry, "intraday", cur_date)
                 else:
                     exit_prem = self.bt_engine._close_premium(cur_date, float(cur["close_price"]), 
                         float(entry["strike"]), option_type)
                     exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, 
                         "SELL" if txn_type == "buy" else "BUY", False)
-                    self.bt_engine._close_position(self.trades, [], entry, exit_prem, 
+                    self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem, 
                         "intraday", cur_date, qty, txn_type)
-                if self.trades[open_trade_idx].get("exit_date") is None:
-                    self.trades[open_trade_idx]["exit_date"] = cur_date
-                    self.trades[open_trade_idx]["exit_price"] = exit_prem
-                    self.trades[open_trade_idx]["exit_time"] = exit_time
+                self._sync_exit(open_trade_idx)
                 self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
-                if daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit:
+                if (daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
                     self.kill_switch_on = True
             
             # Generate signals for next bar (using current bar i - no look-ahead)
@@ -372,11 +413,8 @@ class HistoricalReplayEngine:
                 
                 if has_open and self.pending_exit is None and (exit_sig or time_exit):
                     self.pending_exit = "condition" if exit_sig else "time"
-            
-            # Expiry square-off
-            self.bt_engine._square_off_expiry(self.historical_data, self.trades, [], 
-                self.symbol, option_type, txn_type, qty, self.risk_management)
-            
+            # NOTE: no per-bar _square_off_expiry call (engine me bhi last-bar
+            # only hai) - end-of-period close neeche sab band karta hai.
             self.equity_curve.append(self.capital)
         
         # Close any remaining open positions at end
@@ -385,16 +423,13 @@ class HistoricalReplayEngine:
             entry = self.trades[idx]
             last = self.historical_data[-1]
             if entry.get("is_spread"):
-                self.bt_engine._close_spread(self.trades, [], entry, "end_of_period", last["trade_date"])
+                self.bt_engine._close_spread(self.trades, self._exits, entry, "end_of_period", last["trade_date"])
             else:
                 exit_prem = self.bt_engine._close_premium(last["trade_date"], float(last["close_price"]), 
                     float(entry["strike"]), option_type)
-                self.bt_engine._close_position(self.trades, [], entry, exit_prem, "end_of_period", 
+                self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem, "end_of_period", 
                     last["trade_date"], qty, txn_type)
-            if self.trades[idx].get("exit_date") is None:
-                self.trades[idx]["exit_date"] = last["trade_date"]
-                self.trades[idx]["exit_price"] = exit_prem
-                self.trades[idx]["exit_time"] = exit_time
+            self._sync_exit(idx)
         
         return self._build_result()
     
@@ -421,7 +456,21 @@ class HistoricalReplayEngine:
                 
                 entry_time_str = trade.get("entry_time", "09:35")
                 exit_time_str = trade.get("exit_time", "15:14")
-                
+                # Engine entry dicts carry the date under "date" (not
+                # "entry_date") - map it, else rows look dateless.
+                _ed = trade.get("entry_date") or trade.get("date", "")
+                # Structured diagnostics parity with backtest rows.
+                try:
+                    _gq = int(trade.get("quantity", 0) or 0)
+                    _ge = float(trade.get("price", 0) or 0)
+                    _gx = float(trade.get("exit_price", 0) or 0)
+                    _tt = str(trade.get("type", "buy") or "buy")
+                    _gross = ((_gx - _ge) if _tt == "buy" else (_ge - _gx)) * _gq
+                    _chg = float((trade.get("costs") or {}).get("total", 0) or 0) + float((trade.get("exit_costs") or {}).get("total", 0) or 0)
+                    _slip = _gross - float(pnl or 0)
+                except Exception:
+                    _gross, _slip, _chg = 0.0, 0.0, 0.0
+
                 if trade.get("is_spread"):
                     legs_str = " + ".join(
                         f"{'Sell' if l['type']=='sell' else 'Buy'} {l['option_type']} {l['strike']}"
@@ -430,7 +479,7 @@ class HistoricalReplayEngine:
                     trade_list.append({
                         "index": total_trades,
                         "symbol": self.symbol,
-                        "entry_date": trade.get("entry_date", ""),
+                        "entry_date": _ed,
                         "entry_time": entry_time_str,
                         "exit_date": trade.get("exit_date", ""),
                         "exit_time": exit_time_str,
@@ -441,8 +490,13 @@ class HistoricalReplayEngine:
                         "lots": trade.get("legs", [{}])[0].get("lots", 1) if trade.get("legs") else 1,
                         "entry_price": trade.get("price", 0),
                         "exit_price": trade.get("exit_price", 0),
+                        "gross_pnl": round(_gross, 2),
+                        "slippage": round(_slip, 2),
+                        "charges": round(_chg, 2),
                         "pnl": pnl,
                         "pnl_formatted": f"₹{pnl:,.2f}",
+                        "exit_reason": trade.get("exit_reason", ""),
+                        "reason": trade.get("exit_reason", ""),
                         "is_spread": True,
                     })
                 else:
@@ -450,7 +504,7 @@ class HistoricalReplayEngine:
                     trade_list.append({
                         "index": total_trades,
                         "symbol": self.symbol,
-                        "entry_date": trade.get("entry_date", ""),
+                        "entry_date": _ed,
                         "entry_time": entry_time_str,
                         "exit_date": trade.get("exit_date", ""),
                         "exit_time": exit_time_str,
@@ -461,8 +515,13 @@ class HistoricalReplayEngine:
                         "lots": leg_info.get("lots", 1),
                         "entry_price": trade.get("price", 0),
                         "exit_price": trade.get("exit_price", 0),
+                        "gross_pnl": round(_gross, 2),
+                        "slippage": round(_slip, 2),
+                        "charges": round(_chg, 2),
                         "pnl": pnl,
                         "pnl_formatted": f"₹{pnl:,.2f}",
+                        "exit_reason": trade.get("exit_reason", ""),
+                        "reason": trade.get("exit_reason", ""),
                     })
         
         total_return = self.capital - self.initial_capital
@@ -608,9 +667,11 @@ class HistoricalReplayEngine:
         self.current_bar_idx = 0
         self.pending_entry = None
         self.pending_exit = None
+        self.pending_entry_signal = None
         self.pending_auto_buy = None
         self.daily_trades = 0
         self.daily_pnl = 0.0
         self.kill_switch_on = False
         self.last_date = ""
         self.entry_bars = []
+        self._exits = []

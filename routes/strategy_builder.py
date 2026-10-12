@@ -1849,6 +1849,11 @@ def run_master_confluence(req: MasterConfluenceRequest):
 
             st_val = supertrend[i] if i < len(supertrend) else 0
             prev_st = supertrend[i - 1] if i > 0 and i - 1 < len(supertrend) else 0
+            # Warmup bars are None (never 0.0): None would corrupt comparisons
+            if st_val is None:
+                st_val = 0
+            if prev_st is None:
+                prev_st = 0
             ml = macd_data.get("macd", [None] * len(closes))
             ms = macd_data.get("signal", [None] * len(closes))
             cur_macd = ml[i] if i < len(ml) and ml[i] is not None else 0

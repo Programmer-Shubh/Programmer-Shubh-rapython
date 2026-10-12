@@ -356,6 +356,8 @@ def get_history():
                 "exit": t.get("exit_price", 0),
                 "pnl": t["pnl"],
                 "pnl_formatted": format_currency(t["pnl"]),
+                "entry_cost": t.get("total_cost", 0),
+                "exit_cost": t.get("exit_cost", 0),
                 "lot_size": get_lot_size(t["symbol"]) if t.get("lot_size",50)==50 and get_lot_size(t["symbol"])!=50 else t.get("lot_size", 50),
                 "quantity": t.get("quantity", 1),
                 "total_qty": t.get("quantity", 1) * (get_lot_size(t["symbol"]) if t.get("lot_size",50)==50 and get_lot_size(t["symbol"])!=50 else t.get("lot_size", 50)),
@@ -430,11 +432,30 @@ def run_historical_replay(req: HistoricalReplayRequest):
 
 @router.post("/backtest-compare")
 def backtest_compare(req: HistoricalReplayRequest):
-    """Run both backtest and historical replay, return both for comparison."""
+    """Run both backtest and historical replay, return both for comparison.
+    Both consume the SAME replay-loaded bars (single data path) so any
+    nonzero diff is a real logic divergence, not a data artifact."""
     try:
-        # Run backtest
+        # One shared history load (replay loader = DB spot history)
+        _loader = HistoricalReplayEngine()
+        _loader.configure(
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+        )
+        historical = list(_loader.historical_data)
+        # Run backtest on those exact bars
         bt_engine = BacktestEngine(is_live=False)
-        historical = bt_engine._load_historical(req.symbol, req.start_date, req.end_date)
+        try:
+            bt_engine._skip_db = True
+        except Exception:
+            pass
         bt_result = bt_engine.run(
             historical=historical,
             symbol=req.symbol,
@@ -448,8 +469,11 @@ def backtest_compare(req: HistoricalReplayRequest):
             risk_management=req.risk,
             is_live=False,
         )
-        
-        # Run historical replay (exact same logic)
+
+        # Run historical replay (same bars, independent loop).
+        # Model-only pricing on BOTH sides: DB LTP presence varies by path,
+        # so premiums are pinned to the model to compare pure LOGIC
+        # (signals/exits/math), not data-source luck.
         replay_engine = HistoricalReplayEngine()
         replay_engine.configure(
             symbol=req.symbol,
@@ -462,6 +486,10 @@ def backtest_compare(req: HistoricalReplayRequest):
             advanced_options=req.advanced,
             risk_management=req.risk,
         )
+        try:
+            replay_engine.bt_engine._skip_db = True
+        except Exception:
+            pass
         replay_result = replay_engine.run_replay()
         
         # Compare

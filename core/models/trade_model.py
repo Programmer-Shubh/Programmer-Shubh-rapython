@@ -68,20 +68,14 @@ class TradeModel:
         return _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
 
     def _sl_tp_levels(self, t: dict, entry: float, qty: int, lot: int):
-        """Same rupee-to-premium conversion as the live auto-exit block."""
-        def _to_level(level, is_sl):
-            if level is None or float(level) <= 0:
-                return 0
-            level = float(level)
-            if 0 < level < entry * 5 or level < 50:
-                return level
-            per_share = level / max(qty * lot, 1)
-            if t.get("transaction_type") == "BUY":
-                return entry - per_share if is_sl else entry + per_share
-            return entry + per_share if is_sl else entry - per_share
+        """Shared SL/TP math (utils.helpers.sltp_premium_level): overnight-gap
+        exits bilkul wahi level par hon jo backtest + SL monitor use karte
+        hain (parity). Purana local 5x-guess hataya."""
         try:
-            sl_level = _to_level(t.get("stop_loss", 0), True)
-            tp_level = _to_level(t.get("target", 0), False)
+            from utils.helpers import sltp_premium_level as _lvl
+            _txn = t.get("transaction_type", "BUY")
+            sl_level = _lvl(entry, t.get("stop_loss", 0), qty, lot, _txn, True)
+            tp_level = _lvl(entry, t.get("target", 0), qty, lot, _txn, False)
         except Exception:
             sl_level, tp_level = 0, 0
         return sl_level, tp_level
