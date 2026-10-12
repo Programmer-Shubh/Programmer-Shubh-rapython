@@ -386,6 +386,16 @@ def get_live_chain(symbol: str, expiry: str = ""):
 @router.post("/place-trade")
 def place_trade(req: TradeRequest):
     try:
+        # Market-hours gate: band market me PAPER entry nahi (live LTP nahi
+        # hota - model/stale rate par order lag jata tha). Close/exit/delete
+        # par koi rok nahi (wo alag endpoints hain). Auto paths (heartbeat /
+        # worker / save-hook) pehle se gated hain; ye manual button ka gate.
+        from core.services.sl_monitor import market_open_ist as _mkt
+        if not bool(_mkt()):
+            return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-15:30 IST). Market khulne par dobara try karo."}
+    except Exception:
+        pass
+    try:
         # Strategy expiry: auto-rollover to next weekly expiry by default so
         # paper trading keeps running instead of blocking on a past end_date.
         _rolled_to = ""

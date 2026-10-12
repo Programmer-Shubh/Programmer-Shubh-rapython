@@ -7,6 +7,16 @@ from core.services.transaction_costs import TransactionCosts
 def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500, tp: float = 3000) -> Dict:
     """legs: [{option_type, transaction, lots, strike_selection, otm_distance}]"""
     mode = mode.upper()
+    if mode == "PAPER":
+        # Market-hours gate (button/webhook PAPER entries): band market me
+        # fantasy rate par order nahi. LIVE broker flow untouched (AMO etc.
+        # broker khud handle karta hai).
+        try:
+            from core.services.sl_monitor import market_open_ist as _mkt
+            if not bool(_mkt()):
+                return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-3:30 IST)."}
+        except Exception:
+            pass
     live = LiveMarketData()
     spot = live.get_spot_price(symbol) or 0
     if spot <= 0:

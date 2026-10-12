@@ -175,6 +175,13 @@ def auto_paper_status(run: int = 0):
 
 @router.post("/place")
 def place_trade(req: PlaceTradeRequest):
+    try:
+        # Market-hours gate (chain place-trade jaisa): band market me entry nahi.
+        from core.services.sl_monitor import market_open_ist as _mkt
+        if not bool(_mkt()):
+            return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-15:30 IST)."}
+    except Exception:
+        pass
     # Mandatory Risk Management: SL/Target required (especially for option selling)
     if req.stop_loss is None or req.take_profit is None:
         return {"error": "Stop-Loss and Target are mandatory - cannot be blank"}
