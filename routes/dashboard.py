@@ -209,6 +209,8 @@ def get_trade_history():
                 "expiry_date": t.get("expiry_date", ""),
                 "pnl": t["pnl"],
                 "pnl_formatted": format_currency(t["pnl"]),
+                "entry_cost": t.get("total_cost", 0),
+                "exit_cost": t.get("exit_cost", 0),
                 "status": t.get("exit_status", "closed"),
                 "qty": t.get("quantity", 1),
             }
