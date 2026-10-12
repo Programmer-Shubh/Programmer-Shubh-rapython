@@ -248,14 +248,17 @@ def _today_signal(sid, s, today):
         # Lookback fallback: aaj ka signal na ho par pichhle N din me asli
         # signal bana ho AUR us par ab tak koi paper entry na hui ho to lagao
         # (trend-follow, once-per-signal - roz dobara nahi). N =
-        # signal_lookback_days (risk/advanced, default 5, 0 = sirf aaj).
+        # signal_lookback_days (risk/advanced me EXPLICIT rakho tabhi; default
+        # 0 = sirf aaj ka signal, purana tareeka).
         try:
-            _lb = 5
+            _lb = 0
             try:
-                _lb = int((risk or {}).get("signal_lookback_days",
-                          (adv or {}).get("signal_lookback_days", 5)) or 5)
+                _v = (risk or {}).get("signal_lookback_days", None)
+                if _v is None:
+                    _v = (adv or {}).get("signal_lookback_days", None)
+                _lb = 0 if _v is None else int(_v)
             except Exception:
-                _lb = 5
+                _lb = 0
             _lb = max(0, min(15, _lb))
             if _lb > 0:
                 from core.models.database import Database as _DB
