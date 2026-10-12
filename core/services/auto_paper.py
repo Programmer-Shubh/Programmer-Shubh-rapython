@@ -114,6 +114,41 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
         return {"placed": [], "skipped": f"error: {e}"[:150]}
 
 
+def _recent_signal_ok(entry_dates, today, lookback_days, traded_dates):
+    """Pure decision helper (unit-tested): latest backtest entry within
+    [today-lookback, today) that has NOT been paper-traded since.
+    Returns (ok: bool, signal_date: str). Dates are YYYY-MM-DD strings."""
+    try:
+        lb = max(0, min(15, int(lookback_days or 0)))
+    except Exception:
+        lb = 0
+    if lb <= 0:
+        return False, ""
+    try:
+        import datetime as _dt
+        _t = _dt.datetime.strptime(str(today)[:10], "%Y-%m-%d").date()
+        _cut = (_t - _dt.timedelta(days=lb)).strftime("%Y-%m-%d")
+    except Exception:
+        return False, ""
+    try:
+        _traded = {str(p or "")[:10] for p in (traded_dates or []) if p}
+    except Exception:
+        _traded = set()
+    try:
+        cands = sorted({str(d or "")[:10] for d in (entry_dates or [])
+                        if d and str(d)[:10] < str(today)[:10]
+                        and str(d)[:10] >= _cut}, reverse=True)
+    except Exception:
+        return False, ""
+    for _d in cands:
+        try:
+            if not any(_d < str(p or "")[:10] <= str(today)[:10] for p in _traded):
+                return True, _d
+        except Exception:
+            continue
+    return False, ""
+
+
 def _today_signal(sid, s, today):
     """True if the strategy's own indicators fire an entry dated TODAY on
     REAL history (backtest engine, same legs/config). Guards:
@@ -198,12 +233,46 @@ def _today_signal(sid, s, today):
             except Exception as e:
                 return False, f"engine timeout/fail: {e}"[:100]
         try:
-            tl = ((res or {}).get("metrics") or {}).get("trade_list") or []
+            # trade_list TOP-LEVEL aata hai _run_backtest_core se (metrics ke
+            # andar NAHI - purana path hamesha [] deta tha = auto kabhi nahi
+            # lagta tha; wahi "click par lagta, auto nahi" bug tha).
+            _res = res or {}
+            tl = _res.get("trade_list") or ((_res.get("metrics") or {}).get("trade_list") or [])
         except Exception:
             tl = []
         try:
             if any(str(t.get("entry_date", ""))[:10] == today for t in tl):
                 return True, "aaj ka signal mila"
+        except Exception:
+            pass
+        # Lookback fallback: aaj ka signal na ho par pichhle N din me asli
+        # signal bana ho AUR us par ab tak koi paper entry na hui ho to lagao
+        # (trend-follow, once-per-signal - roz dobara nahi). N =
+        # signal_lookback_days (risk/advanced, default 5, 0 = sirf aaj).
+        try:
+            _lb = 5
+            try:
+                _lb = int((risk or {}).get("signal_lookback_days",
+                          (adv or {}).get("signal_lookback_days", 5)) or 5)
+            except Exception:
+                _lb = 5
+            _lb = max(0, min(15, _lb))
+            if _lb > 0:
+                from core.models.database import Database as _DB
+                _prows = _DB.get_instance().fetch_all(
+                    "SELECT entry_date FROM paper_trades WHERE strategy_id=?", [sid])
+                _traded = [str(r.get("entry_date") or "")[:10] for r in (_prows or [])]
+                _ok, _sd = _recent_signal_ok(
+                    [str(t.get("entry_date", ""))[:10] for t in tl],
+                    today, _lb, _traded)
+                if _ok:
+                    try:
+                        import datetime as _dt2
+                        _age = (_dt2.datetime.strptime(today, "%Y-%m-%d").date()
+                                - _dt2.datetime.strptime(_sd, "%Y-%m-%d").date()).days
+                    except Exception:
+                        _age = 0
+                    return True, f"{_age} din purana signal {_sd} (trend follow, pehli entry)"
         except Exception:
             pass
         return False, "aaj koi signal nahi"
