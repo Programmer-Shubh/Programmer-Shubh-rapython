@@ -1,15 +1,14 @@
-"""Keep-alive endpoints so a free cron-job.org account can ping the site
-and stop Render's free tier from sleeping.
+"""Keep-alive: Render free sleeps after 15 min idle, killing auto-paper/SL
+threads while the browser is closed. Two layers (either suffices):
 
-Setup (2 minutes, free):
-1. Create account at https://cron-job.org (free plan = 50 cronjobs).
-2. Create cronjob -> Title "RaTrade keep-alive" -> Address:
-      https://ratrade-iwi2.onrender.com/api/keepalive/ping
-   -> every 5 minutes.
-3. Save + enable. Render stays awake while pings arrive.
+1. SELF-PING (automatic, zero setup): the app pings its own public URL
+   (RENDER_EXTERNAL_URL, or SELF_URL env) every 9 minutes, so the process
+   never idles out. Starts on boot, no user action needed.
+2. EXTERNAL cron (backup): GitHub keep-alive.yml / cron-job.org hitting
+   /api/keepalive/ping wakes a sleeping service; then layer 1 keeps it up.
+   (GitHub throttles schedules to a few runs/day - NOT sufficient alone.)
 
-If SELF_URL env var is set (e.g. https://ratrade-iwi2.onrender.com), the app also
-self-pings every 9 minutes as a backup.
+Endpoints: /api/keepalive/ping (wake), /api/keepalive/info (setup text).
 """
 import time
 from fastapi import APIRouter
@@ -40,10 +39,14 @@ def info():
 
 
 async def self_ping_loop():
-    """Backup self-ping when SELF_URL is configured. Runs forever in background."""
+    """Backup self-ping: every 9 min (< Render 15-min idle sleep) so the
+    process + auto-paper/SL threads stay alive with the browser closed.
+    URL: SELF_URL env, else Render's own RENDER_EXTERNAL_URL (zero setup).
+    GitHub crons alone are NOT enough (throttled to ~2-5 runs/day)."""
     import asyncio
     import os
-    base = (os.environ.get("SELF_URL") or "").rstrip("/")
+    base = ((os.environ.get("SELF_URL") or "").strip()
+            or (os.environ.get("RENDER_EXTERNAL_URL") or "").strip()).rstrip("/")
     if not base:
         return
     try:

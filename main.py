@@ -16,7 +16,7 @@ async def _start_background_refresh():
     asyncio.get_running_loop().create_task(run_refresh_loop())
     try:
         import os as _os
-        if _os.environ.get("SELF_URL"):
+        if _os.environ.get("SELF_URL") or _os.environ.get("RENDER_EXTERNAL_URL"):
             from routes.keepalive import self_ping_loop
             asyncio.get_running_loop().create_task(self_ping_loop())
     except Exception:
