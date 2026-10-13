@@ -24,6 +24,8 @@ _STATE = {"threads": {}, "last_daily": {}, "last_live": {}}
 # (120d Yahoo fetch per strategy per worker run + per heartbeat).
 _HIST_CACHE = {}  # (sym, start, end) -> (ts, hist); TTL 6h
 _HIST_TTL = 6 * 3600
+_SIGNAL_CACHE = {}  # (sid, today, cfghash) -> (ts, fires, why); TTL 30 min
+_SIGNAL_TTL = 1800
 _INTRA_CACHE = {}  # sym -> (ts, bars); TTL 15 min (shared across strategies)
 _INTRA_TTL = 900
 
@@ -193,6 +195,28 @@ def _today_signal(sid, s, today):
             legs = []
         if not legs:
             return False, "no legs"
+        # Per-day signal cache (same config): worker/heartbeat har pass me
+        # 60-din backtest dobara na chalaye (timeout pressure + CPU). 30 min TTL.
+        try:
+            import hashlib as _hl2
+            _cfgh = _hl2.md5(_js.dumps(
+                [legs, _js.loads(s.get("indicators") or "[]")],
+                sort_keys=True, default=str).encode()).hexdigest()[:12]
+            _sck = (int(sid or 0), today, _cfgh)
+            _shit = _SIGNAL_CACHE.get(_sck)
+            if _shit and time.time() - _shit[0] < _SIGNAL_TTL:
+                return bool(_shit[1]), str(_shit[2])
+        except Exception:
+            _sck, _cfgh = None, ""
+        def _sig_store(_fires, _why):
+            try:
+                if _sck:
+                    _SIGNAL_CACHE[_sck] = (time.time(), bool(_fires), str(_why))
+                    if len(_SIGNAL_CACHE) > 60:
+                        _SIGNAL_CACHE.pop(next(iter(_SIGNAL_CACHE)))
+            except Exception:
+                pass
+            return _fires, _why
         try:
             adv = _js.loads(s.get("advanced_options") or "{}")
         except Exception:
@@ -231,7 +255,7 @@ def _today_signal(sid, s, today):
             try:
                 res = _ex.submit(_run).result(timeout=180)
             except Exception as e:
-                return False, f"engine timeout/fail: {e}"[:100]
+                return _sig_store(False, f"engine timeout/fail: {e}"[:100])
         try:
             # trade_list TOP-LEVEL aata hai _run_backtest_core se (metrics ke
             # andar NAHI - purana path hamesha [] deta tha = auto kabhi nahi
@@ -242,7 +266,7 @@ def _today_signal(sid, s, today):
             tl = []
         try:
             if any(str(t.get("entry_date", ""))[:10] == today for t in tl):
-                return True, "aaj ka signal mila"
+                return _sig_store(True, "aaj ka signal mila")
         except Exception:
             pass
         # Lookback fallback: aaj ka signal na ho par pichhle N din me asli
@@ -275,10 +299,10 @@ def _today_signal(sid, s, today):
                                 - _dt2.datetime.strptime(_sd, "%Y-%m-%d").date()).days
                     except Exception:
                         _age = 0
-                    return True, f"{_age} din purana signal {_sd} (trend follow, pehli entry)"
+                    return _sig_store(True, f"{_age} din purana signal {_sd} (trend follow, pehli entry)")
         except Exception:
             pass
-        return False, "aaj koi signal nahi"
+        return _sig_store(False, "aaj koi signal nahi")
     except Exception as e:
         return False, f"signal-check fail: {e}"[:120]
 
@@ -524,21 +548,26 @@ def place_for_strategy(sid, signal_check="daily"):
         # Signal gate: 'daily' runs the backtest gate, 'intraday' runs the
         # live-15m gate (only fired legs), 'done' skips (caller gated).
         use_legs = legs
+        # Fail-CLOSED: gate me exception aaye to SKIP (place kabhi nahi).
+        # Pehle `except: pass` tha - gate crash hone par bina signal entry
+        # lag jati thi (andha trade). Ab crash = skip + wajah.
         if signal_check == "daily":
             try:
                 _fires, _why = _today_signal(sid, s, today)
-                if not _fires:
-                    return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
-            except Exception:
-                pass
+            except Exception as _ge:
+                return {"placed": placed,
+                        "notes": [f"{s.get('name')}: signal-check crash - skipped ({str(_ge)[:80]})"]}
+            if not _fires:
+                return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
         elif signal_check == "intraday":
             try:
                 _fired, _why = _intraday_signal(sid, s, today)
-                if not _fired:
-                    return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
-                use_legs = _fired
-            except Exception:
-                pass
+            except Exception as _ge:
+                return {"placed": placed,
+                        "notes": [f"{s.get('name')}: live signal-check crash - skipped ({str(_ge)[:80]})"]}
+            if not _fired:
+                return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
+            use_legs = _fired
         _pl, _nt = _execute_legs(s, use_legs, db, tm, today)
         placed.extend(_pl)
         notes.extend(_nt)
@@ -636,7 +665,7 @@ def dry_run_status():
                                 "reason": f"db check failed: {e}"[:120]})
                     continue
                 out.append({"id": sid, "name": s.get("name"), "decision": "DUE",
-                            "reason": f"{len(legs)} leg(s) will place on next worker run"})
+                            "reason": f"{len(legs)} leg(s): guards pass, signal worker-pass par check hoga"})
             except Exception:
                 continue
         return {"today": today, "strategies": out}
