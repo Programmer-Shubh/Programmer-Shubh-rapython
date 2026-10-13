@@ -234,7 +234,12 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
             _got = []
         _got = [b for b in _got
                 if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
-        if len(_got) >= 40:
+        # Span-aware minimum: ek 15m din me max ~25 bars hote hain, to
+        # single-day request par 40-bar gate kabhi pass nahi hota tha
+        # (hamesha INSUFFICIENT = intraday auto/backtest dead). Engine
+        # min_bars=5 + abstain rule ke saath 15 bars honest hain.
+        _need = 40 if _span > 2 else 15
+        if len(_got) >= _need:
             return _dedup_bars(_got), "yahoo_intraday"
     except Exception:
         pass
@@ -1021,7 +1026,16 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                                 _bars15, _src15 = [], "no-intraday-data"
                     except Exception:
                         _bars15, _src15 = [], "no-intraday-data"
-                if _bars15 and len(_bars15) >= 40:
+                # Span-aware minimum (_intraday_full_range jaisa): single-day
+                # 15m me max ~25 bars, 40 gate kabhi pass nahi hota tha.
+                try:
+                    import datetime as _cdt3
+                    _rs3 = _cdt3.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+                    _re3 = _cdt3.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                    _need15 = 40 if (_re3 - _rs3).days + 1 > 2 else 15
+                except Exception:
+                    _need15 = 40
+                if _bars15 and len(_bars15) >= _need15:
                     historical = _bars15
                     _use_db = True
                     _hist_src = _src15 if _src15 else _hist_src

@@ -317,7 +317,10 @@ def fetch_yahoo_daily(symbol: str, start_date: str, end_date: str, timeout: floa
 
 def fetch_yahoo_intraday(symbol: str, interval: str = "15m", days: int = 5, timeout: float = 10):
     """Yahoo intraday bars (primary intraday source). interval 5m/15m/30m/1h,
-    IST-stamped bar dicts with bar_time. Returns [] on any failure."""
+    IST-stamped bar dicts with bar_time. Returns [] on any failure.
+    Retry (3x, backoff, query1/query2 rotation): Yahoo cloud-IP se aksar
+    pehli hit 429/timeout deta hai - bina retry worker hamesha khaali haath
+    (auto-paper intraday dead)."""
     out = []
     try:
         import datetime as _dt
@@ -326,10 +329,21 @@ def fetch_yahoo_intraday(symbol: str, interval: str = "15m", days: int = 5, time
                               f"{symbol}.NS" if "." not in (symbol or "") and not str(symbol or "").startswith("^") else symbol)
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval={iv}&range={int(days or 5)}d"
         _sess = _yahoo_session()
-        try:
-            r = _sess.get(url, timeout=timeout) if _sess is not None else requests.get(url, headers=_UA, timeout=timeout)
-        except Exception:
-            return []
+        r = None
+        for _try in range(3):
+            try:
+                _host = "query1" if _try % 2 == 0 else "query2"
+                _url = url.replace("query1.", _host + ".", 1)
+                r = _sess.get(_url, timeout=timeout) if _sess is not None else requests.get(_url, headers=_UA, timeout=timeout)
+                if r is not None and r.status_code == 200:
+                    break
+            except Exception:
+                r = None
+            try:
+                import time as _ts
+                _ts.sleep(2)
+            except Exception:
+                pass
         if r is None or r.status_code != 200:
             return []
         j = r.json()

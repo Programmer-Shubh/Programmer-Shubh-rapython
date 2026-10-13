@@ -313,7 +313,7 @@
                 <div class="col-6"><div class="card h-100" style="border-left:4px solid #198754"><div class="card-body p-3"><div class="small text-muted">MARKET REGIME</div><h5 id="regime-label" class="fw-bold mb-1">—</h5><div class="small"><span id="regime-conf"></span> <span id="regime-resist" class="text-muted"></span></div><div id="regime-checks" class="mt-2 small"></div></div></div></div>
                 <div class="col-6"><div class="card h-100" style="border-left:4px solid #0d6efd"><div class="card-body p-3"><div class="small text-muted">OPTION SENTIMENT</div><div class="d-flex gap-3 flex-wrap"><div><div class="small text-muted">PCR</div><strong id="sent-pcr">—</strong></div><div><div class="small text-muted">Put OI</div><strong id="sent-put">—</strong></div><div><div class="small text-muted">Call OI</div><strong id="sent-call">—</strong></div></div><div class="small mt-2">Put Writing: <span id="sent-pw">—</span> • Call Writing: <span id="sent-cw">—</span></div><div class="mt-2"><span id="sent-overall" class="badge bg-secondary">—</span> <small id="sent-conf" class="text-muted"></small></div></div></div></div>
             </div>
-            <div class="card mb-2" style="background:linear-gradient(135deg,#f8fbff 0%,#ffffff 100%)"><div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small">Arbitrage — Equity NSE/BSE</strong><span class="badge bg-success">Live</span><button class="btn btn-sm btn-outline-primary" onclick="loadPairs()">Refresh</button></div><div class="card-body p-2 small" id="pairs-box"><span class="text-muted">Loading...</span></div></div>
+            <!-- Arbitrage card REMOVED (user demand) -->
             <div class="row" id="mkt-cards"></div>
             <div class="card">
                 <div class="card-header">Today — NSE Future & Option Top 5 Bullish & Bearish <small class="text-muted" id="fno-date"></small> <button class="btn btn-sm btn-outline-primary" onclick="loadFnoTop5()"><i class="bi bi-arrow-clockwise"></i></button></div>
@@ -909,63 +909,8 @@
             if(!sel.value) sel.value='NIFTY';
         }catch(e){}
     }
-    async function equityArb(stock, buyEx, sellEx, buyPx, sellPx){
-        const qty=prompt('Quantity (shares):','1');if(!qty) return;
-        if(!confirm(`Equity Arb: Buy ${stock} on ${buyEx} @ ₹${buyPx} and Sell on ${sellEx} @ ₹${sellPx} x${qty}?`)) return;
-        const r=await P('/api/scanner/equity-arb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:stock,buy_exchange:buyEx,sell_exchange:sellEx,buy_price:buyPx,sell_price:sellPx,quantity:parseInt(qty)||1})});
-        if(r.error) alert('Error: '+r.error); else {alert(`Equity Arb placed! Buy #${r.buy_id} Sell #${r.sell_id} Spread ₹${r.spread}`);loadDashPositions();}
-    }
-    async function loadPairs(){
-        try{
-            const r=await A('/api/scanner/pairs');
-            const el=document.getElementById('pairs-box');if(!el) return;
-            if(!r.pairs||!r.pairs.length){el.innerHTML='<span class="text-muted">No ₹12+ arb now — market flat</span>';return;}
-            let h='<table class="table table-sm mb-0"><tr><th>Stock</th><th>NSE</th><th>BSE</th><th>Diff</th><th>Signal</th><th>Equity Arb</th></tr>';
-            r.pairs.slice(0,5).forEach(p=>{
-                const arb=p.arb?'<span class="badge bg-warning text-dark">ARB</span>':'';
-                const stock=(p.pair||'').split('/')[0]||p.pair;
-                const nse=p.nse_price||p.price_a||0, bse=p.bse_price||0;
-                const diff=p.nse_bse_diff!=null&&bse?`₹${nse.toFixed(0)} / ₹${bse.toFixed(0)} <span class="${p.nse_bse_diff>=0?'price-up':'price-down'}">${p.nse_bse_diff>0?'+':''}${p.nse_bse_diff} (${p.nse_bse_pct}%)</span>`:(p.price_diff!=null?`₹${p.price_a?.toFixed(0)}/${p.price_b?.toFixed(0)} <span class="${p.price_diff>=0?'price-up':'price-down'}">${p.price_diff>0?'+':''}${p.price_diff}</span>`:'—');
-                // Signal -> Buy/Sell buttons (paper + live via quickStrat prompt)
-                let sigShort='';
-                if(p.signal&&p.signal!=='HOLD'&&!p.signal.includes('HOLD')){
-                    if(p.signal.includes('SHORT')||p.signal.includes('LONG')){
-                        const isShort=p.signal.includes('SHORT');
-                        sigShort=isShort?'<span class="badge bg-danger">SELL</span>':'<span class="badge bg-success">BUY</span>';
-                    } else sigShort=p.signal;
-                } else sigShort='<span class="badge bg-secondary">HOLD</span>';
-                let btns='';
-                // Equity Arb: Buy low / Sell high on NSE vs BSE
-                const cheapEx = (nse && bse && nse < bse) ? 'NSE' : (bse? 'BSE' : 'NSE');
-                const expEx = cheapEx==='NSE' ? 'BSE' : 'NSE';
-                const cheapPx = cheapEx==='NSE'? nse : bse;
-                const expPx = cheapEx==='NSE'? bse : nse;
-                if(p.signal&&p.signal!=='HOLD'&&!p.signal.includes('HOLD')){
-                    const m=p.signal.match(/(SHORT|LONG)\s+(\w+)\s*\/\s*(SHORT|LONG)\s+(\w+)/);
-                    if(m){
-                        const aAct=m[1]==='SHORT'?'SELL':'BUY';
-                        btns=`<button class="btn btn-sm btn-success py-0" onclick="equityArb('${stock}','${cheapEx}','${expEx}',${cheapPx},${expPx})">Buy ${cheapEx} / Sell ${expEx}</button>`;
-                    } else {
-                        btns=`<button class="btn btn-sm btn-success py-0" onclick="equityArb('${stock}','${cheapEx}','${expEx}',${cheapPx},${expPx})">Buy ${cheapEx} / Sell ${expEx}</button>`;
-                    }
-                } else {
-                    btns=`<button class="btn btn-sm btn-success py-0" onclick="equityArb('${stock}','${cheapEx}','${expEx}',${cheapPx},${expPx})">Buy ${cheapEx} / Sell ${expEx}</button>`;
-                }
-                h+=`<tr><td><strong>${stock}</strong> ${arb}</td><td>${nse?`₹${nse.toFixed(0)}`:'—'}</td><td>${bse?`₹${bse.toFixed(0)}`:'—'}</td><td class="small">${diff}</td><td>${sigShort}</td><td style="white-space:nowrap">${btns}</td></tr>`;
-            });
-            h+='</table>';
-            // Payoff diagram for top ARB pair spread
-            try{
-                const top=r.pairs[0];
-                if(top&&top.arb){
-                    const spA=top.nse_price||top.price_a||100, spB=top.bse_price||top.price_b||top.nse_price||100;
-                    const diff=top.nse_bse_diff||top.price_diff||0;
-                    h+=`<div class="mt-2 p-2" style="background:#f8f9fa;border-radius:6px"><div class="small fw-bold">Payoff — ${top.pair} Spread (ARB)</div><div class="small text-muted">NSE ₹${spA} vs BSE ₹${spB} → Diff ₹${diff} (${top.nse_bse_pct||top.price_diff_pct}%) | Z ${top.zscore} | ${top.signal}</div><div class="small">Long low / Short high — profit if spread reverts to 0</div></div>`;
-                }
-            }catch(e){}
-            el.innerHTML=h;
-        }catch(e){try{document.getElementById('pairs-box').innerHTML='<span class="text-danger small">Failed</span>';}catch(_){}}
-    }
+    // Arbitrage UI REMOVED (user demand): equityArb/loadPairs deleted with
+    // the dashboard card. Backend endpoints untouched.
     async function loadMTF(){
         const sel=document.getElementById('mtf-sym');const sym=(sel&&sel.value)||'NIFTY';
         try{
@@ -982,7 +927,7 @@
         try{const _c=_getDashCache(); if(_c&&_c.spot){let h='';for(const [sym,d] of Object.entries(_c.spot)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; document.getElementById('status').innerHTML='<span class="live-dot"></span> Cached';}}catch(e){}
         try{const s=await A('/api/dashboard/spot');document.getElementById('status').innerHTML='<span class="live-dot"></span> Connected';let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; try{_setDashCache({spot:s});}catch(e){}}catch(e){document.getElementById('status').innerHTML='Offline';}
         loadRegimeSyms().then(()=>{loadRegime();loadMTFSyms();});
-        loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();loadPairs();loadMTF();
+        loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();loadMTF();
     }
     function singleBtn(sym,action,type,strike,exp,label,cls){return `<button class="btn btn-sm ${cls}" onclick="quickStrat('${sym}','${action}','${type}',${strike},'${exp}')">${label}</button>`;}
     function stratBtns(x){const sig=(x.signal_type||x.type||'').toUpperCase();const opt=x.option_suggestion||{};const sym=x.symbol,strike=opt.strike||0,exp=opt.expiry||''; if(sig.includes('SELL')&&sig.includes('CE')) return singleBtn(sym,'SELL','CE',strike,exp,'Sell CE','btn-sell'); if(sig.includes('SELL')&&sig.includes('PE')) return singleBtn(sym,'SELL','PE',strike,exp,'Sell PE','btn-sell'); if(sig.includes('CE')) return singleBtn(sym,'BUY','CE',strike,exp,'Buy CE','btn-buy'); if(sig.includes('PE')) return singleBtn(sym,'BUY','PE',strike,exp,'Buy PE','btn-buy'); const bull=(x.direction==='bullish')||(!x.direction&&sig.includes('CE')); return bull?singleBtn(sym,'BUY','CE',strike,exp,'Buy CE','btn-buy'):singleBtn(sym,'BUY','PE',strike,exp,'Buy PE','btn-buy');}
