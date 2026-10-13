@@ -292,10 +292,19 @@ def _intraday_signal(sid, s, today):
         sym = str(s.get("symbol") or "").upper()
         if not sym:
             return None, "no symbol"
+        # Config PEHLE parse karo (neeche cache-timeframe ko chahiye) - pehle
+        # `adv` neeche define tha par upar use ho raha tha = NameError, har
+        # cold call par live worker dead ("no fresh bars" milta tha).
+        try:
+            _adv0 = _js.loads(s.get("advanced_options") or "{}")
+        except Exception:
+            _adv0 = {}
+        if not isinstance(_adv0, dict):
+            _adv0 = {}
         try:
             # Bandwidth saver: 15m bars shared across strategies, 15-min TTL
             # (was: fresh fetch per strategy per 5-min run).
-            _tf0 = str((adv or {}).get("timeframe") or "15m").lower()
+            _tf0 = str((_adv0 or {}).get("timeframe") or "15m").lower()
             if _tf0 not in ("1m", "5m", "15m", "30m", "1h"):
                 _tf0 = "15m"
             _ick = (sym, _tf0)

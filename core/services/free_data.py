@@ -330,6 +330,7 @@ def fetch_yahoo_intraday(symbol: str, interval: str = "15m", days: int = 5, time
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval={iv}&range={int(days or 5)}d"
         _sess = _yahoo_session()
         r = None
+        _last_err = ""
         for _try in range(3):
             try:
                 _host = "query1" if _try % 2 == 0 else "query2"
@@ -337,14 +338,28 @@ def fetch_yahoo_intraday(symbol: str, interval: str = "15m", days: int = 5, time
                 r = _sess.get(_url, timeout=timeout) if _sess is not None else requests.get(_url, headers=_UA, timeout=timeout)
                 if r is not None and r.status_code == 200:
                     break
-            except Exception:
+                _last_err = f"http={getattr(r, 'status_code', '?')}"
+                try:
+                    print(f"[yahoo-intraday] {symbol} {iv} try{_try + 1}/3 FAILED ({_last_err})", flush=True)
+                except Exception:
+                    pass
+            except Exception as e:
                 r = None
+                _last_err = f"exc={str(e)[:80]}"
+                try:
+                    print(f"[yahoo-intraday] {symbol} {iv} try{_try + 1}/3 FAILED ({_last_err})", flush=True)
+                except Exception:
+                    pass
             try:
                 import time as _ts
                 _ts.sleep(2)
             except Exception:
                 pass
         if r is None or r.status_code != 200:
+            try:
+                print(f"[yahoo-intraday] {symbol} {iv} EMPTY after 3 tries (last: {_last_err})", flush=True)
+            except Exception:
+                pass
             return []
         j = r.json()
         res = (j.get("chart", {}).get("result") or [{}])[0]
