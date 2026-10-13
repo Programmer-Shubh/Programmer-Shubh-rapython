@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from core.models.database import Database
 from core.models.trade_model import TradeModel
 from core.services.live_market_data import LiveMarketData
-from utils.helpers import get_lot_size, format_currency
+from utils.helpers import get_lot_size, format_currency, effective_lot_size
 
 router = APIRouter()
 
@@ -168,7 +168,7 @@ def get_portfolio():
                 "trade_mode": t["trade"].get("trade_mode", "paper"),
                 "trade_type": t["trade"].get("trade_type", "intraday"),
                 "qty": t["trade"].get("quantity", 1),
-                "lot_size": t["trade"].get("lot_size", 50),
+                "lot_size": effective_lot_size(t["trade"].get("symbol"), t["trade"].get("lot_size")),
                 "entry_date": t["trade"].get("entry_date", ""),
                 "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
                 "expiry_date": t["trade"].get("expiry_date", ""),

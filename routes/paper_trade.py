@@ -5,7 +5,7 @@ from core.models.trade_model import TradeModel
 from core.services.transaction_costs import TransactionCosts
 from core.services.historical_replay import HistoricalReplayEngine
 from core.services.backtest_engine import BacktestEngine
-from utils.helpers import get_lot_size, format_currency
+from utils.helpers import get_lot_size, format_currency, effective_lot_size
 
 router = APIRouter()
 
@@ -81,7 +81,7 @@ def get_open_trades():
                 "strike": t["trade"]["strike_price"],
                 "transaction_type": t["trade"]["transaction_type"],
                 "quantity": t["trade"]["quantity"],
-                "lot_size": get_lot_size(t["trade"]["symbol"]) if t["trade"].get("lot_size",50)==50 and get_lot_size(t["trade"]["symbol"])!=50 else t["trade"].get("lot_size", 50),
+                "lot_size": effective_lot_size(t["trade"]["symbol"], t["trade"].get("lot_size")),
                 "entry_price": t["trade"]["entry_price"],
                 "current_price": t["current_price"],
                 "pnl": t["unrealized_pnl"],
@@ -365,9 +365,9 @@ def get_history():
                 "pnl_formatted": format_currency(t["pnl"]),
                 "entry_cost": t.get("total_cost", 0),
                 "exit_cost": t.get("exit_cost", 0),
-                "lot_size": get_lot_size(t["symbol"]) if t.get("lot_size",50)==50 and get_lot_size(t["symbol"])!=50 else t.get("lot_size", 50),
+                "lot_size": t.get("lot_size", 50),
                 "quantity": t.get("quantity", 1),
-                "total_qty": t.get("quantity", 1) * (get_lot_size(t["symbol"]) if t.get("lot_size",50)==50 and get_lot_size(t["symbol"])!=50 else t.get("lot_size", 50)),
+                "total_qty": t.get("quantity", 1) * (t.get("lot_size", 50) or 50),
                 "transaction_type": t.get("transaction_type",""),
                 "expiry_date": t.get("expiry_date", ""),
                 "exit_status": t.get("exit_status", ""),

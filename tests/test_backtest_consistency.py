@@ -197,13 +197,15 @@ def test_slippage_matters():
 
 def test_lot_size_math():
     from utils.helpers import get_lot_size
-    assert get_lot_size("NIFTY") == 75
-    assert get_lot_size("BANKNIFTY") == 15
+    assert get_lot_size("NIFTY") == 65
+    assert get_lot_size("BANKNIFTY") == 30
+    assert get_lot_size("APOLLOHOSP") == 125
+    assert get_lot_size("BAJAJHLDNG") == 75
     r = _run()
     tl = r.get("trade_list") or []
     assert tl
     for t in tl[:3]:
-        assert int(t.get("quantity", 0)) == 1 * 15, t
+        assert int(t.get("quantity", 0)) == 1 * 30, t
 
 
 def test_run_id_unique_and_echo():

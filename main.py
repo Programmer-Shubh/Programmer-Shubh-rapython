@@ -144,15 +144,36 @@ async def _startup_background():
         _th3.Thread(target=_roll_loop, daemon=True).start()
     except: pass
     try:
-        # Lot-size backfill in background thread (16 updates, could be slow on Postgres)
+        # Lot master warm + open-position lot backfill (dynamic official lots).
+        # Pehle broker master warm karo, phir KHULI positions ke saare symbols
+        # (16-symbol fixed list nahi) correct lot par lao - PnL/Qty khud sahi.
         def _lot_backfill():
             try:
+                # Broker master warm (background thread me blocking OK, ~1/download per deploy)
+                try:
+                    from core.services.lot_master import warm_lot_cache
+                    warm_lot_cache()
+                except Exception:
+                    pass
                 from utils.helpers import get_lot_size
                 _db = Database.get_instance()
-                for sym in ["NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","ADANIENT","BAJFINANCE","RELIANCE","HDFCBANK","ICICIBANK","TCS","INFY","SBIN","KOTAKBANK","LT","M&M","MARUTI"]:
+                try:
+                    _rows = _db.fetch_all(
+                        "SELECT DISTINCT symbol FROM paper_trades WHERE status='open'")
+                    _syms = [str(r.get("symbol") or "").upper()
+                             for r in (_rows or []) if r.get("symbol")]
+                except Exception:
+                    _syms = []
+                for _s in ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]:
+                    if _s not in _syms:
+                        _syms.append(_s)
+                for sym in _syms:
                     try:
-                        correct = get_lot_size(sym)
-                        _db.execute("UPDATE paper_trades SET lot_size=? WHERE symbol=? AND lot_size!=?", [correct, sym, correct])
+                        correct = int(get_lot_size(sym) or 0)
+                        if correct > 0:
+                            _db.execute(
+                                "UPDATE paper_trades SET lot_size=? WHERE symbol=? AND status='open' AND lot_size!=?",
+                                [correct, sym, correct])
                     except: pass
             except: pass
         import threading as _th
@@ -263,8 +284,9 @@ def db_status():
 
 @app.get("/api/lot-size/{symbol}")
 def lot_size(symbol: str):
-    from utils.helpers import get_lot_size
-    return {"symbol": symbol.upper(), "lot_size": get_lot_size(symbol)}
+    from utils.helpers import get_lot_size, lot_source
+    return {"symbol": symbol.upper(), "lot_size": get_lot_size(symbol),
+            "source": lot_source(symbol)}
 
 @app.get("/ready")
 async def ready():

@@ -62,25 +62,42 @@ def _load_nse_lots():
     return _NSE_LOTS_CACHE
 
 def get_lot_size(symbol: str) -> int:
+    s = str(symbol or "").strip().upper()
+    if not s:
+        return 50
+    # 1) Broker instrument master (official, dynamic). Cached/disk - instant
+    #    after warmup; cold start par None (neeche static). Kabhi block nahi.
+    try:
+        from core.services.lot_master import get_lot as _bl
+        _lot, _src = _bl(s)
+        if _lot and int(_lot) > 0:
+            return int(_lot)
+    except Exception:
+        pass
     lots = {
-        "NIFTY": 75, "BANKNIFTY": 15, "FINNIFTY": 60, "MIDCPNIFTY": 75,
+        # Verified 2026-10-13 against TWO independent brokers (Dhan scrip
+        # master + Angel instrument master - sab match). Purani map (NIFTY 75
+        # vagera) 2024-25 revision se stale thi - wahi "175/150 dikha raha"
+        # shikayat thi. Broker master runtime par override karta hai.
+        "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120,
         "SENSEX": 10, "BANKEX": 20,
-        "RELIANCE": 250, "HDFCBANK": 550, "ICICIBANK": 700,
-        "TCS": 175, "INFY": 400, "ITC": 1600, "SBIN": 700,
-        "AXISBANK": 625, "KOTAKBANK": 400, "LT": 150, "HINDUNILVR": 300,
-        "BHARTIARTL": 475, "M&M": 400, "MARUTI": 50, "BAJFINANCE": 125,
-        "WIPRO": 1500, "ONGC": 1875, "SUNPHARMA": 400, "ULTRACEMCO": 50,
-        "NTPC": 2250, "POWERGRID": 2700, "TATAMOTORS": 1125, "TATASTEEL": 550,
-        "HCLTECH": 350, "JSWSTEEL": 675, "COALINDIA": 2700, "DRREDDY": 125,
-        "CIPLA": 300, "ADANIENT": 309, "SBILIFE": 450, "BPCL": 1800,
-        "GRASIM": 200, "TECHM": 600, "DIVISLAB": 75, "EICHERMOT": 300,
-        "BRITANNIA": 140, "HINDALCO": 900, "VEDL": 1650, "INDUSINDBK": 900,
-        "SHREECEM": 30, "NESTLEIND": 40, "BAJAJFINSV": 125, "HEROMOTOCO": 300,
-        "APOLLOHOSP": 75, "UPL": 1100,
+        "RELIANCE": 500, "HDFCBANK": 650, "ICICIBANK": 700,
+        "TCS": 225, "INFY": 400, "ITC": 1725, "SBIN": 750,
+        "AXISBANK": 625, "KOTAKBANK": 2000, "LT": 175, "HINDUNILVR": 300,
+        "BHARTIARTL": 475, "M&M": 200, "MARUTI": 50, "BAJFINANCE": 750,
+        "WIPRO": 3000, "ONGC": 2250, "SUNPHARMA": 350, "ULTRACEMCO": 50,
+        "NTPC": 1500, "POWERGRID": 1900, "TATAMOTORS": 1125, "TATASTEEL": 2750,
+        "HCLTECH": 400, "JSWSTEEL": 675, "COALINDIA": 1350, "DRREDDY": 625,
+        "CIPLA": 425, "ADANIENT": 309, "SBILIFE": 375, "BPCL": 1975,
+        "GRASIM": 250, "TECHM": 600, "DIVISLAB": 100, "EICHERMOT": 100,
+        "BRITANNIA": 125, "HINDALCO": 700, "VEDL": 1150, "INDUSINDBK": 700,
+        "SHREECEM": 25, "NESTLEIND": 500, "BAJAJFINSV": 300, "HEROMOTOCO": 150,
+        "APOLLOHOSP": 125, "UPL": 1355, "BAJAJHLDNG": 75, "ALKEM": 125,
+        "TITAN": 175,
         "GOLDBEES": 100, "SILVERBEES": 100,
     }
-    # Correct exchange lots override (Aug 2026)
-    _override={"FINNIFTY":60,"ADANIENT":309,"NIFTY":75}
+    # Correct exchange lots override (Oct 2026, dual-broker verified)
+    _override={"FINNIFTY":60,"ADANIENT":309,"NIFTY":65,"BANKNIFTY":30}
     if symbol.upper() in _override: return _override[symbol.upper()]
     # Hardcoded map FIRST (instant): network fetch only for unknown symbols.
     # The old order called _load_nse_lots() (seconds of NSE timeouts) on every
@@ -94,6 +111,48 @@ def get_lot_size(symbol: str) -> int:
             return int(live[symbol.upper()])
     except Exception: pass
     return lots.get(symbol.upper(), 50)
+
+
+def effective_lot_size(symbol: str, stored=None) -> int:
+    """Display/live lot for OPEN positions: dynamic lookup wins (stale stored
+    50/175/150 kabhi nahi), lookup fail par stored, phir 50. Closed history
+    hamesha stored lot par rehti hai (as-recorded record)."""
+    try:
+        v = get_lot_size(symbol)
+        if v and int(v) > 0:
+            return int(v)
+    except Exception:
+        pass
+    try:
+        if stored and int(stored) > 0:
+            return int(stored)
+    except Exception:
+        pass
+    return 50
+
+
+def lot_source(symbol: str) -> str:
+    """Kahan se aaya: broker-master | nse | static-map | default (transparency)."""
+    try:
+        s = str(symbol or "").strip().upper()
+        if not s:
+            return "default"
+        try:
+            from core.services.lot_master import get_lot as _bl2
+            _lot, _src = _bl2(s)
+            if _lot and int(_lot) > 0:
+                return str(_src or "broker-master")
+        except Exception:
+            pass
+        try:
+            live = _load_nse_lots()
+            if live and s in live:
+                return "nse"
+        except Exception:
+            pass
+        return "static-map"
+    except Exception:
+        return "default"
 
 
 OPTION_INDICES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}

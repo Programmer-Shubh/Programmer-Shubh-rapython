@@ -128,7 +128,11 @@ class TradeModel:
             try:
                 entry = float(t.get("entry_price") or 0)
                 qty = int(t.get("quantity") or 1)
-                lot = int(t.get("lot_size") or 50)
+                try:
+                    from utils.helpers import effective_lot_size as _el
+                    lot = _el(t.get("symbol"), t.get("lot_size"))
+                except Exception:
+                    lot = int(t.get("lot_size") or 50)
                 if entry <= 0:
                     continue
                 cur = self.get_option_premium(
@@ -255,7 +259,11 @@ class TradeModel:
             )
             entry = t["entry_price"]
             qty = t["quantity"]
-            lot = t.get("lot_size", 50)
+            try:
+                from utils.helpers import effective_lot_size as _el2
+                lot = _el2(t.get("symbol"), t.get("lot_size", 50))
+            except Exception:
+                lot = t.get("lot_size", 50)
             if current_price is None or entry <= 0:
                 # Never flicker: use last known premium or entry as current
                 fallback = self._last_premiums.get(ck, entry if entry>0 else 0)
