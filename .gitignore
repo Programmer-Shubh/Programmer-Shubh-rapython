@@ -47,6 +47,7 @@ ai/
 opencode/
 test_webhook.py
 data/dhan_master_*.json
+data/dhan_lots.json
 static/ratrade-extension.zip
 static/chain_comparison.html
 static/tutorial.html
