@@ -75,32 +75,46 @@ class BhavcopyModel:
                    r.get("strike_price"), r.get("option_type"))
             deduped[key] = r
         rows = list(deduped.values())
+        # Chunked (2000 rows/txn): poore din ka F&O (hazaaron rows) ek giant
+        # transaction me pooler statement timeout kha jata tha (PG dead ->
+        # strategies gayab). Har chunk apne commit me.
+        CH = 2000
+        done = 0
         try:
-            self.db.executemany(
-                """DELETE FROM bhavcopy_data WHERE symbol=? AND trade_date=?
-                   AND COALESCE(expiry_date,'')=COALESCE(?,'')
-                   AND COALESCE(strike_price,0)=COALESCE(?,0)
-                   AND COALESCE(option_type,'')=COALESCE(?,'')""",
-                [(r.get("symbol"), r.get("trade_date"), r.get("expiry_date"),
-                  r.get("strike_price"), r.get("option_type"))
-                 for r in rows],
-            )
+            for _a in range(0, len(rows), CH):
+                _ch = rows[_a:_a + CH]
+                try:
+                    self.db.executemany(
+                        """DELETE FROM bhavcopy_data WHERE symbol=? AND trade_date=?
+                           AND COALESCE(expiry_date,'')=COALESCE(?,'')
+                           AND COALESCE(strike_price,0)=COALESCE(?,0)
+                           AND COALESCE(option_type,'')=COALESCE(?,'')""",
+                        [(r.get("symbol"), r.get("trade_date"), r.get("expiry_date"),
+                          r.get("strike_price"), r.get("option_type"))
+                         for r in _ch],
+                    )
+                except Exception:
+                    pass
+                try:
+                    self.db.executemany(
+                        """INSERT INTO bhavcopy_data
+                           (symbol, trade_date, expiry_date, strike_price, option_type,
+                            open_price, high_price, low_price, close_price, volume, oi)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        [
+                            (
+                                r.get("symbol"), r.get("trade_date"), r.get("expiry_date"),
+                                r.get("strike_price"), r.get("option_type"),
+                                r.get("open_price", 0), r.get("high_price", 0),
+                                r.get("low_price", 0), r.get("close_price", 0),
+                                r.get("volume", 0), r.get("oi", 0),
+                            )
+                            for r in _ch
+                        ],
+                    )
+                    done += len(_ch)
+                except Exception:
+                    break
         except Exception:
             pass
-        self.db.executemany(
-            """INSERT INTO bhavcopy_data
-               (symbol, trade_date, expiry_date, strike_price, option_type,
-                open_price, high_price, low_price, close_price, volume, oi)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            [
-                (
-                    r.get("symbol"), r.get("trade_date"), r.get("expiry_date"),
-                    r.get("strike_price"), r.get("option_type"),
-                    r.get("open_price", 0), r.get("high_price", 0),
-                    r.get("low_price", 0), r.get("close_price", 0),
-                    r.get("volume", 0), r.get("oi", 0),
-                )
-                for r in rows
-            ],
-        )
-        return len(rows)
+        return done

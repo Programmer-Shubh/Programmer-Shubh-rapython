@@ -8,10 +8,61 @@ Run: python -m pytest tests/test_backtest_consistency.py -q
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("DB_PATH", os.path.join("data", "ratrade.db"))
 
 from routes.strategy_builder import _run_backtest_core, BacktestRequest
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _seed_pipeline_db():
+    """Deterministic DB seed (BANKNIFTY + RELIANCE spot, Jul-Aug 2026).
+    Pipeline DB-first hai (>=15 bars -> no network), isliye suite hermetic +
+    stable hai: Yahoo/NSE availability ya 60d-clock se koi lena-dena nahi.
+    Series me up/down regimes hain taaki BUY+SELL dono taraf signals bane.
+    Teardown seeded range saaf karta hai (dev data ko haath nahi)."""
+    import random as _rnd
+    import datetime as _dt
+    from core.models.database import Database as _DB
+
+    def _series(sym, base, seed):
+        rnd = _rnd.Random(seed)
+        rows = []
+        d = _dt.date(2026, 7, 20)
+        e = _dt.date(2026, 8, 20)
+        px = base
+        k = 0
+        plan = ([0.009] * 10 + [-0.010] * 8 + [0.004] * 8 + [-0.006] * 8
+                + [0.012] * 6 + [-0.014] * 5 + [0.003] * 10)
+        while d <= e:
+            if d.weekday() < 5:
+                drift = plan[k % len(plan)] + rnd.uniform(-0.004, 0.004)
+                k += 1
+                o = px
+                c = max(1.0, px * (1 + drift))
+                h = max(o, c) * 1.003
+                low = min(o, c) * 0.997
+                rows.append((sym, d.strftime("%Y-%m-%d"), round(o, 2),
+                             round(h, 2), round(low, 2), round(c, 2), 500000, 0))
+                px = c
+            d += _dt.timedelta(days=1)
+        return rows
+
+    _db = _DB.get_instance()
+    _rows = (_series("BANKNIFTY", 55000.0, 11)
+             + _series("RELIANCE", 2850.0, 22))
+    _db.executemany(
+        "INSERT INTO bhavcopy_data (symbol, trade_date, open_price, high_price,"
+        " low_price, close_price, volume, oi) VALUES (?,?,?,?,?,?,?,?)", _rows)
+    yield
+    try:
+        _db.execute("DELETE FROM bhavcopy_data WHERE option_type IS NULL AND ("
+                    "(symbol='BANKNIFTY' OR symbol='RELIANCE') ) AND "
+                    "trade_date BETWEEN '2026-07-15' AND '2026-08-25'")
+    except Exception:
+        pass
 
 SYM = "BANKNIFTY"
 START, END = "2026-07-20", "2026-08-20"
@@ -199,9 +250,10 @@ def test_equity_backtest():
 
 def test_equity_non_fno_allowed():
     # Spec: no real data -> honest INSUFFICIENT (synthetic fabrication banned).
-    # GOLDBEES has no real bars locally, so the run must refuse, not fabricate.
+    # Bogus symbol has no DB/Yahoo/NSE bars anywhere, so the run must refuse,
+    # not fabricate (GOLDBEES can't be used: Yahoo serves its real history).
     r = _run_backtest_core(BacktestRequest(
-        symbol="GOLDBEES", symbols=["GOLDBEES"], start_date="2026-08-01", end_date="2026-08-20",
+        symbol="ZZZNODATA", symbols=["ZZZNODATA"], start_date="2026-07-20", end_date="2026-08-20",
         indicators=[{"id": "supertrend", "params": {"period": 10, "multiplier": 3}}],
         legs=[{"option_type": "EQ", "transaction": "buy", "lots": 10,
                "strike_selection": "atm", "otm_distance": 0}],
@@ -210,7 +262,7 @@ def test_equity_non_fno_allowed():
     assert r.get("error") and "INSUFFICIENT" in r.get("error"), r
     # ...while a data-rich EQ symbol still trades honestly.
     r2 = _run_backtest_core(BacktestRequest(
-        symbol="RELIANCE", symbols=["RELIANCE"], start_date="2026-08-01", end_date="2026-08-20",
+        symbol="RELIANCE", symbols=["RELIANCE"], start_date="2026-07-20", end_date="2026-08-20",
         indicators=[{"id": "supertrend", "params": {"period": 10, "multiplier": 3}}],
         legs=[{"option_type": "EQ", "transaction": "buy", "lots": 10,
                "strike_selection": "atm", "otm_distance": 0}],

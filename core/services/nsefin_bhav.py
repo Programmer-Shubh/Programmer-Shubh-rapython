@@ -108,20 +108,28 @@ def import_fno_bhavcopy(day) -> dict:
 
 
 def missing_recent_dates(days: int = 90) -> list:
-    """Recent trading dates with no F&O options data in DB (for gap fill)."""
+    """Recent trading dates with no F&O options data in DB (for gap fill).
+    ONE grouped query (per-date COUNT loop full-table-scan karta tha -
+    pooler statement timeout ka ek kaaran)."""
     from core.models.database import Database
     out = []
     try:
-        d = datetime.date.today() - datetime.timedelta(days=1)
+        import datetime as _dtd
+        _end = _dtd.date.today() - _dtd.timedelta(days=1)
+        _start = _end - _dtd.timedelta(days=days + 20)
+        rows = Database.get_instance().fetch_all(
+            "SELECT trade_date, COUNT(*) c FROM bhavcopy_data "
+            "WHERE trade_date BETWEEN ? AND ? AND option_type IN ('CE','PE') "
+            "GROUP BY trade_date",
+            [_start.strftime("%Y-%m-%d"), _end.strftime("%Y-%m-%d")])
+        _have = {str(r.get("trade_date", ""))[:10] for r in (rows or []) if r.get("c")}
+        d = _end
         checked = 0
         while len(out) < days and checked < days + 20:
             if d.weekday() < 5:
-                row = Database.get_instance().fetch_one(
-                    "SELECT COUNT(*) c FROM bhavcopy_data WHERE trade_date=? AND option_type IN ('CE','PE')",
-                    [d.strftime("%Y-%m-%d")])
-                if not row or not row["c"]:
+                if d.strftime("%Y-%m-%d") not in _have:
                     out.append(d.strftime("%Y-%m-%d"))
-            d -= datetime.timedelta(days=1)
+            d -= _dtd.timedelta(days=1)
             checked += 1
     except Exception:
         pass
@@ -141,16 +149,37 @@ def backfill_fno(days: int = 90, per_run: int = 10) -> dict:
 
 
 def purge_old_data(months: int = RETENTION_MONTHS) -> int:
-    """Delete bhavcopy rows older than N months ('old delete'). Returns count."""
+    """Delete bhavcopy rows older than N months ('old delete'). Returns count.
+    CHUNKED (20k rows/txn): ek giant DELETE pooler statement timeout kha kar
+    poora PG backend dead kar deta tha (phir strategies gayab)."""
     from core.models.database import Database
     try:
         cutoff = (datetime.date.today() - datetime.timedelta(days=int(months * 30.5))).strftime("%Y-%m-%d")
         db = Database.get_instance()
-        row = db.fetch_one("SELECT COUNT(*) c FROM bhavcopy_data WHERE trade_date<?", [cutoff])
-        n = int(row["c"]) if row else 0
-        if n:
-            db.execute("DELETE FROM bhavcopy_data WHERE trade_date<?", [cutoff])
-        return n
+        try:
+            _pg = bool(db._is_postgres())
+        except Exception:
+            _pg = False
+        _key = "ctid" if _pg else "rowid"
+        total = 0
+        for _ in range(200):
+            try:
+                probe = db.fetch_one(
+                    f"SELECT 1 as x FROM bhavcopy_data WHERE trade_date<? LIMIT 1", [cutoff])
+            except Exception:
+                break
+            if not probe:
+                break
+            try:
+                db.execute(
+                    f"DELETE FROM bhavcopy_data WHERE {_key} IN "
+                    f"(SELECT {_key} FROM bhavcopy_data WHERE trade_date<? LIMIT 20000)",
+                    [cutoff])
+                total += 20000
+            except Exception as e:
+                logger.warning("purge chunk failed: %s", e)
+                break
+        return total
     except Exception as e:
         logger.warning("purge failed: %s", e)
         return 0
