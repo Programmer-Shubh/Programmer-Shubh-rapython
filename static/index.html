@@ -1314,9 +1314,10 @@ let _lastOpenTrdHTML = null;
             // chahiye to ↻ Naya run dabao (force refresh).
             try{if(r.strategy_id)window._lastBTStratId=r.strategy_id;}catch(e){}
             const _storedBadge=r.stored?(' • <span class="badge bg-success">Saved result'+(r.stored_at?(' • '+r.stored_at):'')+'</span>'):(r.stored===false&&r.strategy_id?(' • <span class="badge bg-info">Naya run (saved)</span>'):'');
+            const _chgBadge=r.config_changed?(' • <span class="badge bg-warning text-dark">Config badli — trade history purani wali, naya chahiye to ↻ Naya run</span>'):'';
             const _localBadge=(r._localCache&&!r.stored)?(' • <span class="badge bg-secondary">Turant copy (server se pakka ho raha...)</span>'):'';
             const _refreshBtn=r.strategy_id?(' <button class="btn btn-sm btn-outline-primary ms-1" style="font-size:11px;padding:0 6px" title="Config same hai to saved, naya chahiye to force" onclick="backtestStrat('+(r.strategy_id)+',true)">↻ Naya run</button>'):'';
-            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'')+_storedBadge+_localBadge+_refreshBtn;
+            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'')+_storedBadge+_chgBadge+_localBadge+_refreshBtn;
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
             const pnl = m.final_capital - m.initial_capital;
@@ -1861,6 +1862,18 @@ let _lastOpenTrdHTML = null;
             } else {
                 document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Naya backtest chal raha hai...</p>';
             }
+            // SAVED-result instant: banate-samay wali trade history DB se
+            // turant render (0 second) - POST slow/timeout ho tab bhi history
+            // gayab nahi hogi. POST safal hone par wahi overwrite karega.
+            if(!force){
+                try{
+                    const _sv=await A('/api/strategies/'+id+'/saved-result');
+                    if(_sv&&!_sv.error&&(_sv.metrics||_sv.trade_list)){
+                        window._directBT=_sv;
+                        await runBacktest({direct:_sv});
+                    }
+                }catch(_sve){}
+            }
             // 45s cap: latke to form-flow (async+progress wala) pakdega.
             // Bina cap ke hang = hamesha-spinner (wahi shikayat).
             const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),45000);
@@ -2178,6 +2191,18 @@ let _lastOpenTrdHTML = null;
                     }
                 } else {
                     document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Naya backtest chal raha hai...</p>';
+                }
+                // SAVED-result instant: banate-samay wali trade history DB se
+                // turant render (0 second) - POST slow/timeout ho tab bhi
+                // history gayab nahi hogi. POST safal hone par overwrite.
+                if(!force){
+                    try{
+                        const _sv2=await A('/api/strategies/'+id+'/saved-result');
+                        if(_sv2&&!_sv2.error&&(_sv2.metrics||_sv2.trade_list)){
+                            window._directBT=_sv2;
+                            await runBacktest({direct:_sv2});
+                        }
+                    }catch(_sve2){}
                 }
                 const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),45000);
                 let r=null;

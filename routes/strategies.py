@@ -709,3 +709,55 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
         import traceback
         traceback.print_exc()
         return {"error": f"Backtest failed: {e}"[:250]}
+
+
+@router.get("/{strat_id}/saved-result")
+def strategy_saved_result(strat_id: int):
+    """Backtest Detail ka INSTANT path: strategy banate samay wali poori trade
+    history (metrics + trade_list) DB se seedha - bina hash-gate, bina run,
+    bina wait. Config badli ho tab bhi SAVED wahi dikhta hai (config_changed
+    badge ke saath); naya chahiye to POST .../backtest?refresh=1."""
+    import json as _js
+    try:
+        db = Database.get_instance()
+        row = db.fetch_one("SELECT * FROM strategies WHERE id=?", [strat_id])
+        if not row:
+            return {"error": "Strategy not found"}
+        raw = row.get("last_backtest") or ""
+        if not raw:
+            return {"error": "Is strategy ka saved result nahi hai - pehle Run Backtest karke Save karo"}
+        try:
+            res = _js.loads(raw) if isinstance(raw, str) else dict(raw)
+        except Exception:
+            return {"error": "Saved result corrupt hai - Naya run karo"}
+        if not isinstance(res, dict) or not (res.get("metrics") or res.get("trade_list") is not None):
+            return {"error": "Saved result adhura hai - Naya run karo"}
+        res["stored"] = True
+        res["stored_at"] = row.get("last_backtest_at") or ""
+        res["strategy_id"] = strat_id
+        res["strategy_name"] = row.get("name") or ""
+        # Config badli ya nahi (badge ke liye - result phir bhi SAVED wala).
+        try:
+            def _ld(v, fb):
+                try:
+                    if v is None or v == "":
+                        return fb
+                    return _js.loads(v) if isinstance(v, str) else (v or fb)
+                except Exception:
+                    return fb
+            _legs = _ld(row.get("legs"), [])
+            _inds = _ld(row.get("indicators"), [])
+            _ec = _ld(row.get("entry_conditions"), [])
+            _xc = _ld(row.get("exit_conditions"), [])
+            _adv = _ld(row.get("advanced_options"), {})
+            _risk = _ld(row.get("risk_management"), {})
+            _now_hash = _canonical_config_hash(
+                row.get("symbol"), row.get("start_date"), row.get("end_date"),
+                row.get("timeframe"), _inds, _ec, _xc, _legs, _adv, _risk)
+            _old_hash = str(row.get("last_backtest_hash") or "")
+            res["config_changed"] = bool(_now_hash and _old_hash and _now_hash != _old_hash)
+        except Exception:
+            res["config_changed"] = False
+        return res
+    except Exception as e:
+        return {"error": f"Saved result failed: {e}"[:200]}
