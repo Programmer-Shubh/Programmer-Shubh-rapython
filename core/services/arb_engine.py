@@ -138,19 +138,28 @@ def place_pair(symbol, qty=1, min_net=DEFAULT_MIN_NET):
     except Exception as e:
         # Cancel-and-flat: never leave an orphan leg
         try:
+            from utils.helpers import log_trade_delete as _ltd
             if id1 and not id2:
+                _r = tm.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [id1])
+                if _r:
+                    _ltd(dict(_r), "arb-orphan-flatten")
                 tm.db.execute("DELETE FROM paper_trades WHERE id=?", [id1])
             elif id2 and not id1:
+                _r = tm.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [id2])
+                if _r:
+                    _ltd(dict(_r), "arb-orphan-flatten")
                 tm.db.execute("DELETE FROM paper_trades WHERE id=?", [id2])
         except Exception:
             pass
         return {"error": f"dual-leg failed, flattened: {e}"[:150]}
     if not (id1 and id2):
         try:
-            if id1:
-                tm.db.execute("DELETE FROM paper_trades WHERE id=?", [id1])
-            if id2:
-                tm.db.execute("DELETE FROM paper_trades WHERE id=?", [id2])
+            from utils.helpers import log_trade_delete as _ltd2
+            for _oid in [x for x in (id1, id2) if x]:
+                _r = tm.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [_oid])
+                if _r:
+                    _ltd2(dict(_r), "arb-incomplete-flatten")
+                tm.db.execute("DELETE FROM paper_trades WHERE id=?", [_oid])
         except Exception:
             pass
         return {"error": "dual-leg incomplete - both cancelled, no orphan"}

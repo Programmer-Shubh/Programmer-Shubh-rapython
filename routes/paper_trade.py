@@ -113,7 +113,28 @@ def run_monitor(key: str = ""):
         if _need and key != _need:
             return {"error": "forbidden"}
         from core.services.sl_monitor import run_once as _sl_once
-        return {"success": True, **_sl_once(min_interval=0, market_hours=True)}
+        _out = {"success": True, **_sl_once(min_interval=0, market_hours=True)}
+        # Gayab-trade diagnosis: aaj ke delete-log ki tail (kisne-kya hataya).
+        try:
+            import os as _os2, json as _js2, datetime as _dt2
+            _day = (_dt2.datetime.utcnow() + _dt2.timedelta(hours=5, minutes=30)).strftime("%Y%m%d")
+            _lp = os.path.join(os.path.dirname(__file__), "..", "data", "logs",
+                               f"trade_deletes_{_day}.jsonl")
+            _tail = []
+            try:
+                with open(os.path.abspath(_lp), "r", encoding="utf-8") as _f:
+                    _lines = _f.read().strip().split("\n")
+                for _ln in _lines[-10:]:
+                    try:
+                        _tail.append(_js2.loads(_ln))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            _out["recent_deletes"] = _tail
+        except Exception:
+            _out["recent_deletes"] = []
+        return _out
     except Exception as e:
         return {"error": str(e)[:200]}
 
@@ -328,6 +349,13 @@ def deduplicate_trades():
     faulty = trade_model.db.fetch_all("SELECT id, symbol, strike_price FROM paper_trades WHERE status='open' AND (strike_price <= 100 OR strike_price IS NULL OR strike_price = '' OR symbol IS NULL OR symbol='' OR option_type IS NULL OR option_type='')")
     faulty_ids = [r["id"] for r in faulty]
     for fid in faulty_ids:
+        try:
+            _row = trade_model.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [fid])
+            if _row:
+                from utils.helpers import log_trade_delete as _ltd
+                _ltd(dict(_row), "deduplicate-faulty")
+        except Exception:
+            pass
         trade_model.db.execute("DELETE FROM paper_trades WHERE id=?", [fid])
     # Clean specific user reported duplicates: ensure clean accurate format
     # Return summary

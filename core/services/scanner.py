@@ -764,13 +764,21 @@ class OptionScanner:
             self._last_debug = _dbg
         except Exception:
             pass
+        # Fresh-only threshold: purane-trend (stale, score 70, bina fresh
+        # cross) wale setups DASHBOARD par dikhte hi nahi - late entry se
+        # nuksaan hota tha. Combo-100 hamesha rehta hai (uske apne niyam).
         try:
-            _req70 = int(min_score) if int(min_score) >= 70 else 70
+            _fresh_min = max(80, int(min_score))
         except Exception:
-            _req70 = 70
+            _fresh_min = 80
         # Dashboard Trade Opportunity backbone = SIRF ST+MACD+Vol500k gate.
         # Purane engines (scan/VWAP/PA/SD/intraday/tick/combo/AI-gate) hata diye.
         base = self._smv_signals(symbols)
+        try:
+            base = [s for s in (base or [])
+                    if s.get("combo") or int(s.get("score", 0) or 0) >= _fresh_min]
+        except Exception:
+            pass
         # RSI+VWAP+ST+PCR momentum combo: paancho shartein ek saath (score 100,
         # alag entry - primary picker combo ko prefer karta hai). Backtest ke
         # combo_rsi_vwap_pcr se SAME niyam (parity).

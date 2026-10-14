@@ -456,6 +456,34 @@ def sltp_premium_level(entry_price: float, amount: float, quantity: int,
         return 0.0
 
 
+def log_trade_delete(trade: dict, where: str = "") -> None:
+    """Har paper_trades DELETE ka snapshot JSONL me (never raises).
+    File: data/logs/trade_deletes_YYYYMMDD.jsonl. Closed/open trade gayab
+    ho to yahi batayega kisne-kab delete kiya (manual button vs cleanup)."""
+    try:
+        import datetime as _dt
+        _base = os.path.join(os.path.dirname(__file__), "..", "data", "logs")
+        try:
+            os.makedirs(_base, exist_ok=True)
+        except Exception:
+            return
+        _now = _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
+        _row = {"ts": _now.strftime("%Y-%m-%d %H:%M:%S"), "where": str(where or ""),
+                "trade": {k: (trade or {}).get(k) for k in
+                          ("id", "symbol", "option_type", "strike_price",
+                           "transaction_type", "quantity", "lot_size", "entry_price",
+                           "exit_price", "entry_date", "exit_date", "pnl",
+                           "status", "exit_status", "strategy_id", "trade_mode")}}
+        try:
+            with open(os.path.join(_base, f"trade_deletes_{_now.strftime('%Y%m%d')}.jsonl"),
+                      "a", encoding="utf-8") as _f:
+                _f.write(json.dumps(_row, default=str) + "\n")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def log_exit_skip(check: str, trade_id=None, symbol: str = "", reason: str = "") -> None:
     """SL/TP/EOD exit skip ka reason JSONL me likho (never raises).
     File: data/logs/exit_skips_YYYYMMDD.jsonl — ek line per skip:

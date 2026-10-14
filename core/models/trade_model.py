@@ -339,8 +339,10 @@ class TradeModel:
         return n
 
     def get_closed_trades(self, user_id=1) -> list:
+        # NULL-safe ordering: exit_date khaali ho to bhi row dikhe (nayi sabse upar).
         return self.db.fetch_all(
-            "SELECT * FROM paper_trades WHERE user_id=? AND status='closed' ORDER BY exit_date DESC",
+            "SELECT * FROM paper_trades WHERE user_id=? AND status='closed'"
+            " ORDER BY COALESCE(exit_date,'') DESC, id DESC",
             [user_id],
         )
 
@@ -490,6 +492,13 @@ class TradeModel:
             else:
                 seen[key] = r["id"]
         for tid in to_delete:
+            try:
+                _row = self.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [tid])
+                if _row:
+                    from utils.helpers import log_trade_delete as _ltd
+                    _ltd(dict(_row), "deduplicate-open")
+            except Exception:
+                pass
             self.db.execute("DELETE FROM paper_trades WHERE id=?", [tid])
         return len(to_delete)
 
@@ -679,6 +688,13 @@ class TradeModel:
         )
 
     def delete_trade(self, trade_id: int) -> int:
+        try:
+            _row = self.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [trade_id])
+            if _row:
+                from utils.helpers import log_trade_delete as _ltd
+                _ltd(dict(_row), "manual-delete-button")
+        except Exception:
+            pass
         return self.db.execute("DELETE FROM paper_trades WHERE id=?", [trade_id])
 
     def set_trade_mode(self, trade_id: int, trade_mode: str) -> int:
@@ -811,6 +827,13 @@ class TradeModel:
         # Clean faulty open trades
         faulty = self.db.fetch_all("SELECT id FROM paper_trades WHERE user_id=? AND status='open' AND (strike_price <= 0 OR strike_price IS NULL OR symbol IS NULL OR option_type IS NULL)", [user_id])
         for f in faulty:
+            try:
+                _row = self.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [f["id"]])
+                if _row:
+                    from utils.helpers import log_trade_delete as _ltd
+                    _ltd(dict(_row), "clean-history-faulty")
+            except Exception:
+                pass
             self.db.execute("DELETE FROM paper_trades WHERE id=?", [f["id"]])
             fixed += 1
         return {"fixed": fixed, "issues": issues, "total_closed": len(trades)}
