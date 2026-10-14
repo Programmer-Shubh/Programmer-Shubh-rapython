@@ -641,14 +641,14 @@ class OptionScanner:
                 if st_cross:
                     rs.append(f"ST bullish (fresh cross breakout, {st_fresh_age} bar pehle)")
                 else:
-                    rs.append("ST bullish (purana trend - late entry savdhaan)")
+                    rs.append("ST bullish")
                 if macd_cross and macd_strong:
                     _mc_age = f" {mc_fresh_age} bar pehle" if mc_fresh_age else ""
                     rs.append(f"MACD bullish (crossover above zero{_mc_age})")
                 elif macd_cross:
                     rs.append("MACD bullish (weak turn - zero ke neeche, aadhe points)")
                 else:
-                    rs.append("MACD bullish (purana - late entry savdhaan)")
+                    rs.append("MACD bullish")
                 rs.append(vol_txt)
                 rs.append(f"RSI {rsi_now:.0f} (momentum ok, overbought nahi)")
                 if vwap_txt:
@@ -661,14 +661,14 @@ class OptionScanner:
                 if st_cross:
                     rs.append(f"ST bearish (fresh cross breakdown, {st_fresh_age} bar pehle)")
                 else:
-                    rs.append("ST bearish (purana trend - late entry savdhaan)")
+                    rs.append("ST bearish")
                 if macd_cross and macd_strong:
                     _mc_age = f" {mc_fresh_age} bar pehle" if mc_fresh_age else ""
                     rs.append(f"MACD bearish (crossover below zero{_mc_age})")
                 elif macd_cross:
                     rs.append("MACD bearish (weak turn - zero ke upar, aadhe points)")
                 else:
-                    rs.append("MACD bearish (purana - late entry savdhaan)")
+                    rs.append("MACD bearish")
                 rs.append(vol_txt)
                 rs.append(f"RSI {rsi_now:.0f} (momentum ok, oversold nahi)")
                 if vwap_txt:
