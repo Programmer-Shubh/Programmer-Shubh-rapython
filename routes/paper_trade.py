@@ -189,6 +189,14 @@ def place_trade(req: PlaceTradeRequest):
         return {"error": "Stop-Loss and Target are mandatory - cannot be blank"}
     if req.stop_loss <= 0 or req.take_profit <= 0:
         return {"error": "Stop-Loss and Target must be > 0 (mandatory for risk management, especially for SELL)"}
+    # Official-lot gate (fail-closed): unverified lot par order BLOCK.
+    try:
+        from utils.helpers import lot_guard_error as _lge2
+        _lot_err2 = _lge2(req.symbol)
+        if _lot_err2:
+            return {"error": _lot_err2}
+    except Exception:
+        pass
     # Global strike alignment (before validation)
     try:
         from utils.helpers import align_strike_price
@@ -224,33 +232,8 @@ def place_trade(req: PlaceTradeRequest):
                 return {"error": f"Premium ₹{req.entry_price} live LTP ₹{float(_live):.2f} se {_dev*100:.0f}% alag hai (25% limit) - LTP ke paas price dalo ya chain se order karo"}
     except Exception:
         pass
-    # Deep ITM/OTM guard: relaxed to ATM±8 / 12% and chain-aware (fixes KOTAKBANK/BANKNIFTY false blocks)
-    try:
-        from core.services.live_market_data import LiveMarketData as _LMD
-        from utils.helpers import get_strike_step
-        _lm = _LMD(); _spot = _lm.get_spot_price(req.symbol) or 0
-        if _spot<=0:
-            try: _s=_lm.get_live_spot(req.symbol); _spot=float(_s["spot"]) if _s and _s.get("spot") else 0
-            except: pass
-        _step=get_strike_step(req.symbol); _atm=round(_spot/_step)*_step if _spot>0 else 0
-        # User asked: never block any symbol for this error — disable all distance checks
-        _has = False
-        try:
-            from core.models.bhavcopy_model import BhavcopyModel as _BM
-            _b = _BM()
-            _d = _b.get_dates(req.symbol)
-            if _d:
-                _exps = _b.get_expiries(req.symbol, _d[0])
-                if _exps:
-                    _chk = _b.get_option_chain(req.symbol, _d[0], _exps[0])
-                    if _chk and any(float(r.get("strike_price",0))==float(req.strike) for r in _chk):
-                        _has = True
-        except: pass
-        if False and _atm>0 and abs(req.strike-_atm)>_step*8 and not _has:
-            return {"error": f"Strike {req.strike} far from ATM {_atm} (ATM±8, spot {_spot:.0f}) - try nearer ATM"}
-        if False and _spot>0 and abs(req.strike-_spot)/_spot>0.12 and not _has:
-            return {"error": f"Strike {req.strike} is {abs(req.strike-_spot)/_spot*100:.1f}% away from spot {_spot:.2f} (12% limit) - try nearer ATM {_atm}"}
-    except Exception: pass
+    # (Purana dead ATM-distance guard block HATAYA - `if False` kabhi chalta
+    # nahi tha, sirf bhavcopy DB roundtrips kharch karta tha.)
     # Deduplication: if identical open position exists, block duplicate
     existing = trade_model.db.fetch_one("SELECT id FROM paper_trades WHERE symbol=? AND strike_price=? AND option_type=? AND transaction_type=? AND status='open' LIMIT 1", [req.symbol, req.strike, req.option_type, req.transaction_type])
     if existing:

@@ -61,6 +61,31 @@ def _load_nse_lots():
     _NSE_LOTS_FAIL_TS = _time.time()
     return _NSE_LOTS_CACHE
 
+# Verified static lot map (module-level taaki get_lot_size + official_lot
+# ek hi source dekhen - drift impossible). NSE lots Dec-2025 revision
+# (ICICI-Direct: NIFTY 65, BANKNIFTY 30, FINNIFTY 60, MIDCPNIFTY 120);
+# BSE lots Oct-2026 verified (SENSEX 20, BANKEX 30). Broker master (NSE)
+# runtime par override karta hai.
+_STATIC_LOTS = {
+    "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120,
+    "SENSEX": 20, "BANKEX": 30,
+    "RELIANCE": 500, "HDFCBANK": 650, "ICICIBANK": 700,
+    "TCS": 225, "INFY": 400, "ITC": 1725, "SBIN": 750,
+    "AXISBANK": 625, "KOTAKBANK": 2000, "LT": 175, "HINDUNILVR": 300,
+    "BHARTIARTL": 475, "M&M": 200, "MARUTI": 50, "BAJFINANCE": 750,
+    "WIPRO": 3000, "ONGC": 2250, "SUNPHARMA": 350, "ULTRACEMCO": 50,
+    "NTPC": 1500, "POWERGRID": 1900, "TATAMOTORS": 1125, "TATASTEEL": 2750,
+    "HCLTECH": 400, "JSWSTEEL": 675, "COALINDIA": 1350, "DRREDDY": 625,
+    "CIPLA": 425, "ADANIENT": 309, "SBILIFE": 375, "BPCL": 1975,
+    "GRASIM": 250, "TECHM": 600, "DIVISLAB": 100, "EICHERMOT": 100,
+    "BRITANNIA": 125, "HINDALCO": 700, "VEDL": 1150, "INDUSINDBK": 700,
+    "SHREECEM": 25, "NESTLEIND": 500, "BAJAJFINSV": 300, "HEROMOTOCO": 150,
+    "APOLLOHOSP": 125, "UPL": 1355, "BAJAJHLDNG": 75, "ALKEM": 125,
+    "TITAN": 175,
+    "GOLDBEES": 100, "SILVERBEES": 100,
+}
+
+
 def get_lot_size(symbol: str) -> int:
     s = str(symbol or "").strip().upper()
     if not s:
@@ -74,43 +99,66 @@ def get_lot_size(symbol: str) -> int:
             return int(_lot)
     except Exception:
         pass
-    lots = {
-        # Verified 2026-10-13 against TWO independent brokers (Dhan scrip
-        # master + Angel instrument master - sab match). Purani map (NIFTY 75
-        # vagera) 2024-25 revision se stale thi - wahi "175/150 dikha raha"
-        # shikayat thi. Broker master runtime par override karta hai.
-        "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120,
-        "SENSEX": 10, "BANKEX": 20,
-        "RELIANCE": 500, "HDFCBANK": 650, "ICICIBANK": 700,
-        "TCS": 225, "INFY": 400, "ITC": 1725, "SBIN": 750,
-        "AXISBANK": 625, "KOTAKBANK": 2000, "LT": 175, "HINDUNILVR": 300,
-        "BHARTIARTL": 475, "M&M": 200, "MARUTI": 50, "BAJFINANCE": 750,
-        "WIPRO": 3000, "ONGC": 2250, "SUNPHARMA": 350, "ULTRACEMCO": 50,
-        "NTPC": 1500, "POWERGRID": 1900, "TATAMOTORS": 1125, "TATASTEEL": 2750,
-        "HCLTECH": 400, "JSWSTEEL": 675, "COALINDIA": 1350, "DRREDDY": 625,
-        "CIPLA": 425, "ADANIENT": 309, "SBILIFE": 375, "BPCL": 1975,
-        "GRASIM": 250, "TECHM": 600, "DIVISLAB": 100, "EICHERMOT": 100,
-        "BRITANNIA": 125, "HINDALCO": 700, "VEDL": 1150, "INDUSINDBK": 700,
-        "SHREECEM": 25, "NESTLEIND": 500, "BAJAJFINSV": 300, "HEROMOTOCO": 150,
-        "APOLLOHOSP": 125, "UPL": 1355, "BAJAJHLDNG": 75, "ALKEM": 125,
-        "TITAN": 175,
-        "GOLDBEES": 100, "SILVERBEES": 100,
-    }
-    # Correct exchange lots override (Oct 2026, dual-broker verified)
-    _override={"FINNIFTY":60,"ADANIENT":309,"NIFTY":65,"BANKNIFTY":30}
-    if symbol.upper() in _override: return _override[symbol.upper()]
     # Hardcoded map FIRST (instant): network fetch only for unknown symbols.
     # The old order called _load_nse_lots() (seconds of NSE timeouts) on every
     # get_lot_size() even for symbols already in the map below.
-    _hit = lots.get(symbol.upper())
+    _hit = _STATIC_LOTS.get(s)
     if _hit:
         return _hit
     try:
-        live=_load_nse_lots()
-        if live and symbol.upper() in live:
-            return int(live[symbol.upper()])
-    except Exception: pass
-    return lots.get(symbol.upper(), 50)
+        live = _load_nse_lots()
+        if live and s in live:
+            return int(live[s])
+    except Exception:
+        pass
+    return 50
+
+
+def official_lot(symbol: str):
+    """Single source of truth: (lot, source, verified).
+    verified=True sirf tab jab lot kisi official jagah se aaya ho
+    (broker-master / nse / verified static map). Unknown symbol par
+    (50, 'default', False) - order paths is par TRADE BLOCK karte hain
+    taaki galat lot par kabhi order na lage (SENSEX-10 jaisa case)."""
+    try:
+        s = str(symbol or "").strip().upper()
+        if not s:
+            return 50, "default", False
+        try:
+            from core.services.lot_master import get_lot as _bl
+            _lot, _src = _bl(s)
+            if _lot and int(_lot) > 0:
+                return int(_lot), str(_src or "broker-master"), True
+        except Exception:
+            pass
+        try:
+            live = _load_nse_lots()
+            if live and s in live and int(live[s] or 0) > 0:
+                return int(live[s]), "nse", True
+        except Exception:
+            pass
+        if s in _STATIC_LOTS:
+            try:
+                return int(_STATIC_LOTS[s]), "static-map", True
+            except Exception:
+                pass
+        return 50, "default", False
+    except Exception:
+        return 50, "default", False
+
+
+def lot_guard_error(symbol: str):
+    """Order-time lot gate: None = lot verified (order OK); str = block reason.
+    Har order path (paper/live/webhook/auto) isko check karta hai - galat ya
+    unverified lot par TRADE LAGTA HI NAHI (fail-closed)."""
+    try:
+        _lot, _src, _ok = official_lot(symbol)
+        if _ok and _lot and int(_lot) > 0:
+            return None
+        return (f"{str(symbol or '').upper()} ka official lot size verify nahi hua "
+                f"(source: {_src}) - galat lot par order BLOCK. Symbol naam check karo.")
+    except Exception:
+        return f"{symbol} ka lot verify nahi hua - order BLOCK."
 
 
 def effective_lot_size(symbol: str, stored=None) -> int:
@@ -132,25 +180,10 @@ def effective_lot_size(symbol: str, stored=None) -> int:
 
 
 def lot_source(symbol: str) -> str:
-    """Kahan se aaya: broker-master | nse | static-map | default (transparency)."""
+    """Kahan se aaya: broker-master | nse | static-map | default (transparency).
+    Unknown symbol (50-default guess) par 'default' - order paths is par block."""
     try:
-        s = str(symbol or "").strip().upper()
-        if not s:
-            return "default"
-        try:
-            from core.services.lot_master import get_lot as _bl2
-            _lot, _src = _bl2(s)
-            if _lot and int(_lot) > 0:
-                return str(_src or "broker-master")
-        except Exception:
-            pass
-        try:
-            live = _load_nse_lots()
-            if live and s in live:
-                return "nse"
-        except Exception:
-            pass
-        return "static-map"
+        return official_lot(symbol)[1]
     except Exception:
         return "default"
 

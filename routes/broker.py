@@ -1238,6 +1238,15 @@ async def place_live_order(req: LiveOrderRequest):
                 return {"error": f"{symbol} par koi options nahi hain (F&O me nahi) - live order impossible"}
         except Exception:
             pass
+        # Official-lot gate (fail-closed, REAL MONEY): unverified lot par
+        # live order BLOCK - galat lot par broker order kabhi na jaye.
+        try:
+            from utils.helpers import lot_guard_error as _lge4
+            _lot_err4 = _lge4(symbol)
+            if _lot_err4:
+                return {"error": _lot_err4}
+        except Exception:
+            pass
         # Strategy expiry: auto-rollover to next weekly expiry by default so
         # live trading keeps running instead of blocking on a past end_date.
         _rolled_to = ""
@@ -1483,7 +1492,9 @@ async def place_live_order(req: LiveOrderRequest):
             premium = None
         if not premium or premium <= 0:
             spot = LiveMarketData().get_spot_price(symbol)
-            premium = model_premium(spot or strike, strike, 7, opt, symbol=symbol) if spot else 50.0
+            if not spot or spot <= 0:
+                return {"error": f"Live premium/spot nahi mila {symbol} {strike}{opt} - bina price ke live fill record nahi hoga"}
+            premium = model_premium(spot, strike, 7, opt, symbol=symbol)
         adj = TransactionCosts.apply_fill_slippage(float(premium), txn, is_live=True)
         costs = TransactionCosts.calculate(adj * lots * lot, txn == "SELL", is_live=True)
         import datetime as _dt

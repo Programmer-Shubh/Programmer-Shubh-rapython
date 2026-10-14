@@ -17,6 +17,14 @@ def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500
                 return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-3:30 IST)."}
         except Exception:
             pass
+    # Official-lot gate (fail-closed): unverified lot par order BLOCK.
+    try:
+        from utils.helpers import lot_guard_error as _lge5
+        _lot_err5 = _lge5(symbol)
+        if _lot_err5:
+            return {"error": _lot_err5}
+    except Exception:
+        pass
     live = LiveMarketData()
     spot = live.get_spot_price(symbol) or 0
     if spot <= 0:
@@ -43,7 +51,9 @@ def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500
             _dte = 28 if _exp_hint == "monthly" else 7
             premium = model_premium(spot, strike, _dte, leg["option_type"], symbol=symbol)
         except Exception:
-            premium = max(spot*0.02, 1.5) if spot > 0 else 0
+            premium = 0  # purana spot*2% synthetic HATAYA - fantasy fill nahi
+        if not premium or premium <= 0:
+            return {"error": f"No premium for {symbol} {strike}{leg['option_type']} (spot/model fail) - order nahi laga"}
         adj = TransactionCosts.apply_fill_slippage(premium, leg["transaction"].upper(), is_live=False)
         lot = get_lot_size(symbol)
         costs = TransactionCosts.calculate(adj * int(leg.get("lots",1)) * lot, leg["transaction"].lower()=="sell", is_live=False)

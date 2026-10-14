@@ -90,6 +90,14 @@ def _place_from_signal(data: dict, source: str = "webhook") -> dict:
     strike = float(data.get("strike") or data.get("strike_price") or 0)
     expiry = data.get("expiry") or data.get("expiry_date") or ""
     qty = int(data.get("quantity") or data.get("qty") or 1)
+    # Official-lot gate (fail-closed): unverified lot par order BLOCK.
+    try:
+        from utils.helpers import lot_guard_error as _lge3
+        _lot_err3 = _lge3(symbol)
+        if _lot_err3:
+            return {"error": _lot_err3}
+    except Exception:
+        pass
     # If webhook comes with full legs (Strategy Builder), route via execution_engine directly
     if data.get("legs"):
         try:
@@ -122,14 +130,7 @@ def _place_from_signal(data: dict, source: str = "webhook") -> dict:
         row = bhav.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? ORDER BY trade_date DESC LIMIT 1", [symbol, strike, opt_type])
         if row and row["close_price"]:
             premium = float(row["close_price"])
-    if premium <= 0:
-        # Real spot * 1% (real, not BS)
-        spot = live.get_spot_price(symbol) or 0
-        if spot <= 0:
-            ls = live.get_live_spot(symbol)
-            spot = float(ls["spot"]) if ls and ls.get("spot") else 0
-        if spot > 0:
-            premium = round(spot * 0.01, 2)
+    # Purana spot*1% synthetic HATAYA - premium na mile to error (fantasy fill nahi)
     if premium <= 0:
         return {"error": f"No premium for {symbol} {strike}{opt_type}"}
     # Hard floor: ₹1-2 lottery tickets kabhi place nahi hote

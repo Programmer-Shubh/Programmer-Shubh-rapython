@@ -441,6 +441,15 @@ def place_trade(req: TradeRequest):
             return {"error": "Stop-Loss and Target are mandatory - cannot be blank (SELL requires SL to prevent unmanaged risk)"}
         if req.stop_loss <= 0 or req.take_profit <= 0:
             return {"error": "Stop-Loss and Target must be > 0 - mandatory fields"}
+        # Official-lot gate (fail-closed): unverified lot par order BLOCK -
+        # galat lot (SENSEX-10 jaisa) par kabhi trade na lage.
+        try:
+            from utils.helpers import lot_guard_error as _lge
+            _lot_err = _lge(req.symbol)
+            if _lot_err:
+                return {"error": _lot_err}
+        except Exception:
+            pass
         # Data Validation: symbol, option_type, quantity, strike checks
         if not req.symbol or not str(req.symbol).strip():
             return {"error": "Symbol missing"}
@@ -587,7 +596,7 @@ def place_trade(req: TradeRequest):
                             pass
                         premium = model_premium(_spot_g, req.strike, expiry_days, req.option_type, symbol=req.symbol)
                     except Exception:
-                        premium = max(round(_spot_g * 0.015, 2), 1.5)
+                        premium = 0  # purana spot*1.5% synthetic HATAYA - fantasy fill nahi
             except Exception:
                 pass
         if premium <= 0:
@@ -622,7 +631,7 @@ def place_trade(req: TradeRequest):
                             expiry_days = 7
                     premium = model_premium(spot_est, req.strike, expiry_days, req.option_type, symbol=req.symbol)
                 except Exception:
-                    premium = max(round(spot_est * 0.015, 2), 1.5)
+                    premium = 0  # purana spot*1.5% synthetic HATAYA - fantasy fill nahi
             if premium <= 0:
                 return {"error": "No premium data for this strike"}
             # Stale-DB guard: DB close like 1.50 for ATM is unrealistic (shows 1.50 vs scanner 105) -> ALWAYS recompute via SAME model_premium as scanner (fixes NIFTY 105 vs 1.50 mismatch for all symbols)
