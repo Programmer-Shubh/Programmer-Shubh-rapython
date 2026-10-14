@@ -80,36 +80,54 @@ def _canonical_config_hash(symbol, start_date, end_date, timeframe,
 
 
 def _result_matches_config(res: dict, symbol, start_date, end_date,
-                           indicators, legs, risk=None, advanced=None) -> bool:
+                           indicators, legs, risk=None, advanced=None,
+                           reasons: list = None) -> bool:
     """Frontend-bheja result kya isi saved config se bana hai? (params echo
     vs saved config). Mismatch par attach mat karo - galat result card par
-    dikhega. Returns True only on clear match."""
+    dikhega. Returns True only on clear match. reasons (list) di ho to har
+    mismatch ki wajah usme (Hindi-English, user ko dikhane layak)."""
+    def _why(t):
+        try:
+            if reasons is not None:
+                reasons.append(str(t)[:160])
+        except Exception:
+            pass
     try:
         if not isinstance(res, dict):
+            _why("result khaali hai - pehle Run Backtest karo")
             return False
         m = res.get("metrics") or {}
         if not isinstance(m, dict) or "total_trades" not in m:
+            _why("result me metrics nahi - pehle Run Backtest karo")
             return False
         p = res.get("params") or {}
         if not isinstance(p, dict):
+            _why("result me params-echo nahi (purana run?) - dobara Run Backtest karo")
             return False
         syms = p.get("symbols") or ([res.get("symbol")] if res.get("symbol") else [])
         if str(symbol or "").upper() not in [str(x or "").upper() for x in syms]:
+            _why(f"symbol alag hai (run: {syms} vs save: {symbol}) - wahi symbol par run karke save karo")
             return False
         if str(p.get("start_date") or "")[:10] != str(start_date or "")[:10]:
+            _why(f"start date alag hai (run: {str(p.get('start_date') or '')[:10]} vs save: {str(start_date or '')[:10]})")
             return False
         if str(p.get("end_date") or "")[:10] != str(end_date or "")[:10]:
+            _why(f"end date alag hai (run: {str(p.get('end_date') or '')[:10]} vs save: {str(end_date or '')[:10]})")
             return False
         plegs = p.get("legs") or []
         if len(plegs) != len(legs or []):
+            _why(f"legs ki ginti alag hai (run: {len(plegs)} vs save: {len(legs or [])})")
             return False
         for _pl, _sl in zip(plegs, legs or []):
             if not isinstance(_pl, dict) or not isinstance(_sl, dict):
+                _why("leg ka format alag hai - dobara run karke save karo")
                 return False
             if str(_pl.get("option_type") or "").upper() != str(_sl.get("option_type") or "").upper():
+                _why("option_type (CE/PE) alag hai - run wali legs par save karo")
                 return False
             _st = str(_sl.get("transaction") or _sl.get("position") or "").lower()
             if str(_pl.get("transaction") or "").lower() != _st:
+                _why("buy/sell direction alag hai - run wali legs par save karo")
                 return False
         pinds = set()
         for _iv in (p.get("indicators") or []):
@@ -118,6 +136,7 @@ def _result_matches_config(res: dict, symbol, start_date, end_date,
         for _iv in (indicators or []):
             sinds.add(str((_iv.get("id") if isinstance(_iv, dict) else _iv) or ""))
         if pinds != sinds:
+            _why(f"indicators alag hain (run: {sorted(pinds)} vs save: {sorted(sinds)})")
             return False
         # Risk/settings bhi match hone chahiye (SL/TP/mode badla ho to purana
         # result attach mat karo). Saved risk/advanced vs result params echo.
@@ -133,14 +152,17 @@ def _result_matches_config(res: dict, symbol, start_date, end_date,
 
             _psl, _ssl = _f(p.get("sl")), _f(_rk.get("daily_stop_loss"))
             if _psl is not None and _ssl is not None and abs(_psl - _ssl) > 0.01:
+                _why(f"stop-loss alag hai (run: {_psl} vs save: {_ssl})")
                 return False
             _ptp, _stp = _f(p.get("tp")), _f(_rk.get("daily_take_profit"))
             if _ptp is not None and _stp is not None and abs(_ptp - _stp) > 0.01:
+                _why(f"target alag hai (run: {_ptp} vs save: {_stp})")
                 return False
             try:
                 _pm = int(p.get("max_trades_per_day") or 0)
                 _sm = int(_rk.get("max_trades_per_day") or 0)
                 if _pm and _sm and _pm != _sm:
+                    _why(f"max trades/day alag hai (run: {_pm} vs save: {_sm})")
                     return False
             except Exception:
                 pass
@@ -148,11 +170,14 @@ def _result_matches_config(res: dict, symbol, start_date, end_date,
                 _pv = str(p.get(_k) or "")
                 _sv = str(_ad.get(_k) or "")
                 if _pv and _sv and _pv != _sv:
+                    _why(f"{_k} alag hai (run: {_pv} vs save: {_sv})")
                     return False
         except Exception:
+            _why("risk/settings compare nahi hua - dobara run karke save karo")
             return False
         return True
     except Exception:
+        _why("match-check crash - dobara run karke save karo")
         return False
 
 
@@ -340,11 +365,12 @@ def save_strategy(req: StrategyRequest):
     except Exception:
         _new_hash = ""
     _attach_res = None
+    _attach_reasons = []
     try:
         if isinstance(req.last_backtest, dict) and _result_matches_config(
                 req.last_backtest, req.symbol, req.start_date, req.end_date,
                 req.indicators, req.legs, req.risk_management,
-                req.advanced_options):
+                req.advanced_options, reasons=_attach_reasons):
             _attach_res = req.last_backtest
     except Exception:
         pass
@@ -391,6 +417,19 @@ def save_strategy(req: StrategyRequest):
     resp = {"id": saved_id, "status": saved_status}
     if auto_trades:
         resp["auto_trades"] = auto_trades
+    # Honest attach status: result juda ya nahi + wajah (frontend jhootha
+    # "saved" na bole - mismatch par exact kaaran dikhe).
+    try:
+        resp["result_saved"] = bool(_attach_res is not None)
+        if _attach_res is not None:
+            try:
+                resp["result_trades"] = int((_attach_res.get("metrics") or {}).get("total_trades") or 0)
+            except Exception:
+                resp["result_trades"] = 0
+        else:
+            resp["result_skip_reason"] = "; ".join(_attach_reasons[:2]) or "result match nahi hua"
+    except Exception:
+        pass
     return resp
 
 
