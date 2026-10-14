@@ -558,7 +558,7 @@
                 <div class="card-body" id="robot-status"><p class="text-muted small">Strategy stopped. Select symbol + order + SL/Target then Start Strategy for paper trading. Market hours: Mon-Fri 9:15-15:30 IST — Paper trades can queue outside hours.</p></div>
             </div>
             <div class="card mt-3" id="robot-saved-card">
-                <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Strategies</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
+                <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Strategies</strong><span><button class="btn btn-sm btn-outline-success me-1" onclick="showBrowserCopies()" title="Is browser me padi purani copies dekho (bina F12 ke)">📱 Browser Copy</button><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></span></div>
                 <div class="px-3 pt-2 small text-muted" id="ap-worker">Auto-paper worker: checking...</div>
                 <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p></div>
             </div>
@@ -2313,6 +2313,50 @@ let _lastOpenTrdHTML = null;
             try{if(typeof loadRobotSaved==='function')loadRobotSaved();}catch(e){}
             try{if(typeof loadStrats==='function')loadStrats();}catch(e){}
             window._directBT=r;await runBacktest({direct:r});
+        }catch(e){alert('Error: '+(e.message||e));}
+    }
+    function showBrowserCopies(){
+        // Bina F12 ke: is browser (phone/computer) me padi purani backtest
+        // copies ki list - Dekho + Wapas lao, sab button se.
+        try{
+            let items=[];
+            for(let i=0;i<localStorage.length;i++){
+                const k=localStorage.key(i);
+                if(k&&k.indexOf('btSaved_')===0){
+                    try{
+                        const r=JSON.parse(localStorage.getItem(k));
+                        const m=r.metrics||{};
+                        items.push({key:k,id:k.replace('btSaved_',''),
+                            trades:(m.total_trades||((r.trade_list||[]).length))||0,
+                            net:(m.net_pnl||0),win:(m.win_rate||0),
+                            name:(r.strategy_name||'')});
+                    }catch(e){}
+                }
+            }
+            let h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><strong>📱 Browser Copies (is device me)</strong><button class="btn btn-sm btn-outline-dark" onclick="document.getElementById(&apos;stratModal&apos;).remove()">Close</button></div>';
+            if(!items.length){
+                h+='<p class="text-muted small mb-0">Is browser me koi purana copy nahi mila. Dusre browser/phone me check karo jisme pehle result khola tha.</p>';
+            }else{
+                h+='<table class="table table-sm mb-0"><thead><tr><th>Strategy</th><th>Trades</th><th>Net P&L</th><th></th></tr></thead><tbody>';
+                items.forEach(v=>{
+                    h+=`<tr><td><strong>#${v.id}</strong> <span class="small text-muted">${v.name||''}</span></td><td><strong>${v.trades}</strong></td><td class="${v.net>=0?'price-up':'price-down'}">${F(v.net)}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="viewBrowserCopy('${v.id}')">Dekho</button> <button class="btn btn-sm btn-outline-success" onclick="restoreBrowserCopy('${v.id}')">Wapas lao</button></td></tr>`;
+                });
+                h+='</tbody></table><small class="text-muted">Wapas lao = ye purana result server par save ho jayega.</small>';
+            }
+            let m=document.getElementById('stratModal');if(m)m.remove();
+            m=document.createElement('div');m.id='stratModal';m.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center';
+            m.innerHTML=`<div style="background:#fff;border-radius:8px;width:92%;max-width:560px;max-height:80vh;overflow:auto;padding:14px">${h}</div>`;
+            m.onclick=e=>{if(e.target===m)m.remove();};
+            document.body.appendChild(m);
+        }catch(e){alert('Error: '+(e.message||e));}
+    }
+    function viewBrowserCopy(id){
+        try{
+            const r=JSON.parse(localStorage.getItem('btSaved_'+id)||'null');
+            if(!r||(!r.metrics&&!r.trade_list)){alert('Copy nahi mili.');return;}
+            try{const m=document.getElementById('stratModal');if(m)m.remove();}catch(e){}
+            try{const _nb=document.querySelector('.nav button[onclick*="strategy"]');go('strategy',_nb||null);}catch(e){}
+            window._directBT=r;runBacktest({direct:r});
         }catch(e){alert('Error: '+(e.message||e));}
     }
     async function restoreBrowserCopy(id){
