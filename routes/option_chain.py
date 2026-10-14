@@ -672,23 +672,26 @@ def place_trade(req: TradeRequest):
         costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
         trade_model = TradeModel()
         from utils.helpers import model_iv as _model_iv
-        trade_id = trade_model.insert_trade({
-            "symbol": req.symbol,
-            "option_type": req.option_type,
-            "strike_price": req.strike,
-            "expiry_date": req.expiry,
-            "transaction_type": req.transaction_type,
-            "quantity": req.quantity,
-            "lot_size": lot_size,
-            "entry_price": adj_premium,
-            "stop_loss": req.stop_loss,
-            "target": req.take_profit,
-            "total_cost": costs["total"],
-            "entry_date": req.date,
-            "entry_iv": _model_iv(req.symbol),
-            "trade_type": req.trade_type,
-            "strategy_id": req.strategy_id or 0,
-        })
+        try:
+            trade_id = trade_model.insert_trade({
+                "symbol": req.symbol,
+                "option_type": req.option_type,
+                "strike_price": req.strike,
+                "expiry_date": req.expiry,
+                "transaction_type": req.transaction_type,
+                "quantity": req.quantity,
+                "lot_size": lot_size,
+                "entry_price": adj_premium,
+                "stop_loss": req.stop_loss,
+                "target": req.take_profit,
+                "total_cost": costs["total"],
+                "entry_date": req.date,
+                "entry_iv": _model_iv(req.symbol),
+                "trade_type": req.trade_type,
+                "strategy_id": req.strategy_id or 0,
+            }, atomic_dedup=True)
+        except ValueError as _de:
+            return {"error": str(_de)[:200]}
         _resp = {"trade_id": trade_id, "entry_price": round(adj_premium, 2), "costs": costs}
         try:
             _tqty = int(req.quantity or 1) * int(lot_size or 0)

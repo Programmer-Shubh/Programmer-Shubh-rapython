@@ -315,13 +315,17 @@ class BacktestEngine:
                         daily_pnl += exits[-1]["pnl"]
                     kill_switch_on = True
 
-            has_open = len(entries) > len(exits) and not just_entered
             # Intraday square-off, same SESSION as entry (never next-day):
             # minute bars -> last bar of the day; daily bars -> the entry
             # bar's own close (one bar IS one session). Stale multi-day
             # intraday holds are also flushed (entry_date < today).
+            # NOTE: entry-bar EOD is ALLOWED (no just_entered gate): fill is
+            # at open, exit at close - no lookahead, and paper also force-
+            # closes same evening (intraday_auto/strategy_exit). Gating it
+            # carried last-bar entries overnight (gap risk paper never has).
+            has_open_eod = len(entries) > len(exits)
             is_early_exit = False
-            if trade_mode == "intraday" and has_open:
+            if trade_mode == "intraday" and has_open_eod:
                 try:
                     _ed = str(entries[len(exits)].get("date", "") or "")
                 except Exception:
@@ -330,7 +334,7 @@ class BacktestEngine:
                     is_early_exit = bool(is_last)
                 else:
                     is_early_exit = bool(is_last and _ed and _ed <= cur_date)
-            if has_open and trade_mode == "intraday" and is_early_exit:
+            if has_open_eod and trade_mode == "intraday" and is_early_exit:
                 entry = entries[len(exits)]
                 if entry.get("is_spread"):
                     self._close_spread(entries, exits, entry, "intraday", cur_date, trigger="EOD")
@@ -351,6 +355,7 @@ class BacktestEngine:
                 entry = entries[len(exits)]
                 if entry.get("is_spread"):
                     self._close_spread(entries, exits, entry, "expiry_squareoff", cur_date, trigger="expiry")
+                else:
                     exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
                     exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                     self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff", cur_date, qty, txn_type,
@@ -486,6 +491,7 @@ class BacktestEngine:
                 self._close_spread(entries, exits, entry, "end_of_period", last["trade_date"])
             else:
                 exit_prem = self._close_premium(last["trade_date"], float(last["close_price"]), float(entry["strike"]), option_type)
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                 self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type,
                                      trigger="end_of_period")
 
@@ -1803,6 +1809,7 @@ class BacktestEngine:
         revision ran this on EVERY bar, closing positions at the FUTURE last-bar
         price days early (look-ahead) and freeing bogus re-entries."""
         import datetime
+        import calendar
         # Find the last bar's date
         last_date = historical[-1]["trade_date"] if historical else ""
         if cur_date and cur_date != last_date:
@@ -1970,8 +1977,17 @@ class BacktestEngine:
         # parity): model_premium(per-symbol NSE-typical IV, real DTE). Pehle
         # yahan custom floor (index 0.18/stock 0.20) tha jo live rate se alag
         # premium deta tha -> backtest profit, paper loss (divergence #1).
+        # NOTE: cache key me SPOT bhi hai (date-only key same din ke baad ke
+        # bars ko pehle spot ka premium deta tha - intraday fill freeze).
+        # DB-sourced prints date-keyed rehte hain (daily print sahi hai).
         if spot and spot > 0 and strike and strike > 0:
             dte_days = max(self._days_to_expiry(date, self._get_expiry_type()), 1)
+            try:
+                _mkey = f"{date}_{strike}_{option_type}_e_m{int(float(spot))}"
+            except Exception:
+                _mkey = f"{date}_{strike}_{option_type}_e_mx"
+            if _mkey in self.premium_cache:
+                return self.premium_cache[_mkey]
             try:
                 from utils.helpers import model_premium as _mp
                 val = _mp(float(spot), float(strike), dte_days, option_type,
@@ -1980,7 +1996,7 @@ class BacktestEngine:
                 val = 0
             if val and float(val) > 0:
                 val = round(float(val), 2)
-                self.premium_cache[key] = val
+                self.premium_cache[_mkey] = val
                 return val
         self.premium_cache[key] = 5.0
         return 5.0
@@ -2048,9 +2064,16 @@ class BacktestEngine:
                 pass
         # Black-Scholes fallback — UNIFIED pricer (entry parity): model_premium
         # (per-symbol IV, real DTE). Exit alag formula se nikalta tha to
-        # entry/exit mismatch se fake winrate banta tha.
+        # entry/exit mismatch se fake winrate banta tha. Cache key me SPOT
+        # (entry-side jaisa intraday freeze fix).
         if spot and spot > 0 and strike and strike > 0:
             dte_days = max(self._days_to_expiry(date, self._get_expiry_type()), 1)
+            try:
+                _mkey = f"{date}_{strike}_{option_type}_c_m{int(float(spot))}"
+            except Exception:
+                _mkey = f"{date}_{strike}_{option_type}_c_mx"
+            if _mkey in self.premium_cache:
+                return self.premium_cache[_mkey]
             try:
                 from utils.helpers import model_premium as _mp2
                 val = _mp2(float(spot), float(strike), dte_days, option_type,
@@ -2059,7 +2082,7 @@ class BacktestEngine:
                 val = 0
             if val and float(val) > 0:
                 val = round(float(val), 2)
-                self.premium_cache[key] = val
+                self.premium_cache[_mkey] = val
                 return val
         self.premium_cache[key] = 5.0
         return 5.0
@@ -2118,7 +2141,11 @@ class BacktestEngine:
             eqty = float(entry.get("quantity", qty) or qty)
             if txn_type == "buy":
                 return prem * eqty - float(entry.get("total_cost", 0) or 0)
-            return float(entry.get("price", 0) or 0) * eqty - prem * eqty
+            # SELL: entry costs bhi ghatao (BUY jaisa) - warna MTM trigger
+            # ~entry-costs der se fire hota tha (loser zyada der held).
+            _basis = float(entry.get("price", 0) or 0) * eqty
+            _costs = float(entry.get("total_cost", 0) or 0) - _basis
+            return _basis - prem * eqty - max(0.0, _costs)
         except Exception:
             return 0.0
 

@@ -1,13 +1,37 @@
+import threading as _threading
 from core.models.database import Database
 from core.services.transaction_costs import TransactionCosts
 from utils.helpers import get_lot_size
 
 
 class TradeModel:
+    # Double-click / worker-race guard: check-then-insert atomic hona chahiye
+    _place_lock = _threading.Lock()
+
     def __init__(self):
         self.db = Database.get_instance()
 
-    def insert_trade(self, data: dict) -> int:
+    def insert_trade(self, data: dict, atomic_dedup: bool = False) -> int:
+        # atomic_dedup=True: same contract ka open dup check + INSERT ek lock
+        # me (double-click ya manual+worker race par doosri entry block).
+        # Pre-check routes me pehle se hai (UX message ke liye) - ye final gate.
+        if atomic_dedup:
+            with TradeModel._place_lock:
+                try:
+                    dup = self.db.fetch_one(
+                        "SELECT id FROM paper_trades WHERE symbol=? AND strike_price=? AND option_type=?"
+                        " AND transaction_type=? AND status='open' LIMIT 1",
+                        [data.get("symbol"), data.get("strike_price"),
+                         data.get("option_type"), data.get("transaction_type")])
+                except Exception:
+                    dup = None
+                if dup:
+                    raise ValueError(
+                        f"Duplicate open position (ID {dup['id']}) - already open")
+                return self._insert_row(data)
+        return self._insert_row(data)
+
+    def _insert_row(self, data: dict) -> int:
         # entry_iv: pin model IV at order time (old positions never reprice on map tunes)
         try:
             self.db.execute("ALTER TABLE paper_trades ADD COLUMN entry_iv REAL DEFAULT NULL")
@@ -67,6 +91,29 @@ class TradeModel:
         import datetime as _dt
         return _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
 
+    def _forced_exit_price(self, t: dict):
+        """EOD/expiry/hold force-close ka price: live premium > last-known
+        cached premium > entry price. Seedha entry par close karna crash ko
+        P&L 0 dikhata tha (nuksan chhupta tha) - cache me aakhri dekha bhav
+        zyada imaandar hai."""
+        try:
+            cur = self.get_option_premium(
+                t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
+                iv=t.get("entry_iv"),
+            )
+            if cur and cur > 0:
+                return float(cur), "live"
+        except Exception:
+            pass
+        try:
+            _ck = f"{t.get('symbol')}_{t.get('option_type')}_{float(t.get('strike_price') or 0)}_{t.get('expiry_date', '')}"
+            _last = (self._last_premiums or {}).get(_ck, 0)
+            if _last and float(_last) > 0:
+                return float(_last), "last-known"
+        except Exception:
+            pass
+        return float(t.get("entry_price") or 0), "entry-fallback"
+
     def _sl_tp_levels(self, t: dict, entry: float, qty: int, lot: int):
         """Shared SL/TP math (utils.helpers.sltp_premium_level): overnight-gap
         exits bilkul wahi level par hon jo backtest + SL monitor use karte
@@ -98,12 +145,7 @@ class TradeModel:
         n = 0
         for t in opens:
             try:
-                cur = self.get_option_premium(
-                    t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
-                    iv=t.get("entry_iv"),
-                )
-                if not cur or cur <= 0:
-                    cur = t["entry_price"]
+                cur, _src = self._forced_exit_price(t)
                 self.close_trade(t["id"], float(cur), today, exit_status="intraday_auto")
                 n += 1
             except Exception:
@@ -164,21 +206,14 @@ class TradeModel:
                 _carried = bool(_entry_d and _entry_d < today)
                 if not _carried and _now_mins < _exit_mins:
                     continue  # exit time abhi aaya nahi
-                try:
-                    cur = self.get_option_premium(
-                        t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
-                        iv=t.get("entry_iv"),
-                    )
-                except Exception:
-                    cur = None
-                if not cur or cur <= 0:
+                cur, _src = self._forced_exit_price(t)
+                if _src != "live":
                     try:
                         from utils.helpers import log_exit_skip as _log
                         _log("strategy_exit", t.get("id"), t.get("symbol"),
-                             "live premium nahi mila - entry price par EOD exit")
+                             f"live premium nahi mila - {_src} par EOD exit")
                     except Exception:
                         pass
-                    cur = t["entry_price"]
                 self.close_trade(t["id"], float(cur), today, exit_status="strategy_exit")
                 hit.append({"id": t["id"], "reason": "strategy_exit",
                             "exit_price": round(float(cur), 2), "exit_time": _et})
@@ -271,12 +306,7 @@ class TradeModel:
                     continue
                 if exp_d == today and str(t.get("entry_date") or "")[:10] >= today:
                     continue  # entered today: EOD/intraday exit owns it
-                cur = self.get_option_premium(
-                    t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
-                    iv=t.get("entry_iv"),
-                )
-                if not cur or cur <= 0:
-                    cur = t["entry_price"]
+                cur, _src = self._forced_exit_price(t)
                 self.close_trade(t["id"], float(cur), today, exit_status="expiry")
                 n += 1
             except Exception:
@@ -301,12 +331,7 @@ class TradeModel:
                 t = self.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [r["id"]])
                 if not t:
                     continue
-                cur = self.get_option_premium(
-                    t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
-                    iv=t.get("entry_iv"),
-                )
-                if not cur or cur <= 0:
-                    cur = t["entry_price"]
+                cur, _src = self._forced_exit_price(t)
                 self.close_trade(r["id"], float(cur), self._ist_today(), exit_status="max_hold_30d")
                 n += 1
             except Exception:

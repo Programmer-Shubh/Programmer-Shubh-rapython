@@ -63,7 +63,16 @@ def check_stoploss_target(confirm_secs=2):
         # Old inline copy yahan duplicate thi (drift ka khatra) - ab single source.
         from utils.helpers import sltp_premium_level as _lvl
         _qty = int(trade.get("quantity", 1) or 1)
-        _lot = int(trade.get("lot_size", 0) or 0)
+        # Lot fallback: stored 0/NULL par effective_lot_size (sibling paths
+        # trade_model 208-211 jaisa). Seedha 0 jaane par units=1 hokar SL
+        # level 0.05/1600 ban jata tha = SL kabhi nahi kat-ta tha.
+        try:
+            from utils.helpers import effective_lot_size as _el
+            _lot = int(_el(trade.get("symbol"), trade.get("lot_size")) or 0)
+        except Exception:
+            _lot = int(trade.get("lot_size", 0) or 0)
+        if _lot <= 0:
+            _lot = 50
         sl_level = _lvl(entry, sl, _qty, _lot, trade["transaction_type"], True)
         tp_level = _lvl(entry, tp, _qty, _lot, trade["transaction_type"], False)
         # Conservative intra-candle: current is proxy for High/Low - hit if breached

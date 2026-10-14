@@ -12,7 +12,7 @@ class TransactionCosts:
     # Updated: 0.015% on buy, 0.003% on sell for options (SEBI circular)
     STAMP_DUTY_BUY_PCT = 0.015  # 0.015% on buy
     STAMP_DUTY_SELL_PCT = 0.003  # 0.003% on sell
-    # GST: 18% on (brokerage + exchange + SEBI + stamp)
+    # GST: 18% on (brokerage + exchange + SEBI) only (no GST on STT/stamp)
     GST_PCT = 18.0
     # STT: 0.1% on sell side for options (premium value) - both intraday and delivery
     # STT on buy side for options: NIL (removed in 2018)
@@ -66,10 +66,11 @@ class TransactionCosts:
         else:
             stt = turnover * cls.STT_PCT_BUY / 100
 
-        # GST: 18% on (brokerage + exchange + SEBI + stamp)
-        subtotal = brokerage + exchange_txn + sebi_fee + stamp_duty + stt
+        # GST: 18% on (brokerage + exchange + SEBI) only - STT/stamp sarkari
+        # levy hain, unpar GST nahi lagta (Zerodha contract-note formula).
+        subtotal = brokerage + exchange_txn + sebi_fee
         gst = subtotal * cls.GST_PCT / 100
-        total = subtotal + gst
+        total = subtotal + gst + stamp_duty + stt
         return {
             "brokerage": round(brokerage, 2),
             "exchange_txn": round(exchange_txn, 2),
@@ -98,9 +99,9 @@ class TransactionCosts:
         else:
             stamp_duty = turnover * cls.STAMP_EQ_DELIVERY_BUY_PCT / 100 if not is_sell else 0.0
             stt = turnover * cls.STT_EQ_DELIVERY_PCT / 100
-        subtotal = brokerage + exchange_txn + sebi_fee + stamp_duty + stt
+        subtotal = brokerage + exchange_txn + sebi_fee
         gst = subtotal * cls.GST_PCT / 100
-        total = subtotal + gst
+        total = subtotal + gst + stamp_duty + stt
         return {
             "brokerage": round(brokerage, 2),
             "exchange_txn": round(exchange_txn, 2),

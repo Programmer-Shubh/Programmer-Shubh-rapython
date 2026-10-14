@@ -213,6 +213,17 @@ def place_trade(req: PlaceTradeRequest):
             if req.entry_price > intrinsic + 600:
                 return {"error": f"Premium ₹{req.entry_price} too high vs spot ₹{_sp:.0f} (likely spot sent as premium). Correct premium ~₹{intrinsic+80:.0f}. Use option LTP, not spot."}
     except Exception: pass
+    # Live requote guard (fantasy-entry block): typed premium live LTP se
+    # 25% se zyada alag ho to reject - paper fill achievable hona chahiye
+    # (typed 5 vs LTP 105 jaisa phantom PnL block). Live na mile to allow.
+    try:
+        _live = trade_model.get_option_premium(req.symbol, req.option_type, req.strike, "")
+        if _live and float(_live) > 0 and req.entry_price > 0:
+            _dev = abs(float(req.entry_price) - float(_live)) / float(_live)
+            if _dev > 0.25:
+                return {"error": f"Premium ₹{req.entry_price} live LTP ₹{float(_live):.2f} se {_dev*100:.0f}% alag hai (25% limit) - LTP ke paas price dalo ya chain se order karo"}
+    except Exception:
+        pass
     # Deep ITM/OTM guard: relaxed to ATM±8 / 12% and chain-aware (fixes KOTAKBANK/BANKNIFTY false blocks)
     try:
         from core.services.live_market_data import LiveMarketData as _LMD
@@ -256,27 +267,47 @@ def place_trade(req: PlaceTradeRequest):
     lot_size = get_lot_size(req.symbol)
     costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
     trade_model = TradeModel()
-    tid = trade_model.insert_trade({
-        "symbol": req.symbol,
-        "option_type": req.option_type,
-        "strike_price": req.strike,
-        "transaction_type": req.transaction_type,
-        "quantity": req.quantity,
-        "lot_size": lot_size,
-        "entry_price": adj_premium,
-        "stop_loss": req.stop_loss,
-        "target": req.take_profit,
-        "total_cost": costs["total"],
-        "entry_date": req.date,
-        "trade_type": req.trade_type,
-        "strategy_id": req.strategy_id,
-    })
+    try:
+        tid = trade_model.insert_trade({
+            "symbol": req.symbol,
+            "option_type": req.option_type,
+            "strike_price": req.strike,
+            "transaction_type": req.transaction_type,
+            "quantity": req.quantity,
+            "lot_size": lot_size,
+            "entry_price": adj_premium,
+            "stop_loss": req.stop_loss,
+            "target": req.take_profit,
+            "total_cost": costs["total"],
+            "entry_date": req.date,
+            "trade_type": req.trade_type,
+            "strategy_id": req.strategy_id,
+        }, atomic_dedup=True)
+    except ValueError as _de:
+        return {"error": str(_de)[:200]}
     return {"trade_id": tid, "entry_price": round(adj_premium, 2), "costs": costs}
 
 
 @router.post("/close")
 def close_trade(req: CloseTradeRequest):
     trade_model = TradeModel()
+    _row = trade_model.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [req.trade_id])
+    if not _row:
+        return {"error": f"Trade {req.trade_id} nahi mila"}
+    # Live requote guard (fantasy-exit block): typed exit live LTP se 50%
+    # se zyada alag ho to reject (typed 200 vs LTP 100 = phantom +6500).
+    # Live na mile to allow (can't verify). Band 50% hai taaki tez market
+    # me legit close na ruke.
+    try:
+        _live = trade_model.get_option_premium(
+            _row.get("symbol"), _row.get("option_type"),
+            _row.get("strike_price"), _row.get("expiry_date"))
+        if _live and float(_live) > 0 and req.exit_price > 0:
+            _dev = abs(float(req.exit_price) - float(_live)) / float(_live)
+            if _dev > 0.50:
+                return {"error": f"Exit ₹{req.exit_price} live LTP ₹{float(_live):.2f} se {_dev*100:.0f}% alag hai (50% limit) - LTP ke paas price dalo"}
+    except Exception:
+        pass
     trade_model.close_trade(req.trade_id, req.exit_price, req.date)
     return {"status": "closed", "trade_id": req.trade_id}
 
