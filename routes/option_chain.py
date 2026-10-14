@@ -396,6 +396,14 @@ def place_trade(req: TradeRequest):
     except Exception:
         pass
     try:
+        # 3:15 PM entry cutoff (user demand): iske baad KOI nayi entry nahi -
+        # exit/SL/Target par koi rok nahi (wo alag endpoints + monitor hain).
+        from core.services.sl_monitor import entry_open_ist as _eok, entry_block_reason as _ebr
+        if not bool(_eok()):
+            return {"error": _ebr()}
+    except Exception:
+        pass
+    try:
         # Strategy expiry: auto-rollover to next weekly expiry by default so
         # paper trading keeps running instead of blocking on a past end_date.
         _rolled_to = ""

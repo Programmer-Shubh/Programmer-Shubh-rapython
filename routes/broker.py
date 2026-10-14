@@ -1238,6 +1238,15 @@ async def place_live_order(req: LiveOrderRequest):
                 return {"error": f"{symbol} par koi options nahi hain (F&O me nahi) - live order impossible"}
         except Exception:
             pass
+        # 3:15 PM entry cutoff (user demand, REAL MONEY): iske baad live
+        # order bhi nahi. Exits broker par hamesha allowed.
+        try:
+            from core.services.sl_monitor import entry_open_ist as _eok5
+            from core.services.sl_monitor import entry_block_reason as _ebr5
+            if not bool(_eok5()):
+                return {"error": _ebr5()}
+        except Exception:
+            pass
         # Official-lot gate (fail-closed, REAL MONEY): unverified lot par
         # live order BLOCK - galat lot par broker order kabhi na jaye.
         try:

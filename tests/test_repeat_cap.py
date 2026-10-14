@@ -42,7 +42,13 @@ def _seed_closed(sid, n, today):
             [today, today, sid])
 
 
+def _entry_open(monkeypatch):
+    import core.services.sl_monitor as _slm
+    monkeypatch.setattr(_slm, "entry_open_ist", lambda *_a, **_k: True)
+
+
 def test_repeat_allowed_until_cap(monkeypatch):
+    _entry_open(monkeypatch)
     sid = _seed_strategy(5)
     try:
         today = _ist()
@@ -62,6 +68,7 @@ def test_repeat_allowed_until_cap(monkeypatch):
 
 
 def test_cap_blocks_at_five(monkeypatch):
+    _entry_open(monkeypatch)
     sid = _seed_strategy(5)
     try:
         today = _ist()
@@ -81,6 +88,7 @@ def test_cap_blocks_at_five(monkeypatch):
 
 
 def test_open_position_blocks(monkeypatch):
+    _entry_open(monkeypatch)
     sid = _seed_strategy(5)
     db = Database.get_instance()
     try:

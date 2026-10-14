@@ -19,6 +19,8 @@ def test_gate_crash_skips_not_places(monkeypatch):
                      "max_trades_per_day": 5}),
          "active"])
     sid = int(db.fetch_one("SELECT id FROM strategies WHERE name='t-gate-crash'")["id"])
+    import core.services.sl_monitor as _slm
+    monkeypatch.setattr(_slm, "entry_open_ist", lambda *_a, **_k: True)
     try:
         calls = []
 

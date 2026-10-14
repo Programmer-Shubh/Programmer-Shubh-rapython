@@ -45,6 +45,32 @@ def market_open_ist():
         return True
 
 
+ENTRY_CUTOFF_MIN = 15 * 60 + 15  # 3:15 PM IST - iske baad NAYI entry nahi
+
+
+def entry_open_ist(_now=None):
+    """Nayi ENTRY allowed? Market khula + 3:15 PM se pehle (user demand).
+    EXITS (close/SL/TP/strategy-exit/square-off) hamesha khule rehte hain -
+    ye gate sirf naye orders rokta hai. _now: test hook (IST datetime)."""
+    try:
+        if not market_open_ist():
+            return False
+        from datetime import timedelta, timezone
+        if _now is None:
+            from datetime import datetime as _dt
+            ist = timezone(timedelta(hours=5, minutes=30))
+            _now = _dt.now(ist)
+        mins = _now.hour * 60 + _now.minute
+        return mins < ENTRY_CUTOFF_MIN
+    except Exception:
+        return False
+
+
+def entry_block_reason():
+    return ("3:15 PM ke baad nayi entry band hai - kal market khulne par order "
+            "lagao (exit/SL/Target hamesha chalu rahenge)")
+
+
 def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
     """Scan + close breached trades. Returns {closed, skipped, skipped_trades}.
     Strategy exit_time EOD exit market gate se PEHLE chalta hai (market band

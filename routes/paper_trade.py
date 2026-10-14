@@ -205,6 +205,14 @@ def place_trade(req: PlaceTradeRequest):
             return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-15:30 IST)."}
     except Exception:
         pass
+    try:
+        # 3:15 PM entry cutoff (user demand): iske baad KOI nayi entry nahi.
+        from core.services.sl_monitor import entry_open_ist as _eok
+        from core.services.sl_monitor import entry_block_reason as _ebr
+        if not bool(_eok()):
+            return {"error": _ebr()}
+    except Exception:
+        pass
     # Mandatory Risk Management: SL/Target required (especially for option selling)
     if req.stop_loss is None or req.take_profit is None:
         return {"error": "Stop-Loss and Target are mandatory - cannot be blank"}

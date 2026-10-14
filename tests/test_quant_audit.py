@@ -153,6 +153,7 @@ def test_place_rejects_fantasy_premium(monkeypatch):
     """Typed 5 vs live 100 -> reject; typed 105 vs live 100 -> pass gate."""
     import core.services.sl_monitor as _sl
     monkeypatch.setattr(_sl, "market_open_ist", lambda: True)
+    monkeypatch.setattr(_sl, "entry_open_ist", lambda *_a, **_k: True)
     from core.models.trade_model import TradeModel
     monkeypatch.setattr(TradeModel, "get_option_premium", lambda *a, **k: 100.0)
     from routes.paper_trade import PlaceTradeRequest, place_trade

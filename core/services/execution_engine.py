@@ -17,6 +17,14 @@ def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500
                 return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-3:30 IST)."}
         except Exception:
             pass
+        # 3:15 PM entry cutoff (user demand).
+        try:
+            from core.services.sl_monitor import entry_open_ist as _eok
+            from core.services.sl_monitor import entry_block_reason as _ebr
+            if not bool(_eok()):
+                return {"error": _ebr()}
+        except Exception:
+            pass
     # Official-lot gate (fail-closed): unverified lot par order BLOCK.
     try:
         from utils.helpers import lot_guard_error as _lge5

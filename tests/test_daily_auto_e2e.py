@@ -174,6 +174,8 @@ def test_lookback_entry_uses_current_legs_and_cap(monkeypatch):
         seen["legs"] = legs
         return [{"trade_id": 99}], []
 
+    import core.services.sl_monitor as _slm
+    monkeypatch.setattr(_slm, "entry_open_ist", lambda *_a, **_k: True)
     try:
         monkeypatch.setattr(ap, "_today_signal", fake_signal)
         monkeypatch.setattr(ap, "_execute_legs", fake_exec)

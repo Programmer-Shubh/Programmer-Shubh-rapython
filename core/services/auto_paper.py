@@ -501,6 +501,15 @@ def place_for_strategy(sid, signal_check="daily"):
     fired legs), 'done' (caller already gated). Same open/max-day guards, so
     Save is idempotent. Returns {placed, notes}."""
     placed, notes = [], []
+    # 3:15 PM entry cutoff (user demand): iske baad worker/save-hook/manual
+    # me se KOI nayi entry nahi. Exits (SL monitor) isse affected nahi.
+    try:
+        from core.services.sl_monitor import entry_open_ist as _eok
+        from core.services.sl_monitor import entry_block_reason as _ebr
+        if not bool(_eok()):
+            return {"placed": placed, "notes": [_ebr()]}
+    except Exception:
+        pass
     try:
         import json as _js
         from core.models.database import Database
