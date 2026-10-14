@@ -20,7 +20,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 LAST_SCAN = {"ts": "", "closed": [], "skipped": []}
 
 
-def check_stoploss_target(confirm_secs=5):
+def check_stoploss_target(confirm_secs=2):
     """Intra-candle SL/TP check - same levels as backtest (shared helper
     utils.helpers.sltp_premium_level - BacktestEngine._check_sl_tp parity).
     For live, current LTP is treated as both High/Low - hit if level breached.

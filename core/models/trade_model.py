@@ -586,11 +586,24 @@ class TradeModel:
                             if spot_now > 0:
                                 self._last_spots[symbol] = spot_now
                             if not spot_moved:
-                                val = last  # reject bad tick, keep last
+                                # Clamp-and-catch-up (pin NAHI): single tick max
+                                # 60% move, cache clamped value par aage badhao -
+                                # agle polls me poora pakad lega. Purana
+                                # `val = last` gap/sleep ke baad premium ko
+                                # hamesha ke liye freeze kar deta tha (SL/TP
+                                # andha: exit kabhi nahi kat-ta tha).
+                                _dir = 1 if val > last else -1
+                                val = round(last * (1 + 0.60 * _dir), 2)
+                                self._last_premiums[cache_key] = val
                             else:
                                 self._last_premiums[cache_key] = val
                         except Exception:
-                            val = last
+                            try:
+                                _dir = 1 if val > last else -1
+                                val = round(last * (1 + 0.60 * _dir), 2)
+                                self._last_premiums[cache_key] = val
+                            except Exception:
+                                pass
                     else:
                         self._last_premiums[cache_key] = val
                 else:

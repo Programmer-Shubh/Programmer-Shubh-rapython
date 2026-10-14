@@ -67,7 +67,9 @@ async def _startup_background():
         def _sl_mon():
             try:
                 from core.services.sl_monitor import start_background
-                start_background(120)
+                # 30s poll (tha 120s): tez intraday move me SL/TP jaldi kate,
+                # overshoot kam. Scan cheap + idempotent hai.
+                start_background(30)
             except: pass
         import threading as _th2
         _th2.Thread(target=_sl_mon, daemon=True).start()
