@@ -1313,7 +1313,7 @@ let _lastOpenTrdHTML = null;
             // result bhejta hai (same run_id). Naya data/config par naya run
             // chahiye to ↻ Naya run dabao (force refresh).
             try{if(r.strategy_id)window._lastBTStratId=r.strategy_id;}catch(e){}
-            const _storedBadge=r.stored?(' • <span class="badge bg-success">Saved result'+(r.stored_at?(' • '+r.stored_at):'')+'</span>'):(r.stored===false&&r.strategy_id?(' • <span class="badge bg-info">Naya run (saved)</span>'):'');
+            const _storedBadge=r.kept_saved?(' • <span class="badge bg-warning text-dark">Naya run 0 trades — purana saved result rakha (mitaya nahi)</span>'):(r.stored?(' • <span class="badge bg-success">Saved result'+(r.stored_at?(' • '+r.stored_at):'')+'</span>'):(r.stored===false&&r.strategy_id?(' • <span class="badge bg-info">Naya run (saved)</span>'):'');
             const _chgBadge=r.config_changed?(' • <span class="badge bg-warning text-dark">Config badli — trade history purani wali, naya chahiye to ↻ Naya run</span>'):'';
             const _localBadge=(r._localCache&&!r.stored)?(' • <span class="badge bg-secondary">Turant copy (server se pakka ho raha...)</span>'):'';
             const _refreshBtn=r.strategy_id?(' <button class="btn btn-sm btn-outline-primary ms-1" style="font-size:11px;padding:0 6px" title="Config same hai to saved, naya chahiye to force" onclick="backtestStrat('+(r.strategy_id)+',true)">↻ Naya run</button>'):'';

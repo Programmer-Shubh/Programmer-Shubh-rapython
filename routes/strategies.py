@@ -729,25 +729,49 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
         except Exception:
             pass
         # Naya run save karo taaki agli baar WAHI result mile (error save nahi).
+        # GUARD: 0-trade fresh run saved non-zero history NAHI mitata.
+        _kept = False
         if isinstance(res, dict) and not res.get("error") and (res.get("metrics") or res.get("trade_list") is not None):
             try:
-                from datetime import datetime as _dtn, timedelta as _tdn, timezone as _tzn
-                _now_s = (_dtn.now(_tzn(_tdn(hours=5, minutes=30)))).strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                _now_s = ""
-            try:
-                db.execute(
-                    "UPDATE strategies SET last_backtest=?, last_backtest_hash=?, last_backtest_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    [_js.dumps(res, default=str), _cfg_hash, _now_s, strat_id],
-                )
-                res["stored_at"] = _now_s
+                if not _should_overwrite_saved(row.get("last_backtest"), res):
+                    _kept = True
+                else:
+                    from datetime import datetime as _dtn, timedelta as _tdn, timezone as _tzn
+                    _now_s = (_dtn.now(_tzn(_tdn(hours=5, minutes=30)))).strftime("%Y-%m-%d %H:%M")
+                    db.execute(
+                        "UPDATE strategies SET last_backtest=?, last_backtest_hash=?, last_backtest_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        [_js.dumps(res, default=str), _cfg_hash, _now_s, strat_id],
+                    )
+                    res["stored_at"] = _now_s
             except Exception:
                 pass
+        try:
+            if _kept:
+                res["kept_saved"] = True
+        except Exception:
+            pass
         return res
     except Exception as e:
         import traceback
         traceback.print_exc()
         return {"error": f"Backtest failed: {e}"[:250]}
+
+
+def _should_overwrite_saved(stored_raw, fresh_res) -> bool:
+    """Fresh run saved result ko mitaye ya nahi? 0-trade fresh run kabhi
+    non-zero saved history NAHI mitata (ce-sell-ppp ke 188 trades ek 0-trade
+    run ne 2026-10-14 ko uda diye the - wahi bug). Baaki sab pehle jaisa."""
+    try:
+        if not stored_raw:
+            return True
+        _s = stored_raw if isinstance(stored_raw, dict) else __import__("json").loads(stored_raw)
+        _st = int(((_s or {}).get("metrics") or {}).get("total_trades") or 0)
+        if _st <= 0:
+            return True  # khone ko kuch nahi
+        _ft = int(((fresh_res or {}).get("metrics") or {}).get("total_trades") or 0)
+        return _ft > 0
+    except Exception:
+        return True
 
 
 @router.get("/{strat_id}/saved-result")
