@@ -376,6 +376,20 @@ class Database:
                     setting_value TEXT,
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 );
+
+                CREATE TABLE IF NOT EXISTS strategy_results (
+                    id SERIAL PRIMARY KEY,
+                    strategy_id INTEGER NOT NULL,
+                    run_id TEXT,
+                    config_hash TEXT,
+                    stored_at TEXT,
+                    trades INTEGER DEFAULT 0,
+                    net_pnl DOUBLE PRECISION DEFAULT 0,
+                    win_rate DOUBLE PRECISION DEFAULT 0,
+                    result_json TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_stratres_sid ON strategy_results(strategy_id);
             """
             try:
                 with self._conn() as conn:
@@ -531,6 +545,20 @@ class Database:
                     setting_value TEXT,
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
+
+                CREATE TABLE IF NOT EXISTS strategy_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    strategy_id INTEGER NOT NULL,
+                    run_id TEXT,
+                    config_hash TEXT,
+                    stored_at TEXT,
+                    trades INTEGER DEFAULT 0,
+                    net_pnl REAL DEFAULT 0,
+                    win_rate REAL DEFAULT 0,
+                    result_json TEXT,
+                    created_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_stratres_sid ON strategy_results(strategy_id);
             """)
         try:
             _sconn.close()

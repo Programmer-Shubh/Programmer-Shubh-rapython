@@ -181,6 +181,82 @@ def _result_matches_config(res: dict, symbol, start_date, end_date,
         return False
 
 
+_RESULTS_KEEP = 10
+
+
+def _ensure_results_table():
+    """strategy_results table pakki karo (purani DB files me init_schema ke
+    baad bani table missing ho sakti hai) - har history/restore/archive se pehle."""
+    try:
+        from core.models.database import Database as _DB
+        db = _DB.get_instance()
+        try:
+            _pg = db._is_postgres()
+        except Exception:
+            _pg = False
+        if _pg:
+            db.execute("CREATE TABLE IF NOT EXISTS strategy_results (id SERIAL PRIMARY KEY,"
+                       " strategy_id INTEGER NOT NULL, run_id TEXT, config_hash TEXT,"
+                       " stored_at TEXT, trades INTEGER DEFAULT 0,"
+                       " net_pnl DOUBLE PRECISION DEFAULT 0, win_rate DOUBLE PRECISION DEFAULT 0,"
+                       " result_json TEXT, created_at TIMESTAMPTZ DEFAULT NOW())")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_stratres_sid ON strategy_results(strategy_id)")
+        else:
+            db.execute("CREATE TABLE IF NOT EXISTS strategy_results (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                       " strategy_id INTEGER NOT NULL, run_id TEXT, config_hash TEXT,"
+                       " stored_at TEXT, trades INTEGER DEFAULT 0,"
+                       " net_pnl REAL DEFAULT 0, win_rate REAL DEFAULT 0,"
+                       " result_json TEXT, created_at TEXT DEFAULT (datetime('now')))")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_stratres_sid ON strategy_results(strategy_id)")
+    except Exception:
+        pass
+
+
+def _archive_result(strategy_id, res, config_hash="", stored_at=""):
+    """Append-only version history (max 10/strategy): har save naya version,
+    purana kabhi overwrite nahi hota. Same run_id dobara archive nahi."""
+    import json as _js
+    try:
+        _ensure_results_table()
+    except Exception:
+        pass
+    try:
+        db = Database.get_instance()
+        try:
+            _rid = str((res or {}).get("run_id") or "")
+            if _rid:
+                _ex = db.fetch_one(
+                    "SELECT id FROM strategy_results WHERE strategy_id=? AND run_id=? LIMIT 1",
+                    [strategy_id, _rid])
+                if _ex:
+                    return int(_ex.get("id") or 0)
+        except Exception:
+            pass
+        m = (res or {}).get("metrics") or {}
+        _aid = db.execute(
+            "INSERT INTO strategy_results (strategy_id, run_id, config_hash,"
+            " stored_at, trades, net_pnl, win_rate, result_json)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            [strategy_id, str((res or {}).get("run_id") or ""), str(config_hash or ""),
+             str(stored_at or ""), int(m.get("total_trades") or 0),
+             float(m.get("net_pnl") or 0), float(m.get("win_rate") or 0),
+             _js.dumps(res, default=str)])
+        try:
+            _old = db.fetch_all(
+                "SELECT id FROM strategy_results WHERE strategy_id=? ORDER BY id DESC",
+                [strategy_id]) or []
+            for _r in _old[_RESULTS_KEEP:]:
+                try:
+                    db.execute("DELETE FROM strategy_results WHERE id=?", [_r["id"]])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return int(_aid or 0)
+    except Exception:
+        return 0
+
+
 def _bt_summary(row) -> dict:
     """List/cards ke liye halka summary (poora JSON nahi - list halki rahe)."""
     import json as _js
@@ -417,6 +493,12 @@ def save_strategy(req: StrategyRequest):
     resp = {"id": saved_id, "status": saved_status}
     if auto_trades:
         resp["auto_trades"] = auto_trades
+    # Version history: attach hua result archive karo (purana kabhi na mite).
+    try:
+        if _attach_res is not None:
+            _archive_result(saved_id, _attach_res, _new_hash, _now_s)
+    except Exception:
+        pass
     # Honest attach status: result juda ya nahi + wajah (frontend jhootha
     # "saved" na bole - mismatch par exact kaaran dikhe).
     try:
@@ -743,6 +825,10 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
                         [_js.dumps(res, default=str), _cfg_hash, _now_s, strat_id],
                     )
                     res["stored_at"] = _now_s
+                    try:
+                        _archive_result(strat_id, res, _cfg_hash, _now_s)
+                    except Exception:
+                        pass
             except Exception:
                 pass
         try:
@@ -824,3 +910,129 @@ def strategy_saved_result(strat_id: int):
         return res
     except Exception as e:
         return {"error": f"Saved result failed: {e}"[:200]}
+
+
+@router.get("/{strat_id}/results-history")
+def strategy_results_history(strat_id: int, history_id: int = 0):
+    """Purane saved results ki list (naya sabse upar) + ?history_id=N par
+    poora result JSON (trade history samet) dekhne ke liye. history kabhi
+    delete nahi hoti (max 10/strategy) - 188-trade loss dobara impossible."""
+    import json as _js
+    try:
+        _ensure_results_table()
+    except Exception:
+        pass
+    try:
+        db = Database.get_instance()
+        _srow = db.fetch_one("SELECT id FROM strategies WHERE id=?", [strat_id])
+        if not _srow:
+            return {"error": "Strategy not found"}
+        if history_id:
+            _v = db.fetch_one(
+                "SELECT * FROM strategy_results WHERE id=? AND strategy_id=?",
+                [history_id, strat_id])
+            if not _v:
+                return {"error": "Version nahi mila"}
+            try:
+                _full = _js.loads(_v.get("result_json") or "{}")
+            except Exception:
+                return {"error": "Version corrupt hai"}
+            if not isinstance(_full, dict):
+                return {"error": "Version corrupt hai"}
+            _full["stored"] = True
+            _full["stored_at"] = _v.get("stored_at") or ""
+            _full["strategy_id"] = strat_id
+            _full["version_id"] = int(_v.get("id") or 0)
+            return _full
+        rows = db.fetch_all(
+            "SELECT id, run_id, stored_at, trades, net_pnl, win_rate"
+            " FROM strategy_results WHERE strategy_id=? ORDER BY id DESC LIMIT 10",
+            [strat_id]) or []
+        return {"strategy_id": strat_id, "count": len(rows),
+                "versions": [dict(r) for r in rows]}
+    except Exception as e:
+        return {"error": f"History failed: {e}"[:200]}
+
+
+@router.post("/{strat_id}/restore-result")
+def strategy_restore_result(strat_id: int, body: dict):
+    """Purana version (history_id) ya browser-copy (result) ko wapas current
+    saved result banao. Pehle CURRENT wala archive hota hai (undo safe).
+    Symbol mismatch par reject (galat strategy me galat result nahi)."""
+    import json as _js
+    try:
+        _ensure_results_table()
+    except Exception:
+        pass
+    try:
+        db = Database.get_instance()
+        row = db.fetch_one("SELECT * FROM strategies WHERE id=?", [strat_id])
+        if not row:
+            return {"error": "Strategy not found"}
+        body = body or {}
+        res = None
+        if body.get("history_id"):
+            _v = db.fetch_one(
+                "SELECT * FROM strategy_results WHERE id=? AND strategy_id=?",
+                [int(body["history_id"]), strat_id])
+            if not _v:
+                return {"error": "Version nahi mila"}
+            try:
+                res = _js.loads(_v.get("result_json") or "{}")
+            except Exception:
+                return {"error": "Version corrupt hai"}
+        elif isinstance(body.get("result"), dict):
+            res = body["result"]
+        else:
+            return {"error": "history_id ya result do"}
+        if not isinstance(res, dict) or not (res.get("metrics") or res.get("trade_list") is not None):
+            return {"error": "Result adhura hai (metrics/trade_list nahi)"}
+        _syms = ((res.get("params") or {}).get("symbols") or
+                 ([res.get("symbol")] if res.get("symbol") else []))
+        if _syms and str(row.get("symbol") or "").upper() not in \
+                [str(x or "").upper() for x in _syms]:
+            return {"error": f"Symbol mismatch (result: {_syms} vs strategy: {row.get('symbol')})"}
+        # Pehle current archive (undo safe), phir restore + current-config hash
+        # (badge imaandari se batayega config badli ya nahi).
+        try:
+            if row.get("last_backtest"):
+                _cur = _js.loads(row["last_backtest"]) if isinstance(row["last_backtest"], str) else row["last_backtest"]
+                if isinstance(_cur, dict):
+                    _archive_result(strat_id, _cur, str(row.get("last_backtest_hash") or ""),
+                                    str(row.get("last_backtest_at") or ""))
+        except Exception:
+            pass
+        try:
+            from datetime import datetime as _dtn, timedelta as _tdn, timezone as _tzn
+            _now_s = (_dtn.now(_tzn(_tdn(hours=5, minutes=30)))).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            _now_s = ""
+        try:
+            def _ld(v, fb):
+                try:
+                    if v is None or v == "":
+                        return fb
+                    return _js.loads(v) if isinstance(v, str) else (v or fb)
+                except Exception:
+                    return fb
+            _hash = _canonical_config_hash(
+                row.get("symbol"), row.get("start_date"), row.get("end_date"),
+                row.get("timeframe"), _ld(row.get("indicators"), []),
+                _ld(row.get("entry_conditions"), []), _ld(row.get("exit_conditions"), []),
+                _ld(row.get("legs"), []), _ld(row.get("advanced_options"), {}),
+                _ld(row.get("risk_management"), {}))
+        except Exception:
+            _hash = ""
+        try:
+            db.execute(
+                "UPDATE strategies SET last_backtest=?, last_backtest_hash=?, last_backtest_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                [_js.dumps(res, default=str), _hash, _now_s + " (restored)", strat_id])
+            _archive_result(strat_id, res, _hash, _now_s + " (restored)")
+        except Exception as e:
+            return {"error": f"Restore save failed: {e}"[:200]}
+        res["stored"] = True
+        res["stored_at"] = _now_s + " (restored)"
+        res["strategy_id"] = strat_id
+        return res
+    except Exception as e:
+        return {"error": f"Restore failed: {e}"[:200]}
