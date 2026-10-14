@@ -774,6 +774,198 @@ class IndicatorEngine:
                 "exit_sell": exit_sell, "rsi": rsi, "vwap": vw,
                 "supertrend": st, "pcr": pcr_s}
 
+    def _wilder_atr(self, highs, lows, closes, period):
+        """Pine ta.atr compatible: Wilder RMA of True Range, SMA-seeded.
+        Fully causal (bar i uses bars <= i only)."""
+        n = len(closes)
+        atr = [0.0] * n
+        if n < 2 or period < 1:
+            return atr
+        trs = [0.0] * n
+        for i in range(1, n):
+            try:
+                trs[i] = max(float(highs[i]) - float(lows[i]),
+                             abs(float(highs[i]) - float(closes[i - 1])),
+                             abs(float(lows[i]) - float(closes[i - 1])))
+            except Exception:
+                trs[i] = 0.0
+        if n <= period:
+            return atr
+        seed = sum(trs[1:period + 1]) / max(period, 1)
+        atr[period] = seed
+        for i in range(period + 1, n):
+            atr[i] = (atr[i - 1] * (period - 1) + trs[i]) / period
+        return atr
+
+    def calculate_zero_lag_trend(self, data, closes, length=70, mult=1.2):
+        """AlgoAlpha 'Zero Lag Trend Signals (MTF)' - exact Pine port for charts.
+
+        zlema = EMA(close + (close - close[lag]), length), lag=floor((L-1)/2)
+        volatility = highest(ATR(L), 3*L) * mult
+        trend: crossover(close, zlema+vol)->+1 (bullish),
+               crossunder(close, zlema-vol)->-1 (bearish), else persist.
+        Entry: close crosses ZLEMA itself while trend already confirmed
+               (bullish: trend==1 and prev==1; bearish mirror).
+        Upper band shown when bearish, lower when bullish (Pine parity).
+        All causal - signal at bar i uses bars <= i only (no repaint on
+        closed bars; live forming bar may update like Pine realtime).
+        Returns {zlema, upper, lower, trend, buy, sell, flip_up, flip_down}."""
+        try:
+            length = max(5, int(length or 70))
+        except Exception:
+            length = 70
+        try:
+            mult = float(mult if mult and float(mult) > 0 else 1.2)
+        except Exception:
+            mult = 1.2
+        n = len(closes)
+        out = {"zlema": [None] * n, "upper": [None] * n, "lower": [None] * n,
+               "trend": [0] * n, "buy": [False] * n, "sell": [False] * n,
+               "flip_up": [False] * n, "flip_down": [False] * n}
+        if n < length + 2:
+            return out
+        try:
+            highs = [float((d or {}).get("high_price", closes[i] if i < len(closes) else 0) or 0)
+                     for i, d in enumerate(data or [])]
+            lows = [float((d or {}).get("low_price", closes[i] if i < len(closes) else 0) or 0)
+                    for i, d in enumerate(data or [])]
+        except Exception:
+            return out
+        if len(highs) < n:
+            highs = highs + [closes[-1]] * (n - len(highs))
+        if len(lows) < n:
+            lows = lows + [closes[-1]] * (n - len(lows))
+        lag = (length - 1) // 2
+        try:
+            xsrc = []
+            for i in range(n):
+                _lagged = closes[i - lag] if i - lag >= 0 else closes[0]
+                xsrc.append(float(closes[i]) + (float(closes[i]) - float(_lagged)))
+            zl = self.calculate_ema(xsrc, length) or [None] * n
+        except Exception:
+            return out
+        try:
+            atr = self._wilder_atr(highs, lows, closes, length)
+        except Exception:
+            atr = [0.0] * n
+        win = max(1, length * 3)
+        trend = 0
+        prev_trend = 0
+        for i in range(n):
+            try:
+                _zl = zl[i] if i < len(zl) else None
+                if _zl is None:
+                    out["trend"][i] = trend
+                    continue
+                _lo = max(0, i - win + 1)
+                _hist = [a for a in atr[_lo:i + 1] if a]
+                _vol = (max(_hist) if _hist else 0.0) * mult
+                _c = float(closes[i])
+                _pc = float(closes[i - 1]) if i > 0 else _c
+                _up = _zl + _vol
+                _dn = _zl - _vol
+                # Pine ta.crossover(a,b): a[1]<=b[1] and a>b (prev-bar values)
+                _pup = None
+                _pdn = None
+                try:
+                    _pzl = zl[i - 1] if i - 1 >= 0 and i - 1 < len(zl) else None
+                    _plo = max(0, i - 1 - win + 1)
+                    _ph = [a for a in atr[_plo:i] if a]
+                    _pvol = (max(_ph) if _ph else 0.0) * mult
+                    if _pzl is not None:
+                        _pup = _pzl + _pvol
+                        _pdn = _pzl - _pvol
+                except Exception:
+                    pass
+                if _pup is not None and _pc <= _pup and _c > _up:
+                    trend = 1
+                elif _pdn is not None and _pc >= _pdn and _c < _dn:
+                    trend = -1
+                # flip markers: crossover/crossunder(trend, 0)
+                if prev_trend <= 0 < trend:
+                    out["flip_up"][i] = True
+                if prev_trend >= 0 > trend:
+                    out["flip_down"][i] = True
+                # entries: close crosses ZLEMA itself while trend confirmed
+                try:
+                    _cross_up = _pzl is not None and _pc <= _pzl and _c > _zl
+                    _cross_dn = _pzl is not None and _pc >= _pzl and _c < _zl
+                except Exception:
+                    _cross_up = _cross_dn = False
+                if _cross_up and trend == 1 and prev_trend == 1:
+                    out["buy"][i] = True
+                if _cross_dn and trend == -1 and prev_trend == -1:
+                    out["sell"][i] = True
+                out["zlema"][i] = round(float(_zl), 2)
+                out["upper"][i] = round(float(_up), 2) if trend == -1 else None
+                out["lower"][i] = round(float(_dn), 2) if trend == 1 else None
+                out["trend"][i] = trend
+                prev_trend = trend
+            except Exception:
+                try:
+                    out["trend"][i] = trend
+                except Exception:
+                    pass
+                continue
+        return out
+
+    def resample_ohlc(self, bars, minutes):
+        """Intraday bars -> timeframe buckets (MTF trend table).
+        minutes: 5/15/30/60/240/1440. Buckets by IST clock (bar_time HH:MM;
+        bars without bar_time are daily and pass through for >=1440 only).
+        Returns chronological OHLC list with trade_date (+bar_time)."""
+        out = []
+        try:
+            tf = max(1, int(minutes or 15))
+        except Exception:
+            tf = 15
+        try:
+            import datetime as _dt
+            buckets = {}
+            order = []
+            for b in bars or []:
+                try:
+                    _d = str((b or {}).get("trade_date", ""))[:10]
+                    if not _d:
+                        continue
+                    _bt = str((b or {}).get("bar_time", "") or "")
+                    if not _bt and tf < 1440:
+                        continue
+                    try:
+                        _hh, _mm = (int(_bt.split(":")[0]), int(_bt.split(":")[1])) if ":" in _bt else (0, 0)
+                    except Exception:
+                        _hh, _mm = (0, 0)
+                    _slot = (_hh * 60 + _mm) // tf if tf < 1440 else 0
+                    _key = (_d, _slot)
+                    o = float((b or {}).get("open_price", 0) or 0)
+                    h = float((b or {}).get("high_price", 0) or 0)
+                    l = float((b or {}).get("low_price", 0) or 0)
+                    c = float((b or {}).get("close_price", 0) or 0)
+                    v = float((b or {}).get("volume", 0) or 0)
+                    if c <= 0:
+                        continue
+                    if _key not in buckets:
+                        buckets[_key] = {"trade_date": _d, "bar_time": "",
+                                         "open_price": o, "high_price": h,
+                                         "low_price": l, "close_price": c, "volume": v}
+                        order.append(_key)
+                        if tf < 1440:
+                            _bh, _bm = divmod(_slot * tf, 60)
+                            buckets[_key]["bar_time"] = f"{int(_bh):02d}:{int(_bm):02d}"
+                    else:
+                        _g = buckets[_key]
+                        _g["high_price"] = max(_g["high_price"], h)
+                        _g["low_price"] = min(_g["low_price"], l)
+                        _g["close_price"] = c
+                        _g["volume"] = (_g.get("volume", 0) or 0) + v
+                except Exception:
+                    continue
+            for _k in order:
+                out.append(buckets[_k])
+        except Exception:
+            pass
+        return out
+
     def calculate_adx(self, data: List[Dict], period: int = 14) -> Dict:
         """Wilder's ADX with +DI/-DI. adx[i] = trend strength (0-100);
         +DI > -DI = bulls stronger. Best setting: period 14, trend gate 25."""

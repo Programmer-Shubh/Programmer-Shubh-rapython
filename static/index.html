@@ -728,10 +728,12 @@
                     <div class="col-6 col-md-1"><label class="form-label small">ST Pd</label><input type="number" id="tv-stp" class="form-control form-control-sm" value="10" min="2"></div>
                     <div class="col-6 col-md-1"><label class="form-label small">ST Mult</label><input type="number" id="tv-stm" class="form-control form-control-sm" value="3" step="0.5" min="1"></div>
                     <div class="col-6 col-md-1"><label class="form-label small">EMA F/S</label><div class="d-flex gap-1"><input type="number" id="tv-ef" class="form-control form-control-sm" value="9" min="2"><input type="number" id="tv-es" class="form-control form-control-sm" value="21" min="3"></div></div>
-                    <div class="col-6 col-md-2 d-flex gap-2 align-items-center flex-wrap"><label class="small"><input type="checkbox" id="tv-marks" checked> Markers</label><label class="small"><input type="checkbox" id="tv-st" checked> SuperTrend</label><label class="small"><input type="checkbox" id="tv-ema" checked> EMA</label><label class="small"><input type="checkbox" id="tv-auto" checked> Auto-refresh 60s</label></div>
+                    <div class="col-6 col-md-2 d-flex gap-2 align-items-center flex-wrap"><label class="small"><input type="checkbox" id="tv-marks" checked> Markers</label><label class="small"><input type="checkbox" id="tv-st" checked> SuperTrend</label><label class="small"><input type="checkbox" id="tv-zl" checked> ZeroLag</label><label class="small"><input type="checkbox" id="tv-ema" checked> EMA</label><label class="small"><input type="checkbox" id="tv-auto" checked> Auto-refresh 60s</label></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">ZL Len</label><input type="number" id="tv-zll" class="form-control form-control-sm" value="70" min="5"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">ZL Mult</label><input type="number" id="tv-zlm" class="form-control form-control-sm" value="1.2" step="0.1" min="0.1"></div>
                 </div>
             </div></div>
-            <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:520px"></div><div class="small p-2"><span style="color:#198754">▲ BUY</span> <span style="color:#dc3545">▼ SELL</span> <span style="color:#0d6efd">● EXIT</span> <span style="color:#ff9800">● OPEN</span> <span style="color:#ff9800">— SuperTrend</span> <span style="color:#2962ff">— EMAfast</span> <span style="color:#6f42c1">— EMAslow</span></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
+            <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:520px"></div><div class="small p-2"><span style="color:#198754">▲ BUY</span> <span style="color:#dc3545">▼ SELL</span> <span style="color:#0d6efd">● EXIT</span> <span style="color:#ff9800">● OPEN</span> <span style="color:#198754">— SuperTrend Bull</span> <span style="color:#dc3545">— SuperTrend Bear</span> <span style="color:#00ffbb">— ZeroLag Bull</span> <span style="color:#ff1100">— ZeroLag Bear</span> <span style="color:#2962ff">— EMAfast</span> <span style="color:#6f42c1">— EMAslow</span> <span class="text-muted">[AlgoAlpha Pine exact: Len 70 / Mult 1.2]</span></div><div id="tv-mtf" class="p-2"></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
         </div>
 
 <!-- CALL/PUT ROBOT - Simple Buy/Sell with SL/TP -->
@@ -2852,7 +2854,7 @@ def run(data):
             document.getElementById('py-logs').textContent=r.logs||'(no script output)';
         }catch(e){btn.innerHTML=orig;document.getElementById('py-metrics').innerHTML='<p class="text-danger p-2">Network error: '+(e.message||e)+'</p>';}
     }
-    let _tvChart=null,_tvCandle=null,_tvST=null,_tvEF=null,_tvES=null,_tvTimer=null;
+    let _tvChart=null,_tvCandle=null,_tvST=null,_tvEF=null,_tvES=null,_tvTimer=null,_tvZLBull=null,_tvZLBear=null,_tvZLup=null,_tvZLlo=null;
     async function tvLoad(){
         const btn=document.getElementById('tv-load');const orig=btn.innerHTML;btn.innerHTML='<span class="spinner"></span> Loading...';
         try{
@@ -2860,7 +2862,7 @@ def run(data):
             const sym=(document.getElementById('tv-sym').value||'NIFTY').toUpperCase();
             const s=document.getElementById('tv-start').value, e=document.getElementById('tv-end').value;
             if(!s||!e){btn.innerHTML=orig;alert('Start/End date select karo');return;}
-            const q=new URLSearchParams({symbol:sym,start_date:s,end_date:e,mode:document.getElementById('tv-mode').value,st_period:document.getElementById('tv-stp').value||10,st_mult:document.getElementById('tv-stm').value||3,ema_fast:document.getElementById('tv-ef').value||9,ema_slow:document.getElementById('tv-es').value||21});
+            const q=new URLSearchParams({symbol:sym,start_date:s,end_date:e,mode:document.getElementById('tv-mode').value,st_period:document.getElementById('tv-stp').value||10,st_mult:document.getElementById('tv-stm').value||3,ema_fast:document.getElementById('tv-ef').value||9,ema_slow:document.getElementById('tv-es').value||21,zl_length:document.getElementById('tv-zll').value||70,zl_mult:document.getElementById('tv-zlm').value||1.2});
             const r=await A('/api/tvchart/data?'+q.toString());
             btn.innerHTML=orig;
             if(!r||r.error||!r.candles){document.getElementById('tv-info').textContent='Error: '+((r&&r.error)||'no data');return;}
@@ -2877,10 +2879,45 @@ def run(data):
             }catch(e){_tvST=_tvChart.addLineSeries({color:'#ff9800',lineWidth:3,title:'SuperTrend'});if(document.getElementById('tv-st').checked)_tvST.setData(r.series.supertrend||[]);else _tvST.setData([]);}
             _tvEF=_tvChart.addLineSeries({color:'#2962ff',lineWidth:1,title:'EMAfast'});_tvEF.setData(document.getElementById('tv-ema').checked?(r.series.ema_fast||[]):[]);
             _tvES=_tvChart.addLineSeries({color:'#6f42c1',lineWidth:1,title:'EMAslow'});if(document.getElementById('tv-ema').checked)_tvES.setData(r.series.ema_slow||[]);else _tvES.setData([]);
+            // Zero-Lag Trend (AlgoAlpha port): teal/red basis + deviation bands
+            const _zl=(r.series&&r.series.zerolag)||{};
+            try{_tvZLBull=_tvChart.addLineSeries({color:'#00ffbb',lineWidth:2,title:'ZL Bull'});_tvZLBear=_tvChart.addLineSeries({color:'#ff1100',lineWidth:2,title:'ZL Bear'});}catch(e){_tvZLBull=null;_tvZLBear=null;}
+            try{_tvZLup=_tvChart.addLineSeries({color:'#adb5bd',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,title:'ZL Upper'});_tvZLlo=_tvChart.addLineSeries({color:'#adb5bd',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,title:'ZL Lower'});}catch(e){_tvZLup=null;_tvZLlo=null;}
+            try{
+                const _on=document.getElementById('tv-zl').checked;
+                if(_tvZLBull)_tvZLBull.setData(_on?(_zl.zlema_bull||[]):[]);
+                if(_tvZLBear)_tvZLBear.setData(_on?(_zl.zlema_bear||[]):[]);
+                if(_tvZLup)_tvZLup.setData(_on?(_zl.upper||[]):[]);
+                if(_tvZLlo)_tvZLlo.setData(_on?(_zl.lower||[]):[]);
+            }catch(e){}
             const marks=(document.getElementById('tv-marks').checked)?(r.markers||[]):[];
+            // Zero-Lag entry/flip markers (Pine ▲▼/trend-flip parity)
+            try{
+                if(document.getElementById('tv-zl').checked){
+                    (_zl.buy||[]).forEach(t=>marks.push({time:t,position:'belowBar',color:'#00ffbb',shape:'arrowUp',text:'[ZL] Bullish Entry ▲'}));
+                    (_zl.sell||[]).forEach(t=>marks.push({time:t,position:'aboveBar',color:'#ff1100',shape:'arrowDown',text:'[ZL] Bearish Entry ▼'}));
+                    (_zl.flip_up||[]).forEach(t=>marks.push({time:t,position:'belowBar',color:'#00ffbb',shape:'circle',text:'[ZL] Trend UP'}));
+                    (_zl.flip_down||[]).forEach(t=>marks.push({time:t,position:'aboveBar',color:'#ff1100',shape:'circle',text:'[ZL] Trend DOWN'}));
+                    marks.sort((a,b)=>String(a.time)<String(b.time)?-1:1);
+                }
+            }catch(e){}
+            // MTF trend table (Pine top-right table parity)
+            try{
+                const _mtf=r.mtf||[];
+                if(_mtf.length){
+                    let _mh='<div class="small fw-bold mb-1">Zero-Lag MTF Trend (closed bars only)</div><table class="table table-sm mb-0" style="max-width:420px"><thead><tr><th>Time Frame</th><th>Signal</th><th class="text-muted">Note</th></tr></thead><tbody>';
+                    _mtf.forEach(row=>{
+                        const _s=row.signal||'n/a';
+                        const _cls=_s==='Bullish'?'bg-success':(_s==='Bearish'?'bg-danger':'bg-secondary');
+                        _mh+=`<tr><td><strong>${row.tf||''}</strong></td><td><span class="badge ${_cls}">${_s}</span></td><td class="text-muted small">${row.note||''}</td></tr>`;
+                    });
+                    _mh+='</tbody></table>';
+                    document.getElementById('tv-mtf').innerHTML=_mh;
+                } else { document.getElementById('tv-mtf').innerHTML=''; }
+            }catch(e){}
             try{_tvCandle.setMarkers(marks);}catch(me){try{_tvCandle.setMarkers([]);}catch(_){}}
             _tvChart.timeScale().fitContent();
-            document.getElementById('tv-info').textContent=sym+' | '+r.candles.length+' candles | '+marks.length+' trade markers (paper+live entries/exits) | ST('+r.params.st_period+','+r.params.st_mult+') EMA('+r.params.ema_fast+'/'+r.params.ema_slow+')';
+            document.getElementById('tv-info').textContent=sym+' | '+r.candles.length+' candles | '+marks.length+' markers (trades + ZeroLag) | ST('+r.params.st_period+','+r.params.st_mult+') EMA('+r.params.ema_fast+'/'+r.params.ema_slow+') ZL('+(r.params.zl_length||70)+','+(r.params.zl_mult||1.2)+') trend: '+(_zl.trend||'-');
             if(_tvTimer)clearInterval(_tvTimer);
             if(document.getElementById('tv-auto').checked)_tvTimer=setInterval(()=>{if(!document.getElementById('pg-tvchart').classList.contains('hidden'))tvLoad();},15000);
             window.addEventListener('resize',()=>{try{_tvChart.applyOptions({width:el.clientWidth});}catch(e){}});

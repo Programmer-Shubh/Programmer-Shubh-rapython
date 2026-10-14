@@ -39,9 +39,26 @@ def _candles(symbol: str, start: str, end: str) -> list:
 @router.get("/data")
 def chart_data(symbol: str = "NIFTY", start: str = "2026-08-01", end: str = "2026-09-08",
                mode: str = "all", st_period: int = 10, st_mult: float = 3.0,
-               ema_fast: int = 9, ema_slow: int = 21):
+               ema_fast: int = 9, ema_slow: int = 21,
+               zl_length: int = 70, zl_mult: float = 1.2,
+               start_date: str = "", end_date: str = ""):
     try:
+        # Frontend sends start_date/end_date, old callers send start/end — accept both
+        if start_date:
+            start = start_date
+        if end_date:
+            end = end_date
         symbol = (symbol or "NIFTY").upper()
+        try:
+            zl_length = max(5, int(zl_length or 70))
+        except Exception:
+            zl_length = 70
+        try:
+            zl_mult = float(zl_mult or 1.2)
+            if zl_mult <= 0:
+                zl_mult = 1.2
+        except Exception:
+            zl_mult = 1.2
         candles = _candles(symbol, start, end)
         if not candles:
             return {"error": f"No candle data for {symbol}."}
@@ -81,6 +98,94 @@ def chart_data(symbol: str = "NIFTY", start: str = "2026-08-01", end: str = "202
             "ema_slow": [{"time": c["time"], "value": round(es[i], 2)} for i, c in enumerate(candles)
                          if i < len(es) and es[i]],
         }
+        # ---- Zero-Lag Trend (AlgoAlpha port) on chart timeframe ----
+        zerolag = {"zlema_bull": [], "zlema_bear": [], "upper": [], "lower": [],
+                   "buy": [], "sell": [], "flip_up": [], "flip_down": [],
+                   "trend": None, "length": zl_length, "mult": zl_mult}
+        try:
+            zl = ind.calculate_zero_lag_trend(hist, closes, zl_length, zl_mult) or {}
+            _z = zl.get("zlema", []) or []
+            _tr = zl.get("trend", []) or []
+            for i, c in enumerate(candles):
+                try:
+                    if i >= len(_z) or _z[i] is None:
+                        continue
+                    _t = _tr[i] if i < len(_tr) else 0
+                    _pt = {"time": c["time"], "value": round(float(_z[i]), 2)}
+                    if _t == 1:
+                        zerolag["zlema_bull"].append(_pt)
+                    elif _t == -1:
+                        zerolag["zlema_bear"].append(_pt)
+                    _up = (zl.get("upper", []) or [])
+                    _lo = (zl.get("lower", []) or [])
+                    if i < len(_up) and _up[i] is not None:
+                        zerolag["upper"].append({"time": c["time"], "value": round(float(_up[i]), 2)})
+                    if i < len(_lo) and _lo[i] is not None:
+                        zerolag["lower"].append({"time": c["time"], "value": round(float(_lo[i]), 2)})
+                    _buys = zl.get("buy", []) or []
+                    _sells = zl.get("sell", []) or []
+                    if i < len(_buys) and _buys[i]:
+                        zerolag["buy"].append(c["time"])
+                    if i < len(_sells) and _sells[i]:
+                        zerolag["sell"].append(c["time"])
+                    _fu = zl.get("flip_up", []) or []
+                    _fd = zl.get("flip_down", []) or []
+                    if i < len(_fu) and _fu[i]:
+                        zerolag["flip_up"].append(c["time"])
+                    if i < len(_fd) and _fd[i]:
+                        zerolag["flip_down"].append(c["time"])
+                except Exception:
+                    continue
+            try:
+                zerolag["trend"] = "Bullish" if _tr and _tr[-1] == 1 else ("Bearish" if _tr and _tr[-1] == -1 else "Flat")
+            except Exception:
+                pass
+        except Exception:
+            pass
+        series["zerolag"] = zerolag
+        # ---- MTF trend table (5m/15m/1H/4H/1D, real bars only) ----
+        mtf = []
+        try:
+            from core.services.free_data import fetch_yahoo_intraday as _fy
+            _tf_defs = [("5m", "5m", 3), ("15m", "15m", 8)]
+            _intra = {}
+            for _tf_name, _iv, _days in _tf_defs:
+                try:
+                    _bars = _fy(symbol, _iv, days=_days) or []
+                    # forming bar hatao (closed only, no repaint)
+                    if _bars and len(_bars) > 1:
+                        _bars = _bars[:-1]
+                    _intra[_tf_name] = _bars
+                except Exception:
+                    _intra[_tf_name] = []
+            _tf_targets = [("5m", 5), ("15m", 15), ("1H", 60), ("4H", 240), ("1D", 1440)]
+            for _label, _mins in _tf_targets:
+                try:
+                    if _mins <= 15:
+                        _src = list(_intra.get(_label, []) or [])
+                    else:
+                        _src = ind.resample_ohlc(list(_intra.get("15m", []) or []), _mins)
+                    _note_src = "live intraday"
+                    if (not _src or len(_src) < zl_length + 2) and _mins >= 1440:
+                        # Fallback: Yahoo blocked/empty ho to chart ke daily candles
+                        # se 1D trend — Pine Timeframe-5 parity, kabhi blank nahi
+                        if len(hist) >= zl_length + 2:
+                            _src = list(hist)
+                            _note_src = "daily chart"
+                    if not _src or len(_src) < zl_length + 2:
+                        mtf.append({"tf": _label, "signal": "n/a",
+                                    "note": f"sirf {len(_src or [])} bars (70+ chahiye)"})
+                        continue
+                    _cc = [float(b.get("close_price", 0) or 0) for b in _src]
+                    _rr = ind.calculate_zero_lag_trend(_src, _cc, zl_length, zl_mult) or {}
+                    _tt = _rr.get("trend", []) or []
+                    _sig = "Bullish" if _tt and _tt[-1] == 1 else ("Bearish" if _tt and _tt[-1] == -1 else "Flat")
+                    mtf.append({"tf": _label, "signal": _sig,
+                                "note": f"{len(_src)} closed bars ({_note_src})"})
+                except Exception as _me:
+                    mtf.append({"tf": _label, "signal": "n/a", "note": str(_me)[:60]})
+        except Exception:
+            pass
         # ---- trade markers (paper + live, entries/exits/open) ----
         db = Database.get_instance()
         q = """SELECT id, symbol, option_type, strike_price, transaction_type, quantity,
@@ -152,9 +257,10 @@ def chart_data(symbol: str = "NIFTY", start: str = "2026-08-01", end: str = "202
                 continue
         markers.sort(key=lambda m: m["time"])
         return {"success": True, "symbol": symbol, "candles": candles,
-                "series": series, "markers": markers,
+                "series": series, "markers": markers, "mtf": mtf,
                 "params": {"st_period": st_period, "st_mult": st_mult,
-                           "ema_fast": ema_fast, "ema_slow": ema_slow, "mode": mode}}
+                           "ema_fast": ema_fast, "ema_slow": ema_slow, "mode": mode,
+                           "zl_length": zl_length, "zl_mult": zl_mult}}
     except Exception as e:
         import traceback
         traceback.print_exc()
