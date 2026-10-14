@@ -1313,7 +1313,12 @@ let _lastOpenTrdHTML = null;
             // result bhejta hai (same run_id). Naya data/config par naya run
             // chahiye to ↻ Naya run dabao (force refresh).
             try{if(r.strategy_id)window._lastBTStratId=r.strategy_id;}catch(e){}
-            const _storedBadge=r.kept_saved?(' • <span class="badge bg-warning text-dark">Naya run 0 trades — purana saved result rakha (mitaya nahi)</span>'):(r.stored?(' • <span class="badge bg-success">Saved result'+(r.stored_at?(' • '+r.stored_at):'')+'</span>'):(r.stored===false&&r.strategy_id?(' • <span class="badge bg-info">Naya run (saved)</span>'):'');
+            let _storedBadge='';
+            try{
+                if(r.kept_saved){_storedBadge=' • <span class="badge bg-warning text-dark">Naya run 0 trades — purana saved result rakha (mitaya nahi)</span>';}
+                else if(r.stored){_storedBadge=' • <span class="badge bg-success">Saved result'+(r.stored_at?(' • '+r.stored_at):'')+'</span>';}
+                else if(r.stored===false&&r.strategy_id){_storedBadge=' • <span class="badge bg-info">Naya run (saved)</span>';}
+            }catch(_sbe){_storedBadge='';}
             const _chgBadge=r.config_changed?(' • <span class="badge bg-warning text-dark">Config badli — trade history purani wali, naya chahiye to ↻ Naya run</span>'):'';
             const _localBadge=(r._localCache&&!r.stored)?(' • <span class="badge bg-secondary">Turant copy (server se pakka ho raha...)</span>'):'';
             const _refreshBtn=r.strategy_id?(' <button class="btn btn-sm btn-outline-primary ms-1" style="font-size:11px;padding:0 6px" title="Config same hai to saved, naya chahiye to force" onclick="backtestStrat('+(r.strategy_id)+',true)">↻ Naya run</button>'):'';
@@ -1399,6 +1404,23 @@ let _lastOpenTrdHTML = null;
                     try{if(typeof loadRobotSaved==='function')loadRobotSaved();}catch(_){}
                     try{if(typeof loadStrats==='function')loadStrats();}catch(_){}
                 }
+                // Browser-copy recovery: is browser me is strategy ka purana
+                // BADA result pada ho (server wala chhota/mita ho) to wapas
+                // lane ka button dikhao - 188-trade loss dobara nahi.
+                try{
+                    if(r&&r.strategy_id){
+                        const _lcB=JSON.parse(localStorage.getItem('btSaved_'+r.strategy_id)||'null');
+                        const _lcN=(_lcB&&_lcB.metrics&&_lcB.metrics.total_trades)||((_lcB&&_lcB.trade_list)||[]).length||0;
+                        const _rN=(r.metrics&&r.metrics.total_trades)||0;
+                        if(_lcB&&_lcN>_rN){
+                            const _d=document.createElement('div');
+                            _d.className='alert alert-warning py-2 mb-2 small';
+                            _d.innerHTML='Is browser me is strategy ka purana bada result pada hai (<strong>'+_lcN+' trades</strong>) — server par '+_rN+' hai. <button class="btn btn-sm btn-warning ms-2" onclick="restoreBrowserCopy('+r.strategy_id+')">Purana wapas lao</button>';
+                            const _mb=document.getElementById('bt-metrics');
+                            if(_mb)_mb.prepend(_d);
+                        }
+                    }
+                }catch(_){}
             }catch(e){}
         }catch(e){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Render error: '+e.message+'</p>';}
     }
@@ -2165,7 +2187,7 @@ let _lastOpenTrdHTML = null;
                 const legs=_parseJsonField(s.legs,[]); const leg=legs[0]||{}; const ord=(leg.option_type||'')+'-'+(leg.transaction||'');
                 const rm=_parseJsonField(s.risk_management,{});
                 const btH=(s.bt&&s.bt.trades!=null)?`<strong>${s.bt.trades}</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span><br><small class="text-muted">${s.bt.win_rate||0}% • ${s.bt.stored_at||'saved'}</small>`:'<small class="text-muted">—</small>';
-                h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td><td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-success" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="ptFromStrat(${s.id})">Paper Trade</button> <button class="btn btn-sm btn-outline-danger" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="liveFromRobot(${s.id})">Live Trade</button> <button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id},false,this)">Backtest</button> <button class="btn btn-sm btn-outline-info" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
+                h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td><td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-success" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="ptFromStrat(${s.id})">Paper Trade</button> <button class="btn btn-sm btn-outline-danger" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="liveFromRobot(${s.id})">Live Trade</button> <button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id},false,this)">Backtest</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')">History</button> <button class="btn btn-sm btn-outline-info" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
             });
             h+='</tbody></table>'; document.getElementById('robot-saved').innerHTML=h;
         }catch(e){ document.getElementById('robot-saved').innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>'; console.error(e); }
@@ -2247,6 +2269,66 @@ let _lastOpenTrdHTML = null;
             try{document.getElementById('bt-results').scrollIntoView({behavior:'smooth'});}catch(e){}
             try{_btnBusy(el,false);}catch(e){}
         }catch(e){ try{_btnBusy(el,false);}catch(_){} alert('Error: '+e.message); }
+    }
+    async function stratHistory(id,name){
+        // Purane saved results (versions): dekho + wapas lao. Har save naya
+        // version banata hai, purana kabhi mit-ta nahi (max 10).
+        try{
+            try{const _nb=document.querySelector('.nav button[onclick*="strategy"]');go('strategy',_nb||null);}catch(e){}
+            const d=await A('/api/strategies/'+id+'/results-history');
+            if(d.error){alert(d.error);return;}
+            const vs=d.versions||[];
+            let h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><strong>Result History - '+(name||('#'+id))+'</strong><button class="btn btn-sm btn-outline-dark" onclick="document.getElementById(&apos;stratModal&apos;).remove()">Close</button></div>';
+            if(!vs.length){h+='<p class="text-muted small">Abhi koi purana version nahi - pehla save yahin judta jayega.</p>';}
+            else{
+                h+='<table class="table table-sm mb-0"><thead><tr><th>#</th><th>Date</th><th>Trades</th><th>Net P&L</th><th>Win%</th><th></th></tr></thead><tbody>';
+                vs.forEach((v,i)=>{
+                    h+=`<tr><td>${i+1}</td><td class="small">${v.stored_at||'-'}</td><td><strong>${v.trades||0}</strong></td><td class="${(v.net_pnl||0)>=0?'price-up':'price-down'}">${F(v.net_pnl||0)}</td><td>${v.win_rate||0}%</td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-primary" onclick="stratHistoryView(${id},${v.id})">View</button> <button class="btn btn-sm btn-outline-success" onclick="stratHistoryRestore(${id},${v.id},${v.trades||0})">Restore</button></td></tr>`;
+                });
+                h+='</tbody></table><small class="text-muted">Restore dabane se wo version wapas current saved result ban jayega (pehle current archive hota hai - undo safe).</small>';
+            }
+            let m=document.getElementById('stratModal');if(m)m.remove();
+            m=document.createElement('div');m.id='stratModal';m.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center';
+            m.innerHTML=`<div style="background:#fff;border-radius:8px;width:92%;max-width:640px;max-height:80vh;overflow:auto;padding:14px">${h}</div>`;
+            m.onclick=e=>{if(e.target===m)m.remove();};
+            document.body.appendChild(m);
+        }catch(e){alert('Error: '+(e.message||e));}
+    }
+    async function stratHistoryView(id,vid){
+        try{
+            try{const _nb=document.querySelector('.nav button[onclick*="strategy"]');go('strategy',_nb||null);}catch(e){}
+            const r=await A('/api/strategies/'+id+'/results-history?history_id='+vid);
+            if(r.error){alert(r.error);return;}
+            try{const m=document.getElementById('stratModal');if(m)m.remove();}catch(e){}
+            window._directBT=r;await runBacktest({direct:r});
+        }catch(e){alert('Error: '+(e.message||e));}
+    }
+    async function stratHistoryRestore(id,vid,n){
+        try{
+            if(!confirm('Version ('+(n||0)+' trades) wapas current saved result ban jayega. Pakka?'))return;
+            const r=await P('/api/strategies/'+id+'/restore-result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({history_id:vid})});
+            if(r.error){alert(r.error);return;}
+            try{const m=document.getElementById('stratModal');if(m)m.remove();}catch(e){}
+            alert('Purana result wapas aa gaya ('+((r.metrics||{}).total_trades||0)+' trades).');
+            try{if(typeof loadRobotSaved==='function')loadRobotSaved();}catch(e){}
+            try{if(typeof loadStrats==='function')loadStrats();}catch(e){}
+            window._directBT=r;await runBacktest({direct:r});
+        }catch(e){alert('Error: '+(e.message||e));}
+    }
+    async function restoreBrowserCopy(id){
+        // Is browser me pada purana bada result server par wapas lao.
+        try{
+            const lc=JSON.parse(localStorage.getItem('btSaved_'+id)||'null');
+            if(!lc||(!lc.metrics&&!lc.trade_list)){alert('Browser me koi purana copy nahi mila.');return;}
+            const n=(lc.metrics&&lc.metrics.total_trades)||(lc.trade_list||[]).length||0;
+            if(!confirm('Browser copy ('+n+' trades) server par wapas save hoga. Pakka?'))return;
+            const r=await P('/api/strategies/'+id+'/restore-result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({result:lc})});
+            if(r.error){alert(r.error);return;}
+            alert('Browser copy server par save ho gaya ('+((r.metrics||{}).total_trades||0)+' trades).');
+            try{if(typeof loadRobotSaved==='function')loadRobotSaved();}catch(e){}
+            try{if(typeof loadStrats==='function')loadStrats();}catch(e){}
+            window._directBT=r;await runBacktest({direct:r});
+        }catch(e){alert('Error: '+(e.message||e));}
     }
     async function liveFromRobot(id){
         // REAL-MONEY live trade from a saved strategy (all legs, preview + confirm per safety)
