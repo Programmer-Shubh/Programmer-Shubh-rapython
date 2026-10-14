@@ -12,7 +12,7 @@ can never exist (real NSE/BSE gaps are paise). Rules enforced here:
    stamp + slippage buffer must stay positive (min_net configurable).
 4. Simultaneous square-off: exit_pair closes ALL open legs of the base
    symbol together at live spot.
-5. Intraday mandatory exit 15:15 IST (close_intraday_trades cutoff).
+5. Intraday mandatory exit 15:20 IST (close_intraday_trades cutoff).
 6. Time/spread stops (monitor): age > 10 min without convergence to costs,
    or spread widening to 2x entry => close both ('time' / 'spread' stop).
 """

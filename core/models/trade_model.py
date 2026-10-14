@@ -127,30 +127,35 @@ class TradeModel:
             sl_level, tp_level = 0, 0
         return sl_level, tp_level
 
-    def close_intraday_trades(self, user_id=1) -> int:
-        """15:15 IST forced square-off for INTRADAY trades only (cash/EQ
-        never held overnight - short-delivery auction safety).
-        Positional trades (trade_type='positional') carry overnight."""
+    def close_intraday_trades(self, user_id=1, _now=None) -> list:
+        """15:20 IST forced square-off for INTRADAY trades only (user demand:
+        3:20 par intraday exit, positional KEVAL lage rahe). Cash/EQ never
+        held overnight - short-delivery auction safety.
+        Positional trades (trade_type='positional') carry overnight - unhe
+        kabhi nahi chhedta. _now: test hook (IST datetime).
+        Returns [{id, reason, exit_price}] (purana int-count wale callers
+        return value ignore karte hain - safe)."""
+        hit = []
         try:
-            now = self._ist_now()
-            if now.time() < __import__("datetime").time(15, 15):
-                return 0
+            now = _now or self._ist_now()
+            if now.time() < __import__("datetime").time(15, 20):
+                return hit
             today = now.strftime("%Y-%m-%d")
             opens = self.db.fetch_all(
                 "SELECT * FROM paper_trades WHERE user_id=? AND status='open'"
                 " AND COALESCE(trade_type,'intraday')='intraday'", [user_id]
             )
         except Exception:
-            return 0
-        n = 0
-        for t in opens:
+            return hit
+        for t in opens or []:
             try:
                 cur, _src = self._forced_exit_price(t)
                 self.close_trade(t["id"], float(cur), today, exit_status="intraday_auto")
-                n += 1
+                hit.append({"id": t["id"], "reason": "intraday_auto",
+                            "exit_price": round(float(cur), 2)})
             except Exception:
                 continue
-        return n
+        return hit
 
     def close_strategy_exit_time_trades(self, user_id=1, now_hhmm: str = "") -> list:
         """Strategy ke exit_time (15:05 jaisa) par paper trade ka EOD exit.

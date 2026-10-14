@@ -45,7 +45,7 @@ class TradeModeRequest(BaseModel):
 def get_open_trades():
     trade_model = TradeModel()
     # Auto-exits before listing: overnight gap SL/TP, expiry square-off,
-    # 30-day max hold, strategy exit_time EOD exit, then 15:15 intraday-only
+    # 30-day max hold, strategy exit_time EOD exit, then 15:20 intraday-only
     # square-off (positional carries)
     try:
         trade_model.check_overnight_gap()

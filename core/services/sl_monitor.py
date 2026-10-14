@@ -83,19 +83,25 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
             _LAST_RUN = time.time()
         # (b) Strategy exit_time exit: market hours se independent (EOD exit
         # market band ke baad bhi hona chahiye).
+        # (c) 15:20 intraday square-off: background thread se (page khole
+        # bina) - positional KEVAL lage rahte hain. Dono gate se pehle.
         _strat_closed = []
+        _eod_closed = []
         try:
             from core.models.trade_model import TradeModel as _TM
-            _strat_closed = _TM().close_strategy_exit_time_trades() or []
+            _tm = _TM()
+            _strat_closed = _tm.close_strategy_exit_time_trades() or []
+            _eod_closed = _tm.close_intraday_trades() or []
         except Exception:
-            _strat_closed = []
+            pass
+        _pre_closed = list(_strat_closed) + list(_eod_closed)
         if market_hours and not market_open_ist():
-            return {"closed": _strat_closed,
-                    "skipped": "market-closed" if not _strat_closed else "",
+            return {"closed": _pre_closed,
+                    "skipped": "market-closed" if not _pre_closed else "",
                     "skipped_trades": []}
         fn = _check_fn()
         if not fn:
-            return {"closed": _strat_closed, "skipped": "no-check-fn",
+            return {"closed": _pre_closed, "skipped": "no-check-fn",
                     "skipped_trades": []}
         res = fn() or {}
         if isinstance(res, dict):
@@ -104,7 +110,7 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
         else:
             closed = list(res or [])
             _skipped_trades = []
-        closed = list(_strat_closed) + closed
+        closed = _pre_closed + closed
         # Arb pair stops (time/spread) ride along the same scan
         try:
             from core.services import arb_engine as _ae
