@@ -45,11 +45,13 @@ class TradeModeRequest(BaseModel):
 def get_open_trades():
     trade_model = TradeModel()
     # Auto-exits before listing: overnight gap SL/TP, expiry square-off,
-    # 30-day max hold, then 15:10 intraday-only square-off (positional carries)
+    # 30-day max hold, strategy exit_time EOD exit, then 15:15 intraday-only
+    # square-off (positional carries)
     try:
         trade_model.check_overnight_gap()
         trade_model.close_max_hold_trades()
         trade_model.close_expired_trades()
+        trade_model.close_strategy_exit_time_trades()
         trade_model.close_intraday_trades()
     except Exception:
         pass

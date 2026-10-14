@@ -15,6 +15,11 @@ LOG_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 
+# Last scan ka poora hisaab (API/monitor me dikhane ke liye): closed +
+# skipped-with-reason. "SL kyu nahi kata" ka jawab yahi + JSONL log me.
+LAST_SCAN = {"ts": "", "closed": [], "skipped": []}
+
+
 def check_stoploss_target(confirm_secs=5):
     """Intra-candle SL/TP check - same levels as backtest (shared helper
     utils.helpers.sltp_premium_level - BacktestEngine._check_sl_tp parity).
@@ -22,20 +27,35 @@ def check_stoploss_target(confirm_secs=5):
     confirm_secs: breach par itne second baad dobara quote karke pakka karo
       (single bad-tick/spread spike par kaatna band - wahi backtest-vs-paper
       gap tha: backtest smooth bar me tikta, paper ek tick par kat-ta).
-      0 = purana turant-close behavior. TP single touch par (favourable)."""
+      0 = purana turant-close behavior. TP single touch par (favourable).
+    Returns {closed, skipped}: har skip ka reason likha jata hai (JSONL log
+    data/logs/exit_skips_*.jsonl + LAST_SCAN) - silent `continue` khatm."""
+    global LAST_SCAN
     trade_model = TradeModel()
     open_trades = trade_model.get_open_trades()
-    closed = []
+    closed, skipped = [], []
+
+    def _skip(trade, reason):
+        try:
+            skipped.append({"id": trade.get("id"), "symbol": trade.get("symbol", ""),
+                            "reason": str(reason)[:150]})
+            from utils.helpers import log_exit_skip as _log
+            _log("sltp_monitor", trade.get("id"), trade.get("symbol"), reason)
+        except Exception:
+            pass
+
     for trade in open_trades:
-        sl = float(trade.get("stop_loss", 0))
-        tp = float(trade.get("target", 0))
+        sl = float(trade.get("stop_loss", 0) or 0)
+        tp = float(trade.get("target", 0) or 0)
         if sl <= 0 and tp <= 0:
+            _skip(trade, "SL aur Target dono 0 - is trade par monitor disabled hai")
             continue
         current = trade_model.get_option_premium(
             trade["symbol"], trade["option_type"],
             trade["strike_price"], trade["expiry_date"]
         )
         if current is None:
+            _skip(trade, "live premium nahi mila (market band/expiry/quote fail) - SL/TP check skip")
             continue
         entry = float(trade["entry_price"])
         is_buy = trade["transaction_type"] == "BUY"
@@ -75,13 +95,20 @@ def check_stoploss_target(confirm_secs=5):
             # Pass is_live=True via close_trade slippage (trade_model.py)
             trade_model.close_trade(trade["id"], current, datetime.now().strftime("%Y-%m-%d"), reason)
             closed.append({"id": trade["id"], "reason": reason, "exit_price": current})
-    return closed
+    try:
+        LAST_SCAN = {"ts": datetime.now().isoformat(timespec="seconds"),
+                     "closed": closed, "skipped": skipped}
+    except Exception:
+        pass
+    return {"closed": closed, "skipped": skipped}
 
 
 def run_auto_trade():
     print(f"[{datetime.now()}] Checking open trades...")
-    closed = check_stoploss_target()
-    log = {"timestamp": datetime.now().isoformat(), "checked": len(TradeModel().get_open_trades()), "closed": closed}
+    res = check_stoploss_target() or {}
+    closed = res.get("closed", []) if isinstance(res, dict) else (res or [])
+    skipped = res.get("skipped", []) if isinstance(res, dict) else []
+    log = {"timestamp": datetime.now().isoformat(), "checked": len(TradeModel().get_open_trades()), "closed": closed, "skipped": skipped}
     log_file = os.path.join(LOG_DIR, f"trade_{datetime.now().strftime('%Y%m%d_%H%M')}.json")
     with open(log_file, "w") as f:
         json.dump(log, f, indent=2)

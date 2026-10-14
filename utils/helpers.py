@@ -421,3 +421,28 @@ def sltp_premium_level(entry_price: float, amount: float, quantity: int,
         return entry * (1 + amt / 100) if is_sl else entry * (1 - amt / 100)
     except Exception:
         return 0.0
+
+
+def log_exit_skip(check: str, trade_id=None, symbol: str = "", reason: str = "") -> None:
+    """SL/TP/EOD exit skip ka reason JSONL me likho (never raises).
+    File: data/logs/exit_skips_YYYYMMDD.jsonl — ek line per skip:
+    {ts, check, trade_id, symbol, reason}. Isse "SL kyu nahi kata" ka
+    jawab log me hamesha milta hai (silent `continue` khatm)."""
+    try:
+        import datetime as _dt
+        _base = os.path.join(os.path.dirname(__file__), "..", "data", "logs")
+        try:
+            os.makedirs(_base, exist_ok=True)
+        except Exception:
+            return
+        _day = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y%m%d")
+        _ts = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+        _row = {"ts": _ts, "check": str(check or ""), "trade_id": trade_id,
+                "symbol": str(symbol or ""), "reason": str(reason or "")[:200]}
+        try:
+            with open(os.path.join(_base, f"exit_skips_{_day}.jsonl"), "a", encoding="utf-8") as _f:
+                _f.write(json.dumps(_row) + "\n")
+        except Exception:
+            pass
+    except Exception:
+        pass

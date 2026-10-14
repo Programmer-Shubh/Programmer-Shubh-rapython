@@ -46,19 +46,39 @@ def market_open_ist():
 
 
 def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
-    """Scan + close breached trades. Returns {closed, skipped}."""
+    """Scan + close breached trades. Returns {closed, skipped, skipped_trades}.
+    Strategy exit_time EOD exit market gate se PEHLE chalta hai (market band
+    hone ke baad bhi - wahi kal ka 15:29-entry bug tha)."""
     global _LAST_RUN
     try:
         with _LOCK:
             if time.time() - _LAST_RUN < min_interval:
-                return {"closed": [], "skipped": "throttled"}
+                return {"closed": [], "skipped": "throttled", "skipped_trades": []}
             _LAST_RUN = time.time()
+        # (b) Strategy exit_time exit: market hours se independent (EOD exit
+        # market band ke baad bhi hona chahiye).
+        _strat_closed = []
+        try:
+            from core.models.trade_model import TradeModel as _TM
+            _strat_closed = _TM().close_strategy_exit_time_trades() or []
+        except Exception:
+            _strat_closed = []
         if market_hours and not market_open_ist():
-            return {"closed": [], "skipped": "market-closed"}
+            return {"closed": _strat_closed,
+                    "skipped": "market-closed" if not _strat_closed else "",
+                    "skipped_trades": []}
         fn = _check_fn()
         if not fn:
-            return {"closed": [], "skipped": "no-check-fn"}
-        closed = fn() or []
+            return {"closed": _strat_closed, "skipped": "no-check-fn",
+                    "skipped_trades": []}
+        res = fn() or {}
+        if isinstance(res, dict):
+            closed = list(res.get("closed", []) or [])
+            _skipped_trades = list(res.get("skipped", []) or [])
+        else:
+            closed = list(res or [])
+            _skipped_trades = []
+        closed = list(_strat_closed) + closed
         # Arb pair stops (time/spread) ride along the same scan
         try:
             from core.services import arb_engine as _ae
@@ -68,7 +88,7 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
                                           "arb": a} for a in _arb]
         except Exception:
             pass
-        return {"closed": closed, "skipped": ""}
+        return {"closed": closed, "skipped": "", "skipped_trades": _skipped_trades}
     except Exception as e:
         return {"closed": [], "skipped": f"error: {e}"[:150]}
 

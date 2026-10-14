@@ -135,6 +135,7 @@ def get_portfolio():
         trade_model.check_overnight_gap()
         trade_model.close_max_hold_trades()
         trade_model.close_expired_trades()
+        trade_model.close_strategy_exit_time_trades()
         trade_model.close_intraday_trades()
     except Exception:
         pass

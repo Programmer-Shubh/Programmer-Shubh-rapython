@@ -110,6 +110,82 @@ class TradeModel:
                 continue
         return n
 
+    def close_strategy_exit_time_trades(self, user_id=1, now_hhmm: str = "") -> list:
+        """Strategy ke exit_time (15:05 jaisa) par paper trade ka EOD exit.
+        Sirf INTRADAY trades (strategy trade_mode intraday + trade_type
+        intraday) — positional overnight carry hota hai, use nahi chhedte.
+        Market band hone ke BAAD bhi chalta hai (yahi kal ka bug tha:
+        15:29 entry, exit_time 15:05 guzar chuka, koi square-off nahi chala).
+        Premium na mile to entry price par close (trade kabhi carry nahi).
+        Returns [{id, reason, exit_price, exit_time}]."""
+        import json as _js
+        hit = []
+        try:
+            _now = self._ist_now()
+            today = _now.strftime("%Y-%m-%d")
+            hhmm = str(now_hhmm or _now.strftime("%H:%M"))
+        except Exception:
+            return hit
+        try:
+            opens = self.db.fetch_all(
+                "SELECT * FROM paper_trades WHERE user_id=? AND status='open'"
+                " AND COALESCE(strategy_id,0)>0", [user_id]
+            )
+        except Exception:
+            return hit
+        for t in opens or []:
+            try:
+                if self._trade_type(t) != "intraday":
+                    continue
+                try:
+                    s = self.db.fetch_one("SELECT advanced_options FROM strategies WHERE id=?",
+                                          [t.get("strategy_id")])
+                except Exception:
+                    s = None
+                if not s:
+                    continue
+                try:
+                    adv = _js.loads(s.get("advanced_options") or "{}")
+                except Exception:
+                    adv = {}
+                if not isinstance(adv, dict):
+                    adv = {}
+                if str(adv.get("trade_mode") or "intraday").lower() != "intraday":
+                    continue  # positional strategy: overnight carry allowed
+                _et = str(adv.get("exit_time") or "15:15").strip()[:5]
+                try:
+                    _eh, _em = _et.split(":")
+                    _exit_mins = int(_eh) * 60 + int(_em)
+                    _nh, _nm = hhmm[:5].split(":")
+                    _now_mins = int(_nh) * 60 + int(_nm)
+                except Exception:
+                    continue
+                _entry_d = str(t.get("entry_date") or "")[:10]
+                _carried = bool(_entry_d and _entry_d < today)
+                if not _carried and _now_mins < _exit_mins:
+                    continue  # exit time abhi aaya nahi
+                try:
+                    cur = self.get_option_premium(
+                        t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
+                        iv=t.get("entry_iv"),
+                    )
+                except Exception:
+                    cur = None
+                if not cur or cur <= 0:
+                    try:
+                        from utils.helpers import log_exit_skip as _log
+                        _log("strategy_exit", t.get("id"), t.get("symbol"),
+                             "live premium nahi mila - entry price par EOD exit")
+                    except Exception:
+                        pass
+                    cur = t["entry_price"]
+                self.close_trade(t["id"], float(cur), today, exit_status="strategy_exit")
+                hit.append({"id": t["id"], "reason": "strategy_exit",
+                            "exit_price": round(float(cur), 2), "exit_time": _et})
+            except Exception:
+                continue
+        return hit
+
     def check_overnight_gap(self, user_id=1) -> list:
         """Morning gap check: positions carried overnight (entry_date < today)
         are evaluated at the first available premium. If the open itself
@@ -140,6 +216,12 @@ class TradeModel:
                     iv=t.get("entry_iv"),
                 )
                 if not cur or cur <= 0:
+                    try:
+                        from utils.helpers import log_exit_skip as _log
+                        _log("overnight_gap", t.get("id"), t.get("symbol"),
+                             "subah ka premium nahi mila - gap SL/TP check skip")
+                    except Exception:
+                        pass
                     continue
                 sl_level, tp_level = self._sl_tp_levels(t, entry, qty, lot)
                 reason = None
