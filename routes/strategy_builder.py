@@ -1389,6 +1389,20 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                             "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
                             "Strategy Target/SL bahut tight to nahi — pehle bina SL/TP chalakar dekho",
                         ]
+                    # Combo RVP ka apna kaaran: RSI-70 ignition + ST + VWAP +
+                    # PCR + volume-spike paancho ek saath chahiye (strict
+                    # quality filter). Aksar window me ignition hi nahi banta.
+                    try:
+                        _has_rvp = any(str((iv or {}).get("id") if isinstance(iv, dict) else (iv or "")) == "combo_rsi_vwap_pcr"
+                                       for iv in (indicators or []))
+                    except Exception:
+                        _has_rvp = False
+                    if _has_rvp:
+                        _zero_note += (" Combo RVP strict hai: is window me RSI-70 cross + SuperTrend + "
+                                       "VWAP + PCR + volume-spike ek saath nahi bane.")
+                        _zero_tips = (["Lambi window try karo (3-6 month) - ignition mahine me kuch baar banta hai",
+                                       "Combo ke saath SuperTrend bhi tick karo (trend riding width badhta hai)"]
+                                      + _zero_tips)
                 _zero_tips = _zero_tips[:5]
         except Exception:
             pass
@@ -1525,24 +1539,40 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     return _final_res
 
 
-_BT_ACTIVE = {"n": 0}
+_BT_ACTIVE = {"n": 0, "gen": 0, "since": 0.0}
 _BUSY_MSG = "busy: ek backtest pehle se chal raha hai - khatm hone do, phir Run dabao"
+_BT_STALE_SECS = 480  # 8 min se atka worker = dead (fetch-hang/crash) -> lock tod do
 
 
-def _bt_acquire() -> bool:
+def _bt_acquire():
+    """Single-flight lock. Success par generation-id (truthy), busy par 0.
+    8-min+ atka lock apne-aap tootata hai (dead worker 'busy' hamesha ke liye
+    nahi rakhta - wahi 'cursor ghoomta hai' deadlock tha)."""
     try:
         with _BT_JOBS_LOCK:
             if _BT_ACTIVE["n"] >= 1:
-                return False
+                try:
+                    _age = _bt_time.time() - float(_BT_ACTIVE.get("since", 0) or 0)
+                except Exception:
+                    _age = 0
+                if _age < _BT_STALE_SECS:
+                    return 0
+                _BT_ACTIVE["n"] = 0  # stale worker reaped
             _BT_ACTIVE["n"] += 1
-            return True
+            _BT_ACTIVE["gen"] = int(_BT_ACTIVE.get("gen", 0) or 0) + 1
+            _BT_ACTIVE["since"] = _bt_time.time()
+            return int(_BT_ACTIVE["gen"])
     except Exception:
-        return True
+        return 0
 
 
-def _bt_release():
+def _bt_release(gen=None):
+    """Sirf apni generation ka lock chhodo - reaped (mara hua) worker naye
+    run ka lock galti se na khole (double-run/OOM se bachao)."""
     try:
         with _BT_JOBS_LOCK:
+            if gen is not None and int(gen or 0) != int(_BT_ACTIVE.get("gen", 0) or 0):
+                return
             _BT_ACTIVE["n"] = max(0, _BT_ACTIVE["n"] - 1)
     except Exception:
         pass
@@ -1552,12 +1582,13 @@ def _bt_release():
 def run_backtest(req: BacktestRequest):
     # Sync path (kept for backward compat + fast cached runs).
     # Single-flight: pileup = OOM/timeout on free tier.
-    if not _bt_acquire():
+    _gen = _bt_acquire()
+    if not _gen:
         return {"error": _BUSY_MSG}
     try:
         return _run_backtest_core(req)
     finally:
-        _bt_release()
+        _bt_release(_gen)
 
 
 _BT_RUNNING = {}
@@ -1572,7 +1603,8 @@ def _bt_req_hash(req_dict: dict) -> str:
 
 
 def _bt_worker(job_id: str, req_dict: dict):
-    if not _bt_acquire():
+    _gen = _bt_acquire()
+    if not _gen:
         try:
             with _BT_JOBS_LOCK:
                 _BT_JOBS[job_id]["status"] = "error"
@@ -1610,7 +1642,7 @@ def _bt_worker(job_id: str, req_dict: dict):
                     _BT_RUNNING.pop(_h, None)
             except Exception:
                 pass
-        _bt_release()
+        _bt_release(_gen)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1626,7 +1658,7 @@ def _bt_worker(job_id: str, req_dict: dict):
                     pass
         except Exception:
             pass
-        _bt_release()
+        _bt_release(_gen)
 
 
 @router.post("/run-async")
