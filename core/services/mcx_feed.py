@@ -77,6 +77,78 @@ def get_mcx_ltp(symbol: str, timeout: float = 8):
         return None
 
 
+def fetch_mcx_intraday(symbol: str, interval: str = "15m", days: int = 5):
+    """Proxy INTRADAY bars (COMEX/NYMEX via Yahoo + FX, MCX quote units, IST
+    bar_time). Backtest 15m/live/paper sab yahi use karte hain - generic
+    '{SYM}.NS' Yahoo kabhi nahi (wahi SILVER→₹221 fantasy ka source tha)."""
+    try:
+        from utils.helpers import is_mcx as _ismcx
+        if not _ismcx(symbol):
+            return []
+        s = str(symbol or "").strip().upper()
+        conv = _converters().get(s)
+        if not conv:
+            return []
+        ticker, fn = conv
+        iv = {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "60m"}.get(
+            str(interval or "15m"), "15m")
+        try:
+            from core.services.free_data import fetch_yahoo_intraday as _fyi
+            rows = _fyi(ticker, iv, days=min(int(days or 5), 60)) or []
+        except Exception:
+            rows = []
+        if not rows:
+            return []
+        try:
+            from core.services.free_data import fetch_yahoo_intraday as _fyi2
+            fxrows = _fyi2("USDINR=X", iv, days=min(int(days or 5), 60)) or []
+        except Exception:
+            fxrows = []
+        try:
+            _fxm = {}
+            for r in fxrows or []:
+                try:
+                    _fxm[(str(r.get("trade_date", ""))[:10],
+                          str(r.get("bar_time", "") or "")[:5])] = float(
+                        r.get("close_price") or 0)
+                except Exception:
+                    continue
+            _fxd = {}
+            for (d, _t), _v in _fxm.items():
+                if _v > 0 and (d not in _fxd):
+                    _fxd[d] = _v
+        except Exception:
+            _fxm, _fxd = {}, {}
+        _fall = _usdinr() or 0.0
+        out = []
+        for r in rows:
+            try:
+                _d = str(r.get("trade_date", ""))[:10]
+                _bt = str(r.get("bar_time", "") or "")[:5]
+                if not _d or not _bt:
+                    continue
+                _fx = float(_fxm.get((_d, _bt)) or 0) or float(_fxd.get(_d) or 0) or _fall
+                if _fx <= 0:
+                    continue
+                _o = float(fn(float(r.get("open_price") or 0), _fx) or 0)
+                _h = float(fn(float(r.get("high_price") or 0), _fx) or 0)
+                _l = float(fn(float(r.get("low_price") or 0), _fx) or 0)
+                _c = float(fn(float(r.get("close_price") or 0), _fx) or 0)
+                if _c <= 0:
+                    continue
+                out.append({"symbol": s, "trade_date": _d, "bar_time": _bt,
+                            "open_price": round(_o, 2), "high_price": round(_h, 2),
+                            "low_price": round(_l, 2), "close_price": round(_c, 2),
+                            "volume": int(r.get("volume") or 0), "oi": 0,
+                            "source": "proxy"})
+            except Exception:
+                continue
+        out.sort(key=lambda b: (b["trade_date"], b["bar_time"]))
+        return out
+    except Exception:
+        return []
+
+
 def fetch_mcx_history(symbol: str, start_date: str, end_date: str):
     """Proxy OHLC history converted to MCX quote units.
     Returns (bars, source) - bars like bhavcopy rows with trade_date/open/
