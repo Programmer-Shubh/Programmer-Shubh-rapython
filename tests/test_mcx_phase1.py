@@ -118,6 +118,67 @@ def _today():
     return (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
 
 
+def test_mcx_strategy_exit_at_night():
+    """MCX intraday trade exit_time 23:05 par night me exit; 22:00 par khula."""
+    import json
+    from core.models.trade_model import TradeModel
+    tm = TradeModel()
+    tm.db.execute("DELETE FROM paper_trades WHERE user_id=?", [UID])
+    tm.db.execute("DELETE FROM strategies WHERE user_id=? AND name='t-mcx-exit'", [UID])
+    try:
+        sid = tm.db.execute(
+            "INSERT INTO strategies (user_id, name, symbol, advanced_options,"
+            " risk_management, status) VALUES (?,?,?,?,?,?)",
+            [UID, "t-mcx-exit", "CRUDEOIL",
+             json.dumps({"trade_mode": "intraday", "exit_time": "23:05"}),
+             json.dumps({"daily_stop_loss": 1500, "daily_take_profit": 3000}),
+             "active"])
+        tid = tm.db.execute(
+            "INSERT INTO paper_trades (user_id, strategy_id, symbol, option_type,"
+            " strike_price, transaction_type, quantity, lot_size, entry_price,"
+            " stop_loss, target, total_cost, entry_date, trade_type, status)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [UID, int(sid), "CRUDEOIL", "FUT", 0, "BUY", 1, 100, 6300.0,
+             1500, 3000, 0.0, _today(), "intraday", "open"])
+        assert tm.close_strategy_exit_time_trades(user_id=UID, now_hhmm="22:00") == []
+        hit = tm.close_strategy_exit_time_trades(user_id=UID, now_hhmm="23:10")
+        assert [h["id"] for h in hit] == [int(tid)], hit
+        assert hit[0]["reason"] == "strategy_exit"
+    finally:
+        tm.db.execute("DELETE FROM paper_trades WHERE user_id=?", [UID])
+        tm.db.execute("DELETE FROM strategies WHERE user_id=? AND name='t-mcx-exit'", [UID])
+
+
+def test_mcx_strategy_exit_default_2300():
+    """exit_time missing ho to MCX default 23:00 (NSE 15:15 nahi)."""
+    import json
+    from core.models.trade_model import TradeModel
+    tm = TradeModel()
+    tm.db.execute("DELETE FROM paper_trades WHERE user_id=?", [UID])
+    tm.db.execute("DELETE FROM strategies WHERE user_id=? AND name='t-mcx-exit2'", [UID])
+    try:
+        sid = tm.db.execute(
+            "INSERT INTO strategies (user_id, name, symbol, advanced_options,"
+            " risk_management, status) VALUES (?,?,?,?,?,?)",
+            [UID, "t-mcx-exit2", "GOLD",
+             json.dumps({"trade_mode": "intraday"}),
+             json.dumps({"daily_stop_loss": 1500, "daily_take_profit": 3000}),
+             "active"])
+        tid = tm.db.execute(
+            "INSERT INTO paper_trades (user_id, strategy_id, symbol, option_type,"
+            " strike_price, transaction_type, quantity, lot_size, entry_price,"
+            " stop_loss, target, total_cost, entry_date, trade_type, status)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [UID, int(sid), "GOLD", "FUT", 0, "BUY", 1, 100, 150000.0,
+             1500, 3000, 0.0, _today(), "intraday", "open"])
+        assert tm.close_strategy_exit_time_trades(user_id=UID, now_hhmm="22:30") == []
+        hit = tm.close_strategy_exit_time_trades(user_id=UID, now_hhmm="23:05")
+        assert [h["id"] for h in hit] == [int(tid)], hit
+    finally:
+        tm.db.execute("DELETE FROM paper_trades WHERE user_id=?", [UID])
+        tm.db.execute("DELETE FROM strategies WHERE user_id=? AND name='t-mcx-exit2'", [UID])
+
+
 def test_eod_per_exchange():
     """16:00 par NIFTY exit, CRUDEOIL khula; 23:25 par crude bhi exit."""
     from core.models.trade_model import TradeModel

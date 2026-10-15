@@ -788,7 +788,14 @@
         try{const l=JSON.parse(localStorage.getItem('otmSymsCacheV1')||'null');if(l&&l.ts&&Date.now()-l.ts<60*60*1000&&l.data&&l.data.symbols&&l.data.symbols.length)return l.data;}catch(e){}return null;}
     async function otmFresh(){const c=otmCached();if(c&&c.otm_to===4&&c.dte===7)return c;const d=await A('/api/chain/symbols-otm?min_premium=20&otm_to=4&dte=7');try{window._otmData={ts:Date.now(),data:d};localStorage.setItem('otmSymsCacheV1',JSON.stringify({ts:Date.now(),data:d}));}catch(e){}return d;}
     function rExch(){try{const v=(localStorage.getItem('rExch')||document.getElementById('r-exch')?.value||'NSE');return v==='MCX'?'MCX':'NSE';}catch(e){return 'NSE';}}
-    function onExchChange(){try{const v=document.getElementById('r-exch')?.value||'NSE';localStorage.setItem('rExch',v);}catch(e){} loadStrategySymbols();}
+    function onExchChange(){try{const v=document.getElementById('r-exch')?.value||'NSE';localStorage.setItem('rExch',v);}catch(e){} try{
+        // MCX intraday = night session: default exit 23:05 (NSE 15:05 nahi).
+        const _ex=document.getElementById('r-exch')?.value||'NSE';
+        const _tp=document.getElementById('r-type')?.value||'intraday';
+        const _exEl=document.getElementById('r-exit');
+        if(_exEl&&_tp==='intraday'){_exEl.value=(_ex==='MCX')?'23:05':'15:05';}
+        try{document.getElementById('r-exit-note').textContent=(_tp==='intraday')?((_ex==='MCX')?'MCX night square-off (11:05 PM)':'Intraday square-off'):'Positional: overnight carry, no EOD exit';}catch(e){}
+    }catch(e){} loadStrategySymbols();}
     async function loadMcxSyms(){
         // MCX Futures symbol list (official lots) - NSE OTM filter se alag.
         try{
@@ -2141,7 +2148,8 @@ let _lastOpenTrdHTML = null;
         const t=document.getElementById('r-type').value;
         const ex=document.getElementById('r-exit');
         try{const em=document.getElementById('r-exitmode');if(em)em.value=t;}catch(e){}
-        if(t==='intraday'){ex.disabled=false;ex.value='15:05';document.getElementById('r-exit-note').textContent='Intraday square-off';}
+        const _ex=(document.getElementById('r-exch')?.value||'NSE');
+        if(t==='intraday'){ex.disabled=false;ex.value=(_ex==='MCX')?'23:05':'15:05';document.getElementById('r-exit-note').textContent=(_ex==='MCX')?'MCX night square-off (11:05 PM)':'Intraday square-off';}
         else{ex.disabled=true;document.getElementById('r-exit-note').textContent='Positional: overnight carry, no EOD exit';}
     }
     function robotCollectIndicators(){
