@@ -87,6 +87,9 @@ _STATIC_LOTS = {
     "BOSCHLTD": 25, "EICHERMOT": 100, "FORCEMOT": 25, "HDFCAMC": 300,
     "MPHASIS": 275, "OFSS": 100, "PAGEIND": 20, "POWERINDIA": 25,
     "SOLARINDS": 50, "SRF": 200, "WAAREEENER": 175,
+    # BAJAJ-AUTO 75 (NSE market-lots file Oct-2026, 2 sources; Dhan master me
+    # naam alag hone se broker lookup miss hota hai).
+    "BAJAJ-AUTO": 75,
     "GOLDBEES": 100, "SILVERBEES": 100,
 }
 
