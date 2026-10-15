@@ -193,14 +193,19 @@ def ensure_warm_async():
 
 
 def get_lot(symbol: str):
-    """(lot|None, source). Source: broker-master | None(cold/miss)."""
+    """(lot|None, source). Source: broker-master | None(cold/miss).
+    Hyphen-insensitive: 'BAJAJ-AUTO' bhi 'BAJAJAUTO' master row se milega."""
     try:
         s = str(symbol or "").strip().upper()
         if not s:
             return None, "empty"
         hit = _read_cache()
-        if hit and s in hit:
-            return int(hit[s]), "broker-master"
+        if hit:
+            if s in hit:
+                return int(hit[s]), "broker-master"
+            _flat = s.replace("-", "").replace(" ", "")
+            if _flat != s and _flat in hit:
+                return int(hit[_flat]), "broker-master"
         return None, "cold"
     except Exception:
         return None, "error"

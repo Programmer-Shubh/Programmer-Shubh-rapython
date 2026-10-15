@@ -25,6 +25,28 @@ def test_parse_dhan_master():
     assert "ZEROLOT" not in m  # zero lot skipped
 
 
+def test_hyphen_insensitive_lookup(monkeypatch):
+    import core.services.lot_master as lm
+    import time as _t
+    monkeypatch.setattr(lm, "_MEM", {"BAJAJAUTO": 50})
+    monkeypatch.setattr(lm, "_MEM_TS", _t.time())
+    assert lm.get_lot("BAJAJ-AUTO") == (50, "broker-master")
+
+
+def test_new_fno_static_lots(monkeypatch):
+    import core.services.lot_master as lm
+    import utils.helpers as H
+    monkeypatch.setattr(lm, "_MEM", None)
+    monkeypatch.setattr(lm, "_MEM_TS", 0.0)
+    monkeypatch.setattr(H, "_load_nse_lots", lambda: None)
+    for sym, lot in [("BOSCHLTD", 25), ("EICHERMOT", 100), ("FORCEMOT", 25),
+                     ("HDFCAMC", 300), ("MPHASIS", 275), ("OFSS", 100),
+                     ("PAGEIND", 20), ("POWERINDIA", 25), ("SOLARINDS", 50),
+                     ("SRF", 200), ("WAAREEENER", 175)]:
+        assert H.get_lot_size(sym) == lot, (sym, H.get_lot_size(sym))
+        assert H.official_lot(sym)[2] is True, sym
+
+
 def test_broker_beats_static(monkeypatch):
     import core.services.lot_master as lm
     import time as _t
