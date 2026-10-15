@@ -456,6 +456,19 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
                                       "bars": len(db_data), "note": "NSE/BSE official primary truth"})
     except Exception:
         db_data = []
+    # 1b) MCX proxy (COMEX/NYMEX via Yahoo + FX, INR quote units, source='proxy').
+    # MCX ka free archive nahi hai; proxy research/backtest ke liye LABEL ke
+    # saath. DB me import NAHI karte (official archive proxy se pollute nahi).
+    try:
+        from utils.helpers import is_mcx as _ismcx
+        if _ismcx(symbol):
+            from core.services.mcx_feed import fetch_mcx_history as _mch
+            _px, _psrc = _mch(symbol, start_date, end_date)
+            if _px and len(_px) >= 5:
+                return _out(_px, {"status": "VALID", "source": "proxy", "bars": len(_px),
+                                   "note": "MCX proxy (COMEX/NYMEX+FX, INR) - research ke liye, live fill nahi"})
+    except Exception:
+        pass
     # 2) Priority order: nsepython (NSE official) -> Yahoo (60d) -> Stooq ->
     # Alpha Vantage -> Twelve Data. openchart is reference-only
     # (never bar suppliers).

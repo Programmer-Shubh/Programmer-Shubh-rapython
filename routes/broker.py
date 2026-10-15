@@ -1238,13 +1238,21 @@ async def place_live_order(req: LiveOrderRequest):
                 return {"error": f"{symbol} par koi options nahi hain (F&O me nahi) - live order impossible"}
         except Exception:
             pass
-        # 3:15 PM entry cutoff (user demand, REAL MONEY): iske baad live
-        # order bhi nahi. Exits broker par hamesha allowed.
+        # Exchange-aware entry cutoff (REAL MONEY): iske baad live order
+        # bhi nahi. Exits broker par hamesha allowed.
         try:
             from core.services.sl_monitor import entry_open_ist as _eok5
             from core.services.sl_monitor import entry_block_reason as _ebr5
-            if not bool(_eok5()):
-                return {"error": _ebr5()}
+            if not bool(_eok5(symbol=symbol)):
+                return {"error": _ebr5(symbol)}
+        except Exception:
+            pass
+        # MCX live (Phase-2): broker segment mapping NSE-only hai - MCX par
+        # galat segment order jaane se achha saaf BLOCK. Paper/backtest ready.
+        try:
+            from utils.helpers import is_mcx as _ismcx
+            if bool(_ismcx(symbol)):
+                return {"error": "MCX live jald aa raha hai - abhi Paper/Backtest ready hai (live NSE only)"}
         except Exception:
             pass
         # Official-lot gate (fail-closed, REAL MONEY): unverified lot par

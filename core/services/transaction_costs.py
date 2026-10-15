@@ -39,10 +39,12 @@ class TransactionCosts:
             return price * (1 - slippage)
 
     @classmethod
-    def calculate(cls, turnover: float, is_sell: bool, is_live: bool = False) -> dict:
+    def calculate(cls, turnover: float, is_sell: bool, is_live: bool = False,
+                  exchange: str = "NSE") -> dict:
         """Calculate all transaction costs.
         In live mode, use actual broker charges.
         In backtest mode, use realistic estimates with all charges deducted.
+        exchange='MCX': CTT 0.01% sell-side instead of STT (commodity futures).
         """
         # Brokerage: Rs 20 per trade for discount broker; otherwise % of turnover
         brokerage = cls.BROKERAGE_PER_TRADE
@@ -60,8 +62,13 @@ class TransactionCosts:
         else:
             stamp_duty = turnover * cls.STAMP_DUTY_BUY_PCT / 100
 
-        # STT: 0.1% on sell side for options (premium value); 0% on buy side
-        if is_sell:
+        # STT: 0.1% on sell side for options (premium value); 0% on buy side.
+        # MCX futures: NO STT - Commodity Transaction Tax (CTT) 0.01% on SELL
+        # side for non-agri commodities (long-standing levy).
+        _ex = str(exchange or "NSE").upper()
+        if _ex == "MCX":
+            stt = turnover * 0.01 / 100 if is_sell else 0.0
+        elif is_sell:
             stt = turnover * cls.STT_PCT_SELL / 100
         else:
             stt = turnover * cls.STT_PCT_BUY / 100

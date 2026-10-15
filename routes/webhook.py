@@ -85,18 +85,18 @@ def _place_from_signal(data: dict, source: str = "webhook") -> dict:
     if action not in ("BUY","SELL"):
         action = "BUY"
     opt_type = (data.get("type") or data.get("option_type") or "CE").upper()
-    if opt_type not in ("CE","PE"):
+    if opt_type not in ("CE", "PE", "FUT"):
         opt_type = "CE"
     strike = float(data.get("strike") or data.get("strike_price") or 0)
     expiry = data.get("expiry") or data.get("expiry_date") or ""
     qty = int(data.get("quantity") or data.get("qty") or 1)
-    # 3:15 PM entry cutoff (user demand): iske baad webhook se bhi entry nahi.
+    # Exchange-aware entry cutoff (NSE 3:15 PM, MCX 11:00 PM).
     # (Legs-branch execution_engine me apna gate hai; ye direct path ka gate.)
     try:
         from core.services.sl_monitor import entry_open_ist as _eok_w
         from core.services.sl_monitor import entry_block_reason as _ebr_w
-        if not bool(_eok_w()):
-            return {"error": _ebr_w()}
+        if not bool(_eok_w(symbol=symbol)):
+            return {"error": _ebr_w(symbol)}
     except Exception:
         pass
     # Official-lot gate (fail-closed): unverified lot par order BLOCK.

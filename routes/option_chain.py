@@ -53,6 +53,25 @@ def get_symbols():
     return {"symbols": symbols}
 
 
+@router.get("/mcx-symbols")
+def get_mcx_symbols():
+    """MCX commodity futures master: symbol + official lot (quote units) +
+    session. Backtest/Paper (FUT legs) ke liye symbol selector isi se banta hai."""
+    try:
+        from utils.helpers import MCX_LOTS, session_of
+        out = []
+        for _s in sorted(MCX_LOTS):
+            try:
+                out.append({"symbol": _s, "lot_size": int(MCX_LOTS[_s]),
+                            "exchange": "MCX",
+                            "session": session_of(_s).get("close_min", 1410)})
+            except Exception:
+                continue
+        return {"exchange": "MCX", "count": len(out), "symbols": out}
+    except Exception as e:
+        return {"error": str(e)[:150]}
+
+
 _OTM_CACHE = {"ts": 0, "min_premium": None, "result": None}
 
 
@@ -391,16 +410,16 @@ def place_trade(req: TradeRequest):
         # par koi rok nahi (wo alag endpoints hain). Auto paths (heartbeat /
         # worker / save-hook) pehle se gated hain; ye manual button ka gate.
         from core.services.sl_monitor import market_open_ist as _mkt
-        if not bool(_mkt()):
+        if not bool(_mkt(req.symbol)):
             return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-15:30 IST). Market khulne par dobara try karo."}
     except Exception:
         pass
     try:
-        # 3:15 PM entry cutoff (user demand): iske baad KOI nayi entry nahi -
-        # exit/SL/Target par koi rok nahi (wo alag endpoints + monitor hain).
+        # Exchange-aware entry cutoff (NSE 3:15 PM, MCX 11:00 PM): iske baad
+        # KOI nayi entry nahi - exit/SL/Target par koi rok nahi.
         from core.services.sl_monitor import entry_open_ist as _eok, entry_block_reason as _ebr
-        if not bool(_eok()):
-            return {"error": _ebr()}
+        if not bool(_eok(symbol=req.symbol)):
+            return {"error": _ebr(req.symbol)}
     except Exception:
         pass
     try:
@@ -461,20 +480,27 @@ def place_trade(req: TradeRequest):
         # Data Validation: symbol, option_type, quantity, strike checks
         if not req.symbol or not str(req.symbol).strip():
             return {"error": "Symbol missing"}
-        # No options on non-F&O symbols (GOLDBEES/SILVERBEES): block fantasy orders
+        # No options on non-F&O symbols (GOLDBEES/SILVERBEES): block fantasy orders.
+        # FUT (MCX futures) bypass: strike concept nahi, strike 0 = market futures.
+        _is_fut = str(req.option_type or "").upper() == "FUT"
         try:
             from utils.helpers import is_optionable as _isopt2
-            if not _isopt2(req.symbol):
+            if not _is_fut and not _isopt2(req.symbol):
                 return {"error": f"{str(req.symbol).upper()} par koi options nahi hain (F&O me nahi) - order lagana impossible"}
         except Exception:
             pass
-        if req.option_type not in ("CE", "PE"):
-            return {"error": "Option type must be CE or PE"}
+        if req.option_type not in ("CE", "PE", "FUT"):
+            return {"error": "Option type must be CE/PE (options) ya FUT (MCX futures)"}
         if req.quantity <= 0:
             return {"error": "Quantity must be > 0"}
+        if _is_fut:
+            try:
+                req.strike = 0.0
+            except Exception:
+                pass
         # Strike validation: reject 0, '01', missing, not aligned
         raw_strike = str(req.strike).strip() if req.strike is not None else ""
-        if req.strike is None or req.strike <= 0:
+        if not _is_fut and (req.strike is None or req.strike <= 0):
             # Auto-select ATM if strike 0 or invalid (fixes BANKNIFTY CE 0 bug)
             try:
                 live_tmp = LiveMarketData()
@@ -490,21 +516,23 @@ def place_trade(req: TradeRequest):
             except Exception as e:
                 return {"error": f"Invalid strike price {req.strike}: {e}"}
         # Reject faulty leading zero like '01' (comes as 1.0)
-        if raw_strike.startswith("0") and raw_strike not in ("0", "0.0") and not raw_strike.startswith("0."):
+        if not _is_fut and raw_strike.startswith("0") and raw_strike not in ("0", "0.0") and not raw_strike.startswith("0."):
             return {"error": f"Faulty strike price '{raw_strike}' - remove leading zeros"}
         # Global strike alignment: snap to nearest valid step (e.g. Cipla 123 -> 120)
-        try:
-            aligned = align_strike_price(req.symbol, req.strike)
-            if abs(aligned - req.strike) > 0.01:
-                req.strike = aligned
-        except Exception:
-            pass
+        if not _is_fut:
+            try:
+                aligned = align_strike_price(req.symbol, req.strike)
+                if abs(aligned - req.strike) > 0.01:
+                    req.strike = aligned
+            except Exception:
+                pass
         # ATM-distance guard: relaxed to 12% and chain-aware (fixes false 60% error for KOTAKBANK/BANKNIFTY)
         # If the exact strike exists in the visible chain (DB or model), allow it even if dev >12% — stale price, not stale strike.
+        # FUT skip: strike concept nahi.
         try:
             _live0 = LiveMarketData()
             _spot0 = _live0.get_spot_price(req.symbol) or 0
-            if _spot0 > 0:
+            if _spot0 > 0 and not _is_fut:
                 # chain_has_strike = already fetched chain contains this strike?
                 _chain_has = False
                 try:
@@ -549,11 +577,22 @@ def place_trade(req: TradeRequest):
             return {"error": f"Duplicate open position for {req.symbol} {req.strike} {req.option_type} {req.transaction_type} (ID {dup['id']}) - already open"}
         bhav = BhavcopyModel()
         live = LiveMarketData()
-        chain = bhav.get_option_chain(req.symbol, req.date, req.expiry)
-        ce_data = {r["strike_price"]: r for r in chain if r["option_type"] == "CE"}
-        pe_data = {r["strike_price"]: r for r in chain if r["option_type"] == "PE"}
-        chain_row = ce_data.get(req.strike) if req.option_type == "CE" else pe_data.get(req.strike)
-        premium = float(chain_row.get("close_price", 0)) if chain_row else 0
+        # FUT (MCX futures): sirf live/proxy futures LTP - koi chain/DB/model
+        # premium nahi (BS model futures par fantasy hota). Na mile to error.
+        if _is_fut:
+            try:
+                from core.services.mcx_feed import get_mcx_ltp as _mpx
+                premium = float(_mpx(req.symbol) or 0)
+            except Exception:
+                premium = 0
+            if premium <= 0:
+                return {"error": f"No live futures price for {req.symbol} (MCX feed down) - order nahi laga"}
+        else:
+            chain = bhav.get_option_chain(req.symbol, req.date, req.expiry)
+            ce_data = {r["strike_price"]: r for r in chain if r["option_type"] == "CE"}
+            pe_data = {r["strike_price"]: r for r in chain if r["option_type"] == "PE"}
+            chain_row = ce_data.get(req.strike) if req.option_type == "CE" else pe_data.get(req.strike)
+            premium = float(chain_row.get("close_price", 0)) if chain_row else 0
         # Historical-date honesty: if the order date is NOT today and the DB has no
         # premium for this strike/date, NEVER fall back to live pricing (that mixes
         # a stale chain view with a live rate, e.g. chain 370@3.75 vs entry 5.91).
@@ -686,7 +725,12 @@ def place_trade(req: TradeRequest):
             pass
         adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
         lot_size = get_lot_size(req.symbol)
-        costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
+        try:
+            from utils.helpers import exchange_of as _exof4
+            _exch4 = _exof4(req.symbol)
+        except Exception:
+            _exch4 = "NSE"
+        costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True, exchange=_exch4)
         trade_model = TradeModel()
         from utils.helpers import model_iv as _model_iv
         try:

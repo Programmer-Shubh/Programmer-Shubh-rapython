@@ -42,7 +42,7 @@ def test_official_lot_verified_flag(monkeypatch):
 
 def test_paper_place_blocks_unverified_lot(monkeypatch):
     import core.services.sl_monitor as _sl
-    monkeypatch.setattr(_sl, "market_open_ist", lambda: True)
+    monkeypatch.setattr(_sl, "market_open_ist", lambda *_a, **_k: True)
     monkeypatch.setattr(_sl, "entry_open_ist", lambda *_a, **_k: True)
     from routes.paper_trade import PlaceTradeRequest, place_trade
     r = place_trade(PlaceTradeRequest(
@@ -54,7 +54,7 @@ def test_paper_place_blocks_unverified_lot(monkeypatch):
 
 def test_chain_place_blocks_unverified_lot(monkeypatch):
     import core.services.sl_monitor as _sl
-    monkeypatch.setattr(_sl, "market_open_ist", lambda: True)
+    monkeypatch.setattr(_sl, "market_open_ist", lambda *_a, **_k: True)
     monkeypatch.setattr(_sl, "entry_open_ist", lambda *_a, **_k: True)
     from routes.option_chain import TradeRequest, place_trade
     r = place_trade(TradeRequest(
@@ -66,7 +66,7 @@ def test_chain_place_blocks_unverified_lot(monkeypatch):
 
 def test_execution_engine_blocks_unverified_lot(monkeypatch):
     import core.services.sl_monitor as _sl
-    monkeypatch.setattr(_sl, "market_open_ist", lambda: True)
+    monkeypatch.setattr(_sl, "market_open_ist", lambda *_a, **_k: True)
     monkeypatch.setattr(_sl, "entry_open_ist", lambda *_a, **_k: True)
     from core.services.execution_engine import execute
     r = execute([{"option_type": "CE", "transaction": "buy", "lots": 1}],

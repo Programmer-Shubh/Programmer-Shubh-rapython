@@ -24,7 +24,7 @@ def _paper_req():
 
 
 def test_chain_place_blocked_when_closed(monkeypatch):
-    monkeypatch.setattr(slm, "market_open_ist", lambda: False)
+    monkeypatch.setattr(slm, "market_open_ist", lambda *_a, **_k: False)
     r = oc.place_trade(_chain_req())
     assert "Market band" in (r.get("error") or ""), r
 
@@ -32,7 +32,7 @@ def test_chain_place_blocked_when_closed(monkeypatch):
 def test_chain_place_passes_gate_when_open(monkeypatch):
     # gate passes -> fails later on option-type validation (proves gate open,
     # and no DB write happens on this path)
-    monkeypatch.setattr(slm, "market_open_ist", lambda: True)
+    monkeypatch.setattr(slm, "market_open_ist", lambda *_a, **_k: True)
     req = _chain_req()
     req.option_type = "XX"
     r = oc.place_trade(req)
@@ -41,14 +41,14 @@ def test_chain_place_passes_gate_when_open(monkeypatch):
 
 
 def test_trades_place_blocked_when_closed(monkeypatch):
-    monkeypatch.setattr(slm, "market_open_ist", lambda: False)
+    monkeypatch.setattr(slm, "market_open_ist", lambda *_a, **_k: False)
     r = pt.place_trade(_paper_req())
     assert "Market band" in (r.get("error") or ""), r
 
 
 def test_execution_engine_paper_gated(monkeypatch):
     from core.services import execution_engine as ee
-    monkeypatch.setattr(slm, "market_open_ist", lambda: False)
+    monkeypatch.setattr(slm, "market_open_ist", lambda *_a, **_k: False)
     r = ee.execute([{"option_type": "CE", "transaction": "buy", "lots": 1}],
                    "NIFTY", mode="PAPER")
     assert "Market band" in (r.get("error") or ""), r

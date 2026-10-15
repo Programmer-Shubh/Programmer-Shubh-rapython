@@ -17,10 +17,24 @@ def _candles(symbol: str, start: str, end: str) -> list:
     )
     if not rows or len(rows) < 5:
         try:
-            from routes.strategy_builder import _generate_synthetic_fallback
-            rows = _generate_synthetic_fallback(symbol, start, end)
+            from utils.helpers import is_mcx as _ismcx
+            _is_mcx_sym = bool(_ismcx(symbol))
         except Exception:
-            rows = []
+            _is_mcx_sym = False
+        if _is_mcx_sym:
+            # MCX: proxy history (labeled) ya honest empty - synthetic
+            # fantasy chart par KABHI nahi.
+            try:
+                from core.services.mcx_feed import fetch_mcx_history as _mch
+                rows, _src = _mch(symbol, start, end)
+            except Exception:
+                rows = []
+        else:
+            try:
+                from routes.strategy_builder import _generate_synthetic_fallback
+                rows = _generate_synthetic_fallback(symbol, start, end)
+            except Exception:
+                rows = []
     out = []
     for r in rows:
         try:

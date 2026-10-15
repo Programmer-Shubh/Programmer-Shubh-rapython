@@ -1524,12 +1524,39 @@ class BacktestEngine:
                 "total_cost": round(premium * qty + costs["total"], 2),
                 "type": txn_type, "legs": [{"option_type": "EQ", "strike": round(float(spot or 0), 2), "type": txn_type, "lots": lots}],
             }
+        if str(option_type).upper() == "FUT":
+            # MCX futures: price IS the contract price (no strike/premium);
+            # qty = lots x official lot (quote units). Costs options-style
+            # (flat + CTT sell-side via exchange flag).
+            try:
+                from utils.helpers import exchange_of as _exof
+                _ex = _exof(symbol)
+            except Exception:
+                _ex = "NSE"
+            qty = max(1, lots) * get_lot_size(symbol)
+            premium = TransactionCosts.apply_fill_slippage(float(spot or 0), "BUY" if txn_type == "buy" else "SELL", self.is_live)
+            costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live, exchange=_ex)
+            entry_time = getattr(self, '_entry_time', '09:35')
+            entry_clock = getattr(self, '_cur_bar_time', '') or entry_time
+            return {
+                "date": date, "strike": 0.0, "price": round(premium, 2),
+                "quantity": qty, "costs": costs, "time": entry_clock,
+                "total_cost": round(premium * qty + costs["total"], 2),
+                "type": txn_type, "legs": [{"option_type": "FUT", "strike": 0.0, "type": txn_type, "lots": lots}],
+                "expiry": str(getattr(self, "bt_expiry", "") or ""),
+                "prem_src": "futures",
+            }
         qty = lots * get_lot_size(symbol)
         strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
         premium = self._entry_premium(date, spot, strike, option_type)
         premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
         premium = max(premium, 1.5)
-        costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
+        try:
+            from utils.helpers import exchange_of as _exof6
+            _exch6 = _exof6(symbol)
+        except Exception:
+            _exch6 = "NSE"
+        costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live, exchange=_exch6)
         entry_time = getattr(self, '_entry_time', '09:35')
         # Real signal-bar time when known (intraday); daily bars honestly
         # keep the configured session entry time.
@@ -1647,9 +1674,9 @@ class BacktestEngine:
         sl_level = _to_level(sl_amt, True)
         tp_level = _to_level(tp_amt, False)
 
-        # EQ (equity spot) legs: SL/TP on the BAR's spot high/low directly -
-        # no Black-Scholes, no option chain. Same source as EQ entry.
-        if str(option_type or "").upper() == "EQ":
+        # EQ (equity spot) / FUT (futures price) legs: SL/TP on the BAR's
+        # high/low directly - no Black-Scholes, no option chain.
+        if str(option_type or "").upper() in ("EQ", "FUT"):
             try:
                 _hs = float(current.get("high_price", 0) or current.get("close_price", 0) or 0)
                 _ls = float(current.get("low_price", 0) or current.get("close_price", 0) or 0)
@@ -1726,8 +1753,8 @@ class BacktestEngine:
             _memo = None
         _src = "model"
         try:
-            if str(option_type or "").upper() == "EQ":
-                _src = "spot"
+            if str(option_type or "").upper() in ("EQ", "FUT"):
+                _src = "spot" if str(option_type or "").upper() == "EQ" else "futures"
             elif getattr(self, "is_live", False):
                 _src = "live"
             elif not getattr(self, "_skip_db", False):
@@ -2006,14 +2033,14 @@ class BacktestEngine:
         return getattr(self, '_expiry_hint', 'weekly')
 
     def _exit_premium(self, date, spot, strike, option_type):
-        # EQ legs exit at the execution-bar spot (no option chain involved)
-        if str(option_type or "").upper() == "EQ":
+        # EQ/FUT legs exit at the execution-bar price (no option chain involved)
+        if str(option_type or "").upper() in ("EQ", "FUT"):
             return max(float(spot or 0), 0.01)
         return self._entry_premium(date, spot, strike, option_type)
 
     def _close_premium(self, date, spot, strike, option_type):
-        # EQ legs exit at the execution-bar spot (no option chain involved)
-        if str(option_type or "").upper() == "EQ":
+        # EQ/FUT legs exit at the execution-bar price (no option chain involved)
+        if str(option_type or "").upper() in ("EQ", "FUT"):
             return max(float(spot or 0), 0.01)
         key = f"{date}_{strike}_{option_type}_c"
         if key in self.premium_cache:
@@ -2158,15 +2185,20 @@ class BacktestEngine:
         # else a spot*1.5% floor (~42) silently destroys every stop-loss.
         exit_prem = max(float(exit_prem or 0), 0.05)
         try:
-            _eq_exit = str((entry.get("legs", [{}])[0] or {}).get("option_type", "")) == "EQ"
+            _lt = str((entry.get("legs", [{}])[0] or {}).get("option_type", "")).upper()
         except Exception:
-            _eq_exit = False
-        if _eq_exit:
+            _lt = ""
+        if _lt == "EQ":
             # Exit side is opposite of entry (buy->SELL): same convention as above
             exit_costs = TransactionCosts.calculate_equity(
                 exit_prem * qty, txn_type == "buy", getattr(self, "_eq_intraday", True))
         else:
-            exit_costs = TransactionCosts.calculate(exit_prem * qty, txn_type == "buy", self.is_live)
+            try:
+                from utils.helpers import exchange_of as _exof2
+                _ex2 = _exof2(getattr(self, "bt_symbol", ""))
+            except Exception:
+                _ex2 = "NSE"
+            exit_costs = TransactionCosts.calculate(exit_prem * qty, txn_type == "buy", self.is_live, exchange=_ex2)
         if txn_type == "buy":
             pnl = (exit_prem * qty - exit_costs["total"]) - entry["total_cost"]
         else:

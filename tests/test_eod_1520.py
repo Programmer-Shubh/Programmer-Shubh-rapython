@@ -15,14 +15,19 @@ def _now(hh, mm):
     return datetime.datetime(2026, 10, 14, hh, mm)  # Wednesday
 
 
-def _mk(tm, trade_type, entry_date="2026-10-14"):
+def _today():
+    import datetime as _dt
+    return (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
+
+
+def _mk(tm, trade_type, entry_date=None):
     return tm.db.execute(
         "INSERT INTO paper_trades (user_id, symbol, option_type, strike_price,"
         " transaction_type, quantity, lot_size, entry_price, stop_loss, target,"
         " total_cost, entry_date, trade_type, status)"
         " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [UID, "NIFTY", "CE", 25000, "BUY", 1, 65, 100.0,
-         1500, 3000, 0.0, entry_date, trade_type, "open"])
+         1500, 3000, 0.0, entry_date or _today(), trade_type, "open"])
 
 
 def _cleanup(tm):

@@ -978,9 +978,21 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     continue
                 if _has_opt_legs and not _isopt(_sym):
                     _per_symbol[_sym] = {"error": f"{_sym} me options nahi hain (F&O me listed nahi) - option backtest/trade impossible. Spot/Equity par chalao.", "total_trades": 0,
-                                         "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
+                                         "winning_trades": 0, "win_rate": 0, "net_pnl": 0}
                     _fire_prog(_sym)
                     continue
+                # FUT (MCX futures) legs sirf MCX symbols par (NSE par futures
+                # chain yahan nahi - fantasy fills rokne ke liye hard gate).
+                try:
+                    from utils.helpers import is_mcx as _ismcx2
+                    _has_fut = any(str((l or {}).get("option_type", "")).upper() == "FUT" for l in (legs or []))
+                    if _has_fut and not _ismcx2(_sym):
+                        _per_symbol[_sym] = {"error": f"{_sym} MCX commodity nahi - FUT legs sirf MCX symbols (CRUDEOIL/GOLD/...) par.", "total_trades": 0,
+                                             "winning_trades": 0, "win_rate": 0, "net_pnl": 0}
+                        _fire_prog(_sym)
+                        continue
+                except Exception:
+                    pass
             except Exception:
                 pass
             # Timeframe decides the data path FIRST (spec §5): intraday TF par

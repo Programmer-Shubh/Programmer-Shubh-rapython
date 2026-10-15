@@ -32,7 +32,8 @@ def _check_fn():
         return None
 
 
-def market_open_ist():
+def market_open_ist(symbol: str = "NIFTY"):
+    """Exchange-aware session: NSE 9:00-15:45, MCX 9:00-23:30 (Mon-Fri IST)."""
     try:
         from datetime import datetime, timedelta, timezone
         ist = timezone(timedelta(hours=5, minutes=30))
@@ -40,20 +41,25 @@ def market_open_ist():
         if now.weekday() >= 5:
             return False
         mins = now.hour * 60 + now.minute
-        return 9 * 60 <= mins <= 15 * 60 + 45
+        try:
+            from utils.helpers import session_of as _sess
+            _se = _sess(symbol)
+            return int(_se.get("open_min", 540)) <= mins <= int(_se.get("close_min", 945))
+        except Exception:
+            return 9 * 60 <= mins <= 15 * 60 + 45
     except Exception:
         return True
 
 
-ENTRY_CUTOFF_MIN = 15 * 60 + 15  # 3:15 PM IST - iske baad NAYI entry nahi
+ENTRY_CUTOFF_MIN = 15 * 60 + 15  # NSE default - iske baad NAYI entry nahi
 
 
-def entry_open_ist(_now=None):
-    """Nayi ENTRY allowed? Market khula + 3:15 PM se pehle (user demand).
-    EXITS (close/SL/TP/strategy-exit/square-off) hamesha khule rehte hain -
-    ye gate sirf naye orders rokta hai. _now: test hook (IST datetime)."""
+def entry_open_ist(_now=None, symbol: str = "NIFTY"):
+    """Nayi ENTRY allowed? Market khula + exchange cutoff se pehle
+    (NSE 3:15 PM, MCX 11:00 PM). EXITS hamesha khule - ye gate sirf naye
+    orders rokta hai. _now: test hook (IST datetime)."""
     try:
-        if not market_open_ist():
+        if not market_open_ist(symbol):
             return False
         from datetime import timedelta, timezone
         if _now is None:
@@ -61,14 +67,34 @@ def entry_open_ist(_now=None):
             ist = timezone(timedelta(hours=5, minutes=30))
             _now = _dt.now(ist)
         mins = _now.hour * 60 + _now.minute
-        return mins < ENTRY_CUTOFF_MIN
+        try:
+            from utils.helpers import session_of as _sess2
+            _cut = int(_sess2(symbol).get("entry_cutoff_min", ENTRY_CUTOFF_MIN))
+        except Exception:
+            _cut = ENTRY_CUTOFF_MIN
+        return mins < _cut
     except Exception:
         return False
 
 
-def entry_block_reason():
-    return ("3:15 PM ke baad nayi entry band hai - kal market khulne par order "
-            "lagao (exit/SL/Target hamesha chalu rahenge)")
+def _fmt_min(m):
+    try:
+        return f"{int(m) // 60}:{int(m) % 60:02d}"
+    except Exception:
+        return "3:15 PM"
+
+
+def entry_block_reason(symbol: str = "NIFTY"):
+    try:
+        from utils.helpers import session_of as _sess3, exchange_of as _ex
+        _se = _sess3(symbol)
+        _cut = _fmt_min(_se.get("entry_cutoff_min", ENTRY_CUTOFF_MIN))
+        _exn = _se.get("exchange", _ex(symbol))
+        return (f"{_exn} me {_cut} ke baad nayi entry band hai - agle session me order "
+                "lagao (exit/SL/Target hamesha chalu rahenge)")
+    except Exception:
+        return ("3:15 PM ke baad nayi entry band hai - kal market khulne par order "
+                "lagao (exit/SL/Target hamesha chalu rahenge)")
 
 
 def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
