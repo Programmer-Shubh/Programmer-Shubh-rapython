@@ -5,7 +5,7 @@ from core.models.database import Database
 
 
 FNO_SYMBOLS = [
-    "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX",
+    "NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX",
     "RELIANCE", "HDFCBANK", "ICICIBANK", "TCS", "INFY", "ITC", "SBIN",
     "AXISBANK", "KOTAKBANK", "LT", "HINDUNILVR", "BHARTIARTL", "M&M",
     "MARUTI", "BAJFINANCE", "WIPRO", "ONGC", "SUNPHARMA", "ULTRACEMCO",
@@ -29,7 +29,7 @@ class OptionScanner:
     SD_CFG = {"swing_lookback": 20, "exclude_last": 3,
               "zone_pct": 0.005, "max_touches": 2, "vol_mult": 1.5}
     # Intraday universe (15 liquid names; per-symbol TV fetch is the cost).
-    INTRA_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",
+    INTRA_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY",
                      "SENSEX", "BANKEX", "RELIANCE", "HDFCBANK", "ICICIBANK",
                      "TCS", "INFY", "ITC", "SBIN", "POWERGRID", "TATAMOTORS"]
     _INTRA_CACHE = {}
@@ -301,7 +301,7 @@ class OptionScanner:
         # Dashboard rule: stocks AND indices both visible. Split the list and
         # take top indices + top stocks (3+2) instead of pure top-5, so high
         # scoring indices can no longer push all stocks out.
-        indices_set = {'NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'}
+        indices_set = {'NIFTY','BANKNIFTY','FINNIFTY'}
         idx_sigs = [s for s in all_signals if s['symbol'] in indices_set]
         stk_sigs = [s for s in all_signals if s['symbol'] not in indices_set]
         n_idx = min(3, len(idx_sigs))
@@ -1410,7 +1410,7 @@ class OptionScanner:
             return {'strike': 0, 'premium': 0, 'expiry': '', 'spot': 0}
         # Freshness validation: reject stale spot (>3% away from DB latest
         # close). A stale spot (wrong index feed, old cache) produced far
-        # ITM/OTM strikes like NIFTY 20700 / MIDCPNIFTY 17850.
+        # ITM/OTM strikes like NIFTY 20700.
         # Never override a FRESH live price with a possibly-stale DB close.
         if not _live_px:
             try:

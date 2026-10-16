@@ -25,11 +25,10 @@ UNDERLYING = {
     "NIFTY": (13, "IDX_I"),
     "BANKNIFTY": (25, "IDX_I"),
     "FINNIFTY": (27, "IDX_I"),
-    "MIDCPNIFTY": (261, "IDX_I"),
     "SENSEX": (51, "IDX_I"),
 }
 
-WEEKLY_IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+WEEKLY_IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX"}
 
 
 def _data_dir() -> str:
@@ -215,8 +214,8 @@ class DhanLive:
 
     async def get_index_history(self, symbol: str, start_date: str, end_date: str) -> list:
         """Daily OHLC history for an NSE/BSE index via DhanHQ v2 charts/historical.
-        FINNIFTY/MIDCPNIFTY ka Yahoo symbol dead hai aur NSE cloud-blocked -
-        user ka connected Dhan token hi official source hai. Returns bar dicts
+        Yahoo-dead symbols (jaise FINNIFTY) ke liye user ka connected Dhan
+        token hi official source hai. Returns bar dicts
         (trade_date/open/high/low/close/volume) ya []."""
         try:
             import datetime as _dt
@@ -300,8 +299,7 @@ class DhanLive:
             return []
 
     async def get_index_spot(self, symbol: str) -> float:
-        """Live index spot via DhanHQ v2 marketfeed quote (works for MIDCPNIFTY
-        where Yahoo/Google/Stooq have no symbol). Returns 0 on any failure."""
+        """Live index spot via DhanHQ v2 marketfeed quote. Returns 0 on any failure."""
         try:
             info = UNDERLYING.get((symbol or "").upper())
             if not info:

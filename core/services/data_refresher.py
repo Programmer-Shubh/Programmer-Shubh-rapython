@@ -7,7 +7,7 @@ from core.models.bhavcopy_model import BhavcopyModel
 
 logger = logging.getLogger(__name__)
 
-INDEX_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
+INDEX_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
 EXTRA_SYMBOLS = ["RELIANCE", "HDFCBANK", "ICICIBANK", "TCS", "INFY", "ITC", "SBIN",
                  "AXISBANK", "KOTAKBANK", "LT", "HINDUNILVR", "BHARTIARTL", "M&M", "MARUTI",
                  "BAJFINANCE", "WIPRO", "ONGC", "SUNPHARMA", "ULTRACEMCO", "NTPC", "POWERGRID",

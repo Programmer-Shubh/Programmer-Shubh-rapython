@@ -16,7 +16,7 @@ def get_spots():
     # Cloud-first live prices (parallel, ~5s max): Yahoo -> Google -> Stooq -> DB stale.
     # Sequential 8s fetches caused proxy 502s; parallel fixes it.
     live = LiveMarketData()
-    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "HDFCBANK", "TCS", "INFY"]
+    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "HDFCBANK", "TCS", "INFY"]
     try:
         found = live.get_live_spots_parallel(symbols, max_workers=8) or {}
     except Exception:
@@ -426,7 +426,7 @@ def get_top_opportunities():
     # Since we can't async await in sync route, return structured top 5 from scanner logic
     
     # Actually, let's just return a structured response with live spot prices for major indices
-    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"]
+    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX"]
     result = []
     
     for sym in symbols:

@@ -6,7 +6,7 @@ Usage:  PYTHONPATH=. python scripts/fill_history.py [months] [SYM1 SYM2 ...]
 import sys
 import datetime
 
-SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",
+SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY",
            "RELIANCE", "TCS", "HDFCBANK", "INFY", "AXISBANK",
            "BAJAJFINSV", "BHARTIARTL", "BPCL", "SBILIFE"]
 

@@ -166,7 +166,7 @@ async def _startup_background():
                              for r in (_rows or []) if r.get("symbol")]
                 except Exception:
                     _syms = []
-                for _s in ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]:
+                for _s in ["NIFTY", "BANKNIFTY", "FINNIFTY"]:
                     if _s not in _syms:
                         _syms.append(_s)
                 for sym in _syms:

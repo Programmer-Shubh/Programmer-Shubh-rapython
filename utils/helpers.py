@@ -63,11 +63,11 @@ def _load_nse_lots():
 
 # Verified static lot map (module-level taaki get_lot_size + official_lot
 # ek hi source dekhen - drift impossible). NSE lots Dec-2025 revision
-# (ICICI-Direct: NIFTY 65, BANKNIFTY 30, FINNIFTY 60, MIDCPNIFTY 120);
+# (ICICI-Direct: NIFTY 65, BANKNIFTY 30, FINNIFTY 60);
 # BSE lots Oct-2026 verified (SENSEX 20, BANKEX 30). Broker master (NSE)
 # runtime par override karta hai.
 _STATIC_LOTS = {
-    "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120,
+    "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60,
     "SENSEX": 20, "BANKEX": 30,
     "RELIANCE": 500, "HDFCBANK": 650, "ICICIBANK": 700,
     "TCS": 225, "INFY": 400, "ITC": 1725, "SBIN": 750,
@@ -196,7 +196,7 @@ def lot_source(symbol: str) -> str:
         return "default"
 
 
-OPTION_INDICES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+OPTION_INDICES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX"}
 
 # Canonical NSE F&O stock list (options exist ONLY on these + indices).
 # ETFs like GOLDBEES/SILVERBEES have NO options - option backtests/orders
@@ -296,7 +296,7 @@ def check_min_premium(premium, option_type: str = "CE") -> str | None:
 
 def get_strike_step(symbol: str) -> float:
     steps = {
-        "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50, "MIDCPNIFTY": 50,
+        "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
         "SENSEX": 100, "BANKEX": 100,
         # Stocks: use appropriate strike steps based on price range
         "BAJFINANCE": 200, "BAJAJFINSV": 200, "MARUTI": 200, "SHREECEM": 100,
@@ -389,7 +389,7 @@ OPTION_MODEL_IV = 0.25
 OPTION_MODEL_MIN = 1.5
 
 _SYMBOL_IV = {
-    "NIFTY": 0.13, "BANKNIFTY": 0.15, "FINNIFTY": 0.14, "MIDCPNIFTY": 0.16,
+    "NIFTY": 0.13, "BANKNIFTY": 0.15, "FINNIFTY": 0.14,
     "SENSEX": 0.13, "BANKEX": 0.14,
     "ADANIENT": 0.35, "VEDL": 0.35, "INDUSINDBK": 0.35,
 }
@@ -403,7 +403,7 @@ def model_iv(symbol: str | None) -> float:
     if s in _SYMBOL_IV:
         return _SYMBOL_IV[s]
     # Indices default 0.14, stocks default 0.30
-    if s in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX",
+    if s in ("NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX",
              "INDIAVIX"):
         return 0.14
     return 0.30

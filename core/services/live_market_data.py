@@ -41,7 +41,7 @@ def _chain_cache_get(sym):
         return _CHAIN_CACHE[sym]["data"]
     return None
 
-_SYMBOL_MAP = {"NIFTY": "nifty", "BANKNIFTY": "banknifty", "FINNIFTY": "finnifty", "MIDCPNIFTY": "midcpnifty"}
+_SYMBOL_MAP = {"NIFTY": "nifty", "BANKNIFTY": "banknifty", "FINNIFTY": "finnifty"}
 
 # NSE cloud IP block: remove niftytrader.in headers; use cloud-friendly sources only
 _HEADERS = {

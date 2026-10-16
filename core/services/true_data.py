@@ -1,5 +1,5 @@
 """
-TrueData (truedata.in) — Authorized NSE/BSE/MCX vendor.
+TrueData (truedata.in) — Authorized NSE/BSE vendor.
 Optional: requires TRUEDATA_USERNAME/TRUEDATA_PASSWORD or TRUEDATA_API_KEY env vars.
 If not configured, all functions return None/[] gracefully.
 """

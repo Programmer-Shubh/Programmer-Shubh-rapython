@@ -27,7 +27,7 @@ REQ_UNSUB_TICKER = 16
 REQ_UNSUB_QUOTE = 18
 
 SEG_BYTE = {0: "IDX_I", 1: "NSE_EQ", 2: "NSE_FNO", 3: "NSE_CURR",
-            4: "BSE_EQ", 5: "MCX_COMM", 7: "BSE_CURR", 8: "BSE_FNO"}
+            4: "BSE_EQ", 7: "BSE_CURR", 8: "BSE_FNO"}
 
 # Response codes we parse LTP from (float32 LE at offset 8)
 _LTP_CODES = (1, 2, 4, 8)

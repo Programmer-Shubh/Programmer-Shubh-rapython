@@ -97,7 +97,7 @@ def _resolve_expiry(symbol: str, hint: str) -> str:
         pass
     today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
     wd = 3 if symbol.upper() == "SENSEX" else 1  # Thu vs Tue
-    weekly_idx = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+    weekly_idx = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX"}
     hl = hint.lower()
     if hl.startswith("month"):
         pass  # monthly calc below
@@ -359,7 +359,7 @@ async def angel_callback(request: Request):
 
 
 @router.get("/dhan-feed-check")
-async def dhan_feed_check(symbol: str = "MIDCPNIFTY"):
+async def dhan_feed_check(symbol: str = "FINNIFTY"):
     """Diagnose Dhan marketfeed (no secrets exposed): tries quote + LTP shapes,
     returns which worked + spot. Helps debug Render IP blocks on weekends."""
     from core.services.broker_dhan_live import DhanLive, UNDERLYING

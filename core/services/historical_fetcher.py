@@ -35,7 +35,7 @@ def _clean_num(v) -> float:
     except: return 0
 
 def _fetch_truedata_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """TrueData (truedata.in): Authorized NSE/BSE/MCX vendor — requires TRUEDATA_USERNAME/PASSWORD or TRUEDATA_API_KEY."""
+    """TrueData (truedata.in): Authorized NSE/BSE vendor — requires TRUEDATA_USERNAME/PASSWORD or TRUEDATA_API_KEY."""
     try:
         import os
         td_user = os.environ.get("TRUEDATA_USERNAME", "")
@@ -165,7 +165,7 @@ def _fetch_google_finance(symbol: str, start_date: str, end_date: str) -> List[D
 def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """Realistic synthetic OHLCV - instant (<5ms), seed varies daily so same indicator setting != same trade every day."""
     _SPOTS = {
-        "NIFTY": 24500, "BANKNIFTY": 51200, "FINNIFTY": 22800, "MIDCPNIFTY": 14800,
+        "NIFTY": 24500, "BANKNIFTY": 51200, "FINNIFTY": 22800,
         "RELIANCE": 2850, "HDFCBANK": 1780, "ICICIBANK": 1250, "TCS": 3950,
         "INFY": 1580, "ITC": 470, "SBIN": 780, "TATAMOTORS": 980,
         "BAJFINANCE": 6800, "KOTAKBANK": 1820, "LT": 3650, "AXISBANK": 1150,
@@ -254,7 +254,7 @@ def _fetch_openchart_historical(symbol: str, start_date: str, end_date: str) -> 
         from openchart import NSEData
         import datetime as _dt
         from concurrent.futures import ThreadPoolExecutor
-        _IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+        _IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX"}
         seg = "IDX" if symbol.upper() in _IDX else "EQ"
         try:
             sd = _dt.datetime.strptime(start_date, "%Y-%m-%d")
@@ -322,7 +322,7 @@ def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> 
 
         def _do():
             from nsepython import equity_history, index_history
-            _IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX", "INDIAVIX"}
+            _IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX", "INDIAVIX"}
             try:
                 if sym in _IDX:
                     return index_history(sym, _s, _e)
@@ -380,8 +380,8 @@ def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> 
 
 def _fetch_dhan_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """DhanHQ charts/historical (user ka connected broker token).
-    FINNIFTY/MIDCPNIFTY ka Yahoo dead + NSE cloud-blocked hai - yehi official
-    source bachta hai. Token na ho to turant [] (koi network nahi, chain aage).
+    FINNIFTY ka Yahoo dead + NSE cloud-blocked hai - yehi official source
+    bachta hai. Token na ho to turant [] (koi network nahi, chain aage).
     Overall 25s cap (thread-guarded) taaki backtest hang na ho."""
     try:
         from core.services.broker_dhan_live import UNDERLYING as _UL
@@ -419,15 +419,14 @@ _NSE_INDEX_NAMES = {
     "NIFTY": "Nifty 50",
     "BANKNIFTY": "Nifty Bank",
     "FINNIFTY": "Nifty Financial Services",
-    "MIDCPNIFTY": "Nifty Midcap Select",
     "INDIAVIX": "India VIX",
 }
 
 
 def _fetch_nseindex_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """NSE official index archive (ind_close_all_DDMMYYYY.csv, ~17KB/day).
-    FINNIFTY/MIDCPNIFTY ka Yahoo dead + NSE-API cloud-blocked hai - yehi
-    broker-free official source bachta hai (Dhan token ki zaroorat nahi).
+    FINNIFTY ka Yahoo dead + NSE-API cloud-blocked hai - yehi broker-free
+    official source bachta hai (Dhan token ki zaroorat nahi).
     Parallel fetch (8 workers), overall ~60s cap. Na mile to [] (chain aage)."""
     try:
         import datetime as _dt
@@ -527,10 +526,9 @@ def _fetch_stooq_historical(symbol: str, start_date: str, end_date: str) -> List
     try:
         import io, csv as _csv
         import datetime as _dt
-        # NOTE: FINNIFTY (^cnxfin galat/stale levels deta hai) aur MIDCPNIFTY
-        # (^nsemidcap50 Midcap 50 hai, Select nahi) STOOQ MAP SE HATAYE -
-        # galat instrument par backtest se bada nuksaan hota. Ye symbols
-        # Dhan-historical (upar) ya NSE se aate hain, warna honest empty.
+        # NOTE: FINNIFTY (^cnxfin galat/stale levels deta hai) STOOQ MAP SE
+        # HATAYA - galat instrument par backtest se bada nuksaan hota. Ye
+        # symbol Dhan-historical (upar) ya NSE se aata hai, warna honest empty.
         _STOOQ = {"NIFTY": "^nsei", "BANKNIFTY": "^nsebank", "SENSEX": "^sensex"}
         ssym = _STOOQ.get(symbol.upper(), f"{symbol.lower()}.in")
         sd = _dt.datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d")

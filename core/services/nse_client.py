@@ -46,7 +46,7 @@ _API_OC_V3_EQUITY = f"{_NSE_BASE}/api/option-chain-v3?type=Equity&symbol={{symbo
 _API_OC_V2_INDICES = f"{_NSE_BASE}/api/option-chain-indices?symbol={{symbol}}"
 _API_OC_V2_EQUITY = f"{_NSE_BASE}/api/option-chain-equities?symbol={{symbol}}"
 
-_INDICES_SET = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+_INDICES_SET = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX"}
 
 # Rate limiting: min interval between NSE calls
 _MIN_INTERVAL_SEC = 0.35
@@ -467,12 +467,12 @@ def nse_fetch_spot(symbol: str, timeout: float = 5) -> Optional[Dict[str, Any]]:
     if _is_cloud():
         return None
     sym = symbol.upper().strip()
-    if sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"):
+    if sym in ("NIFTY", "BANKNIFTY", "FINNIFTY"):
         # Use allIndices via centralized session
         try:
             r = _request_with_retry(_API_ALL_INDICES, timeout=timeout, max_retries=1)
             if r and r.status_code == 200:
-                _map = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK", "FINNIFTY": "NIFTY FINANCIAL SERVICES", "MIDCPNIFTY": "NIFTY MIDCAP SELECT"}
+                _map = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK", "FINNIFTY": "NIFTY FINANCIAL SERVICES"}
                 target = _map.get(sym)
                 for item in r.json().get("data", []):
                     if item.get("index") == target:

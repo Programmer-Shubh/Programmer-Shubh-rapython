@@ -9,7 +9,7 @@ class EmailAlertParser:
 
     SYMBOL_MAP = {
         "nifty": "NIFTY", "banknifty": "BANKNIFTY", "finnifty": "FINNIFTY",
-        "midcpnifty": "MIDCPNIFTY", "nifty50": "NIFTY", "nifty bank": "BANKNIFTY",
+        "nifty50": "NIFTY", "nifty bank": "BANKNIFTY",
         "reliance": "RELIANCE", "hdfcbank": "HDFCBANK", "icicibank": "ICICIBANK",
         "tcs": "TCS", "infy": "INFY", "itc": "ITC", "sbi": "SBIN", "sbin": "SBIN",
         "axisbank": "AXISBANK", "kotakbank": "KOTAKBANK", "lt": "LT",

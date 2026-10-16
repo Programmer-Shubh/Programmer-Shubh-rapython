@@ -1,4 +1,4 @@
-"""Dhan historical (FINNIFTY/MIDCPNIFTY): parsing + fail-fast + chain wiring."""
+"""Dhan historical (FINNIFTY): parsing + fail-fast + chain wiring."""
 import os
 import sys
 
@@ -60,21 +60,21 @@ def test_fetch_dhan_with_creds(monkeypatch):
     monkeypatch.setattr(cp, "_real_token", lambda tok: True)
 
     async def _fake_hist(self, symbol, s, e):
-        assert symbol == "MIDCPNIFTY"
-        return [{"symbol": "MIDCPNIFTY", "trade_date": "2026-09-29",
-                 "open_price": 12000.0, "high_price": 12100.0,
-                 "low_price": 11950.0, "close_price": 12050.0,
+        assert symbol == "FINNIFTY"
+        return [{"symbol": "FINNIFTY", "trade_date": "2026-09-29",
+                 "open_price": 27000.0, "high_price": 27100.0,
+                 "low_price": 26950.0, "close_price": 27050.0,
                  "volume": 500, "oi": 0}]
 
     monkeypatch.setattr(bdl.DhanLive, "get_index_history", _fake_hist)
-    out = hf._fetch_dhan_historical("MIDCPNIFTY", "2026-09-29", "2026-09-30")
-    assert len(out) == 1 and out[0]["close_price"] == 12050.0
+    out = hf._fetch_dhan_historical("FINNIFTY", "2026-09-29", "2026-09-30")
+    assert len(out) == 1 and out[0]["close_price"] == 27050.0
     # non-index symbol -> []
     assert hf._fetch_dhan_historical("RELIANCE", "2026-09-29", "2026-09-30") == []
 
 
 def test_stooq_wrong_mappings_removed():
-    """FINNIFTY/MIDCPNIFTY ke galat Stooq map hate (wrong-instrument guard)."""
+    """FINNIFTY ke galat Stooq map hate (wrong-instrument guard)."""
     import inspect
     import core.services.historical_fetcher as hf
     src = inspect.getsource(hf._fetch_stooq_historical)

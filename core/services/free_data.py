@@ -6,8 +6,6 @@ import re
 # Yahoo Finance symbols (works from cloud - Yahoo does NOT block Render/AWS)
 # VERIFIED Sep 2026 vs NSE-direct: ^NSEI/^NSEBANK match NSE; FINNIFTY must be
 # NIFTY_FIN_SERVICE.NS (^CNXFIN is a different/stale index ~27638 vs ~25570).
-# MIDCPNIFTY (Midcap Select) has NO Yahoo symbol (^NSEMDCP50 is Midcap 50!) -
-# left out so it falls through to NSE/Google/DB, never a wrong index.
 _YAHOO_MAP = {
     "NIFTY": "^NSEI",
     "BANKNIFTY": "^NSEBANK",
@@ -182,10 +180,9 @@ def fetch_cloud_spot(symbol: str) -> dict:
             chg = float(d.get("change") or 0)
     except Exception:
         pass
-    # 1b) Dhan marketfeed (user's connected broker) — ONLY live source for
-    # MIDCPNIFTY (no Yahoo/Google/Stooq symbol exists for Midcap Select).
+    # 1b) Dhan marketfeed (user's connected broker).
     # WS streaming tick first, REST quote as backup.
-    if not spot and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"):
+    if not spot and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX"):
         try:
             from core.services.dhan_feed import ensure_feed_from_config as _effc
             from core.services.broker_dhan_live import UNDERLYING as _UL
@@ -198,7 +195,7 @@ def fetch_cloud_spot(symbol: str) -> dict:
                     spot, source = float(_wpx), "dhan-ws"
         except Exception:
             pass
-    if not spot and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"):
+    if not spot and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX"):
         try:
             import json as _js
             from core.models.database import Database as _DB

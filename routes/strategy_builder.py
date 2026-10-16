@@ -21,7 +21,7 @@ def _generate_synthetic_fallback(symbol: str, start_date: str, end_date: str) ->
     
     # Base prices for common symbols — must match historical_fetcher _SPOTS
     base_prices = {
-        'NIFTY': 24500, 'BANKNIFTY': 51200, 'FINNIFTY': 22800, 'MIDCPNIFTY': 14800,
+        'NIFTY': 24500, 'BANKNIFTY': 51200, 'FINNIFTY': 22800,
         'RELIANCE': 2850, 'HDFCBANK': 1780, 'ICICIBANK': 1250, 'TCS': 3950,
         'INFY': 1580, 'ITC': 470, 'SBIN': 780, 'AXISBANK': 1050, 'KOTAKBANK': 1820,
         'LT': 3650, 'HINDUNILVR': 2500, 'BHARTIARTL': 1650, 'M&M': 2900,
@@ -248,10 +248,10 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
 
 def _daily_fallback_range(sym, start_date, end_date):
     """Daily fallback, poora requested range: nsepython (NSE official) pehle,
-    phir Dhan broker-history (FINNIFTY/MIDCPNIFTY ka Yahoo dead hai), phir
-    Yahoo (60-day cut). Single source jo pehle 15+ bars de (koi date-merge
-    nahi). Returns (bars, src) - src: nsepython_daily / dhan_daily /
-    yahoo_daily / ""."""
+    phir NSE index-archive, phir Dhan broker-history (FINNIFTY ka Yahoo dead
+    hai), phir Yahoo (60-day cut). Single source jo pehle 15+ bars de (koi
+    date-merge nahi). Returns (bars, src) - src: nsepython_daily /
+    nse_index_archive / dhan_daily / yahoo_daily / ""."""
     try:
         from core.services.historical_fetcher import _fetch_nsepython_historical as _fnp
         try:
@@ -264,8 +264,8 @@ def _daily_fallback_range(sym, start_date, end_date):
             return _nb, "nsepython_daily"
     except Exception:
         pass
-    # NSE index archive (official, no broker needed): FINNIFTY/MIDCPNIFTY ka
-    # Yahoo dead hai - yehi broker-free source hai.
+    # NSE index archive (official, no broker needed): FINNIFTY ka Yahoo
+    # dead hai - yehi broker-free source hai.
     try:
         from core.services.historical_fetcher import _fetch_nseindex_historical as _fnx
         try:
@@ -708,7 +708,7 @@ def _dummy_trades_all_symbols(syms, start_date, end_date, legs, indicators):
     _seed = int(hashlib.md5(f"{','.join(syms)}{start_date}{str(indicators)}{str(legs)}".encode()).hexdigest()[:6], 16)
     _rnd.seed(_seed)
     # Base spot per symbol (approx live, for ATM calc)
-    _base = {"NIFTY": 24500, "BANKNIFTY": 50500, "FINNIFTY": 24500, "MIDCPNIFTY": 12500,
+    _base = {"NIFTY": 24500, "BANKNIFTY": 50500, "FINNIFTY": 24500,
              "AXISBANK": 1150, "BAJAJFINSV": 1850, "BAJFINANCE": 6800, "RELIANCE": 1400, "HDFCBANK": 1700, "ICICIBANK": 950, "SBIN": 800, "INFY": 1500, "TCS": 3400, "LT": 3600, "ITC": 430, "KOTAKBANK": 1750, "HINDUNILVR": 2400, "BHARTIARTL": 850, "M&M": 2800, "MARUTI": 12000, "WIPRO": 450, "ONGC": 270, "SUNPHARMA": 1700, "ULTRACEMCO": 10500, "NTPC": 330, "POWERGRID": 290, "TATAMOTORS": 950, "TATASTEEL": 140, "HCLTECH": 1650, "JSWSTEEL": 850, "COALINDIA": 400, "DRREDDY": 5800, "CIPLA": 1450, "ADANIENT": 2900, "SBILIFE": 1400, "BPCL": 340, "GRASIM": 2400, "TECHM": 1500, "DIVISLAB": 5200, "EICHERMOT": 4800, "BRITANNIA": 4900, "HINDALCO": 630, "VEDL": 440, "INDUSINDBK": 1450, "SHREECEM": 26000, "NESTLEIND": 2400, "APOLLOHOSP": 6200, "UPL": 520, "HEROMOTOCO": 4200, "TITAN": 3400}
     try:
         sd = _dt.datetime.strptime(start_date, "%Y-%m-%d")
@@ -2069,7 +2069,7 @@ def seed_backtest_data(symbol: str = "NIFTY", months: int = 12):
         end -= _dt.timedelta(days=1)
     start = end - _dt.timedelta(days=int(months*30.5))
     if symbol.upper() == "ALL":
-        targets = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL']
+        targets = ['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL']
     else:
         targets = [symbol.upper()]
     seeded = {}

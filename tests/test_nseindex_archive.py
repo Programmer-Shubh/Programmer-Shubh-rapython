@@ -1,4 +1,4 @@
-"""NSE index archive (FINNIFTY/MIDCPNIFTY broker-free official source)."""
+"""NSE index archive (FINNIFTY broker-free official source)."""
 import os
 import sys
 import datetime
@@ -8,10 +8,8 @@ os.environ.setdefault("DB_PATH", os.path.join("data", "ratrade.db"))
 
 _CSV = """Index Name,Index Date,Open Index Value,High Index Value,Low Index Value,Closing Index Value,Points Change,Change(%),Volume
 Nifty Financial Services,29-09-2026,27000.00,27150.00,26900.00,27100.00,100.00,.37,101195775
-Nifty Midcap Select,29-09-2026,13600.00,13650.00,13550.00,13634.00,42.65,.31,257584619
 Nifty Bank,29-09-2026,55350.15,55416.45,54708.80,54918.00,-338.65,-.61,164295019
 Nifty Financial Services,30-09-2026,27100.00,27200.00,27050.00,27150.00,50.00,.18,100000000
-Nifty Midcap Select,30-09-2026,13634.00,13700.00,13600.00,13680.00,46.00,.34,200000000
 """
 
 
@@ -39,22 +37,24 @@ def _dyn_resp(url="", **kw):
         return _R("Index Name,Index Date\n")
     px = 27000.0 + d.day
     t = (("Nifty Financial Services", px, "FIN"),
-         ("Nifty Midcap Select", 13600.0 + d.day, "MID"))
+         ("Nifty Bank", 55000.0 + d.day, "BNK"))
     lines = ["Index Name,Index Date,Open,High,Low,Close,Chg,Chg%,Vol"]
     for nm, c, _ in t:
         lines.append(f"{nm},{d.strftime('%d-%m-%Y')},{c},{c + 50},{c - 50},{c},10,.05,1000")
     return _R("\n".join(lines))
 
 
-def test_archive_parses_both_indices(monkeypatch):
+def test_archive_parses_indices(monkeypatch):
     import requests as _rq
     import core.services.historical_fetcher as hf
     monkeypatch.setattr(_rq, "get", _dyn_resp)
     f = hf._fetch_nseindex_historical("FINNIFTY", "2026-09-21", "2026-09-29")
     assert len(f) == 7 and f[0]["close_price"] == 27021.0, f
     assert f[0]["symbol"] == "FINNIFTY"
-    m = hf._fetch_nseindex_historical("MIDCPNIFTY", "2026-09-21", "2026-09-29")
-    assert len(m) == 7 and m[0]["close_price"] == 13621.0, m
+    b = hf._fetch_nseindex_historical("BANKNIFTY", "2026-09-21", "2026-09-29")
+    assert len(b) == 7 and b[0]["close_price"] == 55021.0, b
+    # removed symbol -> no network, honest empty
+    assert hf._fetch_nseindex_historical("MIDCPNIFTY", "2026-09-21", "2026-09-29") == []
 
 
 def test_archive_unknown_symbol_no_network(monkeypatch):

@@ -80,7 +80,7 @@ def scan_cross_market(symbols=None) -> Dict:
     sc = OptionScanner()
     live = LiveMarketData()
     # Only stocks have both NSE+BSE; indices (NIFTY etc) have no meaningful BSE cross
-    _INDICES = {"NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","SENSEX","BANKEX"}
+    _INDICES = {"NIFTY","BANKNIFTY","FINNIFTY","SENSEX","BANKEX"}
     if not symbols:
         symbols = ["RELIANCE","HDFCBANK","ICICIBANK","TCS","INFY","SBIN","AXISBANK","KOTAKBANK","LT","BHARTIARTL","ITC","BAJFINANCE"]
         symbols = [s for s in symbols if s not in _INDICES][:10]

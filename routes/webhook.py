@@ -60,7 +60,7 @@ def _parse_tv_message(raw: str) -> dict:
             out["action"] = parts[0].upper()
         # find symbol
         for pt in parts:
-            if pt.upper() in ("NIFTY","BANKNIFTY","FINNIFTY","MIDCPNIFTY","RELIANCE","TCS","INFY","SBIN","ITC","HDFCBANK","ICICIBANK","BAJFINANCE"):
+            if pt.upper() in ("NIFTY","BANKNIFTY","FINNIFTY","RELIANCE","TCS","INFY","SBIN","ITC","HDFCBANK","ICICIBANK","BAJFINANCE"):
                 out["symbol"] = pt.upper()
         # find strike
         for pt in parts:
