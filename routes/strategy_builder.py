@@ -248,8 +248,10 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
 
 def _daily_fallback_range(sym, start_date, end_date):
     """Daily fallback, poora requested range: nsepython (NSE official) pehle,
-    phir Yahoo (60-day cut). Single source jo pehle 15+ bars de (koi date-merge
-    nahi). Returns (bars, src) - src: nsepython_daily / yahoo_daily / ""."""
+    phir Dhan broker-history (FINNIFTY/MIDCPNIFTY ka Yahoo dead hai), phir
+    Yahoo (60-day cut). Single source jo pehle 15+ bars de (koi date-merge
+    nahi). Returns (bars, src) - src: nsepython_daily / dhan_daily /
+    yahoo_daily / ""."""
     try:
         from core.services.historical_fetcher import _fetch_nsepython_historical as _fnp
         try:
@@ -260,6 +262,18 @@ def _daily_fallback_range(sym, start_date, end_date):
                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
         if _nb and len(_nb) >= 15:
             return _nb, "nsepython_daily"
+    except Exception:
+        pass
+    try:
+        from core.services.historical_fetcher import _fetch_dhan_historical as _fdh
+        try:
+            _db2 = _fdh(sym, start_date, end_date) or []
+        except Exception:
+            _db2 = []
+        _db2 = [b for b in (_db2 or [])
+                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        if _db2 and len(_db2) >= 15:
+            return _db2, "dhan_daily"
     except Exception:
         pass
     try:

@@ -213,6 +213,92 @@ class DhanLive:
     async def get_order(self, order_id: str) -> dict:
         return await self._request("GET", f"/orders/{order_id}")
 
+    async def get_index_history(self, symbol: str, start_date: str, end_date: str) -> list:
+        """Daily OHLC history for an NSE/BSE index via DhanHQ v2 charts/historical.
+        FINNIFTY/MIDCPNIFTY ka Yahoo symbol dead hai aur NSE cloud-blocked -
+        user ka connected Dhan token hi official source hai. Returns bar dicts
+        (trade_date/open/high/low/close/volume) ya []."""
+        try:
+            import datetime as _dt
+            info = UNDERLYING.get((symbol or "").upper())
+            if not info:
+                return []
+            scrip, seg = info
+            try:
+                _s = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+                _e = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+            except Exception:
+                return []
+            if _e < _s:
+                return []
+            out = []
+            # Dhan range cap safe: 365d chunks
+            _cs, _ce = _s, min(_e, _s + _dt.timedelta(days=364))
+            while True:
+                try:
+                    res = await self._request(
+                        "POST", "/charts/historical",
+                        data={"securityId": str(scrip), "exchangeSegment": seg,
+                              "instrument": "INDEX",
+                              "fromDate": _cs.strftime("%Y-%m-%d"),
+                              "toDate": _ce.strftime("%Y-%m-%d")})
+                except Exception:
+                    break
+                try:
+                    data = (res.get("data") or {}) if isinstance(res, dict) else {}
+                    _o = data.get("open") or []
+                    _h = data.get("high") or []
+                    _l = data.get("low") or []
+                    _c = data.get("close") or []
+                    _v = data.get("volume") or []
+                    _t = data.get("timestamp") or data.get("start_Time") or []
+                    _ist = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+                    for k in range(len(_c or [])):
+                        try:
+                            _ts = _t[k] if k < len(_t or []) else 0
+                            _dtv = _dt.datetime.fromtimestamp(
+                                int(_ts), tz=_dt.timezone.utc).astimezone(_ist)
+                            if _dtv.weekday() >= 5:
+                                continue
+                            _cc = float((_c or [0])[k] or 0)
+                            if _cc <= 0:
+                                continue
+                            _oo = float((_o or [0])[k] if k < len(_o or []) else _cc) or _cc
+                            _hh = float((_h or [0])[k] if k < len(_h or []) else _cc) or _cc
+                            _ll = float((_l or [0])[k] if k < len(_l or []) else _cc) or _cc
+                            _vv = int(float((_v or [0])[k] or 0)) if k < len(_v or []) else 0
+                            out.append({"symbol": str(symbol or "").upper(),
+                                        "trade_date": _dtv.strftime("%Y-%m-%d"),
+                                        "open_price": round(_oo, 2),
+                                        "high_price": round(_hh, 2),
+                                        "low_price": round(_ll, 2),
+                                        "close_price": round(_cc, 2),
+                                        "volume": _vv, "oi": 0})
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+                if _ce >= _e:
+                    break
+                _cs = _ce + _dt.timedelta(days=1)
+                _ce = min(_e, _cs + _dt.timedelta(days=364))
+            # dedupe + range filter + chrono
+            try:
+                _seen, _fin = set(), []
+                for b in sorted(out, key=lambda x: str(x.get("trade_date", ""))):
+                    _d = str(b.get("trade_date", ""))[:10]
+                    if not _d or _d in _seen:
+                        continue
+                    if _d < str(start_date)[:10] or _d > str(end_date)[:10]:
+                        continue
+                    _seen.add(_d)
+                    _fin.append(b)
+                return _fin
+            except Exception:
+                return out
+        except Exception:
+            return []
+
     async def get_index_spot(self, symbol: str) -> float:
         """Live index spot via DhanHQ v2 marketfeed quote (works for MIDCPNIFTY
         where Yahoo/Google/Stooq have no symbol). Returns 0 on any failure."""

@@ -378,12 +378,53 @@ def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> 
         return []
 
 
+def _fetch_dhan_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """DhanHQ charts/historical (user ka connected broker token).
+    FINNIFTY/MIDCPNIFTY ka Yahoo dead + NSE cloud-blocked hai - yehi official
+    source bachta hai. Token na ho to turant [] (koi network nahi, chain aage).
+    Overall 25s cap (thread-guarded) taaki backtest hang na ho."""
+    try:
+        from core.services.broker_dhan_live import UNDERLYING as _UL
+        sym = str(symbol or "").upper()
+        if sym not in (_UL or {}):
+            return []
+        from core.services.contract_pricer import _broker_cfg as _bcfg, _real_token as _rtok
+        cfg = _bcfg("dhan") or {}
+        token = str(cfg.get("access_token") or "")
+        cid = str(cfg.get("client_id") or "")
+        if not _rtok(token) or not cid:
+            return []
+        from core.services.broker_dhan_live import DhanLive as _DL
+        import asyncio as _aio
+        import concurrent.futures as _cf
+        _dl = _DL(client_id=cid, access_token=token)
+        _ex = _cf.ThreadPoolExecutor(max_workers=1)
+        try:
+            bars = _ex.submit(
+                lambda: _aio.run(_dl.get_index_history(sym, start_date, end_date))
+            ).result(timeout=25)
+        except Exception:
+            bars = []
+        finally:
+            try:
+                _ex.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+        return [b for b in (bars or []) if b.get("close_price")] or []
+    except Exception:
+        return []
+
+
 def _fetch_stooq_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """Stooq daily CSV in-memory (no file write) - cloud-friendly, free, no key. Replaces Yahoo."""
     try:
         import io, csv as _csv
         import datetime as _dt
-        _STOOQ = {"NIFTY": "^nsei", "BANKNIFTY": "^nsebank", "FINNIFTY": "^cnxfin", "MIDCPNIFTY": "^nsemidcap50", "SENSEX": "^sensex"}
+        # NOTE: FINNIFTY (^cnxfin galat/stale levels deta hai) aur MIDCPNIFTY
+        # (^nsemidcap50 Midcap 50 hai, Select nahi) STOOQ MAP SE HATAYE -
+        # galat instrument par backtest se bada nuksaan hota. Ye symbols
+        # Dhan-historical (upar) ya NSE se aate hain, warna honest empty.
+        _STOOQ = {"NIFTY": "^nsei", "BANKNIFTY": "^nsebank", "SENSEX": "^sensex"}
         ssym = _STOOQ.get(symbol.upper(), f"{symbol.lower()}.in")
         sd = _dt.datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d")
         ed = _dt.datetime.strptime(end_date, "%Y-%m-%d").strftime("%Y%m%d")
@@ -482,6 +523,7 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
             return []
 
     for _name, _fn in (("nsepython", _fetch_nsepython_historical),
+                       ("dhan", _fetch_dhan_historical),
                        ("yahoo", _fetch_yahoo_hist),
                        ("stooq", _fetch_stooq_historical),
                        ("alphavantage", _dv._fetch_alphavantage_daily),
