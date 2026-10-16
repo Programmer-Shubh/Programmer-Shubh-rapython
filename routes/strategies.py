@@ -522,6 +522,76 @@ def delete_strategy(strat_id: int):
     return {"status": "deleted", "id": strat_id}
 
 
+@router.post("/purge-symbol")
+def purge_symbol(body: dict):
+    """Ek symbol ka POORA data saaf karo: strategies + unke paper trades +
+    unke saved results. Pehle dry-run (confirm missing/false) me sirf gin
+    kar batata hai; confirm=true par delete + audit-log. MIDCPNIFTY jaise
+    hataye gaye symbols ke purane rows ke liye."""
+    import json as _js
+    try:
+        sym = str((body or {}).get("symbol") or "").strip().upper()
+        if not sym:
+            return {"error": "symbol do (e.g. {\"symbol\": \"MIDCPNIFTY\"})"}
+        try:
+            _ensure_results_table()
+        except Exception:
+            pass
+        db = Database.get_instance()
+        _sids = [int(r.get("id") or 0) for r in
+                 (db.fetch_all("SELECT id FROM strategies WHERE symbol=?", [sym]) or [])]
+        _open = db.fetch_one(
+            "SELECT COUNT(*) c FROM paper_trades WHERE symbol=? AND status='open'", [sym])
+        _closed = db.fetch_one(
+            "SELECT COUNT(*) c FROM paper_trades WHERE symbol=? AND status='closed'", [sym])
+        _res = db.fetch_one(
+            "SELECT COUNT(*) c FROM strategy_results WHERE strategy_id IN "
+            "(SELECT id FROM strategies WHERE symbol=?)", [sym])
+        _info = {"symbol": sym, "strategies": len(_sids),
+                 "open_trades": int((_open or {}).get("c") or 0),
+                 "closed_trades": int((_closed or {}).get("c") or 0),
+                 "saved_results": int((_res or {}).get("c") or 0)}
+        if not body.get("confirm"):
+            _info["deleted"] = False
+            _info["hint"] = "Delete ke liye confirm=true bhejo"
+            return _info
+        _del = {"strategies": 0, "trades": 0, "results": 0}
+        try:
+            from utils.helpers import log_trade_delete as _ltd
+        except Exception:
+            _ltd = None
+        for _tid in [int(r.get("id") or 0) for r in
+                     (db.fetch_all("SELECT id FROM paper_trades WHERE symbol=?", [sym]) or [])]:
+            try:
+                if _ltd:
+                    _row = db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [_tid])
+                    if _row:
+                        _ltd(dict(_row), "purge-symbol:" + sym)
+                db.execute("DELETE FROM paper_trades WHERE id=?", [_tid])
+                _del["trades"] += 1
+            except Exception:
+                continue
+        for _sid in _sids:
+            try:
+                try:
+                    _rc = db.fetch_one(
+                        "SELECT COUNT(*) c FROM strategy_results WHERE strategy_id=?", [_sid])
+                    _rn = int((_rc or {}).get("c") or 0)
+                    db.execute("DELETE FROM strategy_results WHERE strategy_id=?", [_sid])
+                    _del["results"] += _rn
+                except Exception:
+                    pass
+                db.execute("DELETE FROM strategies WHERE id=?", [_sid])
+                _del["strategies"] += 1
+            except Exception:
+                continue
+        _info["deleted"] = True
+        _info["removed"] = _del
+        return _info
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 def _norm_exp(exp: str) -> str:
     """Normalize expiry to YYYY-MM-DD (NSE gives '29-Sep-2026')."""
     exp = str(exp or "").strip()
@@ -1036,3 +1106,69 @@ def strategy_restore_result(strat_id: int, body: dict):
         return res
     except Exception as e:
         return {"error": f"Restore failed: {e}"[:200]}
+
+
+@router.post("/{strat_id}/paper-trade")
+def strategy_paper_trade(strat_id: int, body: dict = {}):
+    """Saved strategy se PAPER trade - BACKTEST SIGNAL-GATED (parity fix).
+
+    Purana frontend button seedha live-ATM par saari legs laga deta tha
+    (indicators/entry-conditions ignore) - isliye paper trades backtest
+    result se kabhi match nahi hote the. Ab default me wahi signal gate
+    chalta hai jo auto-worker use karta hai:
+      - saved timeframe intraday (1m/5m/15m/30m/1h) => live intraday gate
+      - saved timeframe daily (1d) => daily backtest gate
+    Signal na bane to KOI blind entry nahi - wajah (notes) milti hai.
+    Force manual entry chahiye to {"force": true} bhejo (purana seedha
+    behavior, strike-step backend se sahi)."""
+    import json as _js
+    try:
+        db = Database.get_instance()
+        row = db.fetch_one("SELECT * FROM strategies WHERE id=?", [strat_id])
+        if not row:
+            return {"error": "Strategy not found"}
+        try:
+            _force = bool((body or {}).get("force"))
+        except Exception:
+            _force = False
+        try:
+            _adv = _js.loads(row.get("advanced_options") or "{}")
+        except Exception:
+            _adv = {}
+        if not isinstance(_adv, dict):
+            _adv = {}
+        _tf = str(_adv.get("timeframe") or row.get("timeframe") or "").lower()
+        _gate = "intraday" if _tf in ("1m", "5m", "15m", "30m", "1h") else "daily"
+        from core.services.auto_paper import place_for_strategy as _pl
+        if _force:
+            # Manual override: gate skip, saari non-AUTO legs seedha lagao
+            # (strike-step/expiry/rollover backend _execute_legs me sahi).
+            try:
+                _legs = _js.loads(row.get("legs") or "[]")
+            except Exception:
+                _legs = []
+            _legs = [l for l in (_legs or [])
+                     if str((l or {}).get("option_type") or "").upper() in ("CE", "PE")]
+            if not _legs:
+                return {"error": "Is strategy me koi CE/PE leg nahi (AUTO ko manual direction chahiye)",
+                        "gate": _gate, "forced": True}
+            from core.services.auto_paper import _execute_legs as _ex
+            from core.models.trade_model import TradeModel as _TM
+            from core.services.auto_paper import _ist_today as _today
+            _placed, _notes = _ex(row, _legs, db, _TM(), _today())
+            res = {"placed": _placed, "notes": _notes}
+        else:
+            res = _pl(strat_id, signal_check=_gate) or {}
+        out = {"strategy_id": strat_id,
+               "strategy_name": row.get("name") or "",
+               "symbol": row.get("symbol") or "",
+               "gate": _gate, "forced": bool(_force),
+               "placed": res.get("placed", []),
+               "notes": res.get("notes", [])}
+        try:
+            out["saved_bt"] = _bt_summary(row)
+        except Exception:
+            out["saved_bt"] = {}
+        return out
+    except Exception as e:
+        return {"error": f"Paper trade failed: {e}"[:200]}

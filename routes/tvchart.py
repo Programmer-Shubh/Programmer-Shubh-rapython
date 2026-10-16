@@ -7,6 +7,25 @@ from core.services.indicator_engine import IndicatorEngine
 router = APIRouter()
 
 
+def _st_flip_times(st_series: list) -> dict:
+    """Pure helper: SuperTrend bullish-flag series se flip points.
+    Returns {"flip_up": [times], "flip_down": [times]} — buy/sell teer ke liye."""
+    up, down = [], []
+    try:
+        prev = None
+        for p in st_series or []:
+            try:
+                cur = bool(p.get("bullish"))
+                if prev is not None and cur != prev:
+                    (up if cur else down).append(p.get("time"))
+                prev = cur
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return {"flip_up": up, "flip_down": down}
+
+
 def _candles(symbol: str, start: str, end: str) -> list:
     db = Database.get_instance()
     rows = db.fetch_all(
@@ -88,11 +107,14 @@ def chart_data(symbol: str = "NIFTY", start: str = "2026-08-01", end: str = "202
         # Split into green/red segments for TradingView (single series can't color per point)
         st_bull = [{"time": p["time"], "value": p["value"]} for p in st_series if p["bullish"]]
         st_bear = [{"time": p["time"], "value": p["value"]} for p in st_series if not p["bullish"]]
+        _flips = _st_flip_times(st_series)
         series = {
             "supertrend": [{"time": c["time"], "value": round(st[i], 2)} for i, c in enumerate(candles)
                            if i < len(st) and st[i]],
             "supertrend_bull": st_bull,
             "supertrend_bear": st_bear,
+            "st_flip_up": _flips["flip_up"],
+            "st_flip_down": _flips["flip_down"],
             "ema_fast": [{"time": c["time"], "value": round(ef[i], 2)} for i, c in enumerate(candles)
                          if i < len(ef) and ef[i]],
             "ema_slow": [{"time": c["time"], "value": round(es[i], 2)} for i, c in enumerate(candles)
@@ -227,8 +249,8 @@ def chart_data(symbol: str = "NIFTY", start: str = "2026-08-01", end: str = "202
                     "position": "belowBar" if is_buy else "aboveBar",
                     "color": "#198754" if is_buy else "#dc3545",
                     "shape": "arrowUp" if is_buy else "arrowDown",
-                    "size": 2,
-                    "text": f"{tag} {side} {opt} {strike} @ {ep:.2f}",
+                    "size": 3,
+                    "text": f"{tag} {'\u25b2 BUY' if is_buy else '\u25bc SELL'} {opt} {strike} @ {ep:.2f}",
                 })
                 if str(t.get("status")) == "closed" and t.get("exit_date"):
                     ptxt = ""

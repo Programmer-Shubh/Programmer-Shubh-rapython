@@ -345,7 +345,7 @@
         <div id="pg-trades" class="pg hidden">
             <div class="row" style="justify-content:space-between;align-items:center">
                 <h4 class="fw-bold">Trading Center</h4>
-                <div><button class="btn btn-sm btn-outline-primary" onclick="runSim()"><i class="bi bi-play-circle"></i> Run Simulation</button></div>
+                <div><button class="btn btn-sm btn-outline-primary" onclick="runSim()"><i class="bi bi-play-circle"></i> Run Simulation</button> <button class="btn btn-sm btn-outline-danger" onclick="purgeSymbol()" title="Ek symbol ka poora data (strategies + trades + results) hamesha ke liye saaf karo"><i class="bi bi-trash"></i> Purge Symbol</button></div>
             </div>
             <div class="row" id="trd-stats"></div>
             <div class="card mb-2">
@@ -407,7 +407,7 @@
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" id="r-mtd" class="form-control form-control-sm" value="5" min="1" max="10"></div>
                         <div class="col-md-2"><label class="form-label small" title="Auto paper: aaj ka signal na mile to kitne din purana signal chalega (0 = sirf aaj)">Signal Lookback (din)</label><input type="number" id="r-slb" class="form-control form-control-sm" value="0" min="0" max="15"></div>
-                        <div class="col-md-2"><label class="form-label small">Chart Timeframe</label><select id="r-timeframe" class="form-select form-select-sm"><option value="1d">Daily</option><option value="5m">5 Minute</option><option value="15m" selected>15 Minute</option><option value="30m">30 Minute</option><option value="1h">1 Hour</option><option value="1m">1 Minute</option></select></div>
+                        <div class="col-md-2"><label class="form-label small">Chart Timeframe</label><select id="r-timeframe" class="form-select form-select-sm"><option value="1d">Daily</option><option value="5m" selected>5 Minute</option><option value="15m">15 Minute</option><option value="30m">30 Minute</option><option value="1h">1 Hour</option><option value="1m">1 Minute</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Momentum</label><input type="range" class="form-range" id="s-momentum" min="0" max="20" value="0"></div>
 
                     </div>
@@ -1089,6 +1089,21 @@
     async function closeTrade(id,price){if(!confirm('Close #'+id+'?'))return;await P('/api/trades/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,exit_price:price,date:new Date().toISOString().split('T')[0]})});_lastOpenTrdHTML=null;loadDash();loadTrades();try{loadDashHistory();}catch(e){}}
     async function editTradeSLTP(id,sl,tp){const nsl=prompt('Stop Loss (₹) - default 1500:',sl||1500);if(nsl===null||nsl==='')return;const ntp=prompt('Target (₹) - default 3000:',tp||3000);if(ntp===null||ntp==='')return;const r=await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:parseFloat(nsl),target:parseFloat(ntp)})});if(r.error)alert('Error: '+r.error);else{alert('Trade #'+id+' SL ₹'+nsl+' / TP ₹'+ntp+' saved — auto-monitor har 5 min me check karega');loadDashPositions();}}
     async function deleteTrade(id){if(!confirm('Delete trade #'+id+'? This cannot be undone.'))return;const r=await P('/api/trades/'+id,{method:'DELETE'});_lastOpenTrdHTML=null;if(!r.error){loadTrades();try{loadDashPositions();}catch(e){}try{loadDashHistory();}catch(e){}}else alert('Error: '+r.error);}
+    async function purgeSymbol(){
+        try{
+            const sym=prompt('Kaunsa symbol poori tarah saaf karna hai? (e.g. MIDCPNIFTY)','MIDCPNIFTY');
+            if(!sym)return;
+            const s=sym.trim().toUpperCase();if(!s)return;
+            const d=await P('/api/strategies/purge-symbol',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})});
+            if(d.error){alert(d.error);return;}
+            const msg=s+': '+d.strategies+' strategies, '+d.open_trades+' open + '+d.closed_trades+' closed trades, '+d.saved_results+' saved results.';
+            if(!confirm(msg+'\n\nHAMESHA ke liye delete karna hai? (undo nahi hoga)'))return;
+            const r=await P('/api/strategies/purge-symbol',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s,confirm:true})});
+            if(r.error){alert(r.error);return;}
+            alert('Saaf ho gaya: '+JSON.stringify(r.removed||{}));
+            loadTrades();try{loadStrats();}catch(e){}try{loadDashPositions();loadDashHistory();}catch(e){}
+        }catch(e){alert('Error: '+(e.message||e));}
+    }
     async function setTradeMode(id,mode){const r=await P('/api/trades/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,trade_mode:mode})});_lastOpenTrdHTML=null;if(!r.error){alert('Trade #'+id+' → '+mode.toUpperCase()+' mode');loadTrades();try{loadDashPositions();}catch(e){}}else alert('Error: '+r.error);}
 
     async function cLoadSymbols(){const sel=document.getElementById('c-sym');const keepCur=sel.value||'NIFTY';sel.innerHTML='';const syms=await A('/api/chain/symbols');const master=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY','HDFCBANK','ICICIBANK','SBIN','ITC','LT','AXISBANK','KOTAKBANK','HINDUNILVR','BHARTIARTL','MARUTI','M&M','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL'];let all=[...new Set([...(syms.symbols||[]), ...master])].sort();all.forEach(x=>{sel.innerHTML+='<option value="'+x+'" '+((x===keepCur||(!all.includes(keepCur)&&x==='NIFTY'))?'selected':'')+'>'+x+'</option>';});document.getElementById('c-live').checked=true;toggleLiveMode();}
@@ -1947,33 +1962,20 @@ let _lastOpenTrdHTML = null;
     let runMap={};try{const o=await A('/api/trades/open');(o.positions||[]).forEach(t=>{const sid=t.strategy_id||0;if(!sid)return;runMap[sid]=runMap[sid]||{paper:0,live:0};if((t.trade_mode||'paper')==='live')runMap[sid].live++;else runMap[sid].paper++;});}catch(e){}
     let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const disp=s.display_status||s.status||'active';const isExp=(s.expired===true||disp==='expired');const statusCls=isExp?'expired':s.status==='active'?'active':s.status==='draft'?'draft':'paused';const statusLbl=isExp?'expired':(s.status||'active');const run=runMap[s.id]||{paper:0,live:0};const runH=(run.paper?`<span class="badge bg-success ms-1">● PAPER (${run.paper})</span>`:'')+(run.live?`<span class="badge bg-danger ms-1">● LIVE (${run.live})</span>`:'');const dis=isExp?'title="Expired - trade lagane par next expiry par auto-shift hoga"':'';const btH=(s.bt&&s.bt.trades!=null)?`<div class="mb-2 small">Saved BT: <strong>${s.bt.trades} trades</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span> • Win ${s.bt.win_rate||0}% <span class="text-muted">(${s.bt.stored_at||'saved'})</span></div>`:`<div class="mb-2 small text-muted">Saved BT: — (Backtest Detail dabao)</div>`;h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px;${isExp?'opacity:0.65':''}"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name}</h6><span><span class="badge badge-${statusCls}">${statusLbl}</span>${runH}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}</div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div>${btH}<div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-sm btn-success" ${dis} onclick="ptFromStrat(${s.id})">Paper Trade</button><button class="btn btn-sm ${s.status==='active'?'btn-success':'btn-danger'}" onclick="atFromStrat(${s.id},'${s.status}')" title="Auto trading on/off">${s.status==='active'?'Auto ON':'Auto OFF'}</button><button class="btn btn-sm btn-info" onclick="backtestStrat(${s.id},false,this)">Backtest Detail</button><button class="btn btn-sm btn-outline-primary" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat(${s.id})">Delete</button></div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
 
-    async function ptFromStrat(id){try{
+    async function ptFromStrat(id,force){try{
         try{const _mk=isMarketOpenIST();if(!_mk.open){alert(_mk.reason+'\n\nOrder market open par hi lagega (Mon-Fri 9:15-3:30 IST).');return;}}catch(e){}
-        const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}if(s.expired===true||s.display_status==='expired'){/* expired -> backend next expiry par auto-shift karke trade lagata hai, bina puche */}
-            const legs=Array.isArray(s.legs)?s.legs:[];if(!legs.length){alert('No legs in this strategy');return;}
-        let live=null;try{live=await A('/api/chain/live/'+s.symbol);}catch(e){}
-        const atm=live&&live.atm?live.atm:0;
-        if(!atm){alert('Live ATM unavailable - open Option Chain once, then retry');return;}
-        const rm=_parseJsonField(s.risk_management,{});const sl=rm.daily_stop_loss||1500,tp=rm.daily_take_profit||3000;
-        let autoDir=null;
-        if(legs.some(l=>String(l.option_type||'').toUpperCase()==='AUTO')){try{const sig=await A('/api/scanner/st-macd/'+s.symbol);autoDir=(sig&&sig.type==='SELL')?'PE':'CE';}catch(e){autoDir='CE';}}
-        const step=(s.symbol==='BANKNIFTY'?100:s.symbol==='FINNIFTY'?50:20);
-        const today=new Date().toISOString().split('T')[0];
-        const placed=[];
-        for(const leg of legs){
-            let opt=String(leg.option_type||'CE').toUpperCase();if(opt==='AUTO')opt=autoDir||'CE';
-            let txn=String(leg.transaction||'buy').toUpperCase();if(txn==='AUTO')txn='BUY';
-            const sel=String(leg.strike_selection||'atm').toLowerCase();
-            const dist=parseInt(leg.otm_distance)||0;
-            let strike=atm;
-            if(sel==='otm')strike=atm+(opt==='CE'?dist*step:-dist*step);
-            else if(sel==='itm')strike=atm+(opt==='CE'?-dist*step:dist*step);
-            const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s.symbol,option_type:opt,strike:strike,expiry:today,date:today,transaction_type:txn,quantity:leg.lots||1,stop_loss:sl,take_profit:tp,strategy_id:id})});
-            if(r.error){alert('Error: '+r.error);return;}
-            placed.push('Trade #'+r.trade_id+' '+txn+' '+opt+' '+strike+' @ Rs'+r.entry_price+(r.margin&&r.margin.required!=null?(' [Margin ~Rs'+Number(r.margin.required).toLocaleString('en-IN')+']'):''));
-            if(r.rolled_to)placed.push('(Strategy next expiry '+r.rolled_to+' par shift hui)');
+        const r=await P('/api/strategies/'+id+'/paper-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({force:!!force})});
+        if(r.error){alert('Error: '+r.error);return;}
+        const bt=r.saved_bt||{};const btH=(bt.trades!=null)?('\nSaved BT: '+bt.trades+' trades • '+F(bt.net_pnl||0)+' • Win '+(bt.win_rate||0)+'%'):'';
+        if(r.placed&&r.placed.length){
+            const lines=r.placed.map(p=>'Trade #'+p.trade_id+' @ Rs'+p.entry+(p.rolled_to?(' (expiry '+p.rolled_to+')'):'')+(p.strike_snapped?(' [strike '+p.strike_snapped.from+'→'+p.strike_snapped.to+']'):''));
+            alert('Backtest signal ('+(r.gate==='intraday'?'live intraday':'daily')+') par paper trade lag gaya!\n'+lines.join('\n')+btH+'\n\nOpen Positions me dikhega.');
+        }else{
+            const why=(r.notes||[]).join('; ')||'aaj koi signal nahi';
+            if(!force&&confirm('Backtest ke anusar aaj entry nahi banti:\n'+why+btH+'\n\nPhir bhi FORCE paper trade lagau? (signal ignore hoga)')){ptFromStrat(id,true);return;}
+            if(!force)alert('Paper trade nahi laga - backtest ke anusar aaj entry nahi:\n'+why+btH+'\n\n(Backtest Detail me saved result dekho.)');
+            else alert('Paper trade nahi laga:\n'+why+btH);
         }
-        alert('Paper trade lag gaya!\n'+placed.join('\n')+'\n\nOpen Positions me dikhega.');
         loadTrades();try{loadDashPositions();}catch(e){}try{loadStrats();loadRobotSaved();}catch(e){}
     }catch(e){alert('Error: '+e.message);}}
     async function stratDetail(id,name){try{const d=await A('/api/strategies/'+id+'/trades?unlinked=1');if(d.error){alert(d.error);return;}
@@ -3048,6 +3050,14 @@ def run(data):
                 if(_tvZLlo)_tvZLlo.setData(_on?(_zl.lower||[]):[]);
             }catch(e){}
             const marks=(document.getElementById('tv-marks').checked)?(r.markers||[]):[];
+            // SuperTrend flip arrows (buy/sell teer): green ▲ neeche, red ▼ upar
+            try{
+                if(document.getElementById('tv-st').checked){
+                    (r.series.st_flip_up||[]).forEach(t=>marks.push({time:t,position:'belowBar',color:'#198754',shape:'arrowUp',text:'[ST] Bullish ▲'}));
+                    (r.series.st_flip_down||[]).forEach(t=>marks.push({time:t,position:'aboveBar',color:'#dc3545',shape:'arrowDown',text:'[ST] Bearish ▼'}));
+                    marks.sort((a,b)=>String(a.time)<String(b.time)?-1:1);
+                }
+            }catch(e){}
             // Zero-Lag entry/flip markers (Pine ▲▼/trend-flip parity)
             try{
                 if(document.getElementById('tv-zl').checked){

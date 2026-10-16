@@ -389,6 +389,12 @@ def get_history():
     trade_model = TradeModel()
     closed = trade_model.get_closed_trades()
     total_pnl = sum(t["pnl"] for t in closed)
+    # Strategy linkage (paper-vs-backtest compare ke liye): id -> name map.
+    try:
+        _srows = trade_model.db.fetch_all("SELECT id, name FROM strategies") or []
+        _smap = {int(r.get("id") or 0): str(r.get("name") or "") for r in _srows}
+    except Exception:
+        _smap = {}
     # Table-consistent win rate (same >0 net rule as dashboard stats, computed
     # over the RETURNED table rows so metric == table by construction).
     _shown = closed[:30]
@@ -423,6 +429,8 @@ def get_history():
                 "transaction_type": t.get("transaction_type",""),
                 "expiry_date": t.get("expiry_date", ""),
                 "exit_status": t.get("exit_status", ""),
+                "strategy_id": int(t.get("strategy_id") or 0),
+                "strategy_name": _smap.get(int(t.get("strategy_id") or 0), ""),
                 "calc": f"({t.get('exit_price',0):.2f}-{t['entry_price']:.2f})×{t.get('lot_size',50)}" if t.get("transaction_type")=="BUY" else f"({t['entry_price']:.2f}-{t.get('exit_price',0):.2f})×{t.get('lot_size',50)}",
                 "analysis": f"{t.get('transaction_type','')} {t['option_type']} {'profit' if ((t.get('exit_price',0)-t['entry_price'])>0 if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0))>0) else 'loss'}: ₹{t['entry_price']:.2f}→₹{t.get('exit_price',0):.2f} × Lot {t.get('lot_size',50)} = Gross ₹{((t.get('exit_price',0)-t['entry_price']) if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0)))*t.get('quantity',1)*t.get('lot_size',50):,.2f} - Costs = Net {format_currency(t['pnl'])}",
             }

@@ -185,6 +185,11 @@ def get_trade_history():
     trade_model = TradeModel()
     closed = trade_model.get_closed_trades()
     total_pnl = sum(t["pnl"] for t in closed)
+    try:
+        _srows = trade_model.db.fetch_all("SELECT id, name FROM strategies") or []
+        _smap = {int(r.get("id") or 0): str(r.get("name") or "") for r in _srows}
+    except Exception:
+        _smap = {}
     _shown = closed[:50]
     _w = sum(1 for t in _shown if float(t.get("pnl") or 0) > 0)
     return {
@@ -214,6 +219,8 @@ def get_trade_history():
                 "exit_cost": t.get("exit_cost", 0),
                 "status": t.get("exit_status", "closed"),
                 "qty": t.get("quantity", 1),
+                "strategy_id": int(t.get("strategy_id") or 0),
+                "strategy_name": _smap.get(int(t.get("strategy_id") or 0), ""),
             }
             for t in closed[:50]
         ],
