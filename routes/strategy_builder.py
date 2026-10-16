@@ -275,7 +275,7 @@ def _daily_fallback_range(sym, start_date, end_date):
                 bars = []
             try:
                 import time as _ts
-                _ts.sleep(2)
+                _ts.sleep(1)
             except Exception:
                 pass
         bars = [b for b in (bars or [])

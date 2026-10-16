@@ -29,6 +29,47 @@ def _converters():
 
 _FX_CACHE = {"v": 0.0, "ts": 0.0}
 _FX_TTL = 6 * 3600
+# Run-shared FX series (15-min TTL): ek run ke saare MCX symbols EK hi FX
+# intraday + EK hi FX daily fetch share karte hain (pehle har symbol apna
+# 2x Yahoo chain chalata tha - 3 symbols par wahi 140s hang ka kaaran).
+_FXSER_CACHE = {}
+_FXSER_TTL = 900
+
+
+def _fx_series(iv="15m", days=5):
+    """Shared (fx-intraday-rows, fx-daily-rows): TTL cache hit par 0 network."""
+    import time as _tt
+    try:
+        _key = (str(iv or "15m"), int(days or 5))
+    except Exception:
+        _key = ("15m", 5)
+    try:
+        _hit = _FXSER_CACHE.get(_key)
+        if _hit and _tt.time() - _hit[0] < _FXSER_TTL:
+            return _hit[1], _hit[2]
+    except Exception:
+        pass
+    _fxrows, _fxdaily = [], []
+    try:
+        from core.services.free_data import fetch_yahoo_intraday as _fyi
+        _fxrows = _fyi("USDINR=X", _key[0], days=_key[1]) or []
+    except Exception:
+        _fxrows = []
+    try:
+        from core.services.free_data import fetch_yahoo_daily as _fyd
+        import datetime as _dtx
+        _e = _dtx.date.today().strftime("%Y-%m-%d")
+        _s = (_dtx.date.today() - _dtx.timedelta(days=max(10, _key[1] + 5))).strftime("%Y-%m-%d")
+        _fxdaily = _fyd("USDINR=X", _s, _e) or []
+    except Exception:
+        _fxdaily = []
+    try:
+        _FXSER_CACHE[_key] = (_tt.time(), _fxrows, _fxdaily)
+        if len(_FXSER_CACHE) > 6:
+            _FXSER_CACHE.pop(next(iter(_FXSER_CACHE)))
+    except Exception:
+        pass
+    return _fxrows, _fxdaily
 
 
 def _usdinr():
@@ -99,11 +140,11 @@ def fetch_mcx_intraday(symbol: str, interval: str = "15m", days: int = 5):
             rows = []
         if not rows:
             return []
+        # Shared FX (run bhar me 1 baar): har symbol apna chain nahi chalata.
         try:
-            from core.services.free_data import fetch_yahoo_intraday as _fyi2
-            fxrows = _fyi2("USDINR=X", iv, days=min(int(days or 5), 60)) or []
+            fxrows, _fxdaily_shared = _fx_series(iv, min(int(days or 5), 60))
         except Exception:
-            fxrows = []
+            fxrows, _fxdaily_shared = [], []
         try:
             _fxm = {}
             for r in fxrows or []:
@@ -119,14 +160,12 @@ def fetch_mcx_intraday(symbol: str, interval: str = "15m", days: int = 5):
                     _fxd[d] = _v
         except Exception:
             _fxm, _fxd = {}, {}
-        # FX fallback chain: bar-tick > day-close > daily-history seed >
-        # cached LTP. Daily seed isliye taaki intraday-FX ke ek gap par
-        # poori series skip na ho (wahi GOLDM/SILVER INSUFFICIENT ka kaaran).
+        # FX fallback chain: bar-tick > day-close > shared daily-seed >
+        # cached LTP. Shared seed (run me 1 baar) isliye taaki intraday-FX
+        # ke ek gap par poori series skip na ho (wahi GOLDM/SILVER
+        # INSUFFICIENT ka kaaran) - aur har symbol dobara fetch na kare.
         try:
-            from core.services.free_data import fetch_yahoo_daily as _fyd
-            _fxh = _fyd("USDINR=X", (rows[0].get("trade_date", "") if rows else "")[:10] or "2020-01-01",
-                        (rows[-1].get("trade_date", "") if rows else "")[:10] or "2030-01-01") or []
-            for _fr in _fxh:
+            for _fr in _fxdaily_shared or []:
                 try:
                     _dd = str(_fr.get("trade_date", ""))[:10]
                     _vv = float(_fr.get("close_price") or 0)

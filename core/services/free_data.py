@@ -376,7 +376,7 @@ def fetch_yahoo_intraday(symbol: str, interval: str = "15m", days: int = 5, time
                     pass
             try:
                 import time as _ts
-                _ts.sleep(2)
+                _ts.sleep(1)
             except Exception:
                 pass
         if r is None or r.status_code != 200:

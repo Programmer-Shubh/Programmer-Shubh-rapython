@@ -65,6 +65,37 @@ def test_mcx_intraday_conversion_math(monkeypatch):
     assert out[0]["bar_time"] == "20:15" and out[0]["source"] == "proxy"
 
 
+def test_mcx_fx_shared_across_symbols(monkeypatch):
+    """Ek run me FX 1 baar fetch ho (3 symbols = 1 FX chain, pahle 3x tha)."""
+    import core.services.free_data as fd
+    import core.services.mcx_feed as mf
+    mf._FXSER_CACHE.clear()
+    calls = {"fx": 0, "daily": 0}
+
+    def _fake_intra(sym, iv="15m", days=5):
+        if sym == "USDINR=X":
+            calls["fx"] += 1
+            return [_px_bar2("2026-10-14", "20:15", 90.0)]
+        return [_px_bar2("2026-10-14", "20:15", 70.0, v=100)]
+
+    def _fake_daily(sym, s, e, timeout=10):
+        calls["daily"] += 1
+        return [{"trade_date": "2026-10-14", "close_price": 90.0}]
+
+    def _px_bar2(d, t, c, v=0):
+        return {"trade_date": d, "bar_time": t, "open_price": c,
+                "high_price": c, "low_price": c, "close_price": c,
+                "volume": v}
+
+    monkeypatch.setattr(fd, "fetch_yahoo_intraday", _fake_intra)
+    monkeypatch.setattr(fd, "fetch_yahoo_daily", _fake_daily)
+    monkeypatch.setattr(mf, "_usdinr", lambda: 0.0)
+    assert len(mf.fetch_mcx_intraday("CRUDEOIL", "15m", days=5)) == 1
+    assert len(mf.fetch_mcx_intraday("CRUDEOIL", "15m", days=5)) == 1
+    assert calls["fx"] == 1 and calls["daily"] == 1, calls
+    mf._FXSER_CACHE.clear()
+
+
 def test_mcx_no_proxy_means_empty(monkeypatch):
     import core.services.mcx_feed as mf
     assert mf.get_mcx_ltp("NICKEL") is None
