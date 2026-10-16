@@ -264,6 +264,20 @@ def _daily_fallback_range(sym, start_date, end_date):
             return _nb, "nsepython_daily"
     except Exception:
         pass
+    # NSE index archive (official, no broker needed): FINNIFTY/MIDCPNIFTY ka
+    # Yahoo dead hai - yehi broker-free source hai.
+    try:
+        from core.services.historical_fetcher import _fetch_nseindex_historical as _fnx
+        try:
+            _nx = _fnx(sym, start_date, end_date) or []
+        except Exception:
+            _nx = []
+        _nx = [b for b in (_nx or [])
+               if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        if _nx and len(_nx) >= 15:
+            return _nx, "nse_index_archive"
+    except Exception:
+        pass
     try:
         from core.services.historical_fetcher import _fetch_dhan_historical as _fdh
         try:

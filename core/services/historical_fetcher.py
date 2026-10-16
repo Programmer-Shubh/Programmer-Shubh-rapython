@@ -415,6 +415,113 @@ def _fetch_dhan_historical(symbol: str, start_date: str, end_date: str) -> List[
         return []
 
 
+_NSE_INDEX_NAMES = {
+    "NIFTY": "Nifty 50",
+    "BANKNIFTY": "Nifty Bank",
+    "FINNIFTY": "Nifty Financial Services",
+    "MIDCPNIFTY": "Nifty Midcap Select",
+    "INDIAVIX": "India VIX",
+}
+
+
+def _fetch_nseindex_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """NSE official index archive (ind_close_all_DDMMYYYY.csv, ~17KB/day).
+    FINNIFTY/MIDCPNIFTY ka Yahoo dead + NSE-API cloud-blocked hai - yehi
+    broker-free official source bachta hai (Dhan token ki zaroorat nahi).
+    Parallel fetch (8 workers), overall ~60s cap. Na mile to [] (chain aage)."""
+    try:
+        import datetime as _dt
+        sym = str(symbol or "").upper()
+        _idx = _NSE_INDEX_NAMES.get(sym)
+        if not _idx:
+            return []
+        try:
+            _s = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+            _e = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+        except Exception:
+            return []
+        if _e < _s:
+            return []
+        _days = []
+        _d = _s
+        while _d <= _e and len(_days) < 400:
+            if _d.weekday() < 5:
+                _days.append(_d)
+            _d += _dt.timedelta(days=1)
+        if not _days:
+            return []
+
+        def _one(_day):
+            try:
+                import requests as _rq
+                _url = ("https://archives.nseindia.com/content/indices/ind_close_all_"
+                        + _day.strftime("%d%m%Y") + ".csv")
+                _r = _rq.get(_url, headers={"User-Agent": "Mozilla/5.0"},
+                             timeout=10)
+                if _r is None or getattr(_r, "status_code", 0) != 200:
+                    return None
+                for _ln in (_r.text or "").splitlines()[1:]:
+                    try:
+                        if not _ln.strip():
+                            continue
+                        _p = _ln.split(",")
+                        if len(_p) < 9:
+                            continue
+                        if str(_p[0] or "").strip().upper() != _idx.upper():
+                            continue
+                        _o = float((str(_p[2] or "").strip() or "0") or 0)
+                        _h = float((str(_p[3] or "").strip() or "0") or 0)
+                        _l = float((str(_p[4] or "").strip() or "0") or 0)
+                        _c = float((str(_p[5] or "").strip() or "0") or 0)
+                        if _c <= 0:
+                            return None
+                        try:
+                            _v = int(float((str(_p[8] or "").strip() or "0") or 0))
+                        except Exception:
+                            _v = 0
+                        return {"symbol": sym, "trade_date": _day.strftime("%Y-%m-%d"),
+                                "open_price": round(_o or _c, 2),
+                                "high_price": round(_h or _c, 2),
+                                "low_price": round(_l or _c, 2),
+                                "close_price": round(_c, 2),
+                                "volume": _v, "oi": 0}
+                    except Exception:
+                        continue
+                return None
+            except Exception:
+                return None
+
+        from concurrent.futures import ThreadPoolExecutor as _TPE
+        out = []
+        try:
+            _ex = _TPE(max_workers=8)
+            try:
+                _futs = [_ex.submit(_one, _d) for _d in _days]
+                import time as _tm
+                _dead = _tm.time() + 60
+                for _f in _futs:
+                    try:
+                        _left = max(1.0, _dead - _tm.time())
+                        _b = _f.result(timeout=_left)
+                    except Exception:
+                        _b = None
+                    if _b:
+                        out.append(_b)
+                    if _tm.time() > _dead:
+                        break
+            finally:
+                try:
+                    _ex.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
+        except Exception:
+            return []
+        out.sort(key=lambda r: r["trade_date"])
+        return out if len(out) >= 5 else []
+    except Exception:
+        return []
+
+
 def _fetch_stooq_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """Stooq daily CSV in-memory (no file write) - cloud-friendly, free, no key. Replaces Yahoo."""
     try:
@@ -523,6 +630,7 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
             return []
 
     for _name, _fn in (("nsepython", _fetch_nsepython_historical),
+                       ("nse_index_archive", _fetch_nseindex_historical),
                        ("dhan", _fetch_dhan_historical),
                        ("yahoo", _fetch_yahoo_hist),
                        ("stooq", _fetch_stooq_historical),
