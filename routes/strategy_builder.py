@@ -1057,7 +1057,13 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     if len(_BT_CACHE) > 12:
                         _BT_CACHE.pop(next(iter(_BT_CACHE)))
                 else:
-                    _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile - fabricated bars nahi banate", "total_trades": 0,
+                    try:
+                        from utils.helpers import is_mcx as _ismcx3
+                        _mcx_hint = (" MCX intraday COMEX-proxy par chalta hai - feed down ho to 10-15 min "
+                                     "baad retry karo ya Daily timeframe try karo." if _ismcx3(_sym) else "")
+                    except Exception:
+                        _mcx_hint = ""
+                    _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile - fabricated bars nahi banate.{_mcx_hint}", "total_trades": 0,
                                          "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                          "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(_bars15 or [])}}
                     _fire_prog(_sym)

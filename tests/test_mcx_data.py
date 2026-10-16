@@ -70,3 +70,33 @@ def test_mcx_no_proxy_means_empty(monkeypatch):
     assert mf.get_mcx_ltp("NICKEL") is None
     bars, src = mf.fetch_mcx_history("NICKEL", "2026-09-01", "2026-09-05")
     assert bars == [] and src == "none"
+
+
+def _px_bar(d, t, o, h, l, c, v=100):
+    return {"trade_date": d, "bar_time": t, "open_price": o,
+            "high_price": h, "low_price": l, "close_price": c, "volume": v}
+
+
+def test_mcx_intraday_fx_fallback_daily_seed(monkeypatch):
+    """Intraday-FX na mile to daily-FX seed se bars bachen (skip nahi)."""
+    import core.services.free_data as fd
+    import core.services.mcx_feed as mf
+
+    def _fake_intra(sym, iv="15m", days=5):
+        if sym == "USDINR=X":
+            return []
+        assert sym == "CL=F", sym
+        return [_px_bar("2026-10-14", "20:15", 70.0, 70.5, 69.8, 70.2),
+                _px_bar("2026-10-14", "20:30", 70.2, 70.6, 70.0, 70.4)]
+
+    def _fake_daily(sym, s, e, timeout=10):
+        assert sym == "USDINR=X", sym
+        return [{"trade_date": "2026-10-14", "close_price": 90.0}]
+
+    monkeypatch.setattr(fd, "fetch_yahoo_intraday", _fake_intra)
+    monkeypatch.setattr(fd, "fetch_yahoo_daily", _fake_daily)
+    monkeypatch.setattr(mf, "_usdinr", lambda: 0.0)
+    out = mf.fetch_mcx_intraday("CRUDEOIL", "15m", days=5)
+    assert len(out) == 2, out
+    assert out[0]["close_price"] == round(70.2 * 90.0, 2)
+    assert out[1]["close_price"] == round(70.4 * 90.0, 2)

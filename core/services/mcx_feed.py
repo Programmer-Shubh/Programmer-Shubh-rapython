@@ -119,8 +119,31 @@ def fetch_mcx_intraday(symbol: str, interval: str = "15m", days: int = 5):
                     _fxd[d] = _v
         except Exception:
             _fxm, _fxd = {}, {}
+        # FX fallback chain: bar-tick > day-close > daily-history seed >
+        # cached LTP. Daily seed isliye taaki intraday-FX ke ek gap par
+        # poori series skip na ho (wahi GOLDM/SILVER INSUFFICIENT ka kaaran).
+        try:
+            from core.services.free_data import fetch_yahoo_daily as _fyd
+            _fxh = _fyd("USDINR=X", (rows[0].get("trade_date", "") if rows else "")[:10] or "2020-01-01",
+                        (rows[-1].get("trade_date", "") if rows else "")[:10] or "2030-01-01") or []
+            for _fr in _fxh:
+                try:
+                    _dd = str(_fr.get("trade_date", ""))[:10]
+                    _vv = float(_fr.get("close_price") or 0)
+                    if _dd and _vv > 0 and _dd not in _fxd:
+                        _fxd[_dd] = _vv
+                except Exception:
+                    continue
+        except Exception:
+            pass
         _fall = _usdinr() or 0.0
+        if not _fall:
+            try:
+                _fall = float((_fxd or {}).get(max(_fxd.keys()))) if _fxd else 0.0
+            except Exception:
+                _fall = 0.0
         out = []
+        _last_fx = 0.0
         for r in rows:
             try:
                 _d = str(r.get("trade_date", ""))[:10]
@@ -128,6 +151,10 @@ def fetch_mcx_intraday(symbol: str, interval: str = "15m", days: int = 5):
                 if not _d or not _bt:
                     continue
                 _fx = float(_fxm.get((_d, _bt)) or 0) or float(_fxd.get(_d) or 0) or _fall
+                if _fx > 0:
+                    _last_fx = _fx
+                else:
+                    _fx = _last_fx  # forward-fill: thoda stale FX, par bar bachta hai
                 if _fx <= 0:
                     continue
                 _o = float(fn(float(r.get("open_price") or 0), _fx) or 0)
