@@ -257,20 +257,7 @@ def fetch_cloud_spot(symbol: str) -> dict:
 def fetch_yahoo_daily(symbol: str, start_date: str, end_date: str, timeout: float = 10):
     """Yahoo daily OHLC history (most reliable cloud source - same endpoint
     as the working spot quotes). Split-adjusted via adjclose factor so
-    corporate actions don't fabricate jumps. Returns bar dicts or [].
-    MCX symbols yahan aate hi proxy par route hote hain (generic {SYM}.NS
-    galat instrument deta tha - SILVER→₹221 ETF fantasy)."""
-    try:
-        from utils.helpers import is_mcx as _ismcx
-        if _ismcx(symbol):
-            try:
-                from core.services.mcx_feed import fetch_mcx_history as _mch
-                _bars, _src = _mch(symbol, start_date, end_date)
-                return _bars or []
-            except Exception:
-                return []
-    except Exception:
-        pass
+    corporate actions don't fabricate jumps. Returns bar dicts or []."""
     out = []
     try:
         import datetime as _dt
@@ -333,18 +320,7 @@ def fetch_yahoo_intraday(symbol: str, interval: str = "15m", days: int = 5, time
     IST-stamped bar dicts with bar_time. Returns [] on any failure.
     Retry (3x, backoff, query1/query2 rotation): Yahoo cloud-IP se aksar
     pehli hit 429/timeout deta hai - bina retry worker hamesha khaali haath
-    (auto-paper intraday dead).
-    MCX symbols proxy-intraday par route (generic {SYM}.NS galat instrument)."""
-    try:
-        from utils.helpers import is_mcx as _ismcx2
-        if _ismcx2(symbol):
-            try:
-                from core.services.mcx_feed import fetch_mcx_intraday as _mci
-                return _mci(symbol, interval, days) or []
-            except Exception:
-                return []
-    except Exception:
-        pass
+    (auto-paper intraday dead)."""
     out = []
     try:
         import datetime as _dt

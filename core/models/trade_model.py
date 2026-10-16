@@ -128,40 +128,26 @@ class TradeModel:
         return sl_level, tp_level
 
     def close_intraday_trades(self, user_id=1, _now=None) -> list:
-        """Exchange-aware forced square-off for INTRADAY trades only
-        (NSE 3:20 PM, MCX 11:20 PM - positional KEVAL lage rahe).
-        Cash/EQ never held overnight - short-delivery auction safety.
-        Positional trades carry overnight - unhe kabhi nahi chhedta.
-        _now: test hook (IST datetime).
+        """15:20 IST forced square-off for INTRADAY trades only (user demand:
+        3:20 par intraday exit, positional KEVAL lage rahe). Cash/EQ never
+        held overnight - short-delivery auction safety.
+        Positional trades (trade_type='positional') carry overnight - unhe
+        kabhi nahi chhedta. _now: test hook (IST datetime).
         Returns [{id, reason, exit_price}]."""
         hit = []
         try:
             now = _now or self._ist_now()
+            if now.time() < __import__("datetime").time(15, 20):
+                return hit
             today = now.strftime("%Y-%m-%d")
-            try:
-                now_mins = now.hour * 60 + now.minute
-            except Exception:
-                now_mins = 0
             opens = self.db.fetch_all(
                 "SELECT * FROM paper_trades WHERE user_id=? AND status='open'"
                 " AND COALESCE(trade_type,'intraday')='intraday'", [user_id]
             )
         except Exception:
             return hit
-        try:
-            from utils.helpers import session_of as _sess
-        except Exception:
-            _sess = None
         for t in opens or []:
             try:
-                _eod = 15 * 60 + 20
-                try:
-                    if _sess is not None:
-                        _eod = int(_sess(t.get("symbol")).get("eod_min", _eod))
-                except Exception:
-                    pass
-                if now_mins < _eod and str(t.get("entry_date") or "")[:10] >= today:
-                    continue  # is exchange ka EOD time abhi nahi aaya
                 cur, _src = self._forced_exit_price(t)
                 self.close_trade(t["id"], float(cur), today, exit_status="intraday_auto")
                 hit.append({"id": t["id"], "reason": "intraday_auto",
@@ -212,12 +198,7 @@ class TradeModel:
                     adv = {}
                 if str(adv.get("trade_mode") or "intraday").lower() != "intraday":
                     continue  # positional strategy: overnight carry allowed
-                try:
-                    from utils.helpers import session_of as _sess2
-                    _def_et = "23:00" if str(_sess2(t.get("symbol")).get("exchange")) == "MCX" else "15:15"
-                except Exception:
-                    _def_et = "15:15"
-                _et = str(adv.get("exit_time") or _def_et).strip()[:5]
+                _et = str(adv.get("exit_time") or "15:15").strip()[:5]
                 try:
                     _eh, _em = _et.split(":")
                     _exit_mins = int(_eh) * 60 + int(_em)
@@ -319,8 +300,6 @@ class TradeModel:
                 if len(exp) < 10:
                     if self._trade_type(t) == "positional":
                         continue  # never guess expiry for positional carries
-                    if str(t.get("option_type") or "").upper() == "FUT":
-                        continue  # MCX futures expiry kabhi guess nahi (NSE Thursday nahi)
                     exp = self._infer_expiry(t.get("entry_date") or today)
                     try:
                         self.db.execute("UPDATE paper_trades SET expiry_date=? WHERE id=?", [exp, t["id"]])
@@ -532,16 +511,8 @@ class TradeModel:
         if not data.get("symbol") or not str(data.get("symbol")).strip():
             return "Symbol missing"
         _ot = str(data.get("option_type") or "").upper()
-        if _ot not in ("CE", "PE", "FUT", "EQ"):
-            return "Option type must be CE/PE (options), FUT (MCX futures) ya EQ"
-        if _ot in ("FUT", "EQ"):
-            # Futures/equity: strike concept nahi (0 = market futures),
-            # quantity/entry_price zaroori.
-            if data.get("quantity") is None or int(data.get("quantity", 0)) <= 0:
-                return "Quantity must be > 0"
-            if data.get("entry_price") is not None and float(data.get("entry_price", 0)) <= 0:
-                return "Entry price must be > 0"
-            return None
+        if _ot not in ("CE", "PE"):
+            return "Option type must be CE or PE"
         try:
             strike = float(data.get("strike_price", 0))
         except Exception:
@@ -627,22 +598,6 @@ class TradeModel:
             except Exception:
                 pass
             return None
-        # FUT (MCX futures) LTP: proxy feed only (koi BS model nahi - futures
-        # ka price contract price hota hai). Na mile to None (fail-closed).
-        if str(option_type or "").upper() == "FUT":
-            try:
-                from core.services.mcx_feed import get_mcx_ltp as _mltp
-                _fl = _mltp(symbol)
-                if _fl and float(_fl) > 0:
-                    val = round(float(_fl), 2)
-                    try:
-                        self._last_premiums[f"{symbol}_FUT_0.0_{expiry or ''}"] = val
-                    except Exception:
-                        pass
-                    return val
-            except Exception:
-                pass
-            return None
         if strike is None or float(strike or 0) <= 0:
             return None
         strike = float(strike)
@@ -724,12 +679,7 @@ class TradeModel:
         exit_is_sell = trade["transaction_type"] == "BUY"
         closing_side = "SELL" if exit_is_sell else "BUY"
         exit_price = max(0.01, TransactionCosts.apply_fill_slippage(exit_price, closing_side, is_live=True))
-        try:
-            from utils.helpers import exchange_of as _exof5
-            _exch5 = _exof5(trade.get("symbol"))
-        except Exception:
-            _exch5 = "NSE"
-        exit_costs = TransactionCosts.calculate(exit_price * qty * lot, exit_is_sell, is_live=True, exchange=_exch5)
+        exit_costs = TransactionCosts.calculate(exit_price * qty * lot, exit_is_sell, is_live=True)
         if trade["transaction_type"] == "BUY":
             gross_pnl = (exit_price - trade["entry_price"]) * qty * lot
         else:

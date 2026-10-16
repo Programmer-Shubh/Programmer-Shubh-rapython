@@ -1009,18 +1009,6 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                                          "winning_trades": 0, "win_rate": 0, "net_pnl": 0}
                     _fire_prog(_sym)
                     continue
-                # FUT (MCX futures) legs sirf MCX symbols par (NSE par futures
-                # chain yahan nahi - fantasy fills rokne ke liye hard gate).
-                try:
-                    from utils.helpers import is_mcx as _ismcx2
-                    _has_fut = any(str((l or {}).get("option_type", "")).upper() == "FUT" for l in (legs or []))
-                    if _has_fut and not _ismcx2(_sym):
-                        _per_symbol[_sym] = {"error": f"{_sym} MCX commodity nahi - FUT legs sirf MCX symbols (CRUDEOIL/GOLD/...) par.", "total_trades": 0,
-                                             "winning_trades": 0, "win_rate": 0, "net_pnl": 0}
-                        _fire_prog(_sym)
-                        continue
-                except Exception:
-                    pass
             except Exception:
                 pass
             # Timeframe decides the data path FIRST (spec §5): intraday TF par
@@ -1085,13 +1073,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     if len(_BT_CACHE) > 12:
                         _BT_CACHE.pop(next(iter(_BT_CACHE)))
                 else:
-                    try:
-                        from utils.helpers import is_mcx as _ismcx3
-                        _mcx_hint = (" MCX intraday COMEX-proxy par chalta hai - feed down ho to 10-15 min "
-                                     "baad retry karo ya Daily timeframe try karo." if _ismcx3(_sym) else "")
-                    except Exception:
-                        _mcx_hint = ""
-                    _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile - fabricated bars nahi banate.{_mcx_hint}", "total_trades": 0,
+                    _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile - fabricated bars nahi banate", "total_trades": 0,
                                          "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                          "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(_bars15 or [])}}
                     _fire_prog(_sym)

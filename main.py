@@ -86,38 +86,6 @@ async def _startup_background():
         _th4.Thread(target=_ap_loop, daemon=True).start()
     except: pass
     try:
-        # MCX proxy archive warmer: har 45 min me liquid commodities ka
-        # daily+intraday proxy archive bharo (pehli fill ke baad MCX backtest
-        # bina network/broker ke chalega - Yahoo-jitter proof). MCX hours me.
-        def _mcx_loop():
-            import time as _t
-            try:
-                _t.sleep(300)
-            except Exception:
-                return
-            while True:
-                try:
-                    from core.services.mcx_feed import warm_mcx_archive
-                    from core.services.sl_monitor import market_open_ist as _mkt
-                    try:
-                        _open = bool(_mkt("CRUDEOIL"))
-                    except Exception:
-                        _open = True
-                    if _open:
-                        try:
-                            warm_mcx_archive()
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                try:
-                    _t.sleep(2700)
-                except Exception:
-                    break
-        import threading as _th8
-        _th8.Thread(target=_mcx_loop, daemon=True).start()
-    except: pass
-    try:
         # Dhan token keeper: validate + sync + renew every 6h (auto fetch).
         def _tk_loop():
             try:

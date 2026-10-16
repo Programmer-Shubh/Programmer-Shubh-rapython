@@ -462,33 +462,24 @@ def _execute_legs(s, legs, db, tm, today):
     for leg in legs:
         try:
             opt = str(leg.get("option_type") or "CE").upper()
-            if opt not in ("CE", "PE", "FUT"):
+            if opt not in ("CE", "PE"):
                 continue
             txn = str(leg.get("transaction") or "buy").upper()
             if txn not in ("BUY", "SELL"):
                 txn = "BUY"
-            if opt == "FUT":
-                # MCX futures: strike concept nahi (0 = market futures).
-                req = TradeRequest(
-                    symbol=sym, option_type=opt, strike=0.0,
-                    expiry="", date=today, transaction_type=txn,
-                    quantity=max(1, int(leg.get("lots") or 1)),
-                    stop_loss=sl, take_profit=tp,
-                    trade_type="intraday", strategy_id=int(sid or 0))
-            else:
-                sel = str(leg.get("strike_selection") or "atm").lower()
-                dist = int(leg.get("otm_distance") or 0)
-                strike = atm
-                if sel == "otm":
-                    strike = atm + (dist * step if opt == "CE" else -dist * step)
-                elif sel == "itm":
-                    strike = atm + (-dist * step if opt == "CE" else dist * step)
-                req = TradeRequest(
-                    symbol=sym, option_type=opt, strike=float(strike),
-                    expiry="", date=today, transaction_type=txn,
-                    quantity=max(1, int(leg.get("lots") or 1)),
-                    stop_loss=sl, take_profit=tp,
-                    trade_type="intraday", strategy_id=int(sid or 0))
+            sel = str(leg.get("strike_selection") or "atm").lower()
+            dist = int(leg.get("otm_distance") or 0)
+            strike = atm
+            if sel == "otm":
+                strike = atm + (dist * step if opt == "CE" else -dist * step)
+            elif sel == "itm":
+                strike = atm + (-dist * step if opt == "CE" else dist * step)
+            req = TradeRequest(
+                symbol=sym, option_type=opt, strike=float(strike),
+                expiry="", date=today, transaction_type=txn,
+                quantity=max(1, int(leg.get("lots") or 1)),
+                stop_loss=sl, take_profit=tp,
+                trade_type="intraday", strategy_id=int(sid or 0))
             res = place_trade(req)
             if isinstance(res, dict) and res.get("trade_id"):
                 placed.append({"strategy": s.get("name"), "trade_id": res["trade_id"],
@@ -522,13 +513,13 @@ def place_for_strategy(sid, signal_check="daily"):
         s = db.fetch_one("SELECT * FROM strategies WHERE id=?", [sid])
         if not s:
             return {"placed": placed, "notes": ["strategy not found"]}
-        # Exchange-aware entry cutoff (NSE 3:15 PM, MCX 11:00 PM): iske baad
-        # worker/save-hook/manual se KOI nayi entry nahi. Exits unaffected.
+        # 3:15 PM entry cutoff (user demand): iske baad worker/save-hook/manual
+        # se KOI nayi entry nahi. Exits (SL monitor) isse affected nahi.
         try:
             from core.services.sl_monitor import entry_open_ist as _eok
             from core.services.sl_monitor import entry_block_reason as _ebr
-            if not bool(_eok(symbol=str(s.get("symbol") or "NIFTY"))):
-                return {"placed": placed, "notes": [_ebr(str(s.get("symbol") or "NIFTY"))]}
+            if not bool(_eok()):
+                return {"placed": placed, "notes": [_ebr()]}
         except Exception:
             pass
         # Paused/draft strategies stay stopped - only active ones trade.

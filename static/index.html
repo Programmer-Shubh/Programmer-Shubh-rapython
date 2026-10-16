@@ -392,7 +392,7 @@
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols + Order</small></div>
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-md-4"><label class="form-label small">Exchange</label> <select id="r-exch" class="form-select form-select-sm d-inline-block" style="width:110px" onchange="onExchChange()"><option value="NSE" selected>NSE F&O</option><option value="MCX">MCX Futures</option></select> <label class="form-label small ms-2">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">OTM 1-4 ≥ ₹20 (next week)</span> <span id="r-otm20-note" class="small text-muted"></span> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
+                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">OTM 1-4 ≥ ₹20 (next week)</span> <span id="r-otm20-note" class="small text-muted"></span> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
                         <input type="hidden" id="r-order" value="CE-BUY"><input type="hidden" id="r-strike" value="ATM"><input type="hidden" id="r-otm" value="1"><input type="hidden" id="r-lots" value="1">
                         <div class="col-md-8 d-flex align-items-center"><small class="text-muted">Order/Strike/Lots — Template se auto (Strategy Templates neeche)</small></div>
                     </div>
@@ -457,8 +457,6 @@
                     <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('ironbutterfly')">Iron Butterfly</button>
                     <button class="btn btn-sm btn-outline-dark" onclick="applyTemplate('butterfly')">Butterfly</button>
                     <button class="btn btn-sm btn-outline-info" onclick="applyTemplate('calendar')">Calendar</button>
-                    <button class="btn btn-sm btn-outline-success" onclick="applyTemplate('futbuy')" title="MCX futures long">FUT Buy</button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="applyTemplate('futsell')" title="MCX futures short">FUT Sell</button>
                     <button class="btn btn-sm btn-outline-secondary" onclick="clearLegs()">Clear</button>
                 </div>
                 <div class="card mt-2" id="legsTableCard" style="display:none"><div class="card-body p-0"><table class="table table-sm mb-0" id="legsTable"><thead><tr><th>#</th><th>Position</th><th>Type</th><th>Strike</th><th>Lots</th><th>Expiry</th><th></th></tr></thead><tbody></tbody></table></div></div>
@@ -787,47 +785,8 @@
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
         try{const l=JSON.parse(localStorage.getItem('otmSymsCacheV1')||'null');if(l&&l.ts&&Date.now()-l.ts<60*60*1000&&l.data&&l.data.symbols&&l.data.symbols.length)return l.data;}catch(e){}return null;}
     async function otmFresh(){const c=otmCached();if(c&&c.otm_to===4&&c.dte===7)return c;const d=await A('/api/chain/symbols-otm?min_premium=20&otm_to=4&dte=7');try{window._otmData={ts:Date.now(),data:d};localStorage.setItem('otmSymsCacheV1',JSON.stringify({ts:Date.now(),data:d}));}catch(e){}return d;}
-    function rExch(){try{const v=(localStorage.getItem('rExch')||document.getElementById('r-exch')?.value||'NSE');return v==='MCX'?'MCX':'NSE';}catch(e){return 'NSE';}}
-    function syncExitForExch(){
-        // Exchange ke hisab se exit default (MCX night 23:05, NSE 15:05).
-        // Stale-tab proof: toggle ke saath-saath page-load par bhi chalta hai.
-        // User ka manual edit (22:30 jaisa) kabhi overwrite nahi hota.
-        try{
-            const _ex=document.getElementById('r-exch')?.value||'NSE';
-            const _tp=document.getElementById('r-type')?.value||'intraday';
-            const _exEl=document.getElementById('r-exit');
-            if(_exEl&&_tp==='intraday'){
-                const _want=(_ex==='MCX')?'23:05':'15:05';
-                const _cur=_exEl.value||'';
-                if(!_cur||_cur==='15:05'||_cur==='23:05'){_exEl.value=_want;}
-            }
-            try{document.getElementById('r-exit-note').textContent=(_tp==='intraday')?((_ex==='MCX')?'MCX night square-off (11:05 PM)':'Intraday square-off'):'Positional: overnight carry, no EOD exit';}catch(e){}
-        }catch(e){}
-    }
-    function onExchChange(){try{const v=document.getElementById('r-exch')?.value||'NSE';localStorage.setItem('rExch',v);}catch(e){} syncExitForExch(); loadStrategySymbols();}
-    async function loadMcxSyms(){
-        // MCX Futures symbol list (official lots) - NSE OTM filter se alag.
-        try{
-            const d=await A('/api/chain/mcx-symbols');
-            const syms=(d.symbols||[]).map(x=>x.symbol||x).filter(Boolean);
-            const lots={}; (d.symbols||[]).forEach(x=>{if(x.symbol)lots[x.symbol]=x.lot_size;});
-            const rbox=document.getElementById('r-syms');
-            if(!syms.length){ if(rbox)rbox.innerHTML='<span class="text-danger small">MCX list nahi mili. <button class="btn btn-sm btn-outline-primary ms-1" onclick="loadMcxSyms()">Retry</button></span>'; return; }
-            try{document.getElementById('r-otm20-note').textContent=syms.length+' MCX futures (FUT Buy/Sell legs lagao)';}catch(e){}
-            let keep=[syms[0]];
-            try{const saved=JSON.parse(localStorage.getItem('rSyms')||'[]');if(saved.length)keep=saved.filter(x=>syms.includes(x));if(!keep.length)keep=[syms[0]];}catch(e){}
-            if(rbox){
-                rbox.innerHTML=syms.map(x=>`<label title="Lot ${lots[x]||''}"><input type="checkbox" value="${x}" ${keep.includes(x)?'checked':''}> 🛢️${x}</label>`).join('');
-                rbox.onchange=()=>{try{const v=[...rbox.querySelectorAll('input:checked')].map(o=>o.value);if(v.length>25){[...rbox.querySelectorAll('input:checked')].slice(25).forEach(el=>el.checked=false);}rSymsRefresh();updateRunSummary();}catch(e){}};
-                rSymsRefresh();
-            }
-        }catch(e){console.error('MCX syms failed',e);}
-    }
     async function loadStrategySymbols(){
         try{
-            try{const _ex=rExch();const _es=document.getElementById('r-exch');if(_es&&_es.value!==_ex)_es.value=_ex;}catch(e){}
-            try{if(typeof syncExitForExch==='function')syncExitForExch();}catch(e){}
-            if(rExch()==='MCX'){ await loadMcxSyms(); return; }
             const sel=document.getElementById('s-index');
             // SIRF OTM 1-6 >= ₹20 wale symbols. Fail/empty par FULL LIST KABHI NAHI -
             // khaali + Retry (user ki demand).
@@ -1734,19 +1693,8 @@ let _lastOpenTrdHTML = null;
         card.style.display='block';
         tbody.innerHTML=stratLegs.map((l,i)=>{
             const cur = l.strike_selection==='atm'?'atm':`${l.strike_selection}${l.otm_distance||1}`;
-            return `<tr><td>${i+1}</td><td><select class="form-select form-select-sm" onchange="updLeg(${i},'transaction',this.value)"><option value="buy" ${l.transaction==='buy'?'selected':''}>BUY</option><option value="sell" ${l.transaction==='sell'?'selected':''}>SELL</option></select></td><td><select class="form-select form-select-sm" onchange="updLeg(${i},'option_type',this.value)"><option value="CE" ${l.option_type==='CE'?'selected':''}>CE</option><option value="PE" ${l.option_type==='PE'?'selected':''}>PE</option><option value="EQ" ${l.option_type==='EQ'?'selected':''}>EQ (Equity)</option><option value="FUT" ${l.option_type==='FUT'?'selected':''}>FUT (MCX)</option></select></td><td><select class="form-select form-select-sm" onchange="updLegStrike(${i},this.value)"><option value="atm" ${cur==='atm'?'selected':''}>ATM</option><option value="otm1" ${cur==='otm1'?'selected':''}>OTM 1</option><option value="otm2" ${cur==='otm2'?'selected':''}>OTM 2</option><option value="otm3" ${cur==='otm3'?'selected':''}>OTM 3</option><option value="otm4" ${cur==='otm4'?'selected':''}>OTM 4</option><option value="otm5" ${cur==='otm5'?'selected':''}>OTM 5</option><option value="otm6" ${cur==='otm6'?'selected':''}>OTM 6</option><option value="itm1" ${cur==='itm1'?'selected':''}>ITM 1</option><option value="itm2" ${cur==='itm2'?'selected':''}>ITM 2</option><option value="itm3" ${cur==='itm3'?'selected':''}>ITM 3</option><option value="itm4" ${cur==='itm4'?'selected':''}>ITM 4</option><option value="itm5" ${cur==='itm5'?'selected':''}>ITM 5</option><option value="itm6" ${cur==='itm6'?'selected':''}>ITM 6</option></select></td><td><input type="number" class="form-control form-control-sm" value="${l.lots}" min="1" max="10" style="width:60px" onchange="updLeg(${i},'lots',this.value)"></td><td><select class="form-select form-select-sm" onchange="updLeg(${i},'expiry',this.value)"><option value="weekly" ${l.expiry==='weekly'?'selected':''}>Weekly</option><option value="monthly" ${l.expiry==='monthly'?'selected':''}>Monthly</option></select></td><td><button class="btn btn-sm btn-danger" onclick="removeLeg(${i})"><i class="bi bi-x"></i></button></td></tr>`;
+            return `<tr><td>${i+1}</td><td><select class="form-select form-select-sm" onchange="updLeg(${i},'transaction',this.value)"><option value="buy" ${l.transaction==='buy'?'selected':''}>BUY</option><option value="sell" ${l.transaction==='sell'?'selected':''}>SELL</option></select></td><td><select class="form-select form-select-sm" onchange="updLeg(${i},'option_type',this.value)"><option value="CE" ${l.option_type==='CE'?'selected':''}>CE</option><option value="PE" ${l.option_type==='PE'?'selected':''}>PE</option><option value="EQ" ${l.option_type==='EQ'?'selected':''}>EQ (Equity)</option></select></td><td><select class="form-select form-select-sm" onchange="updLegStrike(${i},this.value)"><option value="atm" ${cur==='atm'?'selected':''}>ATM</option><option value="otm1" ${cur==='otm1'?'selected':''}>OTM 1</option><option value="otm2" ${cur==='otm2'?'selected':''}>OTM 2</option><option value="otm3" ${cur==='otm3'?'selected':''}>OTM 3</option><option value="otm4" ${cur==='otm4'?'selected':''}>OTM 4</option><option value="otm5" ${cur==='otm5'?'selected':''}>OTM 5</option><option value="otm6" ${cur==='otm6'?'selected':''}>OTM 6</option><option value="itm1" ${cur==='itm1'?'selected':''}>ITM 1</option><option value="itm2" ${cur==='itm2'?'selected':''}>ITM 2</option><option value="itm3" ${cur==='itm3'?'selected':''}>ITM 3</option><option value="itm4" ${cur==='itm4'?'selected':''}>ITM 4</option><option value="itm5" ${cur==='itm5'?'selected':''}>ITM 5</option><option value="itm6" ${cur==='itm6'?'selected':''}>ITM 6</option></select></td><td><input type="number" class="form-control form-control-sm" value="${l.lots}" min="1" max="10" style="width:60px" onchange="updLeg(${i},'lots',this.value)"></td><td><select class="form-select form-select-sm" onchange="updLeg(${i},'expiry',this.value)"><option value="weekly" ${l.expiry==='weekly'?'selected':''}>Weekly</option><option value="monthly" ${l.expiry==='monthly'?'selected':''}>Monthly</option></select></td><td><button class="btn btn-sm btn-danger" onclick="removeLeg(${i})"><i class="bi bi-x"></i></button></td></tr>`;
         }).join('');
-        // FUT legs: strike concept nahi - cells ko MKT/— dikhao (template
-        // literal me ternary lagane se parser tootata tha, isliye post-pass).
-        try{
-            tbody.querySelectorAll('tr').forEach(function(tr, ri){
-                if(((stratLegs[ri]||{}).option_type||'')==='FUT'){
-                    var tds=tr.querySelectorAll('td');
-                    if(tds[3])tds[3].innerHTML='<span class="badge bg-secondary" title="Futures: market price, strike nahi">MKT</span>';
-                    if(tds[5])tds[5].innerHTML='<span class="text-muted">-</span>';
-                }
-            });
-        }catch(e){}
         updatePayoff();
         try{if(typeof refreshAutoBadge==='function')refreshAutoBadge();}catch(e){}
         try{if(typeof updateRunSummary==='function')updateRunSummary();}catch(e){}
@@ -1786,8 +1734,6 @@ let _lastOpenTrdHTML = null;
         else if(t==='ironbutterfly'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'PE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='butterfly'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='calendar'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'monthly',offset:0}); renderLegs(); }
-        else if(t==='futbuy'){ stratLegs.push({option_type:'FUT',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
-        else if(t==='futsell'){ stratLegs.push({option_type:'FUT',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         updatePayoff();
     }
     async function updatePayoff(){
@@ -2169,8 +2115,7 @@ let _lastOpenTrdHTML = null;
         const t=document.getElementById('r-type').value;
         const ex=document.getElementById('r-exit');
         try{const em=document.getElementById('r-exitmode');if(em)em.value=t;}catch(e){}
-        const _ex=(document.getElementById('r-exch')?.value||'NSE');
-        if(t==='intraday'){ex.disabled=false;ex.value=(_ex==='MCX')?'23:05':'15:05';document.getElementById('r-exit-note').textContent=(_ex==='MCX')?'MCX night square-off (11:05 PM)':'Intraday square-off';}
+        if(t==='intraday'){ex.disabled=false;ex.value='15:05';document.getElementById('r-exit-note').textContent='Intraday square-off';}
         else{ex.disabled=true;document.getElementById('r-exit-note').textContent='Positional: overnight carry, no EOD exit';}
     }
     function robotCollectIndicators(){

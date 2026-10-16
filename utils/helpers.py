@@ -114,12 +114,6 @@ def get_lot_size(symbol: str) -> int:
     if _hit:
         return _hit
     try:
-        _mhit = MCX_LOTS.get(s)
-        if _mhit:
-            return int(_mhit)
-    except Exception:
-        pass
-    try:
         live = _load_nse_lots()
         if live and s in live:
             return int(live[s])
@@ -149,11 +143,6 @@ def official_lot(symbol: str):
             live = _load_nse_lots()
             if live and s in live and int(live[s] or 0) > 0:
                 return int(live[s]), "nse", True
-        except Exception:
-            pass
-        try:
-            if s in MCX_LOTS and int(MCX_LOTS[s] or 0) > 0:
-                return int(MCX_LOTS[s]), "mcx-static", True
         except Exception:
             pass
         if s in _STATIC_LOTS:
@@ -196,53 +185,6 @@ def effective_lot_size(symbol: str, stored=None) -> int:
     except Exception:
         pass
     return 50
-
-
-# MCX commodity futures registry. Lots = QUOTE units per lot (quote units
-# differ per contract - VERY important for PnL math):
-#  energy quoted per bbl/mmBtu; bullion GOLD per 10g (1kg=100 units),
-#  GOLDM 100g=10 units; SILVER per kg; base metals per kg (5MT=5000kg).
-#  Verified: MCX official specs + Dhan lot chart Oct-2026 (CRUDEOIL 100BBL,
-#  GOLD 1KGS, GOLDM 100GRMS, SILVER 30KGS, SILVERM 5KGS, COPPER 2500KGS,
-#  NATURALGAS 1250MMBtu, NICKEL 1.5MT).
-MCX_LOTS = {
-    "CRUDEOIL": 100, "CRUDEOILM": 10,
-    "NATURALGAS": 1250,
-    "GOLD": 100, "GOLDM": 10,
-    "SILVER": 30, "SILVERM": 5,
-    "COPPER": 2500,
-    "ZINC": 5000, "ALUMINIUM": 5000, "LEAD": 5000, "NICKEL": 1500,
-    "ALUMINI": 1000, "ZINCMINI": 1000, "LEADMINI": 1000,
-}
-MCX_SYMBOLS = set(MCX_LOTS)
-
-
-def is_mcx(symbol: str) -> bool:
-    try:
-        return str(symbol or "").strip().upper() in MCX_SYMBOLS
-    except Exception:
-        return False
-
-
-def exchange_of(symbol: str) -> str:
-    return "MCX" if is_mcx(symbol) else "NSE"
-
-
-# Exchange sessions (minutes since midnight IST). MCX Mon-Fri 9:00-23:30;
-# NSE 9:15-15:30 (monitor tail till 15:45).
-NSE_SESSION = {"exchange": "NSE", "open_min": 9 * 60,
-               "entry_cutoff_min": 15 * 60 + 15, "eod_min": 15 * 60 + 20,
-               "close_min": 15 * 60 + 45}
-MCX_SESSION = {"exchange": "MCX", "open_min": 9 * 60,
-               "entry_cutoff_min": 23 * 60, "eod_min": 23 * 60 + 20,
-               "close_min": 23 * 60 + 30}
-
-
-def session_of(symbol: str) -> dict:
-    try:
-        return dict(MCX_SESSION) if is_mcx(symbol) else dict(NSE_SESSION)
-    except Exception:
-        return dict(NSE_SESSION)
 
 
 def lot_source(symbol: str) -> str:
@@ -341,7 +283,7 @@ MIN_ORDER_PREMIUM = 20.0
 def check_min_premium(premium, option_type: str = "CE") -> str | None:
     """Error string if option premium below floor, else None (pass)."""
     try:
-        if str(option_type or "").upper() in ("EQ", "FUT"):
+        if str(option_type or "").upper() == "EQ":
             return None
         px = float(premium or 0)
     except Exception:

@@ -201,16 +201,16 @@ def place_trade(req: PlaceTradeRequest):
     try:
         # Market-hours gate (chain place-trade jaisa): band market me entry nahi.
         from core.services.sl_monitor import market_open_ist as _mkt
-        if not bool(_mkt(req.symbol)):
+        if not bool(_mkt()):
             return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-15:30 IST)."}
     except Exception:
         pass
     try:
-        # Exchange-aware entry cutoff (NSE 3:15 PM, MCX 11:00 PM).
+        # 3:15 PM entry cutoff (user demand): iske baad KOI nayi entry nahi.
         from core.services.sl_monitor import entry_open_ist as _eok
         from core.services.sl_monitor import entry_block_reason as _ebr
-        if not bool(_eok(symbol=req.symbol)):
-            return {"error": _ebr(req.symbol)}
+        if not bool(_eok()):
+            return {"error": _ebr()}
     except Exception:
         pass
     # Mandatory Risk Management: SL/Target required (especially for option selling)
@@ -238,30 +238,24 @@ def place_trade(req: PlaceTradeRequest):
     if v_err:
         return {"error": v_err}
     # Prevent faulty strike '01' etc already handled, also reject strike 0
-    # (FUT exempt: strike concept nahi, 0 = market futures).
-    _is_fut2 = str(req.option_type or "").upper() == "FUT"
-    if req.entry_price <= 0 or (req.strike <= 0 and not _is_fut2):
+    if req.entry_price <= 0 or req.strike <= 0:
         return {"error": "Enter valid strike (>0) and premium (>0) - Strike 0 invalid, use ATM"}
     # Premium sanity: option premium should not be ~spot price (EICHERMOT bug ₹3128) - must be <20% of spot
-    if not _is_fut2:
-        try:
-            from core.services.live_market_data import LiveMarketData as _LMD2
-            _sp = _LMD2().get_spot_price(req.symbol) if ' _spot' not in dir() else _spot
-            if _sp and _sp>0 and req.entry_price > _sp*0.25:
-                # allow deep ITM CE where premium ~ spot-strike, but cap at spot*0.25 or intrinsic+500
-                intrinsic = max(0, _sp - req.strike) if req.option_type=="CE" else max(0, req.strike - _sp)
-                if req.entry_price > intrinsic + 600:
-                    return {"error": f"Premium ₹{req.entry_price} too high vs spot ₹{_sp:.0f} (likely spot sent as premium). Correct premium ~₹{intrinsic+80:.0f}. Use option LTP, not spot."}
-        except Exception: pass
+    try:
+        from core.services.live_market_data import LiveMarketData as _LMD2
+        _sp = _LMD2().get_spot_price(req.symbol) if ' _spot' not in dir() else _spot
+        if _sp and _sp>0 and req.entry_price > _sp*0.25:
+            # allow deep ITM CE where premium ~ spot-strike, but cap at spot*0.25 or intrinsic+500
+            intrinsic = max(0, _sp - req.strike) if req.option_type=="CE" else max(0, req.strike - _sp)
+            if req.entry_price > intrinsic + 600:
+                return {"error": f"Premium ₹{req.entry_price} too high vs spot ₹{_sp:.0f} (likely spot sent as premium). Correct premium ~₹{intrinsic+80:.0f}. Use option LTP, not spot."}
+    except Exception: pass
     # Live requote guard (fantasy-entry block): typed premium live LTP se
     # 25% se zyada alag ho to reject - paper fill achievable hona chahiye
-    # (typed 5 vs LTP 105 jaisa phantom PnL block). Live na mile to allow -
-    # SIVAAY FUT: futures me bina live quote entry nahi (fail-closed).
+    # (typed 5 vs LTP 105 jaisa phantom PnL block). Live na mile to allow.
     try:
         _live = trade_model.get_option_premium(req.symbol, req.option_type, req.strike, "")
-        if _is_fut2 and not (_live and float(_live) > 0):
-            return {"error": f"No live futures price for {req.symbol} (MCX feed down) - order nahi laga"}
-        if _live and float(_live) > 0 and req.entry_price > 0 and not _is_fut2:
+        if _live and float(_live) > 0 and req.entry_price > 0:
             _dev = abs(float(req.entry_price) - float(_live)) / float(_live)
             if _dev > 0.25:
                 return {"error": f"Premium ₹{req.entry_price} live LTP ₹{float(_live):.2f} se {_dev*100:.0f}% alag hai (25% limit) - LTP ke paas price dalo ya chain se order karo"}
@@ -283,12 +277,7 @@ def place_trade(req: PlaceTradeRequest):
     except Exception:
         pass
     lot_size = get_lot_size(req.symbol)
-    try:
-        from utils.helpers import exchange_of as _exof3
-        _exch3 = _exof3(req.symbol)
-    except Exception:
-        _exch3 = "NSE"
-    costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True, exchange=_exch3)
+    costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
     trade_model = TradeModel()
     try:
         tid = trade_model.insert_trade({

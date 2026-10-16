@@ -38,7 +38,7 @@ def test_chain_place_blocked_after_cutoff(monkeypatch):
         date="2026-10-14", transaction_type="BUY", quantity=1,
         stop_loss=1500.0, take_profit=3000.0, trade_type="intraday",
         strategy_id=0))
-    assert "15:15" in (r.get("error") or ""), r
+    assert "3:15" in (r.get("error") or ""), r
 
 
 def test_paper_place_blocked_after_cutoff(monkeypatch):
@@ -49,7 +49,7 @@ def test_paper_place_blocked_after_cutoff(monkeypatch):
         symbol="NIFTY", option_type="CE", strike=25000.0,
         transaction_type="BUY", quantity=1, entry_price=100.0,
         stop_loss=1500.0, take_profit=3000.0, date="2026-10-14"))
-    assert "15:15" in (r.get("error") or ""), r
+    assert "3:15" in (r.get("error") or ""), r
 
 
 def test_auto_paper_blocked_after_cutoff(monkeypatch):
@@ -75,11 +75,8 @@ def test_auto_paper_blocked_after_cutoff(monkeypatch):
         db.execute("DELETE FROM strategies WHERE name='t-entry-cutoff'")
 
 
-def test_mcx_entry_open_evening(monkeypatch):
-    """MCX shaam ko khula (NSE cutoff ke baad bhi)."""
+def test_entry_cutoff_boundary(monkeypatch):
     monkeypatch.setattr(slm, "market_open_ist", lambda *_a, **_k: True)
-    assert slm.entry_open_ist(_at(20, 0), symbol="CRUDEOIL") is True
-    assert slm.entry_open_ist(_at(23, 0), symbol="CRUDEOIL") is False
     assert slm.entry_open_ist(_at(15, 14)) is True
     assert slm.entry_open_ist(_at(15, 15)) is False
 
@@ -90,4 +87,4 @@ def test_execution_engine_blocked_after_cutoff(monkeypatch):
     monkeypatch.setattr(slm, "entry_open_ist", lambda *_a, **_k: False)
     r = ee.execute([{"option_type": "CE", "transaction": "buy", "lots": 1}],
                    "NIFTY", mode="PAPER")
-    assert "15:15" in (r.get("error") or ""), r
+    assert "3:15" in (r.get("error") or ""), r

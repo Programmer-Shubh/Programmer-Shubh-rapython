@@ -17,12 +17,12 @@ def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500
                 return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-3:30 IST)."}
         except Exception:
             pass
-        # Exchange-aware entry cutoff (NSE 3:15 PM, MCX 11:00 PM).
+        # 3:15 PM entry cutoff (user demand).
         try:
             from core.services.sl_monitor import entry_open_ist as _eok
             from core.services.sl_monitor import entry_block_reason as _ebr
-            if not bool(_eok(symbol=symbol)):
-                return {"error": _ebr(symbol)}
+            if not bool(_eok()):
+                return {"error": _ebr()}
         except Exception:
             pass
     # Official-lot gate (fail-closed): unverified lot par order BLOCK.
@@ -53,22 +53,13 @@ def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500
         # DTE: weekly legs -> 7, monthly -> 28 (pehle hardcoded 7 tha, monthly
         # paper entry backtest se sasta/mahanga padta tha).
         premium = 0
-        _is_fut_ee = str(leg.get("option_type") or "").upper() == "FUT"
-        if _is_fut_ee:
-            # MCX futures: live proxy LTP only (BS model futures par fantasy).
-            try:
-                from core.services.mcx_feed import get_mcx_ltp as _mpx2
-                premium = float(_mpx2(symbol) or 0)
-            except Exception:
-                premium = 0
-        else:
-            try:
-                from utils.helpers import model_premium, model_iv
-                _exp_hint = str((leg.get("expiry") or "")).lower()
-                _dte = 28 if _exp_hint == "monthly" else 7
-                premium = model_premium(spot, strike, _dte, leg["option_type"], symbol=symbol)
-            except Exception:
-                premium = 0  # purana spot*2% synthetic HATAYA - fantasy fill nahi
+        try:
+            from utils.helpers import model_premium, model_iv
+            _exp_hint = str((leg.get("expiry") or "")).lower()
+            _dte = 28 if _exp_hint == "monthly" else 7
+            premium = model_premium(spot, strike, _dte, leg["option_type"], symbol=symbol)
+        except Exception:
+            premium = 0  # purana spot*2% synthetic HATAYA - fantasy fill nahi
         if not premium or premium <= 0:
             return {"error": f"No premium for {symbol} {strike}{leg['option_type']} (spot/model fail) - order nahi laga"}
         adj = TransactionCosts.apply_fill_slippage(premium, leg["transaction"].upper(), is_live=False)
