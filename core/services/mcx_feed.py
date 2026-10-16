@@ -35,6 +35,160 @@ _FX_TTL = 6 * 3600
 _FXSER_CACHE = {}
 _FXSER_TTL = 900
 
+# Liquid MCX symbols warmed in background (paper/backtest bina network ke).
+MCX_WARM_SYMBOLS = ["CRUDEOIL", "NATURALGAS", "GOLD", "GOLDM", "SILVER",
+                    "SILVERM", "COPPER"]
+
+
+def _ensure_mcx_table():
+    """mcx_proxy_bars archive (proxy bars ka local godaam). Pehli successful
+    fill ke baad backtest Yahoo-jitter proof: dobara wahi window secondon me,
+    bina network, bina broker ke."""
+    try:
+        from core.models.database import Database as _DB
+        db = _DB.get_instance()
+        try:
+            _pg = bool(db._is_postgres())
+        except Exception:
+            _pg = False
+        if _pg:
+            db.execute("CREATE TABLE IF NOT EXISTS mcx_proxy_bars (id SERIAL PRIMARY KEY,"
+                       " symbol TEXT NOT NULL, timeframe TEXT NOT NULL DEFAULT '1d',"
+                       " trade_date TEXT NOT NULL, bar_time TEXT NOT NULL DEFAULT '',"
+                       " open_price DOUBLE PRECISION DEFAULT 0, high_price DOUBLE PRECISION DEFAULT 0,"
+                       " low_price DOUBLE PRECISION DEFAULT 0, close_price DOUBLE PRECISION DEFAULT 0,"
+                       " volume BIGINT DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW())")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mcxbar_uq ON"
+                       " mcx_proxy_bars(symbol, timeframe, trade_date, bar_time)")
+        else:
+            db.execute("CREATE TABLE IF NOT EXISTS mcx_proxy_bars (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                       " symbol TEXT NOT NULL, timeframe TEXT NOT NULL DEFAULT '1d',"
+                       " trade_date TEXT NOT NULL, bar_time TEXT NOT NULL DEFAULT '',"
+                       " open_price REAL DEFAULT 0, high_price REAL DEFAULT 0,"
+                       " low_price REAL DEFAULT 0, close_price REAL DEFAULT 0,"
+                       " volume INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mcxbar_uq ON"
+                       " mcx_proxy_bars(symbol, timeframe, trade_date, bar_time)")
+    except Exception:
+        pass
+
+
+def _wanted_days(start_date, end_date):
+    """Requested range ke trading days (weekends nikal kar)."""
+    try:
+        import datetime as _dt
+        _s = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+        _e = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+        out, _d = [], _s
+        while _d <= _e:
+            if _d.weekday() < 5:
+                out.append(_d.strftime("%Y-%m-%d"))
+            _d += _dt.timedelta(days=1)
+        return out
+    except Exception:
+        return []
+
+
+def read_mcx_archive(symbol, timeframe, start_date, end_date):
+    """Archive me poori range covered ho to bars (warna [])."""
+    try:
+        _ensure_mcx_table()
+        from core.models.database import Database as _DB
+        s = str(symbol or "").strip().upper()
+        tf = str(timeframe or "1d")
+        rows = _DB.get_instance().fetch_all(
+            "SELECT trade_date, bar_time, open_price, high_price, low_price,"
+            " close_price, volume FROM mcx_proxy_bars"
+            " WHERE symbol=? AND timeframe=? AND trade_date BETWEEN ? AND ?"
+            " ORDER BY trade_date, bar_time",
+            [s, tf, str(start_date)[:10], str(end_date)[:10]]) or []
+        if not rows:
+            return []
+        _want = set(_wanted_days(start_date, end_date))
+        _have = {str(r.get("trade_date", ""))[:10] for r in rows}
+        if _want and not _want.issubset(_have):
+            return []
+        out = []
+        for r in rows:
+            try:
+                out.append({"symbol": s, "trade_date": str(r.get("trade_date", ""))[:10],
+                            "bar_time": str(r.get("bar_time", "") or ""),
+                            "open_price": float(r.get("open_price") or 0),
+                            "high_price": float(r.get("high_price") or 0),
+                            "low_price": float(r.get("low_price") or 0),
+                            "close_price": float(r.get("close_price") or 0),
+                            "volume": int(r.get("volume") or 0), "oi": 0,
+                            "source": "proxy-archive"})
+            except Exception:
+                continue
+        return [b for b in out if b["close_price"] > 0]
+    except Exception:
+        return []
+
+
+def store_mcx_bars(symbol, timeframe, bars):
+    """Proxy bars archive karo (deduped). Returns stored count."""
+    try:
+        if not bars:
+            return 0
+        _ensure_mcx_table()
+        from core.models.database import Database as _DB
+        db = _DB.get_instance()
+        s = str(symbol or "").strip().upper()
+        tf = str(timeframe or "1d")
+        n = 0
+        for b in bars or []:
+            try:
+                _d = str(b.get("trade_date", ""))[:10]
+                _t = str(b.get("bar_time", "") or "")
+                _c = float(b.get("close_price") or 0)
+                if not _d or _c <= 0:
+                    continue
+                try:
+                    db.execute("DELETE FROM mcx_proxy_bars WHERE symbol=? AND timeframe=?"
+                               " AND trade_date=? AND bar_time=?", [s, tf, _d, _t])
+                except Exception:
+                    pass
+                db.execute("INSERT INTO mcx_proxy_bars (symbol, timeframe, trade_date, bar_time,"
+                           " open_price, high_price, low_price, close_price, volume)"
+                           " VALUES (?,?,?,?,?,?,?,?,?)",
+                           [s, tf, _d, _t,
+                            float(b.get("open_price") or _c),
+                            float(b.get("high_price") or _c),
+                            float(b.get("low_price") or _c), _c,
+                            int(b.get("volume") or 0)])
+                n += 1
+            except Exception:
+                continue
+        return n
+    except Exception:
+        return 0
+
+
+def warm_mcx_archive(symbols=None, intraday_days: int = 5, daily_days: int = 120):
+    """Background warmer: liquid symbols ka daily(120d) + intraday(5d) proxy
+    archive me bharo. Ek baar bharne ke baad backtest bina network ke chalta
+    hai (bina broker, bina Yahoo-jitter). Returns {symbol: bars}."""
+    out = {}
+    try:
+        import datetime as _dt
+        _e = _dt.date.today().strftime("%Y-%m-%d")
+        _s = (_dt.date.today() - _dt.timedelta(days=int(daily_days or 120))).strftime("%Y-%m-%d")
+        for _sym in (symbols or MCX_WARM_SYMBOLS):
+            try:
+                _db, _src = fetch_mcx_history(_sym, _s, _e)
+                if _db:
+                    store_mcx_bars(_sym, "1d", _db)
+                _ib = fetch_mcx_intraday(_sym, "15m", days=int(intraday_days or 5))
+                if _ib:
+                    store_mcx_bars(_sym, "15m", _ib)
+                out[_sym] = len(_db or []) + len(_ib or [])
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
 
 def _fx_series(iv="15m", days=5):
     """Shared (fx-intraday-rows, fx-daily-rows): TTL cache hit par 0 network."""
@@ -133,6 +287,17 @@ def fetch_mcx_intraday(symbol: str, interval: str = "15m", days: int = 5):
         ticker, fn = conv
         iv = {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "60m"}.get(
             str(interval or "15m"), "15m")
+        # Archive-first: pichhli successful fill maujood ho to bina network.
+        try:
+            import datetime as _dtx
+            _ddays = min(int(days or 5), 60)
+            _ee = _dtx.date.today().strftime("%Y-%m-%d")
+            _ss = (_dtx.date.today() - _dtx.timedelta(days=_ddays + 5)).strftime("%Y-%m-%d")
+            _cached = read_mcx_archive(s, iv, _ss, _ee)
+            if _cached and len(_cached) >= 20:
+                return _cached
+        except Exception:
+            pass
         try:
             from core.services.free_data import fetch_yahoo_intraday as _fyi
             rows = _fyi(ticker, iv, days=min(int(days or 5), 60)) or []
@@ -210,6 +375,11 @@ def fetch_mcx_intraday(symbol: str, interval: str = "15m", days: int = 5):
             except Exception:
                 continue
         out.sort(key=lambda b: (b["trade_date"], b["bar_time"]))
+        try:
+            if out:
+                store_mcx_bars(s, iv, out)
+        except Exception:
+            pass
         return out
     except Exception:
         return []
@@ -218,12 +388,19 @@ def fetch_mcx_intraday(symbol: str, interval: str = "15m", days: int = 5):
 def fetch_mcx_history(symbol: str, start_date: str, end_date: str):
     """Proxy OHLC history converted to MCX quote units.
     Returns (bars, source) - bars like bhavcopy rows with trade_date/open/
-    high/low/close/volume; source 'proxy'. ([], 'none') when unavailable."""
+    high/low/close/volume; source 'proxy' (live) ya 'proxy-archive' (local).
+    ([], 'none') when unavailable."""
     try:
         s = str(symbol or "").strip().upper()
         conv = _converters().get(s)
         if not conv:
             return [], "none"
+        try:
+            _cached = read_mcx_archive(s, "1d", start_date, end_date)
+            if _cached and len(_cached) >= 5:
+                return _cached, "proxy-archive"
+        except Exception:
+            pass
         ticker, fn = conv
         from core.services.free_data import fetch_yahoo_daily as _yd
         rows = _yd(ticker, start_date, end_date) or []
@@ -269,6 +446,11 @@ def fetch_mcx_history(symbol: str, start_date: str, end_date: str):
             except Exception:
                 continue
         out.sort(key=lambda b: b["trade_date"])
+        try:
+            if out:
+                store_mcx_bars(s, "1d", out)
+        except Exception:
+            pass
         return out, ("proxy" if out else "none")
     except Exception:
         return [], "none"
