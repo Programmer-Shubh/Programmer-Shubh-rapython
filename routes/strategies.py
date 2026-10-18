@@ -887,6 +887,24 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
             try:
                 if not _should_overwrite_saved(row.get("last_backtest"), res):
                     _kept = True
+                    # Fresh 0-trade ne SAVED non-zero history ko overwrite
+                    # nahi kiya - CLIENT ko bhi WAHI saved result bhejo
+                    # (warna frontend me saved-result render hokar phir
+                    # 0-trade fresh se overwrite ho jaata tha - "detail
+                    # nahi dikha raha" bug).
+                    try:
+                        _sv_raw = row.get("last_backtest") or ""
+                        _sv = _js.loads(_sv_raw) if isinstance(_sv_raw, str) else _sv_raw
+                        if isinstance(_sv, dict) and (_sv.get("metrics") or _sv.get("trade_list") is not None):
+                            _sv["stored"] = True
+                            _sv["stored_at"] = row.get("last_backtest_at") or ""
+                            _sv["strategy_id"] = strat_id
+                            _sv["strategy_name"] = row.get("name") or ""
+                            _sv["kept_saved"] = True
+                            _sv["config_changed"] = True
+                            return _sv
+                    except Exception:
+                        pass
                 else:
                     from datetime import datetime as _dtn, timedelta as _tdn, timezone as _tzn
                     _now_s = (_dtn.now(_tzn(_tdn(hours=5, minutes=30)))).strftime("%Y-%m-%d %H:%M")
