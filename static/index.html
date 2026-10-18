@@ -722,7 +722,7 @@
             <div class="card mb-2"><div class="card-body p-2">
                 <div class="row g-2 align-items-end">
                     <div class="col-6 col-md-2"><label class="form-label small">Symbol</label><input type="text" class="form-control form-control-sm" id="tv-sym" value="NIFTY"></div>
-                    <div class="col-6 col-md-1"><label class="form-label small">Start</label><input type="date" class="form-control form-control-sm" id="tv-start" value="2026-08-01"></div>
+                    <div class="col-6 col-md-1"><label class="form-label small">Start</label><input type="date" class="form-control form-control-sm" id="tv-start" value="2026-04-01"></div>
                     <div class="col-6 col-md-1"><label class="form-label small">End</label><input type="date" class="form-control form-control-sm" id="tv-end" value="2026-09-08"></div>
                     <div class="col-6 col-md-1"><label class="form-label small">Mode</label><select id="tv-mode" class="form-select form-select-sm"><option value="all" selected>Paper+Live</option><option value="paper">Paper only</option><option value="live">Live only</option></select></div>
                     <div class="col-6 col-md-1"><label class="form-label small">ST Pd</label><input type="number" id="tv-stp" class="form-control form-control-sm" value="10" min="2"></div>
@@ -733,7 +733,7 @@
                     <div class="col-6 col-md-1"><label class="form-label small">ZL Mult</label><input type="number" id="tv-zlm" class="form-control form-control-sm" value="1.2" step="0.1" min="0.1"></div>
                 </div>
             </div></div>
-            <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:520px"></div><div class="small p-2"><span style="color:#198754">▲ BUY</span> <span style="color:#dc3545">▼ SELL</span> <span style="color:#0d6efd">● EXIT</span> <span style="color:#ff9800">● OPEN</span> <span style="color:#198754">— SuperTrend Bull</span> <span style="color:#dc3545">— SuperTrend Bear</span> <span style="color:#00ffbb">— ZeroLag Bull</span> <span style="color:#ff1100">— ZeroLag Bear</span> <span style="color:#2962ff">— EMAfast</span> <span style="color:#6f42c1">— EMAslow</span> <span class="text-muted">[AlgoAlpha Pine exact: Len 70 / Mult 1.2]</span></div><div id="tv-mtf" class="p-2"></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
+            <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:560px"></div><div class="small p-2"><span style="color:#198754">▲ BUY</span> <span style="color:#dc3545">▼ SELL</span> <span style="color:#0d6efd">● EXIT</span> <span style="color:#ff9800">● OPEN</span> <span style="color:#198754">— SuperTrend Bull</span> <span style="color:#dc3545">— SuperTrend Bear</span> <span style="color:#00ffbb">— ZeroLag Bull</span> <span style="color:#ff1100">— ZeroLag Bear</span> <span style="color:#2962ff">— EMAfast</span> <span style="color:#6f42c1">— EMAslow</span> <span class="text-muted">[AlgoAlpha Pine exact: Len 70 / Mult 1.2]</span></div><div id="tv-mtf" class="p-2"></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
         </div>
 
 <!-- CALL/PUT ROBOT - Simple Buy/Sell with SL/TP -->
@@ -1458,9 +1458,8 @@ let _lastOpenTrdHTML = null;
         let body=null;
         try{ body=_unifiedBody(); }catch(ue){ _restore(); try{document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Form error: '+(ue.message||ue)+'</p>';}catch(e){} return; }
         if(!body){_restore();return;}
-        // Async-first: submit job (instant), poll every 3s with elapsed timer.
-        // Long backtests (60s+) get killed by proxy timeouts on sync /run,
-        // which is why the button looked "dead". Falls back to sync /run.
+        // Async-first: submit job (instant), poll with elapsed timer.
+        // Cached same-params run = response me hi result (0ms poll).
         let r=null; let lastErr=''; let _usedAsync=false;
         const _btStart=Date.now();
         const _btSpin=()=>{
@@ -1475,17 +1474,11 @@ let _lastOpenTrdHTML = null;
             document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Backtest chal raha hai... '+s+'s (page band mat karo)</p>';
         };
         _btSpin();
-        // Smart routing: chhota run = sync (8s cap), bada run (4+ symbols ya
-        // lamba intraday range) = seedha async (8s waste + duplicate server
-        // compute nahi). Bada run sync me kabhi 8s me nahi hota.
-        let _bigRun=false;
-        try{
-            const _nSym=(body.symbols||[]).length;
-            const _tf=String((body.advanced||{}).timeframe||'1d');
-            let _days=0;
-            try{_days=Math.max(0,(new Date(body.end_date)-new Date(body.start_date))/86400000);}catch(e){}
-            _bigRun=_nSym>3||(_days>30&&['1m','5m','15m','30m','1h'].includes(_tf));
-        }catch(e){}
+        // HAMESHA async (sync-first hataya): client 8s par abort karta tha
+        // par server thread chalta rehta tha (zombie) - single-flight lock
+        // minutes tak busy, har follow-up job "busy" aati, result bahut der
+        // me dikhta tha. Async job instant submit hota hai; cached repeat
+        // response me hi result aata hai (poll bhi nahi).
         // Job poll helper: spinner + progress + 30-fail tolerance + busy note.
         // Server 'busy' bole (dusra backtest chal raha) to wait karke wapas
         // aata hai - user ko dobara dabana nahi padta. 'unknown' (restart me
@@ -1493,7 +1486,7 @@ let _lastOpenTrdHTML = null;
         const _pollJob=async(sub)=>{
             let _netFails=0;
             for(let p=0;p<120;p++){
-                await new Promise(res=>setTimeout(res,700+Math.min(p*50,1800)));
+                await new Promise(res=>setTimeout(res,400+Math.min(p*40,1500)));
                 try{_btSpin();}catch(e){}
                 let st=null;
                 try{ st=await A('/api/backtest/result/'+sub.job_id); _netFails=0; }
@@ -1507,6 +1500,7 @@ let _lastOpenTrdHTML = null;
             if(!r && !lastErr) lastErr='timeout — chhota period/symbol try karo';
         };
         // Async submit helper (20s cap): 'busy' mile to 10s rukkar dobara.
+        // Cached repeat ho to response me hi result (status=done) - skip poll.
         const _submitJob=async()=>{
             for(let s=0;s<6;s++){
                 const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),20000);
@@ -1526,39 +1520,19 @@ let _lastOpenTrdHTML = null;
             }
             return null;
         };
-        // Fast path: try sync first (cached/small runs finish in <2s), fallback to async only if sync times out
         try{
-            // Try sync with 8s timeout — most backtests finish in <2s.
-            // Bada run seedha async (sync attempt me 8s waste nahi).
-            if(_bigRun) throw new Error('big-run-async-direct');
-            const ctrl=new AbortController(); const tmo=setTimeout(()=>ctrl.abort(),8000);
-            try{
-                r=await P('/api/backtest/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
-                clearTimeout(tmo);
-                if(r && !r.error){ _usedAsync=true; }
-                else throw new Error(r.error||'sync failed');
-            }catch(se){
-                try{if(typeof tmo!=='undefined')clearTimeout(tmo);}catch(e){}
-                // Timeout (abort) ho ya instant fail - DONO me async job + poll.
-                // Pehle abort seedha sync-retry me girta tha: 3 andhe attempts,
-                // spinner frozen, server par 4x duplicate compute. Ab kabhi nahi.
-                if(String((se&&se.message)||'').includes('abort')) lastErr='8s me na hua - background job me chala rahe hain...';
-                if(String((se&&se.message)||'')==='big-run-async-direct') lastErr='bada run - seedha background job me...';
-                // Sync failed or slow — fallback to async. Server 'busy' bole
-                // ya restart me job wipe ho ('unknown') to 15s rukkar dobara
-                // submit (max 3 baar) - user ko dabana nahi.
-                for(let _bi=0;_bi<3 && !r;_bi++){
-                    if(_bi>0){ lastErr='server busy tha - '+(_bi+1)+'vi baar try...'; try{_btSpin();const _pb=document.getElementById('bt-progress-text');if(_pb)_pb.textContent='Server busy/restart - wait... ('+(_bi+1)+'/3)';}catch(e){} await new Promise(res=>setTimeout(res,15000)); }
-                    const sub=await _submitJob();
-                    if(sub && sub.job_id){
-                        _usedAsync=true;
-                        await _pollJob(sub);
-                    }
-                    if(r) break;
-                    if(!String(lastErr||'').includes('busy')&&lastErr!=='NEEDS_RESUBMIT') break;
-                    if(lastErr==='NEEDS_RESUBMIT') lastErr='server restart hua tha - naya job laga rahe...';
-                    r=null;
+            for(let _bi=0;_bi<3 && !r;_bi++){
+                if(_bi>0){ lastErr='server busy tha - '+(_bi+1)+'vi baar try...'; try{_btSpin();const _pb=document.getElementById('bt-progress-text');if(_pb)_pb.textContent='Server busy/restart - wait... ('+(_bi+1)+'/3)';}catch(e){} await new Promise(res=>setTimeout(res,15000)); }
+                const sub=await _submitJob();
+                if(sub && sub.job_id){
+                    _usedAsync=true;
+                    if(sub.status==='done' && sub.result){ r=sub.result; lastErr=''; }
+                    else await _pollJob(sub);
                 }
+                if(r) break;
+                if(!String(lastErr||'').includes('busy')&&lastErr!=='NEEDS_RESUBMIT') break;
+                if(lastErr==='NEEDS_RESUBMIT') lastErr='server restart hua tha - naya job laga rahe...';
+                r=null;
             }
         }catch(ae){ lastErr=ae.message||''; }
         if(!_usedAsync){
@@ -1570,7 +1544,8 @@ let _lastOpenTrdHTML = null;
             const sub2=await _submitJob();
             if(sub2 && sub2.job_id){
                 _usedAsync=true;
-                await _pollJob(sub2);
+                if(sub2.status==='done' && sub2.result){ r=sub2.result; lastErr=''; }
+                else await _pollJob(sub2);
             } else if(!lastErr) lastErr='submit nahi hua - dobara Run dabao';
         }catch(e){ lastErr=e.message||''; }
         }
@@ -3013,7 +2988,7 @@ def run(data):
             document.getElementById('py-logs').textContent=r.logs||'(no script output)';
         }catch(e){btn.innerHTML=orig;document.getElementById('py-metrics').innerHTML='<p class="text-danger p-2">Network error: '+(e.message||e)+'</p>';}
     }
-    let _tvChart=null,_tvCandle=null,_tvST=null,_tvEF=null,_tvES=null,_tvTimer=null,_tvZLBull=null,_tvZLBear=null,_tvZLup=null,_tvZLlo=null;
+    let _tvChart=null,_tvCandle=null,_tvST=null,_tvEF=null,_tvES=null,_tvTimer=null,_tvZLBull=null,_tvZLBear=null,_tvZLup=null,_tvZLlo=null,_tvVol=null,_tvOHLC=null,_tvResize=null;
     async function tvLoad(){
         const btn=document.getElementById('tv-load');const orig=btn.innerHTML;btn.innerHTML='<span class="spinner"></span> Loading...';
         try{
@@ -3026,8 +3001,66 @@ def run(data):
             btn.innerHTML=orig;
             if(!r||r.error||!r.candles){document.getElementById('tv-info').textContent='Error: '+((r&&r.error)||'no data');return;}
             const el=document.getElementById('tv-chart');el.innerHTML='';
-            _tvChart=LightweightCharts.createChart(el,{width:el.clientWidth||800,height:520,layout:{background:{color:'#fff'},textColor:'#212529'},grid:{vertLines:{color:'#eee'},horzLines:{color:'#eee'}},timeScale:{timeVisible:false}});
-            _tvCandle=_tvChart.addCandlestickSeries({upColor:'#198754',downColor:'#dc3545',wickUpColor:'#198754',wickDownColor:'#dc3545'});
+            // Purana chart destroy (auto-refresh 60s par naya chart banne se
+            // purana DOM/listener leak hota tha - chart aur bhi "faila" lagta)
+            try{if(_tvChart){_tvChart.remove();_tvChart=null;}}catch(e){}
+            try{if(_tvOHLC&&_tvOHLC.parentNode)_tvOHLC.parentNode.removeChild(_tvOHLC);}catch(e){}
+            _tvOHLC=null;_tvVol=null;_tvCandle=null;
+            // OHLC legend bar (TV website jaisa top-left hover readout)
+            try{
+                const _leg=document.createElement('div');
+                _leg.id='tv-ohlc';
+                _leg.style.cssText='position:absolute;top:6px;left:10px;z-index:5;font:11px/1.5 -apple-system,BlinkMacSystemFont,Trebuchet MS,Roboto,sans-serif;color:#5d606b;pointer-events:none;white-space:nowrap;background:rgba(255,255,255,.82);padding:2px 6px;border-radius:3px';
+                const _c0=r.candles[r.candles.length-1]||{};
+                _leg.innerHTML='<b style="color:#212529">'+sym+'</b> · D · <span style="color:#198754">▲</span>';
+                el.style.position='relative';
+                el.appendChild(_leg);
+                _tvOHLC=_leg;
+            }catch(e){_tvOHLC=null;}
+            // TradingView-website parity: crosshair OHLC, volume pane,
+            // fixed barSpacing (fitContent se 17-candle chart 50px/candle
+            // fail jaata tha - wahi "bahut faila hua" look), autoSize.
+            const _isSparse=r.candles.length<60;
+            _tvChart=LightweightCharts.createChart(el,{
+                width:el.clientWidth||900,height:560,autoSize:true,
+                layout:{background:{color:'#fff'},textColor:'#212529',fontSize:11,
+                        fontFamily:'-apple-system,BlinkMacSystemFont,Trebuchet MS,Roboto,Ubuntu,sans-serif'},
+                grid:{vertLines:{color:'rgba(42,46,57,0.08)'},horzLines:{color:'rgba(42,46,57,0.08)'}},
+                crosshair:{mode:LightweightCharts.CrosshairMode.Normal,
+                    vertLine:{color:'#758696',width:1,style:LightweightCharts.LineStyle.Dashed,labelBackgroundColor:'#2962ff'},
+                    horzLine:{color:'#758696',width:1,style:LightweightCharts.LineStyle.Dashed,labelBackgroundColor:'#2962ff'}},
+                rightPriceScale:{borderColor:'#d6d6d6',scaleMargins:{top:0.10,bottom:0.28}},
+                timeScale:{borderColor:'#d6d6d6',rightOffset:4,barSpacing:_isSparse?10:7,minBarSpacing:1,timeVisible:true,secondsVisible:false,fixLeftEdge:false,fixRightEdge:false},
+                handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},
+                handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:{time:true,price:false}}
+            });
+            _tvCandle=_tvChart.addCandlestickSeries({upColor:'#198754',downColor:'#dc3545',wickUpColor:'#198754',wickDownColor:'#dc3545',borderUpColor:'#198754',borderDownColor:'#dc3545'});
+            _tvCandle.priceScale().applyOptions({scaleMargins:{top:0.10,bottom:0.28}});
+            // Volume pane (TV website hamesha niche dikhata hai)
+            try{
+                _tvVol=_tvChart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol',color:'#26a69a'});
+                _tvVol.priceScale().applyOptions({scaleMargins:{top:0.82,bottom:0}});
+                const _vdata=(r.candles||[]).map(c=>{
+                    try{
+                        const v=parseInt(c.volume||0,10)||0;
+                        const up=(c.close||0)>=(c.open||0);
+                        return {time:c.time,value:v,color:up?'rgba(25,135,84,0.45)':'rgba(220,53,69,0.45)'};
+                    }catch(e){return null;}
+                }).filter(Boolean);
+                _tvVol.setData(_vdata);
+            }catch(e){_tvVol=null;}
+            // Crosshair OHLC legend update (TV website style)
+            try{
+                _tvChart.subscribeCrosshairMove(param=>{
+                    if(!_tvOHLC)return;
+                    try{
+                        const _d=param&&param.seriesData&&param.seriesData.get(_tvCandle);
+                        if(!_d||_d.close==null){const _last=r.candles[r.candles.length-1]||{};_tvOHLC.innerHTML='<b style="color:#212529">'+sym+'</b> · D · <span style="color:#198754">▲</span>';return;}
+                        const _uc=(_d.close>=_d.open)?'#198754':'#dc3545';
+                        _tvOHLC.innerHTML='<b style="color:#212529">'+sym+'</b> · D · O <span style="color:'+_uc+'">'+(+_d.open).toFixed(2)+'</span> H <span style="color:'+_uc+'">'+(+_d.high).toFixed(2)+'</span> L <span style="color:'+_uc+'">'+(+_d.low).toFixed(2)+'</span> C <span style="color:'+_uc+'">'+(+_d.close).toFixed(2)+'</span>';
+                    }catch(e){}
+                });
+            }catch(e){}
             _tvCandle.setData(r.candles);
             // SuperTrend green (bullish) / red (bearish) — split series so color per segment
             let _tvSTBull=null,_tvSTBear=null;
@@ -3083,11 +3116,26 @@ def run(data):
                 } else { document.getElementById('tv-mtf').innerHTML=''; }
             }catch(e){}
             try{_tvCandle.setMarkers(marks);}catch(me){try{_tvCandle.setMarkers([]);}catch(_){}}
-            _tvChart.timeScale().fitContent();
+            // fitContent HATAYA: kam candles par har candle poori width me
+            // fail jaati thi (TV website jaisi density ke liye barSpacing +
+            // right-align). Sparse = tight candles right side, TV style.
+            try{
+                const _cw=el.clientWidth||900;
+                const _n=Math.max(1,r.candles.length);
+                const _bs=Math.max(3,Math.min(11,Math.floor((_cw-70)/_n)));
+                _tvChart.timeScale().applyOptions({barSpacing:_bs,rightOffset:4,minBarSpacing:1});
+                if(_isSparse){
+                    try{_tvChart.timeScale().scrollToRealTime();}catch(e2){try{_tvChart.timeScale().scrollToPosition(0,false);}catch(e3){}}
+                }else{
+                    _tvChart.timeScale().fitContent();
+                }
+            }catch(e){try{_tvChart.timeScale().fitContent();}catch(_){}}
             document.getElementById('tv-info').textContent=sym+' | '+r.candles.length+' candles | '+marks.length+' markers (trades + ZeroLag) | ST('+r.params.st_period+','+r.params.st_mult+') EMA('+r.params.ema_fast+'/'+r.params.ema_slow+') ZL('+(r.params.zl_length||70)+','+(r.params.zl_mult||1.2)+') trend: '+(_zl.trend||'-');
             if(_tvTimer)clearInterval(_tvTimer);
-            if(document.getElementById('tv-auto').checked)_tvTimer=setInterval(()=>{if(!document.getElementById('pg-tvchart').classList.contains('hidden'))tvLoad();},15000);
-            window.addEventListener('resize',()=>{try{_tvChart.applyOptions({width:el.clientWidth});}catch(e){}});
+            if(document.getElementById('tv-auto').checked)_tvTimer=setInterval(()=>{if(!document.getElementById('pg-tvchart').classList.contains('hidden'))tvLoad();},60000);
+            // autoSize already handles resize; remove old leaky listener
+            try{if(_tvResize)window.removeEventListener('resize',_tvResize);}catch(e){}
+            _tvResize=null;
         }catch(err){btn.innerHTML=orig;document.getElementById('tv-info').textContent='Error: '+err.message;}
     }
     async function kaTest(){const s=document.getElementById('ka-status');if(!s)return;try{s.textContent='pinging...';}catch(e){return;}try{const r=await A('/api/keepalive/ping');s.textContent=(r&&r.status==='ok')?('OK - uptime '+Math.round(r.uptime_sec||0)+'s'):'Failed';}catch(e){try{const r2=await A(location.origin+'/api/keepalive/ping');s.textContent=(r2&&r2.status==='ok')?'OK (same origin)':'Failed';}catch(e2){s.textContent='Failed: '+e.message;}}}

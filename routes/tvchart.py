@@ -34,14 +34,8 @@ def _candles(symbol: str, start: str, end: str) -> list:
            AND trade_date BETWEEN ? AND ? ORDER BY trade_date""",
         [symbol, start, end],
     )
-    if not rows or len(rows) < 5:
-        try:
-            from routes.strategy_builder import _generate_synthetic_fallback
-            rows = _generate_synthetic_fallback(symbol, start, end)
-        except Exception:
-            rows = []
     out = []
-    for r in rows:
+    for r in rows or []:
         try:
             out.append({
                 "time": str(r.get("trade_date", ""))[:10],
@@ -49,9 +43,120 @@ def _candles(symbol: str, start: str, end: str) -> list:
                 "high": float(r.get("high_price", 0) or 0),
                 "low": float(r.get("low_price", 0) or 0),
                 "close": float(r.get("close_price", 0) or 0),
+                "volume": int(r.get("volume", 0) or 0),
             })
         except Exception:
             continue
+    out = [c for c in out if c["time"] and c["close"] > 0]
+    # Sparse DB (<30 bars for the range) = chart faila hua dikhta hai
+    # (17 candles + fitContent = har candle 50px). Full-window sources se
+    # supplement karo: NSE official (no 60d cut) -> Yahoo (60d filter).
+    try:
+        if len(out) < 30:
+            _have = {c["time"] for c in out}
+            _added = 0
+            # 1) NSE official (nsepython / index-archive) - full range
+            try:
+                from core.services.historical_fetcher import _fetch_nsepython_historical as _fnp
+                _nb = _fnp(symbol, start, end) or []
+                for b in _nb:
+                    try:
+                        td = str(b.get("trade_date", ""))[:10]
+                        if not td or td in _have or not start <= td <= end:
+                            continue
+                        _c = float(b.get("close_price", 0) or 0)
+                        if _c <= 0:
+                            continue
+                        out.append({
+                            "time": td,
+                            "open": float(b.get("open_price", 0) or _c),
+                            "high": float(b.get("high_price", 0) or _c),
+                            "low": float(b.get("low_price", 0) or _c),
+                            "close": _c,
+                            "volume": int(b.get("volume", 0) or 0),
+                        })
+                        _have.add(td)
+                        _added += 1
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            if len(out) < 30:
+                try:
+                    from core.services.historical_fetcher import _fetch_nseindex_historical as _fnx
+                    _nx = _fnx(symbol, start, end) or []
+                    for b in _nx:
+                        try:
+                            td = str(b.get("trade_date", ""))[:10]
+                            if not td or td in _have or not start <= td <= end:
+                                continue
+                            _c = float(b.get("close_price", 0) or 0)
+                            if _c <= 0:
+                                continue
+                            out.append({
+                                "time": td,
+                                "open": float(b.get("open_price", 0) or _c),
+                                "high": float(b.get("high_price", 0) or _c),
+                                "low": float(b.get("low_price", 0) or _c),
+                                "close": _c,
+                                "volume": int(b.get("volume", 0) or 0),
+                            })
+                            _have.add(td)
+                            _added += 1
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+            # 2) Yahoo daily (recent window, 60d-filtered)
+            if len(out) < 30:
+                try:
+                    from core.services.free_data import fetch_yahoo_daily as _fyd
+                    from core.services.data_validator import yahoo_60d_filter as _f60
+                    _y = _f60(_fyd(symbol, start, end) or []) or []
+                    for b in _y:
+                        try:
+                            td = str(b.get("trade_date", ""))[:10]
+                            if not td or td in _have or not start <= td <= end:
+                                continue
+                            _c = float(b.get("close_price", 0) or 0)
+                            if _c <= 0:
+                                continue
+                            out.append({
+                                "time": td,
+                                "open": float(b.get("open_price", 0) or _c),
+                                "high": float(b.get("high_price", 0) or _c),
+                                "low": float(b.get("low_price", 0) or _c),
+                                "close": _c,
+                                "volume": int(b.get("volume", 0) or 0),
+                            })
+                            _have.add(td)
+                            _added += 1
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+            if _added:
+                out.sort(key=lambda c: c["time"])
+    except Exception:
+        pass
+    if not out:
+        try:
+            from routes.strategy_builder import _generate_synthetic_fallback
+            rows = _generate_synthetic_fallback(symbol, start, end)
+            for r in rows:
+                try:
+                    out.append({
+                        "time": str(r.get("trade_date", ""))[:10],
+                        "open": float(r.get("open_price", 0) or 0),
+                        "high": float(r.get("high_price", 0) or 0),
+                        "low": float(r.get("low_price", 0) or 0),
+                        "close": float(r.get("close_price", 0) or 0),
+                        "volume": int(r.get("volume", 0) or 0),
+                    })
+                except Exception:
+                    continue
+        except Exception:
+            pass
     return [c for c in out if c["time"] and c["close"] > 0]
 
 

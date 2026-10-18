@@ -959,9 +959,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                             pass
             except Exception:
                 _pre15 = {}
-        # Daily DB preload (local, tez) + Yahoo-daily parallel supplement SIRF
-        # un symbols ke liye jinke DB bars <15 hain. Pehle har symbol serial
-        # Yahoo fetch karta tha (25 symbols x 10s timeout = timeout-tak hang).
+        # Daily DB preload (local, tez) + Yahoo-daily parallel supplement un
+        # symbols ke liye jinke DB bars <15 hain YA window coverage <70% hai.
+        # Pehle partial-coverage symbols loop ke ANDAR serial network call
+        # karte the (nsepython 15s + dhan 25s + yahoo 21s = 70s/symbol on
+        # Render) - wahi "Run click -> bahut der me result" ka bada kaaran.
         _preDB, _preY = {}, {}
         try:
             for _s in list(_syms):
@@ -969,7 +971,21 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     _preDB[_s] = _load_db_history(_s, start_date, end_date) or []
                 except Exception:
                     _preDB[_s] = []
-            _needY = [_s for _s in list(_syms) if len(_preDB.get(_s, [])) < 15]
+            _rq_set = set(_req_days or [])
+            _needY = []
+            for _s in list(_syms):
+                _b0 = _preDB.get(_s) or []
+                if len(_b0) < 15:
+                    _needY.append(_s)
+                    continue
+                if _rq_set:
+                    try:
+                        _have0 = {str(h.get("trade_date", ""))[:10] for h in _b0}
+                        _hit0 = sum(1 for _d in _rq_set if _d in _have0)
+                        if _hit0 < len(_rq_set) * 0.7:
+                            _needY.append(_s)
+                    except Exception:
+                        pass
             if _needY:
                 try:
                     from concurrent.futures import ThreadPoolExecutor as _TPE2
@@ -1608,15 +1624,27 @@ def _bt_release(gen=None):
 
 @router.post("/run")
 def run_backtest(req: BacktestRequest):
-    # Sync path (kept for backward compat + fast cached runs).
-    # Single-flight: pileup = OOM/timeout on free tier.
-    _gen = _bt_acquire()
-    if not _gen:
-        return {"error": _BUSY_MSG}
+    # Cache-only sync path (backward compat). Fresh runs /run-async par
+    # jaate hain. Client abort (8s timeout) server thread ko NAHI rokta -
+    # zombie worker single-flight lock minutes tak pakad ke rakhta tha,
+    # phir har async job 'busy' aati thi (user ko laga "result hi nahi
+    # aata"). Isliye sync ab sirf cached same-params run deta hai (5ms).
     try:
-        return _run_backtest_core(req)
-    finally:
-        _bt_release(_gen)
+        import hashlib as _hl0, json as _js0
+        _rk0 = _hl0.md5(_js0.dumps(
+            req.model_dump() if hasattr(req, "model_dump") else req.dict(),
+            sort_keys=True, default=str).encode()).hexdigest()
+        _rc0 = _BT_RESULT_CACHE.get(_rk0)
+        if _rc0 and _bt_time.time() - _rc0[0] < 600:
+            _cached0 = dict(_rc0[1])
+            _cached0["took_ms"] = 5
+            _cached0["cached"] = True
+            _cached0["run_id"] = f"bt-{_bt_uuid.uuid4().hex[:12]}"
+            return _cached0
+    except Exception:
+        pass
+    return {"error": "fresh run - /api/backtest/run-async use karo (slow sync proxy timeout me marta hai)",
+            "use_async": True}
 
 
 _BT_RUNNING = {}
@@ -1712,6 +1740,25 @@ def run_backtest_async(req: BacktestRequest):
                 if _oj and _oj.get("status") in ("queued", "running"):
                     return {"job_id": _old, "status": _oj.get("status"), "deduped": True}
                 _BT_RUNNING.pop(_rh, None)
+    # Instant repeat (algotest-style): same params 10 min ke andar pehle
+    # chal chuka hai to seedha done-job + inline result. Thread spawn +
+    # pehli poll (700ms) ki zaroorat nahi - click par turant screen.
+    try:
+        if _rh:
+            _rcA = _BT_RESULT_CACHE.get(_rh)
+            if _rcA and _bt_time.time() - _rcA[0] < 600:
+                _cachedA = dict(_rcA[1])
+                _cachedA["took_ms"] = 5
+                _cachedA["cached"] = True
+                _cachedA["run_id"] = f"bt-{_bt_uuid.uuid4().hex[:12]}"
+                _jidA = _bt_uuid.uuid4().hex[:12]
+                with _BT_JOBS_LOCK:
+                    _BT_JOBS[_jidA] = {"status": "done", "started_at": _bt_time.time(),
+                                        "result": _cachedA, "error": "", "req_hash": _rh,
+                                        "done_at": _bt_time.time()}
+                return {"job_id": _jidA, "status": "done", "cached": True, "result": _cachedA}
+    except Exception:
+        pass
     job_id = _bt_uuid.uuid4().hex[:12]
     with _BT_JOBS_LOCK:
         _BT_JOBS[job_id] = {"status": "queued", "started_at": _bt_time.time(), "result": None, "error": "", "req_hash": _rh}
