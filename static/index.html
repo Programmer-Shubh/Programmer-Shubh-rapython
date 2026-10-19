@@ -733,7 +733,7 @@
                     <div class="col-6 col-md-1"><label class="form-label small">ZL Mult</label><input type="number" id="tv-zlm" class="form-control form-control-sm" value="1.2" step="0.1" min="0.1"></div>
                 </div>
             </div></div>
-            <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:560px"></div><div class="small p-2"><span style="color:#198754">▲ BUY</span> <span style="color:#dc3545">▼ SELL</span> <span style="color:#0d6efd">● EXIT</span> <span style="color:#ff9800">● OPEN</span> <span style="color:#198754">— SuperTrend Bull</span> <span style="color:#dc3545">— SuperTrend Bear</span> <span style="color:#00ffbb">— ZeroLag Bull</span> <span style="color:#ff1100">— ZeroLag Bear</span> <span style="color:#2962ff">— EMAfast</span> <span style="color:#6f42c1">— EMAslow</span> <span class="text-muted">[AlgoAlpha Pine exact: Len 70 / Mult 1.2]</span></div><div id="tv-mtf" class="p-2"></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
+            <div class="card"><div class="card-body p-1"><div id="tv-chart" style="height:560px"></div><div class="small p-2"><span style="color:#198754">▲ BUY</span> <span style="color:#dc3545">▼ SELL</span> <span style="color:#0d6efd">● EXIT</span> <span style="color:#ff9800">● OPEN</span> <span style="color:#198754">— SuperTrend Bull</span> <span style="color:#dc3545">— SuperTrend Bear</span> <span style="color:#00ffbb">— ZeroLag Bull</span> <span style="color:#ff1100">— ZeroLag Bear</span> <span style="color:#2962ff">— EMAfast</span> <span style="color:#6f42c1">— EMAslow</span> <span class="text-muted">[AlgoAlpha Pine exact: Len 70 / Mult 1.2 + ribbon fill]</span></div><div id="tv-mtf" class="p-2"></div><div id="tv-info" class="small text-muted p-2">Symbol + dates set karke Load Chart dabao. Hara teer = BUY entry, laal teer = SELL entry, neela gola = exit (P&L samet), narangi gola = open position.</div></div></div>
         </div>
 
 <!-- CALL/PUT ROBOT - Simple Buy/Sell with SL/TP -->
@@ -2988,7 +2988,31 @@ def run(data):
             document.getElementById('py-logs').textContent=r.logs||'(no script output)';
         }catch(e){btn.innerHTML=orig;document.getElementById('py-metrics').innerHTML='<p class="text-danger p-2">Network error: '+(e.message||e)+'</p>';}
     }
-    let _tvChart=null,_tvCandle=null,_tvST=null,_tvEF=null,_tvES=null,_tvTimer=null,_tvZLBull=null,_tvZLBear=null,_tvZLup=null,_tvZLlo=null,_tvVol=null,_tvOHLC=null,_tvResize=null;
+    let _tvChart=null,_tvCandle=null,_tvST=null,_tvEF=null,_tvES=null,_tvTimer=null,_tvZLBull=null,_tvZLBear=null,_tvZLup=null,_tvZLlo=null,_tvVol=null,_tvOHLC=null,_tvResize=null,_tvRibbon=null,_tvRibbonPrim=null;
+    // Pine `fill()` parity: ZLEMA aur deviation band ke beech shaded ribbon.
+    // LWC 4.2 me fill built-in nahi - series primitive se canvas polygon.
+    function _tvZLRibbon(ctx,seg,ts,host,color){
+        if(!seg||seg.length<2)return;
+        const top=[],bot=[];
+        for(let i=0;i<seg.length;i++){
+            const p=seg[i];
+            try{
+                const x=ts.timeToCoordinate(p.t);
+                const ya=host.priceToCoordinate(p.a);
+                const yb=host.priceToCoordinate(p.b);
+                if(x==null||ya==null||yb==null)continue;
+                top.push(x,ya);bot.push(x,yb);
+            }catch(e){}
+        }
+        if(top.length<4)return;
+        ctx.beginPath();
+        ctx.moveTo(top[0],top[1]);
+        for(let i=2;i<top.length;i+=2)ctx.lineTo(top[i],top[i+1]);
+        for(let i=bot.length-2;i>=0;i-=2)ctx.lineTo(bot[i],bot[i+1]);
+        ctx.closePath();
+        ctx.fillStyle=color;
+        ctx.fill();
+    }
     async function tvLoad(){
         const btn=document.getElementById('tv-load');const orig=btn.innerHTML;btn.innerHTML='<span class="spinner"></span> Loading...';
         try{
@@ -3082,6 +3106,30 @@ def run(data):
                 if(_tvZLup)_tvZLup.setData(_on?(_zl.upper||[]):[]);
                 if(_tvZLlo)_tvZLlo.setData(_on?(_zl.lower||[]):[]);
             }catch(e){}
+            // Zero-Lag ribbon (AlgoAlpha Pine fill parity): bull segment =
+            // ZLEMA+lower band, bear = ZLEMA+upper band. Primitive attached
+            // to ZL series — chart scroll/zoom par khud redraw hota hai.
+            try{
+                const _pairZL=(z,band)=>{const bm=new Map((band||[]).map(p=>[p.time,p.value]));const o=[];(z||[]).forEach(p=>{const b=bm.get(p.time);if(b!=null&&p.value!=null)o.push({t:p.time,a:+p.value,b:+b});});return o;};
+                window._tvRibbon={bull:_pairZL(_zl.zlema_bull,_zl.lower),bear:_pairZL(_zl.zlema_bear,_zl.upper)};
+                const _rviews=[{renderer:()=>({draw:target=>{
+                    try{
+                        const d=window._tvRibbon;
+                        const cb=document.getElementById('tv-zl');
+                        if(!d||!_tvChart||!cb||!cb.checked)return;
+                        const host=_tvZLBull||_tvZLBear||_tvCandle;
+                        if(!host)return;
+                        const ts=_tvChart.timeScale();
+                        target.useMediaCoordinateSpace(({context:ctx})=>{
+                            try{_tvZLRibbon(ctx,d.bull,ts,host,'rgba(0,255,187,0.22)');}catch(e){}
+                            try{_tvZLRibbon(ctx,d.bear,ts,host,'rgba(255,17,0,0.20)');}catch(e){}
+                        });
+                    }catch(e){}
+                }})}];
+                _tvRibbonPrim={updateAllViews(){},paneViews(){return _rviews;}};
+                const _rhost=_tvZLBull||_tvZLBear;
+                if(_rhost&&typeof _rhost.attachPrimitive==='function')_rhost.attachPrimitive(_tvRibbonPrim);
+            }catch(e){_tvRibbonPrim=null;}
             const marks=(document.getElementById('tv-marks').checked)?(r.markers||[]):[];
             // SuperTrend flip arrows (buy/sell teer): green ▲ neeche, red ▼ upar
             try{
