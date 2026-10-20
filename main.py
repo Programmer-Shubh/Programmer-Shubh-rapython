@@ -33,6 +33,13 @@ async def _fno_sync_loop():
         try:
             from core.services import nsefin_bhav as _fb
             await _aio.to_thread(_fb.backfill_fno, 7, 2)
+            # Stale 'carried prev_close' option rows hatao (non-traded
+            # contract ka pichla close = aaj ka price nahi hota) - warna
+            # backtest premium expiry-level constant rehta hai (garbage P&L).
+            try:
+                await _aio.to_thread(_fb.purge_stale_option_rows)
+            except Exception:
+                pass
             await _aio.to_thread(_fb.purge_old_data, 12)
         except Exception:
             pass

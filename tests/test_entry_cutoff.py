@@ -1,4 +1,7 @@
-"""3:15 PM entry cutoff: iske baad KOI nayi entry nahi (exits khule)."""
+"""3:00 PM entry cutoff: iske baad KOI nayi entry nahi (exits khule).
+Rule: 3:00 PM ke baad naya koi short/sell position nahi khulega; jo trades
+3:00 PM se pehle khule hain wo 3:15 PM tak hold + square-off hote hain.
+"""
 import os
 import sys
 import datetime
@@ -15,12 +18,12 @@ def _at(hh, mm):
 def test_entry_open_before_cutoff(monkeypatch):
     monkeypatch.setattr(slm, "market_open_ist", lambda *_a, **_k: True)
     assert slm.entry_open_ist(_at(9, 15)) is True
-    assert slm.entry_open_ist(_at(15, 14)) is True
+    assert slm.entry_open_ist(_at(14, 59)) is True
 
 
 def test_entry_closed_at_and_after_cutoff(monkeypatch):
     monkeypatch.setattr(slm, "market_open_ist", lambda *_a, **_k: True)
-    assert slm.entry_open_ist(_at(15, 15)) is False
+    assert slm.entry_open_ist(_at(15, 0)) is False
     assert slm.entry_open_ist(_at(15, 34)) is False
 
 
@@ -38,7 +41,7 @@ def test_chain_place_blocked_after_cutoff(monkeypatch):
         date="2026-10-14", transaction_type="BUY", quantity=1,
         stop_loss=1500.0, take_profit=3000.0, trade_type="intraday",
         strategy_id=0))
-    assert "3:15" in (r.get("error") or ""), r
+    assert "3:00" in (r.get("error") or ""), r
 
 
 def test_paper_place_blocked_after_cutoff(monkeypatch):
@@ -49,7 +52,7 @@ def test_paper_place_blocked_after_cutoff(monkeypatch):
         symbol="NIFTY", option_type="CE", strike=25000.0,
         transaction_type="BUY", quantity=1, entry_price=100.0,
         stop_loss=1500.0, take_profit=3000.0, date="2026-10-14"))
-    assert "3:15" in (r.get("error") or ""), r
+    assert "3:00" in (r.get("error") or ""), r
 
 
 def test_auto_paper_blocked_after_cutoff(monkeypatch):
@@ -77,8 +80,8 @@ def test_auto_paper_blocked_after_cutoff(monkeypatch):
 
 def test_entry_cutoff_boundary(monkeypatch):
     monkeypatch.setattr(slm, "market_open_ist", lambda *_a, **_k: True)
-    assert slm.entry_open_ist(_at(15, 14)) is True
-    assert slm.entry_open_ist(_at(15, 15)) is False
+    assert slm.entry_open_ist(_at(14, 59)) is True
+    assert slm.entry_open_ist(_at(15, 0)) is False
 
 
 def test_execution_engine_blocked_after_cutoff(monkeypatch):
@@ -87,4 +90,4 @@ def test_execution_engine_blocked_after_cutoff(monkeypatch):
     monkeypatch.setattr(slm, "entry_open_ist", lambda *_a, **_k: False)
     r = ee.execute([{"option_type": "CE", "transaction": "buy", "lots": 1}],
                    "NIFTY", mode="PAPER")
-    assert "3:15" in (r.get("error") or ""), r
+    assert "3:00" in (r.get("error") or ""), r

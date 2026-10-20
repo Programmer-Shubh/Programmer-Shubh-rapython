@@ -513,7 +513,7 @@ def place_for_strategy(sid, signal_check="daily"):
         s = db.fetch_one("SELECT * FROM strategies WHERE id=?", [sid])
         if not s:
             return {"placed": placed, "notes": ["strategy not found"]}
-        # 3:15 PM entry cutoff (user demand): iske baad worker/save-hook/manual
+        # 3:00 PM entry cutoff (user rule): iske baad worker/save-hook/manual
         # se KOI nayi entry nahi. Exits (SL monitor) isse affected nahi.
         try:
             from core.services.sl_monitor import entry_open_ist as _eok

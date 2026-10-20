@@ -1,5 +1,7 @@
-"""3:20 PM intraday square-off (background se), positional carry.
-SL/TP monitor 15:20 tak (aur 15:45 tak) chalta hai - gate sirf ENTRY rokta hai.
+"""3:15 PM intraday square-off (background se), positional carry.
+SL/TP monitor 15:15 tak (aur 15:45 tak) chalta hai - gate sirf ENTRY rokta hai.
+Rule: 3:00 PM ke baad nayi entry nahi; 3:00 PM se pehle khule intraday
+trades 3:15 PM par square-off hote hain.
 """
 import os
 import sys
@@ -37,7 +39,7 @@ def _cleanup(tm):
         pass
 
 
-def test_intraday_exits_at_1520_positional_carries(monkeypatch):
+def test_intraday_exits_at_1515_positional_carries(monkeypatch):
     from core.models.trade_model import TradeModel
     monkeypatch.setattr(TradeModel, "get_option_premium", lambda *a, **k: 90.0)
     tm = TradeModel()
@@ -45,7 +47,7 @@ def test_intraday_exits_at_1520_positional_carries(monkeypatch):
     try:
         t_intra = _mk(tm, "intraday")
         t_pos = _mk(tm, "positional")
-        hit = tm.close_intraday_trades(user_id=UID, _now=_now(15, 20))
+        hit = tm.close_intraday_trades(user_id=UID, _now=_now(15, 15))
         assert [h["id"] for h in hit] == [int(t_intra)], hit
         assert hit[0]["reason"] == "intraday_auto"
         assert tm.db.fetch_one(
@@ -57,13 +59,13 @@ def test_intraday_exits_at_1520_positional_carries(monkeypatch):
         _cleanup(tm)
 
 
-def test_no_exit_before_1520(monkeypatch):
+def test_no_exit_before_1515(monkeypatch):
     from core.models.trade_model import TradeModel
     tm = TradeModel()
     _cleanup(tm)
     try:
         t_intra = _mk(tm, "intraday")
-        assert tm.close_intraday_trades(user_id=UID, _now=_now(15, 19)) == []
+        assert tm.close_intraday_trades(user_id=UID, _now=_now(15, 14)) == []
         assert tm.db.fetch_one(
             "SELECT status FROM paper_trades WHERE id=?", [int(t_intra)])["status"] == "open"
     finally:

@@ -17,7 +17,7 @@ def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500
                 return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-3:30 IST)."}
         except Exception:
             pass
-        # 3:15 PM entry cutoff (user demand).
+        # 3:00 PM entry cutoff (user rule).
         try:
             from core.services.sl_monitor import entry_open_ist as _eok
             from core.services.sl_monitor import entry_block_reason as _ebr

@@ -77,6 +77,14 @@ def import_fno_bhavcopy(day) -> dict:
                 opt = _norm_opt(r.get("right"))
                 if not opt or cl <= 0:
                     continue
+                # Non-traded contract: NSE bhavcopy me open/high/low = 0 aur
+                # close = prv_close (PICHLE din ka close carry-forward). Woh
+                # stale value aaj ka price nahi hai - import karne se wo
+                # expiry-level constant ban jata tha (11100 CE = 818.35 har
+                # din) aur backtest/premium galat hota tha. Aaj trade nahi hua
+                # to row skip karo (row chahiye hi nahi - fallback model hai).
+                if o <= 0 and h <= 0 and lo <= 0 and vol <= 0:
+                    continue
                 records.append({"symbol": sym, "trade_date": td, "expiry_date": exp,
                                 "strike_price": strike, "option_type": opt,
                                 "open_price": o or cl, "high_price": h or cl,
@@ -146,6 +154,46 @@ def backfill_fno(days: int = 90, per_run: int = 10) -> dict:
         except Exception as e:
             failed.append({d: str(e)[:120]})
     return {"done": done, "failed": failed}
+
+
+def purge_stale_option_rows(chunk: int = 20000) -> int:
+    """Purane 'carried prev_close' option rows hatao (jo naye import rule
+    se aate hi nahi). NSE bhavcopy me non-traded contract ka close =
+    pichle din ka close hota hai - wo aaj ka price nahi hai. Aise rows
+    expiry-level constant ban jate the (11100 CE = 818.35 har din) aur
+    backtest/premium galat hota tha. Sirf option rows (CE/PE), jo pure
+    flat bar (open=high=low=close) aur zero volume wale hain."""
+    from core.models.database import Database
+    try:
+        db = Database.get_instance()
+        try:
+            _pg = bool(db._is_postgres())
+        except Exception:
+            _pg = False
+        _key = "ctid" if _pg else "rowid"
+        _where = ("option_type IN ('CE','PE') AND volume<=0 "
+                  "AND open_price=high_price AND high_price=low_price AND low_price=close_price")
+        total = 0
+        for _ in range(20):
+            try:
+                probe = db.fetch_one(
+                    f"SELECT 1 as x FROM bhavcopy_data WHERE {_where} LIMIT 1")
+            except Exception:
+                break
+            if not probe:
+                break
+            try:
+                db.execute(
+                    f"DELETE FROM bhavcopy_data WHERE {_key} IN "
+                    f"(SELECT {_key} FROM bhavcopy_data WHERE {_where} LIMIT ?)",
+                    [chunk])
+                total += chunk
+            except Exception:
+                break
+        return total
+    except Exception as e:
+        logger.warning("stale option row purge failed: %s", e)
+        return 0
 
 
 def purge_old_data(months: int = RETENTION_MONTHS) -> int:

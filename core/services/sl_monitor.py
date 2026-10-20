@@ -45,11 +45,14 @@ def market_open_ist():
         return True
 
 
-ENTRY_CUTOFF_MIN = 15 * 60 + 15  # 3:15 PM IST - iske baad NAYI entry nahi
+ENTRY_CUTOFF_MIN = 15 * 60  # 3:00 PM IST - iske baad NAYI entry nahi
 
 
 def entry_open_ist(_now=None):
-    """Nayi ENTRY allowed? Market khula + 3:15 PM se pehle (user demand).
+    """Nayi ENTRY allowed? Market khula + 3:00 PM se pehle (user rule).
+    3:00 PM ke baad KISI nayi short/sell position nahi khulti. Jo trades
+    3:00 PM se PEHLE khule hain, wo 3:15 PM tak hold hote hain aur 3:15
+    PM par square-off hote hain (close_intraday_trades).
     EXITS (close/SL/TP/strategy-exit/square-off) hamesha khule rehte hain -
     ye gate sirf naye orders rokta hai. _now: test hook (IST datetime)."""
     try:
@@ -67,8 +70,8 @@ def entry_open_ist(_now=None):
 
 
 def entry_block_reason():
-    return ("3:15 PM ke baad nayi entry band hai - kal market khulne par order "
-            "lagao (exit/SL/Target hamesha chalu rahenge)")
+    return ("3:00 PM ke baad nayi entry band hai - kal market khulne par order "
+            "lagao (exit/SL/Target hamesha chalu rahenge, 3:15 PM tak square-off hota hai)")
 
 
 def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
@@ -83,8 +86,8 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
             _LAST_RUN = time.time()
         # (b) Strategy exit_time exit: market hours se independent (EOD exit
         # market band ke baad bhi hona chahiye).
-        # (c) 15:20 intraday square-off: background thread se (page khole
-        # bina) - positional KEVAL lage rahte hain. Dono gate se pehle.
+        # (c) 15:15 intraday square-off: background thread se (page khole
+        # bina) - positional KEVAL lage rahe hain. Dono gate se pehle.
         _strat_closed = []
         _eod_closed = []
         try:

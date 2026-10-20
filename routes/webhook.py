@@ -90,7 +90,7 @@ def _place_from_signal(data: dict, source: str = "webhook") -> dict:
     strike = float(data.get("strike") or data.get("strike_price") or 0)
     expiry = data.get("expiry") or data.get("expiry_date") or ""
     qty = int(data.get("quantity") or data.get("qty") or 1)
-    # 3:15 PM entry cutoff (user demand): iske baad webhook se bhi entry nahi.
+    # 3:00 PM entry cutoff (user rule): iske baad webhook se bhi entry nahi.
     # (Legs-branch execution_engine me apna gate hai; ye direct path ka gate.)
     try:
         from core.services.sl_monitor import entry_open_ist as _eok_w

@@ -1238,7 +1238,7 @@ async def place_live_order(req: LiveOrderRequest):
                 return {"error": f"{symbol} par koi options nahi hain (F&O me nahi) - live order impossible"}
         except Exception:
             pass
-        # 3:15 PM entry cutoff (user demand, REAL MONEY): iske baad live
+        # 3:00 PM entry cutoff (user rule, REAL MONEY): iske baad live
         # order bhi nahi. Exits broker par hamesha allowed.
         try:
             from core.services.sl_monitor import entry_open_ist as _eok5

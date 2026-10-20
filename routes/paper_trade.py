@@ -206,7 +206,7 @@ def place_trade(req: PlaceTradeRequest):
     except Exception:
         pass
     try:
-        # 3:15 PM entry cutoff (user demand): iske baad KOI nayi entry nahi.
+        # 3:00 PM entry cutoff (user rule): iske baad KOI nayi entry nahi.
         from core.services.sl_monitor import entry_open_ist as _eok
         from core.services.sl_monitor import entry_block_reason as _ebr
         if not bool(_eok()):

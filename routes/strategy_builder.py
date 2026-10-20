@@ -1235,7 +1235,13 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 pass
             engine = BacktestEngine(is_live=False)
             engine._skip_db = not _use_db  # real DB data => premiums from DB; else fast path
-            if _use_db:
+            # Intraday bars: option premium PER-BAR model se aata hai (daily
+            # DB option rows = din ke open/high/low/close => look-ahead +
+            # frozen premium; isi wajah se har trade 5 min me target par
+            # kata tha aur win-rate 100% dikhta tha). Daily prefetch skip.
+            _is_intra_tf = timeframe in ("1m", "5m", "15m", "30m", "1h")
+            engine._intraday_bars = bool(_is_intra_tf)
+            if _use_db and not _is_intra_tf:
                 try:
                     engine.prefetch_option_premiums(_sym, start_date, end_date)
                 except Exception:

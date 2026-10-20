@@ -303,13 +303,18 @@ def get_strike_step(symbol: str) -> float:
         "NESTLEIND": 100, "LT": 50, "HDFCBANK": 20, "ICICIBANK": 20,
         "RELIANCE": 20, "TCS": 50, "INFY": 20, "ITC": 10, "SBIN": 10,
         "AXISBANK": 10, "KOTAKBANK": 10, "HINDUNILVR": 10, "BHARTIARTL": 20,
-        "M&M": 20, "BAJFINANCE": 200, "WIPRO": 10, "ONGC": 10, "SUNPHARMA": 20,
+        "M&M": 20, "WIPRO": 10, "ONGC": 10, "SUNPHARMA": 20,
         "ULTRACEMCO": 100, "NTPC": 10, "POWERGRID": 10, "TATAMOTORS": 10,
         "TATASTEEL": 10, "HCLTECH": 20, "JSWSTEEL": 10, "COALINDIA": 10,
-        "DRREDDY": 20, "CIPLA": 20, "ADANIENT": 20, "SBILIFE": 10, "BPCL": 10,
-        "GRASIM": 20, "TECHM": 20, "DIVISLAB": 20, "EICHERMOT": 20, "BRITANNIA": 20,
-        "HINDALCO": 10, "VEDL": 10, "INDUSINDBK": 10, "HEROMOTOCO": 20,
-        "APOLLOHOSP": 20, "UPL": 10,
+        "DRREDDY": 20, "CIPLA": 20, "ADANIENT": 20, "SBILIFE": 10, "BPCL": 20,
+        "GRASIM": 20, "EICHERMOT": 20, "BRITANNIA": 20, "HINDALCO": 10,
+        "VEDL": 20, "INDUSINDBK": 20,
+        # F&O stocks (NSE live chain se verify kiye hue near-ATM gaps):
+        # pehle inke liye DB/50 fallback chalta tha - 50/20 ka step galat
+        # strike bana raha tha (premium phir nearest-strike par chala jaata).
+        "BAJAJHLDNG": 100, "BAJAJ-AUTO": 100, "APOLLOHOSP": 100,
+        "HEROMOTOCO": 50, "TITAN": 50, "FORCEMOT": 250, "MPHASIS": 50,
+        "SOLARINDS": 250, "BOSCHLTD": 500, "PAGEIND": 500, "OFSS": 100,
         "GOLDBEES": 1, "SILVERBEES": 5,
     }
     hit = steps.get(symbol.upper())

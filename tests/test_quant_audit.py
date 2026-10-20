@@ -75,16 +75,18 @@ def test_monthly_expiry_no_nameerror():
 
 
 def test_intraday_entry_bar_eod():
-    """Last-minute-bar intraday entry exits SAME day (was overnight carry)."""
+    """Last-minute-bar intraday entry exits SAME day (was overnight carry).
+    Bars 14:00-14:42 (3-min step) - 3:00 PM ke baad nayi entry BAND hai
+    (user rule), isliye test window pre-cutoff rakha hai."""
     from core.services.backtest_engine import BacktestEngine
     bars = []
     d = datetime.date(2026, 8, 10)
     px = 25000.0
-    # one intraday session: 15 minute bars same date, rising
+    # one intraday session: 3 minute bars same date, rising
     for k in range(15):
         px *= 1.002
-        hh = 15 + (20 + k * 3) // 60
-        mm = (20 + k * 3) % 60
+        hh = 14 + (k * 3) // 60
+        mm = (k * 3) % 60
         bars.append({"symbol": "NIFTY", "trade_date": "2026-08-10",
                      "bar_time": f"{hh:02d}:{mm:02d}",
                      "open_price": round(px / 1.002, 2), "high_price": round(px * 1.001, 2),

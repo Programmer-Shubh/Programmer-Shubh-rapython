@@ -128,16 +128,17 @@ class TradeModel:
         return sl_level, tp_level
 
     def close_intraday_trades(self, user_id=1, _now=None) -> list:
-        """15:20 IST forced square-off for INTRADAY trades only (user demand:
-        3:20 par intraday exit, positional KEVAL lage rahe). Cash/EQ never
-        held overnight - short-delivery auction safety.
-        Positional trades (trade_type='positional') carry overnight - unhe
-        kabhi nahi chhedta. _now: test hook (IST datetime).
+        """15:15 IST forced square-off for INTRADAY trades only (user rule:
+        3:00 PM se pehle khule trades 3:15 PM tak hold + 3:15 PM par hi
+        square-off). Positional trades (trade_type='positional') carry
+        overnight - unhe kabhi nahi chhedta. Cash/EQ never held overnight -
+        short-delivery auction safety.
+        _now: test hook (IST datetime).
         Returns [{id, reason, exit_price}]."""
         hit = []
         try:
             now = _now or self._ist_now()
-            if now.time() < __import__("datetime").time(15, 20):
+            if now.time() < __import__("datetime").time(15, 15):
                 return hit
             today = now.strftime("%Y-%m-%d")
             opens = self.db.fetch_all(
