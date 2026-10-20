@@ -286,6 +286,8 @@ def _bt_summary(row) -> dict:
                 "win_rate": float(_m.get("win_rate") or 0),
                 "net_pnl": float(_m.get("net_pnl") or 0),
                 "run_id": (_r or {}).get("run_id") or "",
+                # Cards ko batao saved result purane engine ka hai (red chip)
+                "stale_engine": _stored_engine_stale(_r),
                 "stored_at": row.get("last_backtest_at") or ""}
     except Exception:
         return {}
