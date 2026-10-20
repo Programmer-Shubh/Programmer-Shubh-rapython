@@ -1335,6 +1335,7 @@ let _lastOpenTrdHTML = null;
             let _storedBadge='';
             try{
                 if(r.kept_saved){_storedBadge=' • <span class="badge bg-warning text-dark">Naya run 0 trades — purana saved result rakha (mitaya nahi)</span>';}
+                else if(r.stale_engine){_storedBadge=' • <span class="badge bg-danger">PURANE engine ka saved result — ↻ Naya run dabao (fresh honest result)</span>';}
                 else if(r.stored){_storedBadge=' • <span class="badge bg-success">Saved result'+(r.stored_at?(' • '+r.stored_at):'')+'</span>';}
                 else if(r.stored===false&&r.strategy_id){_storedBadge=' • <span class="badge bg-info">Naya run (saved)</span>';}
             }catch(_sbe){_storedBadge='';}

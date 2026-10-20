@@ -79,6 +79,20 @@ def _canonical_config_hash(symbol, start_date, end_date, timeframe,
         return ""
 
 
+def _stored_engine_stale(stored: dict) -> bool:
+    """Saved result PURANE engine version ka hai? Engine-version tag na ho
+    (tagging se pehle ka purana saved result) ya current se alag -> stale.
+    Buggy v2 ka 100%-win fake result aise hi pakda jaata hai."""
+    try:
+        from core.services.backtest_engine import ENGINE_VERSION as _ev
+    except Exception:
+        _ev = "v1"
+    try:
+        return str((stored or {}).get("engine_version") or "") != str(_ev)
+    except Exception:
+        return True
+
+
 def _result_matches_config(res: dict, symbol, start_date, end_date,
                            indicators, legs, risk=None, advanced=None,
                            reasons: list = None) -> bool:
@@ -861,16 +875,22 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
                 if str(row.get("last_backtest_hash") or "") == _cfg_hash and row.get("last_backtest"):
                     _stored = _js.loads(row["last_backtest"])
                     if isinstance(_stored, dict) and (_stored.get("metrics") or _stored.get("trade_list") is not None):
-                        _stored["stored"] = True
-                        _stored["stored_at"] = row.get("last_backtest_at") or ""
-                        _stored["strategy_id"] = strat_id
-                        _stored["strategy_name"] = row.get("name") or ""
-                        try:
-                            _stored["took_ms"] = 5
-                            _stored["cached"] = True
-                        except Exception:
-                            pass
-                        return _stored
+                        # Purane engine ka saved result serve NAHI karte -
+                        # hash me engine version shamil hai to ye ideally kabhi
+                        # hit na ho, phir bhi double-safety: fresh run hi chalega.
+                        if _stored_engine_stale(_stored):
+                            pass  # stale -> hash gate skip, neeche fresh run
+                        else:
+                            _stored["stored"] = True
+                            _stored["stored_at"] = row.get("last_backtest_at") or ""
+                            _stored["strategy_id"] = strat_id
+                            _stored["strategy_name"] = row.get("name") or ""
+                            try:
+                                _stored["took_ms"] = 5
+                                _stored["cached"] = True
+                            except Exception:
+                                pass
+                            return _stored
             except Exception:
                 pass
         res = _run_backtest_core(req)
@@ -878,6 +898,13 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
             res["strategy_id"] = strat_id
             res["strategy_name"] = row.get("name") or ""
             res["stored"] = False
+            # Save-time engine tag (agar result me na ho - kisi aur path se
+            # banas result ho): warna agli baar stale-mana jaayega.
+            try:
+                from core.services.backtest_engine import ENGINE_VERSION as _ev_save
+            except Exception:
+                _ev_save = "v1"
+            res.setdefault("engine_version", _ev_save)
         except Exception:
             pass
         # Naya run save karo taaki agli baar WAHI result mile (error save nahi).
@@ -934,14 +961,27 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
 def _should_overwrite_saved(stored_raw, fresh_res) -> bool:
     """Fresh run saved result ko mitaye ya nahi? 0-trade fresh run kabhi
     non-zero saved history NAHI mitata (ce-sell-ppp ke 188 trades ek 0-trade
-    run ne 2026-10-14 ko uda diye the - wahi bug). Baaki sab pehle jaisa."""
+    run ne 2026-10-14 ko uda diye the - wahi bug) - LEKIN agar stored result
+    PURANE engine version ka hai (staleness tag na ho ya alag ho) to 0-trade
+    fresh bhi usse mitata hai: buggy v2 jaisi 100%-win fake history ko
+    hamesha serve karna galat hai (naye engine ka honest 0-trade = data
+    fetch fail tha tab bhi sahi correction). Baaki sab pehle jaisa."""
     try:
+        try:
+            from core.services.backtest_engine import ENGINE_VERSION as _ev
+        except Exception:
+            _ev = "v1"
         if not stored_raw:
             return True
         _s = stored_raw if isinstance(stored_raw, dict) else __import__("json").loads(stored_raw)
         _st = int(((_s or {}).get("metrics") or {}).get("total_trades") or 0)
         if _st <= 0:
             return True  # khone ko kuch nahi
+        # Stale engine: tag missing (version-tagging se pehle ka result) ya
+        # current se alag -> stored history known-stale hai, overwrite OK.
+        _s_ev = str((_s or {}).get("engine_version") or "")
+        if _s_ev != str(_ev):
+            return True
         _ft = int(((fresh_res or {}).get("metrics") or {}).get("total_trades") or 0)
         return _ft > 0
     except Exception:
@@ -973,6 +1013,13 @@ def strategy_saved_result(strat_id: int):
         res["stored_at"] = row.get("last_backtest_at") or ""
         res["strategy_id"] = strat_id
         res["strategy_name"] = row.get("name") or ""
+        # Purane engine ka saved result? (v2 ke fake 100%-win jaise) -
+        # badge dikhao + note saaf bolo, warna user ko laga rahega sahi hai.
+        res["stale_engine"] = _stored_engine_stale(res)
+        if res["stale_engine"]:
+            res["config_changed"] = True
+            res["note"] = ((res.get("note") or "") +
+                           " Ye result PURANE engine ka saved hai - ↻ Naya run dabao, honest fresh result dikhega.").strip()
         # Config badli ya nahi (badge ke liye - result phir bhi SAVED wala).
         try:
             def _ld(v, fb):

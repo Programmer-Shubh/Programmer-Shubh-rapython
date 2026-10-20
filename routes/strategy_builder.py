@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Request, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Optional, Dict
-from core.services.backtest_engine import BacktestEngine
 from core.services.historical_fetcher import fetch_historical
 from core.models.bhavcopy_model import BhavcopyModel
 from utils.helpers import format_currency
@@ -9,6 +8,7 @@ import datetime
 import re
 import random
 
+from core.services.backtest_engine import BacktestEngine, ENGINE_VERSION
 
 def _generate_synthetic_fallback(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """Guaranteed synthetic data for backtest when all sources fail."""
@@ -1579,6 +1579,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         "validation": _val,
         "validation_status": "OK" if (_val or {}).get("ok") else "PARTIAL_DATA",
         "naked_warning": _naked_warning,
+        # Saved-result staleness check: engine version ke saath tag. Purane
+        # engine ka saved result (jaise v2 ka 100%-win fake result) fresh
+        # 0-trade run aane par bhi overwrite ho jaye (dekho strategies.py
+        # _should_overwrite_saved) - warna buggy history hamesha dikhti hai.
+        "engine_version": ENGINE_VERSION,
     }
     try:
         if '_rk' in locals() and _rk:
