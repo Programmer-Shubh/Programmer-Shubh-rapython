@@ -44,8 +44,10 @@ def test_stored_engine_stale_classifier():
     assert _stored_engine_stale({"engine_version": "v1"}) is True
 
 
-def test_strategy_backtest_keeps_saved_on_zero_fresh(monkeypatch):
-    """Endpoint: current-engine saved history ko fresh 0-trade run nahi mitata."""
+def test_strategy_backtest_returns_saved_instantly(monkeypatch):
+    """Backtest Detail (refresh=0): SAVED result turant wapas - koi chhup-ta
+    fresh run nahi (click-time 45s timeout + 'saved result nahi dikhta' bug).
+    0-trade fresh run saved KO MITATA BHI NAHI (refresh ke bina run hi nahi)."""
     import routes.strategy_builder as sbuilder
     from routes.strategies import strategy_backtest
     from core.services.backtest_engine import ENGINE_VERSION as EV
@@ -61,17 +63,59 @@ def test_strategy_backtest_keeps_saved_on_zero_fresh(monkeypatch):
         " VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [TAG, "NIFTY", "2026-09-01", "2026-09-20", "daily", "[]",
          json.dumps(legs), "{}", "{}", "active",
-         json.dumps(_stored(2, EV)), "stalehash", "2026-10-01 10:00"])
+         json.dumps(_stored(2, EV)), "old-hash", "2026-10-01 10:00"])
     try:
-        monkeypatch.setattr(
-            sbuilder, "_run_backtest_core",
-            lambda req, progress_cb=None: {"metrics": {"total_trades": 0, "net_pnl": 0.0},
-                                           "trade_list": [], "params": {}})
+        _called = {"n": 0}
+
+        def _no_run(req, progress_cb=None):
+            _called["n"] += 1
+            return {"metrics": {"total_trades": 0, "net_pnl": 0.0},
+                    "trade_list": [], "params": {}}
+        monkeypatch.setattr(sbuilder, "_run_backtest_core", _no_run)
         r = strategy_backtest(int(sid))
-        assert r.get("kept_saved") is True, r
-        row = db.fetch_one("SELECT last_backtest FROM strategies WHERE id=?", [int(sid)])
+        assert r.get("stored") is True, r
+        assert r.get("run_id") == "bt-old", r
+        assert len(r.get("trade_list") or []) == 2, r
+        assert _called["n"] == 0, "fresh run ko click par nahi chalna chahiye"
+        # DB me saved history untouched.
+        row = db.fetch_one("SELECT last_backtest, last_backtest_at FROM strategies WHERE id=?", [int(sid)])
         back = json.loads(row["last_backtest"])
         assert back["run_id"] == "bt-old", back
-        assert len(back["trade_list"]) == 2
+        assert row["last_backtest_at"] == "2026-10-01 10:00", row
+    finally:
+        db.execute("DELETE FROM strategies WHERE name=?", [TAG])
+
+
+def test_strategy_backtest_fresh_run_without_saved(monkeypatch):
+    """Saved result ho hi nahi to fresh run hota hai aur save bhi (engine tag
+    stamp ke saath) - pehli baar wala flow."""
+    import routes.strategy_builder as sbuilder
+    from routes.strategies import strategy_backtest
+    from core.services.backtest_engine import ENGINE_VERSION as EV
+    from core.models.database import Database
+    db = Database.get_instance()
+    db.execute("DELETE FROM strategies WHERE name=?", [TAG])
+    legs = [{"option_type": "CE", "transaction": "buy", "lots": 1,
+             "strike_selection": "atm", "otm_distance": 0, "expiry": "weekly"}]
+    sid = db.execute(
+        "INSERT INTO strategies (user_id, name, symbol, start_date, end_date,"
+        " timeframe, indicators, legs, advanced_options, risk_management,"
+        " status, last_backtest, last_backtest_hash, last_backtest_at)"
+        " VALUES (1,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL)",
+        [TAG, "NIFTY", "2026-09-01", "2026-09-20", "daily", "[]",
+         json.dumps(legs), "{}", "{}", "active"])
+    try:
+        def _fake_run(req, progress_cb=None):
+            return {"run_id": "bt-new", "metrics": {"total_trades": 3, "net_pnl": 111.0},
+                    "trade_list": [{"i": 1}], "params": {}}
+        monkeypatch.setattr(sbuilder, "_run_backtest_core", _fake_run)
+        r = strategy_backtest(int(sid))
+        assert r.get("run_id") == "bt-new", r
+        assert r.get("stored") is False, r
+        assert r.get("engine_version") == EV, "fresh save par engine tag stamp ho"
+        row = db.fetch_one("SELECT last_backtest, last_backtest_hash FROM strategies WHERE id=?", [int(sid)])
+        back = json.loads(row["last_backtest"])
+        assert back["run_id"] == "bt-new", back
+        assert row["last_backtest_hash"], "hash save hota hai"
     finally:
         db.execute("DELETE FROM strategies WHERE name=?", [TAG])

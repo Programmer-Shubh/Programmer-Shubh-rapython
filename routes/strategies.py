@@ -865,32 +865,34 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
             risk=risk or {},
         )
         # Config hash (RAW dates - stable: repeat click par wahi saved result,
-        # roz naya run nahi. Save-time hash bhi raw dates par hai).
+        # roz naya run na ho. Save-time hash bhi raw dates par hai).
         _cfg_hash = _canonical_config_hash(
             row.get("symbol"), row.get("start_date"), row.get("end_date"),
             row.get("timeframe"), indicators, entry_conditions,
             exit_conditions, legs, advanced, risk)
-        if not refresh and _cfg_hash:
+        if not refresh and row.get("last_backtest"):
+            # Backtest Detail (refresh=0): SAVED result TURANT wapas - chahe
+            # config badli ho ya engine naya ho. Pehle hash-mismatch par
+            # chupke se FULL fresh run hota tha - 45s client timeout + busy
+            # errors + "saved result nahi dikhta" shikayat. Ab: badge ke saath
+            # saved history hi dikhao; naya run sirf ↻ Naya run (refresh=1)
+            # par. Purane engine ka result red badge me saaf bata do.
             try:
-                if str(row.get("last_backtest_hash") or "") == _cfg_hash and row.get("last_backtest"):
-                    _stored = _js.loads(row["last_backtest"])
-                    if isinstance(_stored, dict) and (_stored.get("metrics") or _stored.get("trade_list") is not None):
-                        # Purane engine ka saved result serve NAHI karte -
-                        # hash me engine version shamil hai to ye ideally kabhi
-                        # hit na ho, phir bhi double-safety: fresh run hi chalega.
-                        if _stored_engine_stale(_stored):
-                            pass  # stale -> hash gate skip, neeche fresh run
-                        else:
-                            _stored["stored"] = True
-                            _stored["stored_at"] = row.get("last_backtest_at") or ""
-                            _stored["strategy_id"] = strat_id
-                            _stored["strategy_name"] = row.get("name") or ""
-                            try:
-                                _stored["took_ms"] = 5
-                                _stored["cached"] = True
-                            except Exception:
-                                pass
-                            return _stored
+                _stored = _js.loads(row["last_backtest"]) if isinstance(row["last_backtest"], str) else dict(row["last_backtest"])
+                if isinstance(_stored, dict) and (_stored.get("metrics") or _stored.get("trade_list") is not None):
+                    _stored["stored"] = True
+                    _stored["stored_at"] = row.get("last_backtest_at") or ""
+                    _stored["strategy_id"] = strat_id
+                    _stored["strategy_name"] = row.get("name") or ""
+                    _stored["config_changed"] = bool(
+                        _cfg_hash and str(row.get("last_backtest_hash") or "") != _cfg_hash)
+                    _stored["stale_engine"] = _stored_engine_stale(_stored)
+                    try:
+                        _stored["took_ms"] = 5
+                        _stored["cached"] = True
+                    except Exception:
+                        pass
+                    return _stored
             except Exception:
                 pass
         res = _run_backtest_core(req)
