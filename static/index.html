@@ -613,6 +613,25 @@
                     </div>
                 </div></div></div>
             </div>
+            <div class="card mt-2"><div class="card-body" style="padding:12px 16px">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="fw-bold mb-0"><i class="bi bi-shield-shaded"></i> Static IP Proxy — Dhan Whitelisting</h6>
+                    <span id="e-status-chip" class="badge bg-secondary" style="font-size:10px">checking...</span>
+                </div>
+                <p class="text-muted small mb-2">Render (free) ka outgoing IP bachta hi nahi - Dhan API whitenlist hone par "Invalid IP (DH-905)" deta hai. Ye proxy sab Dhan broker calls ko aapke whitelisted IPv6 par se bhejta hai. Dhan dashboard me whitelisted IP: <code id="e-ip-show">—</code></p>
+                <div class="row g-2">
+                    <div class="col-md-3"><label class="form-label small mb-0">Proxy URL</label><input type="text" id="e-url" class="form-control form-control-sm" placeholder="https://zeroip.snipy.in:8443"></div>
+                    <div class="col-md-3"><label class="form-label small mb-0">Proxy API Key (Bearer)</label><input type="password" id="e-token" class="form-control form-control-sm" placeholder="zero_ip_..."></div>
+                    <div class="col-md-3"><label class="form-label small mb-0">Whitelisted IPv6</label><input type="text" id="e-ip" class="form-control form-control-sm" placeholder="2406:...</div>
+                    <div class="col-md-3" style="display:flex;gap:6px;align-items:end;flex-wrap:wrap">
+                        <div class="form-check ms-1"><input type="checkbox" class="form-check-input" id="e-on" checked><label class="form-check-label small" for="e-on">On</label></div>
+                        <button class="btn btn-sm btn-success" onclick="saveEgress()">Save</button>
+                        <button class="btn btn-sm btn-outline-primary" onclick="testEgress()">Quick Test</button>
+                    </div>
+                </div>
+                <div id="e-test-out" class="small mt-2"></div>
+                <small class="text-muted d-block mt-1">Env vars (Render dashboard me) zyada priority rakhte hain: EGRESS_PROXY_URL / EGRESS_PROXY_TOKEN / EGRESS_PROXY_IP. Sirf Dhan ke api/auth endpoints proxy par jaate hain, baaki data sources direct.</small>
+            </div></div>
             <div id="broker-config-modal" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center">
                 <div style="background:#fff;border-radius:8px;width:90%;max-width:500px;max-height:80vh;overflow-y:auto">
                     <div style="padding:16px;border-bottom:1px solid #dee2e6;display:flex;justify-content:space-between;align-items:center">
@@ -779,7 +798,7 @@
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}if(id==='brokers')loadBrokers();if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     // OTM filter cache-first: memory (15-min) -> localStorage (60-min) -> network.
     // "Loading symbols..." kabhi atakta nahi - pehli baar ke baad turant list.
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
@@ -2565,6 +2584,39 @@ let _lastOpenTrdHTML = null;
 
     let currentBroker='';
     let brokerData=[];
+    // ---- Static IP egress proxy (Dhan whitelisting) ----
+    async function loadEgress(){
+        try{
+            const r=await A('/api/broker/egress');
+            const e=(r&&r.egress)||{};
+            document.getElementById('e-url').value=e.url||'';
+            document.getElementById('e-ip').value=e.ip||'';
+            if(e.token_masked&&e.token_masked!=='set'){} // token masked he - khali placeholder
+            document.getElementById('e-on').checked=!!e.enabled&&!!e.url;
+            const chip=document.getElementById('e-status-chip');
+            if(e.configured){chip.textContent='ON '+(e.source==='env'?'(env)':'(saved)');chip.className='badge bg-success';}
+            else if(e.url||(e.token_masked==='set')){chip.textContent='OFF';chip.className='badge bg-warning text-dark';}
+            else{chip.textContent='Not configured';chip.className='badge bg-secondary';}
+            document.getElementById('e-ip-show').textContent=e.ip||'—';
+        }catch(e){try{document.getElementById('e-status-chip').textContent='server unreachable';}catch(_){}}
+    }
+    async function saveEgress(){
+        try{
+            const body={enabled:document.getElementById('e-on').checked,url:document.getElementById('e-url').value.trim(),token:document.getElementById('e-token').value.trim(),ip:document.getElementById('e-ip').value.trim()};
+            const r=await P('/api/broker/egress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            if(r.error){alert(r.error);return;}
+            showToast('Egress proxy saved!','success');loadEgress();
+        }catch(e){alert('Save failed: '+e.message);}
+    }
+    async function testEgress(){
+        const out=document.getElementById('e-test-out');
+        out.innerHTML='<span class="text-muted">Testing proxy...</span>';
+        try{
+            const r=await P('/api/broker/egress-test',{method:'POST'});
+            if(r.proxy_ok){out.innerHTML='<span class="badge bg-success">Proxy OK</span> <span class="text-muted small">Dhan/Kite tak request whitelisted IPv6 ('+(r.whitelisted_ip||'')+') par se gayi. Direct IP (Render): '+(r.direct_ip||'—')+'</span>';}
+            else{out.innerHTML='<span class="badge bg-danger">Proxy FAIL</span> <span class="small text-muted">'+((r.proxy_detail||r.proxy_error||'')+'').replace(/</g,'&lt;')+' — token/IP check karo ya Rotate karke naya key bharo.</span>';}
+        }catch(e){out.innerHTML='<span class="badge bg-danger">Test fail:</span> <span class="small text-muted">'+e.message+'</span>';}
+    }
 
     // Fallback list (mirrors backend BROKER_DEFAULTS) so Connect/OAuth buttons
     // ALWAYS render even if /api/broker/list is unreachable (server down/deploy).

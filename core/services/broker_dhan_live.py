@@ -58,9 +58,16 @@ class DhanLive:
     async def _request(self, method: str, path: str, data: dict = None, retries: int = 2) -> dict:
         url = f"{BASE_URL}{path}"
         payload = json.dumps(data) if data is not None else ""
+        # Dhan IP-whitelisting: broker API calls fixed-IP proxy par se
+        # (Render ka shared IP Dhan DH-905 'Invalid IP' deta hai).
+        try:
+            from core.services.egress_proxy import httpx_kwargs as _ekw
+            _proxy = _ekw()
+        except Exception:
+            _proxy = {}
         for attempt in range(1, retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=20) as client:
+                async with httpx.AsyncClient(timeout=20, **_proxy) as client:
                     if method == "GET":
                         resp = await client.get(url, headers=self._headers())
                     elif method == "POST":

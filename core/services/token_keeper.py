@@ -82,10 +82,18 @@ def dhan_totp_login(client_id, pin, totp_secret):
         if not (cid and len(pin) == 6 and sec):
             return ""
         totp = pyotp.TOTP(sec).now()
-        r = _rq.post(
-            "https://auth.dhan.co/app/generateAccessToken",
-            params={"dhanClientId": cid, "pin": pin, "totp": totp},
-            timeout=20)
+        # Dhan IP-whitelisting: login/auth call bhi fixed-IP proxy par se
+        # (jab EGRESS_PROXY_* on ho; warna direct requests).
+        try:
+            from core.services.egress_proxy import sync_request as _sreq
+            r = _sreq("POST", "https://auth.dhan.co/app/generateAccessToken",
+                      params={"dhanClientId": cid, "pin": pin, "totp": totp},
+                      timeout=20)
+        except ImportError:
+            r = _rq.post(
+                "https://auth.dhan.co/app/generateAccessToken",
+                params={"dhanClientId": cid, "pin": pin, "totp": totp},
+                timeout=20)
         if r.status_code != 200:
             return ""
         try:

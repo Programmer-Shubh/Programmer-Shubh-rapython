@@ -94,7 +94,12 @@ class TokenManager:
             "refresh_token": cfg["refresh_token"],
         }
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                from core.services.egress_proxy import httpx_kwargs as _ekw
+                _proxy = _ekw()
+            except Exception:
+                _proxy = {}
+            async with httpx.AsyncClient(timeout=30, **_proxy) as client:
                 resp = await client.post(
                     "https://api.dhan.co/oauth2/token/refresh", json=payload
                 )

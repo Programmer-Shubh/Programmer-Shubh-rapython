@@ -114,12 +114,21 @@ def _broker_cfg(name):
 # ---------------- Dhan: token resolve + batch LTP (sync) ----------------
 
 def _dhan_post(path, token, client_id, payload, timeout=6):
-    import requests
-    r = requests.post(
-        _DHAN_BASE + path,
-        headers={"Content-Type": "application/json", "access-token": token, "client-id": client_id},
-        json=payload, timeout=timeout,
-    )
+    # Dhan IP-whitelisting: proxy ON par httpx Client (Bearer proxy-header).
+    try:
+        from core.services.egress_proxy import sync_request as _sreq
+        r = _sreq(
+            "POST", _DHAN_BASE + path,
+            headers={"Content-Type": "application/json",
+                     "access-token": token, "client-id": client_id},
+            json_body=payload, timeout=timeout)
+    except Exception:
+        import requests
+        r = requests.post(
+            _DHAN_BASE + path,
+            headers={"Content-Type": "application/json", "access-token": token, "client-id": client_id},
+            json=payload, timeout=timeout,
+        )
     if r.status_code != 200:
         return {}
     try:

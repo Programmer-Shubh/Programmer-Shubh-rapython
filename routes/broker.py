@@ -9,6 +9,89 @@ from core.services.broker_dhan import DhanHQ
 
 router = APIRouter()
 
+# ---------------- Static-IP egress proxy (Dhan whitelisting) ----------------
+
+class EgressConfig(BaseModel):
+    enabled: bool = True
+    url: str = ""
+    token: str = ""
+    ip: str = ""
+
+
+@router.get("/egress")
+def egress_get():
+    """Proxy config status (token masked) + kahan se aa raha hai (env/db)."""
+    try:
+        from core.services.egress_proxy import status
+        return {"success": True, "egress": status()}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:200]}
+
+
+@router.post("/egress")
+def egress_save(req: EgressConfig):
+    """UI se proxy save/settings-table me (env vars zyada priority hote hain)."""
+    try:
+        url = (req.url or "").strip().rstrip("/")
+        ip = (req.ip or "").strip()
+        token = (req.token or "").strip()
+        if req.enabled and not (url.startswith(("http://", "https://")) and token and ip):
+            return {"success": False, "error": "Proxy URL (https://...), token aur IPv6 teeno bharo (ya enabled off chhod do)"}
+        payload = {"enabled": bool(req.enabled), "url": url, "token": token, "ip": ip}
+        db = Database.get_instance()
+        existing = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key='egress_proxy'")
+        if existing:
+            db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key=?",
+                       [json.dumps(payload), "egress_proxy"])
+        else:
+            db.execute("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                       ["egress_proxy", json.dumps(payload)])
+        from core.services.egress_proxy import status
+        return {"success": True, "message": "Egress proxy saved", "egress": status()}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:200]}
+
+
+@router.post("/egress-test")
+async def egress_test():
+    """Proxy sahi chal raha hai? Snipy free plan sirf broker-domains allow
+    karta hai (ipify/outside host 403) - isliye test target api.kite.trade
+    (snipy ke apne doc-sample jaisa "take the red pill" 200 body)."""
+    try:
+        import httpx
+        out = {}
+        try:
+            from core.services.egress_proxy import cfg, httpx_kwargs
+            c = cfg()
+            kw = httpx_kwargs()
+            out["proxy_on"] = bool(c.get("configured"))
+            out["proxy_url"] = c.get("url", "")
+            out["whitelisted_ip"] = c.get("ip", "")
+            if kw:
+                async with httpx.AsyncClient(timeout=25, **kw) as cl:
+                    r = await cl.get("https://api.kite.trade/")
+                out["proxy_ok"] = (r.status_code == 200 and
+                                   "kite" in (r.text or "").lower())
+                if not out["proxy_ok"]:
+                    out["proxy_detail"] = f"HTTP {r.status_code} {(r.text or '')[:120]}"
+            else:
+                out["proxy_ok"] = False
+                out["proxy_detail"] = "proxy off"
+        except Exception as e:
+            out["proxy_ok"] = False
+            out["proxy_error"] = str(e)[:200]
+        try:
+            async with httpx.AsyncClient(timeout=15) as cl:
+                r2 = await cl.get("https://api.ipify.org?format=json")
+            out["direct_ip"] = ((r2.json() or {}).get("ip") if r2.status_code == 200 else "") or ""
+        except Exception as e:
+            out["direct_error"] = str(e)[:200]
+        return {"success": True, **out}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:200]}
+
+
+
 BROKER_DEFAULTS = {
     "dhan": {"name": "Dhan", "icon": "bi-bank", "color": "text-primary", "fields": ["client_id", "access_token", "refresh_token", "pin", "totp_secret"], "desc": "Client ID + token (auto) / PIN + TOTP = fully automatic login"},
     "angel": {"name": "Angel One", "icon": "bi-graph-up-arrow", "color": "text-success", "fields": ["client_code", "password", "api_key", "totp_secret"], "desc": "Client Code + Password + API Key"},
