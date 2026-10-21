@@ -2211,14 +2211,16 @@ let _lastOpenTrdHTML = null;
         try{
             const r=await P('/api/strategies/'+id+'/lots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lots:lots})});
             if(r.error){alert('Error: '+r.error);return;}
-            loadRobotSaved();
+            try{loadRobotSaved();}catch(e){}
+            try{loadStrats();}catch(e){}
         }catch(e){alert('Error: '+e.message);}
     }
     async function stratLiveToggle(id, enabled){
         try{
             const r=await P('/api/strategies/'+id+'/live-toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!!enabled})});
             if(r.error){alert('Error: '+r.error);return;}
-            loadRobotSaved();
+            try{loadRobotSaved();}catch(e){}
+            try{loadStrats();}catch(e){}
         }catch(e){alert('Error: '+e.message);}
     }
     async function delRobotSaved(id){ if(!confirm('Delete this saved strategy?')) return; try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadRobotSaved();}catch(e){alert('Error: '+e.message);} }
