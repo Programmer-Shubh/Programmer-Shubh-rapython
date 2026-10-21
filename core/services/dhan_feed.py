@@ -200,11 +200,23 @@ class DhanFeed:
             backoff = min(backoff * 2, 30)
 
     async def _session(self):
+        import ssl as _ssl
         import websockets
         url = (f"{FEED_URL}?version=2&token={self._token}"
                f"&clientId={self._client_id}&authType=2")
-        async with websockets.connect(url, ping_interval=30, ping_timeout=10,
-                                      close_timeout=5) as ws:
+        # Dhan IP-whitelisting: feed bhi fixed-IP CONNECT tunnel par se
+        # (websockets proxy headers nahi bhej sakta -> raw sock tunnel).
+        kwargs = {}
+        try:
+            from core.services.egress_proxy import ws_connect_kwargs_async
+            kwargs = await ws_connect_kwargs_async("api-feed.dhan.co", 443)
+        except Exception:
+            kwargs = {}
+        _kw = dict(ping_interval=30, ping_timeout=10, close_timeout=5)
+        if kwargs.get("sock"):
+            _kw["sock"] = kwargs["sock"]
+            _kw["ssl"] = _ssl.create_default_context()
+        async with websockets.connect(url, **_kw) as ws:
             self._ws = ws
             self._connected = True
             self._last_error = ""

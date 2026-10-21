@@ -99,10 +99,19 @@ class TokenManager:
                 _proxy = _ekw()
             except Exception:
                 _proxy = {}
-            async with httpx.AsyncClient(timeout=30, **_proxy) as client:
-                resp = await client.post(
-                    "https://api.dhan.co/oauth2/token/refresh", json=payload
-                )
+            try:
+                async with httpx.AsyncClient(timeout=30, **_proxy) as client:
+                    resp = await client.post(
+                        "https://api.dhan.co/oauth2/token/refresh", json=payload
+                    )
+            except httpx.RequestError:
+                # Fail-open: proxy network fail -> ek direct attempt.
+                if not _proxy:
+                    raise
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        "https://api.dhan.co/oauth2/token/refresh", json=payload
+                    )
             body = resp.json()
             if resp.status_code in (200, 201) and body.get("accessToken"):
                 cfg["access_token"] = body["accessToken"]

@@ -96,9 +96,17 @@ def sync_request(method, url, headers=None, params=None, json_body=None,
     c = cfg()
     if c.get("configured"):
         import httpx
-        with httpx.Client(timeout=timeout, **httpx_kwargs()) as _cl:
-            return _cl.request(method.upper(), url, headers=headers or {},
-                               params=params, json=json_body, content=data)
+        try:
+            with httpx.Client(timeout=timeout, **httpx_kwargs()) as _cl:
+                return _cl.request(method.upper(), url, headers=headers or {},
+                                   params=params, json=json_body, content=data)
+        except Exception as exc:
+            # Fail-open: proxy network par hi fail ho to ek DIRECT attempt
+            # (Dhan-side HTTP errors yahan nahi pahunchte - sirf layer fail).
+            try:
+                logger.warning("egress sync_request proxy fail, direct fallback: %s", exc)
+            except Exception:
+                pass
     import requests as _rq
     return _rq.request(method.upper(), url, headers=headers or {},
                        params=params, json=json_body, data=data,
@@ -113,3 +121,73 @@ def status() -> dict:
         "set" if tok else "")
     c.pop("token", None)
     return c
+
+
+# ---------------- WebSocket (CONNECT-tunnel) support ----------------
+
+def _tunnel_socket_sync(host, port, timeout=20):
+    """Raw socket -> proxy CONNECT host:port (Bearer + IPv6 headers custom).
+    Tunnel lock ho chuka socket return karta hai (plain TCP; caller wss par
+    khud TLS kare). websockets sabhi versions proxy headers nahi bhej sakte,
+    isliye hand-written CONNECT. Fail -> exception (caller direct fallback)."""
+    import socket
+    from urllib.parse import urlparse
+    c = cfg()
+    if not c.get("configured"):
+        raise RuntimeError("egress proxy off")
+    pu = urlparse(c["url"])
+    phost, pport = pu.hostname, pu.port or 443
+    s = socket.create_connection((phost, pport), timeout=timeout)
+    try:
+        s.settimeout(timeout)
+        req = (f"CONNECT {host}:{port} HTTP/1.1\r\n"
+               f"Host: {host}:{port}\r\n"
+               f"Proxy-Authorization: Bearer {c['token']}\r\n")
+        if c.get("ip"):
+            req += f"X-Snipy-Proxy-IPv6: {c['ip']}\r\n"
+        req += "Proxy-Connection: keep-alive\r\n\r\n"
+        s.sendall(req.encode("ascii", "strict"))
+        resp = b""
+        while b"\r\n\r\n" not in resp:
+            chunk = s.recv(4096)
+            if not chunk:
+                raise RuntimeError("proxy closed CONNECT me")
+            resp += chunk
+            if len(resp) > 16384:
+                raise RuntimeError("CONNECT response lge haath (rich body)")
+        status_line = resp.split(b"\r\n", 1)[0]
+        if b" 200 " not in status_line:
+            raise RuntimeError(
+                f"proxy CONNECT reject: {status_line[:80]!r}")
+        s.settimeout(None)
+        return s
+    except Exception:
+        try:
+            s.close()
+        except Exception:
+            pass
+        raise
+
+
+def ws_connect_kwargs(host, port=443):
+    """websockets.connect(uri, **ws_connect_kwargs(...))-style kwargs.
+    Proxy ON: {'sock': <tunnel socket>} (websockets 14+ sock= supported;
+    TLS+server_hostname websockets khud uri host par wrap karta hai).
+    OFF ya tunnel fail: {} -> direct connection. Blocking CONNECT feed
+    thread ke apne loop me run_in_executor se call ho (loop block na ho)."""
+    try:
+        s = _tunnel_socket_sync(host, port)
+        return {"sock": s}
+    except Exception as e:
+        try:
+            logger.warning("egress ws tunnel fail (%s:%s): %s", host, port, e)
+        except Exception:
+            pass
+        return {}
+
+
+async def ws_connect_kwargs_async(host, port=443):
+    """async wrapper (loop block na ho)."""
+    import asyncio
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, ws_connect_kwargs, host, port)

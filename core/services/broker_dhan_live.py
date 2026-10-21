@@ -65,9 +65,12 @@ class DhanLive:
             _proxy = _ekw()
         except Exception:
             _proxy = {}
-        for attempt in range(1, retries + 1):
+        # Fail-open: proxy network par hi fail ho to aakhri attempt direct.
+        routes = [_proxy, _proxy, {}] if _proxy else [{}, {}, {}]
+        routes = routes[:retries + 1] if _proxy else routes[:retries]
+        for attempt, _kw in enumerate(routes, 1):
             try:
-                async with httpx.AsyncClient(timeout=20, **_proxy) as client:
+                async with httpx.AsyncClient(timeout=20, **_kw) as client:
                     if method == "GET":
                         resp = await client.get(url, headers=self._headers())
                     elif method == "POST":
@@ -109,17 +112,17 @@ class DhanLive:
                     msg = str(body.get("message") or body.get("remarks") or body)[:300]
                 except Exception:
                     msg = f"HTTP {resp.status_code}"
-                if attempt < retries and resp.status_code >= 500:
+                if attempt < len(routes) and resp.status_code >= 500:
                     await asyncio.sleep(2 ** attempt)
                     continue
                 return {"success": False, "data": body, "error": msg}
             except httpx.TimeoutException:
-                if attempt < retries:
+                if attempt < len(routes):
                     await asyncio.sleep(2 ** attempt)
                     continue
                 return {"success": False, "data": {}, "error": "Dhan request timed out"}
             except httpx.RequestError as exc:
-                if attempt < retries:
+                if attempt < len(routes):
                     await asyncio.sleep(2 ** attempt)
                     continue
                 return {"success": False, "data": {}, "error": str(exc)[:200]}
