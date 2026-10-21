@@ -1041,20 +1041,24 @@ async def view_account(req: ConnectRequest):
         }
 
     if req.broker == "dhan" and config.get("access_token"):
-        dh = DhanHQ(
+        # v2 DhanLive (proxied + egress-proxy aware) - purana v1 DhanHQ
+        # client dead endpoints (HTML 4xx) par resp.json() 500 karta tha.
+        from core.services.broker_dhan_live import DhanLive
+        dh = DhanLive(
             client_id=config.get("client_id", ""),
             access_token=config.get("access_token", ""),
-            refresh_token=config.get("refresh_token", ""),
         )
         funds = await dh.get_funds()
         positions = await dh.get_positions()
         holdings = await dh.get_holdings()
+        _f_err = (funds.get("error") or "")
         return {
             "success": True,
-            "funds": funds.get("data", {}) if funds.get("data") else {"message": "Live fetch pending"},
-            "positions": positions.get("data", []) if positions.get("data") else [],
-            "holdings": holdings.get("data", []) if holdings.get("data") else [],
+            "funds": funds.get("data", {}) if funds.get("success") or funds.get("data") else {"message": _f_err or "Live fetch pending"},
+            "positions": positions.get("data", []) if isinstance(positions.get("data"), list) else [],
+            "holdings": holdings.get("data", []) if isinstance(holdings.get("data"), list) else [],
             "orders": [],
+            "dhan_error": _f_err,
         }
 
     if req.broker == "shoonya" and config.get("access_token"):

@@ -53,7 +53,13 @@ class DhanHQ:
                 logger.info(
                     "DhanHQ %s %s attempt=%d/%d", method, path, attempt, retries
                 )
-                async with httpx.AsyncClient(timeout=30) as client:
+                # Dhan IP-whitelisting: broker API calls fixed-IP proxy par se
+                try:
+                    from core.services.egress_proxy import httpx_kwargs as _ekw
+                    _proxy = _ekw()
+                except Exception:
+                    _proxy = {}
+                async with httpx.AsyncClient(timeout=30, **_proxy) as client:
                     if method == "GET":
                         resp = await client.get(url, headers=headers)
                     elif method == "POST":

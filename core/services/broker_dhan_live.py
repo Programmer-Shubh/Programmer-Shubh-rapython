@@ -91,11 +91,17 @@ class DhanLive:
                 except Exception:
                     pass
                 if resp.status_code in (200, 201):
-                    inner = body if isinstance(body, dict) else {}
-                    if str(inner.get("status", "success")).lower() in ("success", "ok", "pending", "transit"):
-                        return {"success": True, "data": inner.get("data", inner), "error": ""}
-                    return {"success": False, "data": inner.get("data", inner),
-                            "error": str(inner.get("remarks") or inner.get("message") or body)[:300]}
+                    # /positions, /holdings list-shaped JSON return karte
+                    # hain (dict nahi) - list direct data banao.
+                    inner = body if isinstance(body, (dict, list)) else {}
+                    _st = inner.get("status", "success") if isinstance(inner, dict) else "success"
+                    if str(_st).lower() in ("success", "ok", "pending", "transit"):
+                        return {"success": True,
+                                "data": inner.get("data", inner) if isinstance(inner, dict) else inner,
+                                "error": ""}
+                    return {"success": False,
+                            "data": inner.get("data", inner) if isinstance(inner, dict) else inner,
+                            "error": str((inner.get("remarks") or inner.get("message") or inner) if isinstance(inner, dict) else inner)[:300]}
                 if resp.status_code == 401:
                     return {"success": False, "data": body, "error": "Dhan token invalid/expired. Reconnect."}
                 msg = ""
@@ -153,7 +159,12 @@ class DhanLive:
         Returns {success, access_token?} — caller must save the new token."""
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=20) as client:
+            try:
+                from core.services.egress_proxy import httpx_kwargs as _ekw
+                _proxy = _ekw()
+            except Exception:
+                _proxy = {}
+            async with httpx.AsyncClient(timeout=20, **_proxy) as client:
                 resp = await client.get(
                     f"{BASE_URL}/RenewToken",
                     headers={"access-token": self.access_token,
@@ -218,6 +229,15 @@ class DhanLive:
 
     async def get_order(self, order_id: str) -> dict:
         return await self._request("GET", f"/orders/{order_id}")
+
+    async def get_funds(self) -> dict:
+        return await self._request("GET", "/fundlimit")
+
+    async def get_positions(self) -> dict:
+        return await self._request("GET", "/positions")
+
+    async def get_holdings(self) -> dict:
+        return await self._request("GET", "/holdings")
 
     async def get_index_history(self, symbol: str, start_date: str, end_date: str) -> list:
         """Daily OHLC history for an NSE/BSE index via DhanHQ v2 charts/historical.
