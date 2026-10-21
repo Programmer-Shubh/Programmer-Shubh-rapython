@@ -2183,15 +2183,43 @@ let _lastOpenTrdHTML = null;
             const r=await A('/api/strategies/list');
             const robots=(r.strategies||[]).filter(s=> (s.description==='robot') || (s.name||'').includes('_Robot_') || (s.name||'').includes('_Strategy_'));
             if(!robots.length){ document.getElementById('robot-saved').innerHTML='<p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p>'; return; }
-            let h='<table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Symbol</th><th>Order</th><th>SL/TP</th><th>Saved BT</th><th>Status</th><th>Action</th></tr></thead><tbody>';
+            let h='<table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Symbol</th><th>Order</th><th>Lots</th><th>SL/TP</th><th>Saved BT</th><th>Status</th><th>Live</th><th>Action</th></tr></thead><tbody>';
             robots.forEach(s=>{
                 const legs=_parseJsonField(s.legs,[]); const leg=legs[0]||{}; const ord=(leg.option_type||'')+'-'+(leg.transaction||'');
+                const curLots=Math.max(1,parseInt(leg.lots)||1);
                 const rm=_parseJsonField(s.risk_management,{});
+                const lv=!!s.live_enabled;
                 const btH=(s.bt&&s.bt.trades!=null)?`<strong>${s.bt.trades}</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span><br><small class="text-muted">${s.bt.win_rate||0}% • ${s.bt.stored_at||'saved'}</small>`:'<small class="text-muted">—</small>';
-                h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td><td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td><td style="white-space:nowrap"><button class="btn btn-sm btn-outline-success" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="ptFromStrat(${s.id})">Paper Trade</button> <button class="btn btn-sm btn-outline-danger" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="liveFromRobot(${s.id})">Live Trade</button> <button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id},false,this)">Backtest</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')">History</button> <button class="btn btn-sm btn-outline-info" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
+                h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td>`+
+`<td><div class="d-flex align-items-center" style="gap:4px"><button class="btn btn-sm btn-outline-secondary px-2" title="Lot ghatayen" onclick="stratLots(${s.id},${curLots-1})">−</button><strong class="mx-1" id="sl-lots-${s.id}">${curLots}</strong><button class="btn btn-sm btn-outline-secondary px-2" title="Lot badhayen" onclick="stratLots(${s.id},${curLots+1})">+</button></div><small class="text-muted" id="sl-qty-${s.id}" style="font-size:10px">qty: …</small></td>`+
+`<td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td>`+
+`<td><button class="btn btn-sm ${(lv?'btn-success':'btn-outline-secondary')}" id="sl-live-${s.id}" onclick="stratLiveToggle(${s.id},${!lv})">${lv?'ON':'OFF'}</button></td>`+
+`<td style="white-space:nowrap"><button class="btn btn-sm btn-outline-success" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="ptFromStrat(${s.id})">Paper Trade</button> <button class="btn btn-sm btn-outline-danger" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="liveFromRobot(${s.id})">Live Trade</button> <button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id},false,this)">Backtest</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')">History</button> <button class="btn btn-sm btn-outline-info" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
             });
             h+='</tbody></table>'; document.getElementById('robot-saved').innerHTML=h;
+            // Lots qty hint: lots x official lot-size (symbol wise ek hi fetch)
+            try{
+                const syms={}; robots.forEach(s=>{syms[(s.symbol||'').toUpperCase()]=syms[(s.symbol||'').toUpperCase()]||[];syms[s.symbol.toUpperCase()].push(s.id);});
+                Object.keys(syms).forEach(async sym=>{
+                    try{const ls=await A('/api/lot-size/'+sym);const q=parseInt(ls.lot_size)||0;syms[sym].forEach(id=>{const el=document.getElementById('sl-qty-'+id);if(el)el.textContent=q?('qty: 1 lot = '+q):'qty: —';});}catch(e){}
+                });
+            }catch(e){}
         }catch(e){ document.getElementById('robot-saved').innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>'; console.error(e); }
+    }
+    async function stratLots(id, lots){
+        lots=Math.max(1,parseInt(lots)||1);
+        try{
+            const r=await P('/api/strategies/'+id+'/lots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lots:lots})});
+            if(r.error){alert('Error: '+r.error);return;}
+            loadRobotSaved();
+        }catch(e){alert('Error: '+e.message);}
+    }
+    async function stratLiveToggle(id, enabled){
+        try{
+            const r=await P('/api/strategies/'+id+'/live-toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!!enabled})});
+            if(r.error){alert('Error: '+r.error);return;}
+            loadRobotSaved();
+        }catch(e){alert('Error: '+e.message);}
     }
     async function delRobotSaved(id){ if(!confirm('Delete this saved strategy?')) return; try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadRobotSaved();}catch(e){alert('Error: '+e.message);} }
     async function backtestFromRobot(id, force, el){
@@ -2380,6 +2408,7 @@ let _lastOpenTrdHTML = null;
         try{
             const s=await A('/api/strategies/'+id);
             if(s.error){ alert(s.error); return; }
+            if(s.live_enabled===false){ alert('Is strategy ka Live Trade OFF hai - card par Live ON button dabao.'); return; }
             /* expired -> backend next expiry par auto-shift karke trade lagata hai, bina puche */
             const legs=_parseJsonField(s.legs,[]);
             if(!legs.length){ alert('No legs in this strategy'); return; }

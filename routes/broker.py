@@ -1347,6 +1347,16 @@ async def place_live_order(req: LiveOrderRequest):
         # live trading keeps running instead of blocking on a past end_date.
         _rolled_to = ""
         if req.strategy_id:
+            # Per-strategy LIVE toggle guard: OFF strategy par koi real order
+            # nahi jayega (dry-run preview allowed hai, confirm screen ke liye).
+            if not req.dry_run:
+                try:
+                    from core.models.database import Database as _DB0
+                    from routes.strategies import _strat_live_enabled as _sle2
+                    if not _sle2(_DB0.get_instance(), req.strategy_id):
+                        return {"error": "Is strategy ka Live Trade OFF hai - Trading Center ke saved strategy card par Live ON karo"}
+                except Exception:
+                    pass
             try:
                 from core.models.database import Database as _DB2
                 from datetime import datetime as _dt2, timedelta as _td2, timezone as _tz2

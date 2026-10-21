@@ -395,6 +395,7 @@ def list_strategies():
         except Exception:
             pass
         _apply_expiry_status(r)
+        r["live_enabled"] = _strat_live_enabled(db, r.get("id"))
     return {"strategies": rows, "count": len(rows)}
 
 
@@ -421,6 +422,7 @@ def get_strategy(strat_id: int):
     except Exception:
         pass
     _apply_expiry_status(row)
+    row["live_enabled"] = _strat_live_enabled(db, strat_id)
     return row
 
 
@@ -529,6 +531,88 @@ def save_strategy(req: StrategyRequest):
     except Exception:
         pass
     return resp
+
+
+def _strat_live_key(strat_id: int) -> str:
+    return f"strat_live_enabled_{int(strat_id)}"
+
+
+def _strat_live_enabled(db, strat_id: int) -> bool:
+    try:
+        row = db.fetch_one(
+            "SELECT setting_value FROM settings WHERE setting_key=?",
+            [_strat_live_key(strat_id)])
+        if not row:
+            return True
+        return str(row.get("setting_value") or "") == "1"
+    except Exception:
+        return True
+
+
+class LotsUpdateRequest(BaseModel):
+    lots: int
+
+
+class LiveToggleRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/{strat_id}/lots")
+def update_strategy_lots(strat_id: int, req: LotsUpdateRequest):
+    """Saved strategy ke saare legs ka lot size badlo (+/- buttons isse use
+    karte hain). DB me legs JSON update hoti hai - live + paper trade dono
+    isi se quantity nikaalte hain."""
+    import json as _js
+    db = Database.get_instance()
+    row = db.fetch_one("SELECT * FROM strategies WHERE id=?", [strat_id])
+    if not row:
+        return {"error": "Strategy not found"}
+    try:
+        legs = _js.loads(row.get("legs") or "[]")
+    except Exception:
+        return {"error": "Legs data galat hai"}
+    if not legs:
+        return {"error": "No legs in this strategy"}
+    lots = int(req.lots)
+    if lots < 1:
+        return {"error": "Lot size minimum 1 hona chahiye"}
+    if lots > 200:
+        return {"error": "Lot size maximum 200 tak hi ja sakta hai"}
+    for leg in legs:
+        if isinstance(leg, dict):
+            leg["lots"] = lots
+    db.execute(
+        "UPDATE strategies SET legs=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        [_js.dumps(legs), strat_id])
+    return {"status": "updated", "id": strat_id, "lots": lots}
+
+
+@router.get("/{strat_id}/live-state")
+def strategy_live_state(strat_id: int):
+    db = Database.get_instance()
+    row = db.fetch_one("SELECT id FROM strategies WHERE id=?", [strat_id])
+    if not row:
+        return {"error": "Strategy not found"}
+    return {"id": strat_id, "live_enabled": _strat_live_enabled(db, strat_id)}
+
+
+@router.post("/{strat_id}/live-toggle")
+def strategy_live_toggle(strat_id: int, req: LiveToggleRequest):
+    """Per-strategy LIVE trade ON/OFF. OFF par is strategy ka live order
+    place nahi hoga (frontend + guard dono check karte hain)."""
+    db = Database.get_instance()
+    row = db.fetch_one("SELECT id FROM strategies WHERE id=?", [strat_id])
+    if not row:
+        return {"error": "Strategy not found"}
+    key = _strat_live_key(strat_id)
+    val = "1" if req.enabled else "0"
+    existing = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key=?", [key])
+    if existing:
+        db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key=?",
+                   [val, key])
+    else:
+        db.execute("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)", [key, val])
+    return {"status": "ok", "id": strat_id, "live_enabled": req.enabled}
 
 
 @router.delete("/{strat_id}")
