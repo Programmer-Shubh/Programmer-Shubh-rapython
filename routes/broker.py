@@ -1358,8 +1358,25 @@ def _dhan_direct_ltp(security_id: str, symbol: str, debug: dict = None):
             debug["dhan_quote"] = "no-token/creds"
             return 0.0
         seg = "BSE_FNO" if (symbol or "").upper() in ("SENSEX", "BANKEX") else "NSE_FNO"
-        q = _dhan_post("/marketfeed/quote", token, cid,
-                       {seg: [int(float(security_id))]}, timeout=8)
+        # status/body bhi dikhao - empty res ka asli reason pakadne ke liye
+        try:
+            from core.services.contract_pricer import _DHAN_BASE
+            from core.services.egress_proxy import sync_request as _sreq
+            r = _sreq("POST", _DHAN_BASE + "/marketfeed/quote",
+                      headers={"Content-Type": "application/json",
+                               "access-token": token, "client-id": cid},
+                      json_body={seg: [int(float(security_id))]}, timeout=8)
+            debug["dhan_http"] = int(getattr(r, "status_code", 0) or 0)
+            debug["dhan_body"] = str((r.text or "")[:200]) if getattr(r, "text", None) else "empty"
+            q = {}
+            if r.status_code == 200:
+                try:
+                    q = r.json() or {}
+                except Exception:
+                    q = {}
+        except Exception as _e2:
+            debug["dhan_http"] = f"req-err: {str(_e2)[:80]}"
+            q = (locals().get("q") or {})
         debug["dhan_quote_keys"] = list((q or {}).keys())
         debug["dhan_quote_status"] = str((q or {}).get("status")) if isinstance(q, dict) else "node"
         data = (q.get("data") or {})
