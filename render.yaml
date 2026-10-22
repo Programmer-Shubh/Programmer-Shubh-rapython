@@ -19,11 +19,12 @@ services:
         value: ""
         sync: false
       # Fyers credentials (Render Dashboard > Environment me fill karo).
-      # App ID format = <appId>-<appType> (e.g. 4mncDFS3DU07JmJO-100).
+      # App ID format = <appId>-<appType> (e.g. VBZLF5380A-200).
       # Secret = MyAPI dashboard ka app secret. PIN optional (token refresh ke liye).
+      # RATRADE_FYERS_SECRET / _SECRET_KEY bhi accepted (aliases).
       - key: RATRADE_FYERS_APP_ID
         sync: false
-      - key: RATRADE_FYERS_SECRET
+      - key: RATRADE_FYERS_SECRET_ID
         sync: false
       - key: RATRADE_FYERS_REDIRECT_URI
         value: "https://ratrade-iwi2.onrender.com/api/broker/fyers-callback"

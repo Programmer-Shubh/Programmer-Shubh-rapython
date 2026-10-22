@@ -276,10 +276,15 @@ def _env_config(broker: str) -> dict:
     """Broker credentials from environment variables (survive Render redeploys
     + opencode edits, unlike the ephemeral SQLite DB which wipes on deploy).
     Naming: RATRADE_<BROKER>_<FIELD> e.g. RATRADE_DHAN_CLIENT_ID.
-    Env values override DB values."""
+    Also accepted: <BROKER>_<FIELD> (FYERS_APP_ID) and per-field aliases
+    (RATRADE_FYERS_SECRET_ID / _SECRET_KEY / _APP_SECRET -> 'secret')."""
     import os
-    # Forgiving aliases: common misspellings still work (e.g. REDIRECT_URL).
-    _ENV_ALIASES = {"redirect_uri": ["redirect_url"]}
+    # Forgiving aliases: common misspellings/naming variants still work.
+    _ENV_ALIASES = {
+        "redirect_uri": ["redirect_url", "callback_url"],
+        "secret": ["secret_id", "secret_key", "app_secret"],
+        "app_id": ["appid", "client_id"],
+    }
     try:
         fields = (BROKER_DEFAULTS.get(broker, {}) or {}).get("fields", []) or []
     except Exception:
@@ -292,18 +297,18 @@ def _env_config(broker: str) -> dict:
             _norm[str(k).strip().upper()] = v
         except Exception:
             pass
+    _b = broker.upper()
     out = {}
     for f in fields:
-        v = _norm.get(f"RATRADE_{broker.upper()}_{f.upper()}", "")
-        if v and str(v).strip():
-            out[f] = str(v).strip()
-    for canon, alts in _ENV_ALIASES.items():
-        if canon in fields and canon not in out:
-            for a in alts:
-                v = _norm.get(f"RATRADE_{broker.upper()}_{a.upper()}", "")
-                if v and str(v).strip():
-                    out[canon] = str(v).strip()
-                    break
+        # 1) RATRADE_<BROKER>_<FIELD>  2) <BROKER>_<FIELD>  3) aliases
+        cands = [f"RATRADE_{_b}_{f.upper()}", f"{_b}_{f.upper()}"]
+        cands += [f"RATRADE_{_b}_{a.upper()}" for a in _ENV_ALIASES.get(f, [])]
+        cands += [f"{_b}_{a.upper()}" for a in _ENV_ALIASES.get(f, [])]
+        for c in cands:
+            v = _norm.get(c, "")
+            if v and str(v).strip():
+                out[f] = str(v).strip()
+                break
     return out
 
 
@@ -323,6 +328,13 @@ def _normalize_broker_cfg(broker: str, cfg: dict) -> dict:
     return cfg
 
 
+# Fields where a Render env value is AUTHORITATIVE over the DB copy (creds).
+# Tokens stay DB-first (the browser OAuth writes them there).
+_ENV_PRIORITY_FIELDS = {
+    "fyers": {"app_id", "secret", "redirect_uri", "pin"},
+}
+
+
 def _get_config(broker: str) -> dict:
     db = Database.get_instance()
     cfg = {}
@@ -337,10 +349,16 @@ def _get_config(broker: str) -> dict:
     # DB wins over env: UI connects + token-keeper renewals are the live
     # truth (env/dashboard values are only the first-boot seed). The keeper
     # syncs any valid env rotation INTO the DB by itself.
+    # Exception: credential fields listed in _ENV_PRIORITY_FIELDS (Fyers
+    # App ID/Secret) - the Render env is the source of truth for those, so
+    # a rotated env value is never shadowed by a stale DB copy.
     try:
         env = _env_config(broker) or {}
+        prio = _ENV_PRIORITY_FIELDS.get(broker) or set()
         for k, v in env.items():
-            if k not in cfg or not cfg.get(k):
+            if k in prio:
+                cfg[k] = v
+            elif k not in cfg or not cfg.get(k):
                 cfg[k] = v
     except Exception:
         pass
