@@ -1301,6 +1301,38 @@ async def margin_preview(req: MarginPreviewRequest):
         return {"error": f"Margin preview failed: {e}"[:200]}
 
 
+def _round_tick(px: float, tick: float = 0.05) -> float:
+    try:
+        return round(round(float(px) / tick) * tick, 2)
+    except Exception:
+        return 0.0
+
+
+async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str, txn: str):
+    """Strategy ke hisab se LIMIT price: premium (DB/broker/model) + Sirf chhota
+    buffer - SELL par thoda NICHE, BUY par thoda UPAR (marketable limit,
+    fast fill, slippage cap). None = price nahi mila (MARKET fallback)."""
+    from core.models.trade_model import TradeModel
+    from core.services.live_market_data import LiveMarketData
+    from utils.helpers import model_premium as _mp
+    premium = None
+    try:
+        premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
+    except Exception:
+        premium = None
+    if not premium or float(premium) <= 0:
+        spot = LiveMarketData().get_spot_price(symbol)
+        if not spot or spot <= 0:
+            return None
+        premium = _mp(spot, strike, 7, opt, symbol=symbol)
+    ltp = float(premium)
+    if ltp <= 0:
+        return None
+    buf = max(0.05, round(ltp * 0.015, 2))
+    px = (ltp - buf) if str(txn).upper() == "SELL" else (ltp + buf)
+    return _round_tick(max(0.05, px))
+
+
 @router.post("/place-live")
 async def place_live_order(req: LiveOrderRequest):
     """REAL live order execution (real money). Safety chain:
@@ -1424,11 +1456,11 @@ async def place_live_order(req: LiveOrderRequest):
         # (Simulated SIM-/ANG- tokens are rejected by _real_token below.)
         if want and not _real_token(want):
             return {"error": f"{want} has no REAL session (old simulated token?). Hit Connect in Brokers tab to login for real - order NOT placed."}
-        broker = want or next((b for b in ("fyers", "dhan", "angel", "shoonya") if _real_token(b)), "")
+        broker = want or next((b for b in ("fyers", "dhan", "angel", "bigul", "shoonya") if _real_token(b)), "")
         if not broker:
-            return {"error": "No broker with a REAL token connected. Connect Fyers, Dhan, Angel or Shoonya first - order NOT placed."}
-        if broker not in ("fyers", "dhan", "angel", "shoonya"):
-            return {"error": f"Live execution supports Fyers/Dhan/Angel/Shoonya (got {broker})."}
+            return {"error": "No broker with a REAL token connected. Connect Fyers, Dhan, Angel, Bigul or Shoonya first - order NOT placed."}
+        if broker not in ("fyers", "dhan", "angel", "bigul", "shoonya"):
+            return {"error": f"Live execution supports Fyers/Dhan/Angel/Bigul/Shoonya (got {broker})."}
         # ---- Universal resolution: NEVER route an unvalidated expiry ----
         try:
             from core.services.symbol_resolver import resolve_contract
@@ -1476,8 +1508,8 @@ async def place_live_order(req: LiveOrderRequest):
                        "source": _res.get("source", "")}
             broker_qty = lots * _dlot
             lot = _dlot
-        elif broker == "angel":
-            preview = {"broker": "angel", "symbol": _refs.get("tradingsymbol", ""),
+        elif broker in ("angel", "bigul"):
+            preview = {"broker": broker, "symbol": _refs.get("tradingsymbol", ""),
                        "symboltoken": _refs.get("symboltoken", ""), "underlying": symbol,
                        "strike": strike, "expiry": exp_ymd, "side": txn,
                        "lots": lots, "lot_size": lot, "quantity": broker_qty,
@@ -1495,6 +1527,19 @@ async def place_live_order(req: LiveOrderRequest):
                        "source": _res.get("source", "")}
             broker_qty = lots * _slot
             lot = _slot
+        # Strategy-compatible LIMIT price (Dhan/Angel/Bigul par LIMIT order
+        # taaki app aur broker ki price na tedhi ho; MARKET par broker LIMIT
+        # me badal ke reject kar deta hai).
+        _limit_px = None
+        try:
+            _limit_px = await _broker_limit_price(symbol, opt, strike, exp_ymd, txn)
+        except Exception:
+            _limit_px = None
+        if _limit_px:
+            preview["limit_price"] = _limit_px
+            for _b in ("dhan", "angel", "bigul"):
+                if preview.get("broker") == _b:
+                    preview["order_type"] = "LIMIT"
         if req.dry_run:
             try:
                 _req_exp = str(exp_hint or "")[:10]
@@ -1546,8 +1591,11 @@ async def place_live_order(req: LiveOrderRequest):
             from core.services.broker_dhan_live import DhanLive
             dl = DhanLive(client_id=(_get_config("dhan") or {}).get("client_id", ""),
                           access_token=(_get_config("dhan") or {}).get("access_token", ""))
+            import asyncio
             res = await dl.place_order(preview["security_id"], txn, broker_qty,
-                                       order_type="MARKET", product=preview.get("product", "INTRADAY"))
+                                       order_type=("LIMIT" if _limit_px else "MARKET"),
+                                       price=(_limit_px or 0),
+                                       product=preview.get("product", "INTRADAY"))
             if not res.get("success"):
                 _derr = str(res.get("error") or "")
                 # DH-905 Invalid IP: Dhan needs the server IP whitelisted in Dhan
@@ -1562,19 +1610,84 @@ async def place_live_order(req: LiveOrderRequest):
                         "preview": preview, "broker_response": res.get("data", {})}
             order_id = str((res.get("data") or {}).get("order_id", ""))
             broker_ref = preview["security_id"]
-        elif broker == "angel":
-            _ac = _get_config("angel") or {}
+            # Fill verify: order FAILED/REJECTED ho to fake position NAHI
+            # likhenge; EXECUTED ho to asli avgTradedPrice entry price hoga.
+            _fill_px = None
+            for _i in range(5):
+                try:
+                    await asyncio.sleep(1.2)
+                    _od = await dl.get_order(order_id)
+                    _data = (_od or {}).get("data") if isinstance(_od, dict) else _od
+                    if not isinstance(_data, dict):
+                        continue
+                    _st = str(_data.get("orderStatus") or _data.get("order_status") or "").upper()
+                    try:
+                        _avg = float(_data.get("averageTradedPrice") or 0)
+                    except Exception:
+                        _avg = 0.0
+                    if _avg > 0:
+                        _fill_px = _round_tick(_avg)
+                    if _st in ("REJECTED", "FAILED", "CANCELLED"):
+                        _rsn = str(_data.get("rejectReason") or _data.get("reasonDescription")
+                                   or _data.get("remarks") or _st)
+                        return {"error": (f"Dhan order FAILED/REJECTED: {_rsn}. "
+                                          f"Open position record NAHI hua (broker verify fail)."),
+                                "preview": preview, "broker_response": _data}
+                    if _st in ("EXECUTED", "TRADED", "COMPLETE", "COMPLETED"):
+                        break
+                except Exception:
+                    continue
+            if _fill_px:
+                preview["fill_price"] = _fill_px
+        elif broker in ("angel", "bigul"):
+            _ac = _get_config(broker) or {}
             from core.services.broker_angel_live import AngelLive
             an = AngelLive(api_key=_ac.get("api_key", ""), client_code=_ac.get("client_code", ""),
                            password=_ac.get("password", ""), totp_secret=_ac.get("totp_secret", ""))
             an.jwt = _ac.get("access_token", "")
             res = await an.place_order(preview["symbol"], preview["symboltoken"], txn,
-                                       broker_qty, product=preview.get("product", "INTRADAY"))
+                                       broker_qty, product=preview.get("product", "INTRADAY"),
+                                       order_type=("LIMIT" if _limit_px else "MARKET"),
+                                       price=(_limit_px or 0))
             if not res.get("success"):
                 return {"error": f"Angel rejected order: {res.get('error')}",
                         "preview": preview, "broker_response": res.get("data", {})}
             order_id = str((res.get("data") or {}).get("order_id", ""))
             broker_ref = preview["symbol"]
+            # Angel/Bigul fill verify: orderbook me status + asli avg price.
+            _fill_px = None
+            for _i in range(5):
+                try:
+                    await asyncio.sleep(1.2)
+                    _ob = await an.order_book()
+                    _rows = ((_ob or {}).get("data") or {}).get("data") if isinstance(_ob, dict) else None
+                    if not _rows:
+                        continue
+                    _row = None
+                    for _r0 in _rows:
+                        if str(_r0.get("orderid") or _r0.get("orderId") or "") == order_id:
+                            _row = _r0
+                            break
+                    if not _row:
+                        continue
+                    _st = str(_row.get("orderstatus") or _row.get("orderStatus") or "").lower()
+                    try:
+                        _avg = float(_row.get("averageprice") or _row.get("averagePrice") or 0)
+                    except Exception:
+                        _avg = 0.0
+                    if _avg > 0:
+                        _fill_px = _round_tick(_avg)
+                    if _st in ("rejected", "cancelled", "failed"):
+                        return {"error": (f"{broker} order FAILED: "
+                                          f"{_row.get('text') or _row.get('statusmessage') or _st}. "
+                                          f"Open position record NAHI hua (broker verify fail)."),
+                                "preview": preview, "broker_response": _row}
+                    if _st in ("complete", "completed", "filled", "executed"):
+                        break
+                except Exception:
+                    continue
+            if _fill_px:
+                preview["fill_price"] = _fill_px
         elif broker == "shoonya":
             _sc = _get_config("shoonya") or {}
             from core.services.broker_shoonya_live import ShoonyaLive
@@ -1590,18 +1703,22 @@ async def place_live_order(req: LiveOrderRequest):
                         "preview": preview, "broker_response": res.get("data", {})}
             order_id = str((res.get("data") or {}).get("order_id", ""))
             broker_ref = preview["symbol"]
-        # Track the live fill locally (entry at premium estimate)
-        premium = None
-        try:
-            premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
-        except Exception:
+        # Track the live fill locally (entry: broker real fill > premium estimate)
+        _px_src = float(preview.get("fill_price") or 0)
+        if _px_src > 0:
+            adj = _round_tick(_px_src)
+        else:
             premium = None
-        if not premium or premium <= 0:
-            spot = LiveMarketData().get_spot_price(symbol)
-            if not spot or spot <= 0:
-                return {"error": f"Live premium/spot nahi mila {symbol} {strike}{opt} - bina price ke live fill record nahi hoga"}
-            premium = model_premium(spot, strike, 7, opt, symbol=symbol)
-        adj = TransactionCosts.apply_fill_slippage(float(premium), txn, is_live=True)
+            try:
+                premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
+            except Exception:
+                premium = None
+            if not premium or float(premium) <= 0:
+                spot = LiveMarketData().get_spot_price(symbol)
+                if not spot or spot <= 0:
+                    return {"error": f"Live premium/spot nahi mila {symbol} {strike}{opt} - bina price ke live fill record nahi hoga"}
+                premium = model_premium(spot, strike, 7, opt, symbol=symbol)
+            adj = TransactionCosts.apply_fill_slippage(float(premium), txn, is_live=True)
         costs = TransactionCosts.calculate(adj * lots * lot, txn == "SELL", is_live=True)
         import datetime as _dt
         tm = TradeModel()

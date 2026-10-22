@@ -208,26 +208,27 @@ async def resolve_contract(broker: str, creds: dict, underlying: str,
                 "expiry_used": use_exp, "source": src,
                 "available_expiries": live_exps}
 
-    if broker == "angel":
+    if broker in ("angel", "bigul"):
         try:
             from core.services.broker_angel_live import AngelLive
         except Exception as e:
-            return {"ok": False, "error": f"Angel client missing: {e}"}
+            return {"ok": False, "error": f"{broker} client missing: {e}"}
         an = AngelLive(api_key=(creds or {}).get("api_key", ""),
                        client_code=(creds or {}).get("client_code", ""),
                        password=(creds or {}).get("password", ""),
-                       totp_secret=(creds or {}).get("totp_secret", ""))
+                       totp_secret=(creds or {}).get("totp_secret", ""),
+                       base_url=(creds or {}).get("api_root", ""))
         an.jwt = (creds or {}).get("access_token", "")
         if not an.jwt:
-            return {"ok": False, "error": "Angel: no session token. Connect (TOTP login) first."}
+            return {"ok": False, "error": f"{broker}: no session token. Connect (TOTP login) first."}
         r = await an.resolve_fo(underlying, guess, strike, opt)
         if r.get("symboltoken"):
             return {"ok": True,
                     "refs": {"tradingsymbol": r["tradingsymbol"],
                              "symboltoken": r["symboltoken"],
                              "lot_size": int(r.get("lotsize") or 0)},
-                    "expiry_used": guess, "source": "angel-search"}
-        return {"ok": False, "error": r.get("error", "Angel resolution failed")}
+                    "expiry_used": guess, "source": f"{broker}-search"}
+        return {"ok": False, "error": r.get("error", f"{broker} resolution failed")}
 
     if broker == "shoonya":
         try:

@@ -37,7 +37,8 @@ def angel_tsym(underlying: str, expiry_ymd: str, strike: float, option_type: str
 
 
 class AngelLive:
-    def __init__(self, api_key: str, client_code: str, password: str, totp_secret: str = ""):
+    def __init__(self, api_key: str, client_code: str, password: str, totp_secret: str = "",
+                 base_url: str = ""):
         self.api_key = api_key or ""
         self.client_code = client_code or ""
         self.password = password or ""
@@ -45,6 +46,9 @@ class AngelLive:
         self.jwt = ""
         self.refresh_token = ""
         self.feed_token = ""
+        # Bigul jaise Angel-compatible (alag host) broker: base_url config di
+        # to wahan calls jayengi, warna Angel One default ROOT.
+        self.base = (str(base_url or "").strip().rstrip("/") or ROOT)
 
     def _headers(self, authed: bool = True) -> dict:
         h = {
@@ -71,7 +75,7 @@ class AngelLive:
         payload = {"clientcode": self.client_code, "password": self.password, "totp": totp}
         try:
             async with httpx.AsyncClient(timeout=20) as c:
-                r = await c.post(ROOT + LOGIN, json=payload, headers=self._headers(False))
+                r = await c.post(self.base + LOGIN, json=payload, headers=self._headers(False))
             try:
                 body = r.json()
             except Exception:
@@ -101,7 +105,7 @@ class AngelLive:
     async def _post(self, path: str, payload: dict) -> dict:
         try:
             async with httpx.AsyncClient(timeout=20) as c:
-                r = await c.post(ROOT + path, json=payload, headers=self._headers(True))
+                r = await c.post(self.base + path, json=payload, headers=self._headers(True))
             try:
                 body = r.json()
             except Exception:
@@ -135,17 +139,21 @@ class AngelLive:
         return {"error": f"Angel: {tsym} not found in NFO search ({len(items) if isinstance(items, list) else 0} hits)"}
 
     async def place_order(self, tradingsymbol: str, symboltoken: str, side: str,
-                          qty: int, product: str = "CARRYFORWARD") -> dict:
+                          qty: int, product: str = "CARRYFORWARD",
+                          order_type: str = "MARKET", price: float = 0) -> dict:
+        _ot = str(order_type or "MARKET").upper()
+        if _ot in ("MKT", "SM"): _ot = "MARKET"
+        elif _ot == "L": _ot = "LIMIT"
         payload = {
             "variety": "NORMAL",
             "tradingsymbol": tradingsymbol,
             "symboltoken": str(symboltoken),
             "transactiontype": str(side or "BUY").upper(),
             "exchange": "NFO",
-            "ordertype": "MARKET",
+            "ordertype": _ot,
             "producttype": product,
             "duration": "DAY",
-            "price": "0",
+            "price": str(max(0.0, float(price or 0))),
             "squareoff": "0",
             "stoploss": "0",
             "quantity": str(int(qty)),
