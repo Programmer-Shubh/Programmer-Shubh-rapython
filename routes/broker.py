@@ -1364,21 +1364,15 @@ def _dhan_direct_ltp(security_id: str, symbol: str, debug: dict = None):
         _payload = {seg: [_sid]}
         r = None
         _last_err = ""
-        # Rasta 1: egress proxy (fixed IP), Rasta 2: direct httpx
-        for _mode in ("proxy", "direct"):
-            try:
-                if _mode == "proxy":
-                    from core.services.egress_proxy import sync_request as _sreq
-                    r = _sreq("POST", _url, headers=_hdr, json_body=_payload, timeout=10)
-                else:
-                    import httpx as _hx
-                    r = _hx.post(_url, headers=_hdr, json=_payload, timeout=10)
-                if getattr(r, "status_code", 0) == 200:
-                    break
-                _last_err = f"{_mode}: http {getattr(r, 'status_code', 0)} {str((getattr(r, 'text', '') or '')[:120])}"
-            except Exception as _e3:
-                _last_err = f"{_mode}: {str(_e3)[:80]}"
-                r = None
+        # SIRF DIRECT call (koi proxy nahi) - Dhan apne server IP se.
+        try:
+            import httpx as _hx
+            r = _hx.post(_url, headers=_hdr, json=_payload, timeout=12)
+            if getattr(r, "status_code", 0) != 200:
+                _last_err = f"direct: http {getattr(r, 'status_code', 0)} {str((getattr(r, 'text', '') or '')[:150])}"
+        except Exception as _e3:
+            _last_err = f"direct: {str(_e3)[:100]}"
+            r = None
         debug["dhan_http"] = int(getattr(r, "status_code", 0) or 0) if r is not None else 0
         if _last_err:
             debug["dhan_err"] = _last_err
@@ -1411,6 +1405,24 @@ def _dhan_direct_ltp(security_id: str, symbol: str, debug: dict = None):
             debug["dhan_quote"] = "entry-missing"
     except Exception as e:
         debug["dhan_quote"] = f"err: {str(e)[:100]}"
+    return 0.0
+
+
+def _dhan_feed_ltp(security_id: str, symbol: str, debug: dict = None) -> float:
+    """Dhan WebSocket live tick (asli real-time LTP) - quote API fail ho to."""
+    if debug is None:
+        debug = {}
+    try:
+        from core.services.dhan_feed import DhanFeed
+        seg = "BSE_FNO" if (symbol or "").upper() in ("SENSEX", "BANKEX") else "NSE_FNO"
+        sid = int(float(security_id))
+        v = float(DhanFeed().get_ltp(seg, sid, max_age=30) or 0)
+        if v > 0:
+            debug["dhan_feed_ltp"] = v
+            return v
+        debug["dhan_feed"] = "no-tick"
+    except Exception as e:
+        debug["dhan_feed"] = f"err: {str(e)[:80]}"
     return 0.0
 
 
@@ -1642,7 +1654,11 @@ async def place_live_order(req: LiveOrderRequest):
             _real_ltp = 0.0
             _qdbg = {}
             if preview.get("broker") == "dhan":
-                _real_ltp = _dhan_direct_ltp(str(preview.get("security_id") or ""), symbol, debug=_qdbg)
+                _sid = str(preview.get("security_id") or "")
+                _real_ltp = _dhan_direct_ltp(_sid, symbol, debug=_qdbg)
+                if _real_ltp <= 0:
+                    # quote API nahi mila -> Dhan WebSocket live tick try
+                    _real_ltp = _dhan_feed_ltp(_sid, symbol, debug=_qdbg)
             elif preview.get("broker") in ("angel", "bigul"):
                 _real_ltp = _angel_direct_ltp(symbol, strike, opt, exp_ymd)
             if req.dry_run and _qdbg:
@@ -1651,6 +1667,14 @@ async def place_live_order(req: LiveOrderRequest):
                 preview["ltp"] = _round_tick(_real_ltp)
                 _limit_px = _round_tick(_real_ltp)
                 preview["limit_price"] = _limit_px
+            elif preview.get("broker") in ("dhan", "angel", "bigul"):
+                # ASLI LTP nahi mila -> order BHEJO HI NAHI (stale price par
+                # koi live order nahi jayega). dry-run me info de dete hain.
+                if not req.dry_run:
+                    return {"error": ("Asli broker LTP nahi mila (Dhan quote + live tick dono fail) - "
+                                      "stale price par order nahi bheja ja raha. Ek minute baad try karo "
+                                      "ya Brokers tab me token refresh karo."),
+                            "preview": preview, "quote_debug": _qdbg}
         except Exception:
             pass
         if req.dry_run:
@@ -1822,10 +1846,16 @@ async def place_live_order(req: LiveOrderRequest):
             adj = _round_tick(_px_src)
         else:
             premium = None
+            # Jo LIMIT price bheji thi wo hi ASLI LTP thi -> wahi entry maano
             try:
-                premium = LiveMarketData().get_option_ltp(symbol, strike, opt, exp_ymd, fresh=True)
+                premium = float(preview.get("limit_price") or 0)
             except Exception:
                 premium = None
+            if not premium or float(premium) <= 0:
+                try:
+                    premium = LiveMarketData().get_option_ltp(symbol, strike, opt, exp_ymd, fresh=True)
+                except Exception:
+                    premium = None
             if not premium or float(premium) <= 0:
                 try:
                     premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
