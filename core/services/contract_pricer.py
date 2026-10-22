@@ -518,6 +518,18 @@ def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False):
                 live.update(_dhan_batch_ltp(sym, want_rest))
         except Exception:
             pass
+        # Tier 1c: NSE live option chain (index options) - real LTP bina
+        # Dhan Data-API subscription ke.
+        try:
+            _nse_missing = [k for k in missing if k not in live]
+            if _nse_missing:
+                from core.services.free_data import nse_chain_ltp as _nlt
+                for _k in _nse_missing:
+                    _v = _nlt(sym, _k[0], _k[1], expiry_ymd)
+                    if _v and _v > 0:
+                        live[_k] = _v
+        except Exception:
+            pass
         # Tier 1b: STOCK options - Dhan master se security id + feed tick
         # (index hi nahi, har stock option ka real LTP milna chahiye).
         try:

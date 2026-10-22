@@ -1,3 +1,79 @@
+_NSE_CHAIN_CACHE = {"ts": 0.0, "data": {}}
+_NSE_CHAIN_TTL = 20  # seconds
+
+
+def fetch_nse_option_chain(symbol: str) -> dict:
+    """NSE ka LIVE option chain (index options) - {expiry: {strike: {"CE":px,"PE":px}}}.
+    Cloud par bhi try hota hai (cookies + browser headers). Fail -> {}.
+    Ye stock options ke liye nahi hota (NSE public API sirf indices deta hai)."""
+    sym = (symbol or "").upper()
+    now = time.time()
+    if _NSE_CHAIN_CACHE["data"] and (now - _NSE_CHAIN_CACHE["ts"]) < _NSE_CHAIN_TTL:
+        return _NSE_CHAIN_CACHE["data"].get(sym, {})
+    out = {}
+    try:
+        s = requests.Session()
+        s.headers.update({
+            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                           "(KHTML, like Gecko) Chrome/122.0 Safari/537.36"),
+            "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.nseindia.com/option-chain",
+            "Connection": "keep-alive",
+        })
+        try:
+            s.get("https://www.nseindia.com", timeout=8)
+        except Exception:
+            pass
+        r = s.get("https://www.nseindia.com/api/option-chain-indices",
+                  params={"symbol": sym}, timeout=12)
+        if r.status_code != 200:
+            return {}
+        j = r.json() or {}
+        recs = ((j.get("records") or {}).get("data") or [])
+        for rec in recs:
+            exp = str(rec.get("expiryDate") or "")[:10]
+            for key, otype in (("CE", "CE"), ("PE", "PE")):
+                for row in (rec.get(key) or []):
+                    try:
+                        px = float(row.get("ltp") or 0)
+                    except Exception:
+                        px = 0
+                    if px <= 0:
+                        continue
+                    try:
+                        st = float(row.get("strikePrice") or 0)
+                    except Exception:
+                        st = 0
+                    if st <= 0:
+                        continue
+                    out.setdefault(exp, {}).setdefault(st, {})[otype] = px
+    except Exception:
+        return {}
+    if out:
+        _NSE_CHAIN_CACHE["data"][sym] = out
+        _NSE_CHAIN_CACHE["ts"] = now
+    return out
+
+
+def nse_chain_ltp(symbol: str, strike: float, opt: str, expiry_ymd: str) -> float:
+    """NSE live chain se ek contract ka LTP (0 = nahi mila)."""
+    try:
+        chain = fetch_nse_option_chain(symbol)
+        ex = str(expiry_ymd or "")[:10]
+        exp_map = chain.get(ex) or {}
+        if not exp_map:
+            # nearest expiry (ek hi week ka rule NSE ke saath match kare)
+            for k, v in chain.items():
+                if k >= ex or not ex:
+                    exp_map = v
+                    break
+        row = exp_map.get(float(strike)) or exp_map.get(int(float(strike))) or {}
+        v = row.get(str(opt).upper(), 0)
+        return float(v or 0)
+    except Exception:
+        return 0.0
+
+
 import time
 import datetime
 import requests
