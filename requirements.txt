@@ -21,3 +21,4 @@ dhanhq>=2.0.0
 psycopg2-binary>=2.9.9
 yfinance>=0.2.40
 matplotlib>=3.8.0
+fyers-apiv3>=2.0.5

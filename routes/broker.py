@@ -749,6 +749,39 @@ def fyers_auth_url():
     return {"success": True, "url": fy.get_auth_url()}
 
 
+@router.get("/fyers-history")
+async def fyers_history(symbol: str = "NSE:NIFTY50-INDEX",
+                        range_from: str = "", range_to: str = "",
+                        resolution: str = "D", rows: int = 40):
+    """Fyers API v3 Historical OHLC candles -> pandas DataFrame (IST datetime).
+    Example: /api/broker/fyers-history?symbol=NSE:SBIN-EQ&range_from=2026-09-01&range_to=2026-10-20&resolution=5"""
+    from core.services.fyers_data import FyersHistoryData, generate_access_token
+    config = _get_config("fyers") or {}
+    token = str(config.get("access_token", "") or "")
+    if not config.get("app_id") or not token:
+        return {"success": False,
+                "error": "Fyers connected nahi hai - Brokers page par Setup + OAuth Login karo"}
+    fh = FyersHistoryData(client_id=config.get("app_id", ""), access_token=token)
+    resp = fh.history(symbol, range_from or "", range_to or "", resolution)
+    if resp.get("s") != "ok":
+        return {"success": False, "error": str(resp.get("message") or resp)[:220],
+                "code": resp.get("code", "")}
+    try:
+        df = FyersHistoryData.to_dataframe(resp)
+    except Exception as e:
+        return {"success": False, "error": f"DataFrame banane me error: {str(e)[:150]}"}
+    out = df.copy()
+    recent = out.tail(max(1, min(int(rows or 40), len(out))))
+    return {"success": True, "symbol": symbol, "resolution": resolution,
+            "range": [str(range_from)[:10], str(range_to)[:10]],
+            "total_candles": int(len(out)),
+            "columns": list(out.columns),
+            "rows": [{**{c: recent.iloc[i][c] for c in out.columns if c != "timestamp"},
+                      "timestamp": str(recent.iloc[i]["timestamp"])}
+                     for i in range(len(recent))],
+            }
+
+
 @router.post("/connect")
 async def connect_broker(req: ConnectRequest):
     if req.broker not in BROKER_DEFAULTS:
