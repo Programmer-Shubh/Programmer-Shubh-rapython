@@ -1339,9 +1339,9 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
             ltp = 0.0
     if ltp <= 0:
         return None
-    buf = max(0.05, round(ltp * 0.015, 2))
-    px = (ltp - buf) if str(txn).upper() == "SELL" else (ltp + buf)
-    return _round_tick(max(0.05, px))
+    # Price EXACT LTP par (strategy ke hisab se, 0.05 tick me rounded).
+    # SELL @ LTP, BUY @ LTP - koi buffer nahi.
+    return _round_tick(ltp)
 
 
 @router.post("/place-live")
