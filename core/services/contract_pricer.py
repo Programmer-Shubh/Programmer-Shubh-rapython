@@ -524,7 +524,7 @@ def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False):
             _nse_missing = [k for k in missing if k not in live]
             if _nse_missing:
                 from core.services.free_data import nse_chain_ltp as _nlt
-                for _k in _nse_missing:
+                for _k in _nse_missing[:8]:  # limited: NSE fetch slow/guarded
                     _v = _nlt(sym, _k[0], _k[1], expiry_ymd)
                     if _v and _v > 0:
                         live[_k] = _v

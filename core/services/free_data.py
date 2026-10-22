@@ -1,5 +1,6 @@
 _NSE_CHAIN_CACHE = {"ts": 0.0, "data": {}}
 _NSE_CHAIN_TTL = 20  # seconds
+_NSE_CHAIN_FAIL = {}  # symbol -> ts (negative cache: fail par dobara mat todo)
 
 
 def fetch_nse_option_chain(symbol: str) -> dict:
@@ -10,6 +11,9 @@ def fetch_nse_option_chain(symbol: str) -> dict:
     now = time.time()
     if _NSE_CHAIN_CACHE["data"] and (now - _NSE_CHAIN_CACHE["ts"]) < _NSE_CHAIN_TTL:
         return _NSE_CHAIN_CACHE["data"].get(sym, {})
+    # Negative cache: fail hone par 60s tak retry mat karo (site hang na ho)
+    if now - float(_NSE_CHAIN_FAIL.get(sym, 0) or 0) < 60:
+        return {}
     out = {}
     try:
         s = requests.Session()
@@ -21,12 +25,13 @@ def fetch_nse_option_chain(symbol: str) -> dict:
             "Connection": "keep-alive",
         })
         try:
-            s.get("https://www.nseindia.com", timeout=8)
+            s.get("https://www.nseindia.com", timeout=5)
         except Exception:
             pass
         r = s.get("https://www.nseindia.com/api/option-chain-indices",
-                  params={"symbol": sym}, timeout=12)
+                  params={"symbol": sym}, timeout=7)
         if r.status_code != 200:
+            _NSE_CHAIN_FAIL[sym] = now
             return {}
         j = r.json() or {}
         recs = ((j.get("records") or {}).get("data") or [])
@@ -48,6 +53,7 @@ def fetch_nse_option_chain(symbol: str) -> dict:
                         continue
                     out.setdefault(exp, {}).setdefault(st, {})[otype] = px
     except Exception:
+        _NSE_CHAIN_FAIL[sym] = now
         return {}
     if out:
         _NSE_CHAIN_CACHE["data"][sym] = out
