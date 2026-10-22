@@ -41,7 +41,11 @@ class FyersV3:
         self.redirect_uri = redirect_uri
         self.access_token = access_token
         self.refresh_token = refresh_token
-        self.pin = str(pin or "").strip()
+        # Fyers trading PIN = 4 digits (used by validate-refresh-token).
+        # Strip spaces/extra chars so a pasted "1234 " still works.
+        self.pin = re.sub(r"\D", "", str(pin or ""))
+        if self.pin and len(self.pin) != 4:
+            logger.warning("Fyers PIN length %d (expected 4 digits)", len(self.pin))
         self._token_expiry: float = 0
         # True when an access token was refreshed mid-flight (caller must persist it)
         self.refreshed: bool = False
