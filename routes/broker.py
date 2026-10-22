@@ -1735,7 +1735,7 @@ async def place_live_order(req: LiveOrderRequest):
                     return {"error": f"Live premium/spot nahi mila {symbol} {strike}{opt} - bina price ke live fill record nahi hoga"}
                 premium = model_premium(spot, strike, 7, opt, symbol=symbol)
             premium = TransactionCosts.apply_fill_slippage(float(premium), txn, is_live=True)
-        adj = adj if isinstance(adj, (int, float)) else premium
+            adj = _round_tick(float(premium))
         costs = TransactionCosts.calculate(adj * lots * lot, txn == "SELL", is_live=True)
         import datetime as _dt
         tm = TradeModel()
