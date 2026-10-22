@@ -7,6 +7,8 @@ IST datetime, basic error-handling + rate-limit safety.
 Symbols: 'NSE:NIFTY50-INDEX', 'NSE:SBIN-EQ', NFO options 'NSE:SBIN24500CE'
 Docs: Fyers API v3 fyers-apiv3 SDK (SessionModel + FyersModel.history).
 """
+import json
+
 import pandas as pd
 
 
@@ -33,6 +35,9 @@ class FyersHistoryData:
     RESOLUTIONS = ("1", "2", "3", "5", "10", "15", "20", "30", "60",
                    "120", "240", "D", "1D", "1W", "1M")
     _MIN_GAP = 0.11  # 10 req/sec hadd; chhota margin rakho
+    # v3 data host (the SDK's base URL changed between versions and the old
+    # one 404s -> use the documented endpoint directly).
+    HISTORY_URL = "https://api-t1.fyers.in/data/history"
 
     def __init__(self, client_id: str, access_token: str, log_path: str = ""):
         self.client_id = (client_id or "").strip()
@@ -84,6 +89,43 @@ class FyersHistoryData:
         return ""
 
     # ---------- main ----------
+    def _native_history(self, payload: dict) -> dict:
+        """Direct v3 data-host call (GET, Authorization: <app_id>:<token>).
+        SDK-version independent - the old SDK base URL 404s on v3."""
+        try:
+            import requests as _rq
+        except Exception:
+            return {"s": "error", "message": "requests not installed"}
+        if not (self.client_id and self.access_token):
+            return {"s": "error", "message": "client id / access token missing"}
+        headers = {
+            "Authorization": f"{self.client_id}:{self.access_token}",
+            "Content-Type": "application/json",
+            "version": "3",
+        }
+        try:
+            r = _rq.get(self.HISTORY_URL, params=payload, headers=headers, timeout=30)
+        except Exception as e:
+            return {"s": "error", "message": f"request failed: {str(e)[:150]}"}
+        if r.status_code != 200:
+            return {"s": "error", "code": r.status_code,
+                    "message": (r.text or "")[:200]}
+        try:
+            body = r.json()
+        except Exception:
+            return {"s": "error", "message": "non-JSON response"}
+        if not isinstance(body, dict):
+            return {"s": "error", "message": f"non-dict response: {str(body)[:120]}"}
+        if body.get("candles") is not None:
+            return {"s": "ok", "code": 200, "message": "", **body}
+        return body
+
+    def _sdk_history(self, payload: dict) -> dict:
+        resp = self.fy.history(data=payload)
+        if isinstance(resp, dict) and resp.get("candles") is not None:
+            return {"s": "ok", **resp}
+        return resp if isinstance(resp, dict) else {"s": "error", "message": str(resp)[:150]}
+
     def history(self, symbol: str, range_from: str, range_to: str,
                 resolution: str = "D", retries: int = 3) -> dict:
         """Raw API call + error mapping. Success: {'s':'ok','candles':[[ts,o,h,l,c,v],...],...}"""
@@ -100,16 +142,15 @@ class FyersHistoryData:
         last_err = ""
         for attempt in range(1, max(1, retries) + 1):
             self._throttle()
-            try:
-                resp = self.fy.history(data=payload)
-            except Exception as e:
-                last_err = f"SDK error: {str(e)[:150]}"
-                time.sleep(0.6 * attempt)
-                continue
-            if not isinstance(resp, dict):
-                last_err = f"non-dict response: {str(resp)[:120]}"
-                time.sleep(0.6 * attempt)
-                continue
+            resp = self._native_history(payload)
+            if not resp.get("s") == "ok":
+                # fall back to the official SDK (older/newer base URLs)
+                try:
+                    alt = self._sdk_history(payload)
+                    if isinstance(alt, dict) and alt.get("s") == "ok":
+                        resp = alt
+                except Exception as e:
+                    resp = {"s": "error", "message": f"SDK error: {str(e)[:150]}"}
             if resp.get("s") == "ok":
                 return resp
             code = str(resp.get("code", "") or "")
