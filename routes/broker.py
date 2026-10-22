@@ -1315,17 +1315,28 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
     from core.models.trade_model import TradeModel
     from core.services.live_market_data import LiveMarketData
     from utils.helpers import model_premium as _mp
-    premium = None
+    # PRIORITY 1: broker ka REAL token-quote (Dhan/Angel) - yahi LTP se batti
+    # match hogi. DB bhavcopy/model stale hota hai (93.10 vs 85.60 wala case).
+    ltp = 0.0
     try:
-        premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
+        ltp = float(LiveMarketData().get_option_ltp(symbol, strike, opt, exp_ymd, fresh=True) or 0)
     except Exception:
+        ltp = 0.0
+    if ltp <= 0:
         premium = None
-    if not premium or float(premium) <= 0:
-        spot = LiveMarketData().get_spot_price(symbol)
-        if not spot or spot <= 0:
-            return None
-        premium = _mp(spot, strike, 7, opt, symbol=symbol)
-    ltp = float(premium)
+        try:
+            premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
+        except Exception:
+            premium = None
+        if not premium or float(premium) <= 0:
+            spot = LiveMarketData().get_spot_price(symbol)
+            if not spot or spot <= 0:
+                return None
+            premium = _mp(spot, strike, 7, opt, symbol=symbol)
+        try:
+            ltp = float(premium)
+        except Exception:
+            ltp = 0.0
     if ltp <= 0:
         return None
     buf = max(0.05, round(ltp * 0.015, 2))
@@ -1710,15 +1721,21 @@ async def place_live_order(req: LiveOrderRequest):
         else:
             premium = None
             try:
-                premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
+                premium = LiveMarketData().get_option_ltp(symbol, strike, opt, exp_ymd, fresh=True)
             except Exception:
                 premium = None
+            if not premium or float(premium) <= 0:
+                try:
+                    premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
+                except Exception:
+                    premium = None
             if not premium or float(premium) <= 0:
                 spot = LiveMarketData().get_spot_price(symbol)
                 if not spot or spot <= 0:
                     return {"error": f"Live premium/spot nahi mila {symbol} {strike}{opt} - bina price ke live fill record nahi hoga"}
                 premium = model_premium(spot, strike, 7, opt, symbol=symbol)
-            adj = TransactionCosts.apply_fill_slippage(float(premium), txn, is_live=True)
+            premium = TransactionCosts.apply_fill_slippage(float(premium), txn, is_live=True)
+        adj = adj if isinstance(adj, (int, float)) else premium
         costs = TransactionCosts.calculate(adj * lots * lot, txn == "SELL", is_live=True)
         import datetime as _dt
         tm = TradeModel()
