@@ -15,8 +15,32 @@ class FyersV3Error(Exception):
     pass
 
 
+def _is_wrong_host(error_msg: str) -> bool:
+    """api.fyers.in (v2 host) answers 'Invalid Request, please provide valid
+    method' for v3 paths - it means 'wrong host', not 'bad request'."""
+    m = str(error_msg or "").lower()
+    return "valid method" in m or "invalid request" in m
+
+
+def _resp_ok(status_code: int, body: dict) -> bool:
+    """Fyers v3 success shape = {"s":"ok","code":200,...}; errors carry
+    {"s":"error","code":-99/-352,...}. HTTP 200 alone is NOT success here."""
+    if not isinstance(body, dict):
+        return False
+    if status_code != 200:
+        return False
+    s = str(body.get("s") or "").strip().lower()
+    if s:
+        return s in ("ok", "success")
+    code = body.get("code")
+    return code in (200, "200", 0, "0", None)
+
+
 class FyersV3:
-    BASE_URL = "https://api.fyers.in"
+    # v3 REST endpoints live on api-t1.fyers.in (api.fyers.in is the v2 host
+    # and answers 'Invalid Request, please provide valid method' for /api/v3/*)
+    BASE_URL = "https://api-t1.fyers.in"
+    FALLBACK_BASE_URL = "https://api.fyers.in"
     # OAuth 2.0 (v3, current): authcode -> validate-authcode (appIdHash).
     # FIX: token endpoints MUST be api-t1 host (official fyers_apiv3 v3.1.15 uses api-t1 for all v3)
     AUTH_URL = "https://api-t1.fyers.in/api/v3/generate-authcode"
@@ -65,6 +89,9 @@ class FyersV3:
     def app_id_hash(self) -> str:
         import hashlib
         return hashlib.sha256(f"{self.app_id}:{self.secret_key}".encode()).hexdigest()
+
+    def _fallback_url(self, path: str) -> str:
+        return f"{self.FALLBACK_BASE_URL}{path}"
 
     def get_auth_url(self) -> str:
         params = {
@@ -167,6 +194,7 @@ class FyersV3:
         headers = {
             "Authorization": auth_val,
             "Content-Type": "application/json",
+            "version": "3",
         }
 
         for attempt in range(1, retries + 1):
@@ -202,8 +230,15 @@ class FyersV3:
                         "error": "Token expired. Re-authenticate.",
                     }
 
-                if resp.status_code >= 400 or body.get("code", 0) != 0:
+                if not _resp_ok(resp.status_code, body):
                     error_msg = body.get("message", body.get("error", str(body)))
+                    # Wrong host answers 'Invalid Request, please provide valid
+                    # method' for v3 paths (api.fyers.in vs api-t1.fyers.in).
+                    if _is_wrong_host(error_msg) and url != self._fallback_url(path):
+                        logger.warning("Fyers %s: host mismatch, retrying %s",
+                                       path, self._fallback_url(path))
+                        url = self._fallback_url(path)
+                        continue
                     logger.error(
                         "Fyers %s %s returned %d: %s",
                         method, path, resp.status_code, error_msg,
