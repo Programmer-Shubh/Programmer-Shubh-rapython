@@ -844,13 +844,18 @@ async def fyers_history(symbol: str = "NSE:NIFTY50-INDEX",
         return {"success": False, "error": f"DataFrame banane me error: {str(e)[:150]}"}
     out = df.copy()
     recent = out.tail(max(1, min(int(rows or 40), len(out))))
+    # numpy scalars (int64/float64) are NOT JSON serializable -> FastAPI 500.
+    # to_dict(orient='records') boxes them into native python types.
+    records = recent.to_dict(orient="records")
+    clean_rows = []
+    for rec in records:
+        r = {k: (str(v) if k == "timestamp" else v) for k, v in rec.items()}
+        clean_rows.append(r)
     return {"success": True, "symbol": symbol, "resolution": resolution,
             "range": [str(range_from)[:10], str(range_to)[:10]],
             "total_candles": int(len(out)),
             "columns": list(out.columns),
-            "rows": [{**{c: recent.iloc[i][c] for c in out.columns if c != "timestamp"},
-                      "timestamp": str(recent.iloc[i]["timestamp"])}
-                     for i in range(len(recent))],
+            "rows": clean_rows,
             }
 
 
