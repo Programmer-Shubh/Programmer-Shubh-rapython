@@ -17,7 +17,14 @@ import time
 
 _LOCK = threading.Lock()
 _LAST_RUN = 0.0
-_MIN_INTERVAL = 1200
+_MIN_INTERVAL = 600
+# Entry-time window (backtest parity): saved strategy ka advanced.entry_time
+# (default 09:35) ke [entry_time, entry_time+15m) window me hi auto entry -
+# backtest engine bhi entry SIRF entry_time bar par lagata hai. Worker ke
+# random pass-times (10:12/12:42) par entry = backtest se alag prices +
+# entry_time se door ke fills = paper/backtest results ka big gap (aaj ka
+# bug). 10-min worker cadence har window ko pakka pakadta hai.
+_ENTRY_WINDOW_MIN = 15
 # Observable worker state (heartbeat for /auto-paper-status)
 _STATE = {"threads": {}, "last_daily": {}, "last_live": {}}
 # Bandwidth saver caches: history refetch was the top per-run eater
@@ -495,6 +502,36 @@ def _execute_legs(s, legs, db, tm, today):
     return placed, notes
 
 
+def _entry_window_ok_for(adv: dict, note_out: list, _now=None):
+    """Backtest entry-time parity: saved strategy ka entry_time (default
+    09:35) window [entry_time, entry_time+15m) me hi auto entry allowed -
+    backtest engine bhi entry SIRF entry_time bar par lagata hai. Worker
+    ke random pass-times (10:12/12:42) par entry = backtest se alag prices
+    + entry_time se door ke fills = paper/backtest results ka big gap.
+    _now: test hook (IST datetime or ISO string)."""
+    try:
+        import datetime as _dt
+        if _now is None:
+            _now = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+        elif isinstance(_now, str):
+            _now = _dt.datetime.fromisoformat(_now)
+        _mins = _now.hour * 60 + _now.minute
+        _et = str((adv or {}).get("entry_time") or "09:35").strip()[:5]
+        try:
+            _eh, _em = _et.split(":")
+            _start = int(_eh) * 60 + int(_em)
+        except Exception:
+            _start = 9 * 60 + 35
+        _end = _start + _ENTRY_WINDOW_MIN
+        if _start <= _mins < _end:
+            return True, _et
+        if note_out is not None:
+            note_out.append(f"entry_time {_et} window (backtest parity) ke bahar - skipped")
+        return False, _et
+    except Exception:
+        return True, ""  # fail-open (manual button par koi rok nahi)
+
+
 def place_for_strategy(sid, signal_check="daily"):
     """Place paper trades for ONE strategy now (used by worker + save hook).
     signal_check: 'daily' (backtest gate), 'intraday' (live 15m gate, only
@@ -525,6 +562,19 @@ def place_for_strategy(sid, signal_check="daily"):
         # Paused/draft strategies stay stopped - only active ones trade.
         if str(s.get("status") or "") != "active":
             return {"placed": placed, "notes": [f"{s.get('name')}: status {s.get('status')} (paused) - skipped"]}
+        # Entry-time window (backtest parity): entry_time (default 09:35) ke
+        # window me hi auto entry, warna backtest bar-timings se alag prices
+        # par entries lagti thi (paper/backtest/live fusion ka gap).
+        try:
+            adv0 = _js.loads(s.get("advanced_options") or "{}")
+        except Exception:
+            adv0 = {}
+        if not isinstance(adv0, dict):
+            adv0 = {}
+        if not globals().get("_ENTRY_WINDOW_PASS", False):
+            _ewok, _ewet = _entry_window_ok_for(adv0, notes)
+            if not _ewok:
+                return {"placed": placed, "notes": notes}
         try:
             rm0 = _js.loads(s.get("risk_management") or "{}")
         except Exception:

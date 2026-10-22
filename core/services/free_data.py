@@ -62,17 +62,23 @@ def fetch_nse_option_chain(symbol: str) -> dict:
 
 
 def nse_chain_ltp(symbol: str, strike: float, opt: str, expiry_ymd: str) -> float:
-    """NSE live chain se ek contract ka LTP (0 = nahi mila)."""
+    """NSE live chain se ek contract ka LTP (0 = nahi mila).
+    PARITY: sirf EXACT expiry ka price (ye tier paper + live + SL-monitor
+    sab jagah padhta hai). Pehla 'nearest expiry' fallback DOOSRE contract
+    ka premium de deta tha (10-29 request me 11-03 monthly ka rate) - wrong
+    contract price = paper loss/backtest profit ka bada sauda gap."""
     try:
         chain = fetch_nse_option_chain(symbol)
         ex = str(expiry_ymd or "")[:10]
         exp_map = chain.get(ex) or {}
         if not exp_map:
-            # nearest expiry (ek hi week ka rule NSE ke saath match kare)
-            for k, v in chain.items():
-                if k >= ex or not ex:
-                    exp_map = v
-                    break
+            # Exact expiry chain me nahi -> WRONG-contract price kabhi na do.
+            # NSE chain fail hua ho to vaise bhi 0 hi hota (model tier sambhalega).
+            if ex:
+                return 0.0
+            for _k, _v in (chain.items() or []):
+                exp_map = _v
+                break
         row = exp_map.get(float(strike)) or exp_map.get(int(float(strike))) or {}
         v = row.get(str(opt).upper(), 0)
         return float(v or 0)

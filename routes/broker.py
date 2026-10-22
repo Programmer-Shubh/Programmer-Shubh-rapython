@@ -225,9 +225,18 @@ def _resolve_expiry(symbol: str, hint: str) -> str:
     import calendar as _cal
     hint = str(hint or "").strip()
     try:
-        return _dt.datetime.strptime(hint[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+        _d = _dt.datetime.strptime(hint[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
     except Exception:
         pass
+    else:
+        # Explicit date snap guard: NON-existent expiry date (10-29 Thursday
+        # NIFTY jaisa phantom) par broker order/cquote REJECT - paper & live
+        # same contract par price ho, isliye nearest real weekly par le jao.
+        try:
+            from core.services.contract_pricer import _snap_future_expiry as _snap
+            return _snap(symbol, _d)
+        except Exception:
+            return _d
     today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
     wd = 3 if symbol.upper() == "SENSEX" else 1  # Thu vs Tue
     weekly_idx = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX"}

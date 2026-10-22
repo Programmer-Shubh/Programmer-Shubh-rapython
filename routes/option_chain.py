@@ -487,6 +487,17 @@ def place_trade(req: TradeRequest):
                     if not _weekly:
                         _weekly = (_nx.datetime.strptime(_ist_t, "%Y-%m-%d") + _nx.timedelta(days=7)).strftime("%Y-%m-%d")
                     req.expiry = _weekly
+            else:
+                # Explicit future date: snap guard - date jo is symbol ki REAL
+                # exchange expiry nahi hai (10-29 Thursday NIFTY jaisa phantom)
+                # -> nearest real weekly. Phantom expiry par broker/NSE quotes
+                # aate hi nahi the aur paper entry model-price par lagti thi
+                # (backtest se durr bhaagti thi - "kal tak same tha" ki wajah).
+                try:
+                    from core.services.contract_pricer import resolve_expiry_hint as _reh2
+                    req.expiry = _reh2(req.symbol, req.expiry or "") or req.expiry
+                except Exception:
+                    pass
         except Exception:
             pass
         # Mandatory SL/Target validation

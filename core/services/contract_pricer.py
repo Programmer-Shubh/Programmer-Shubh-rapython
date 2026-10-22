@@ -36,13 +36,86 @@ def _ist_today():
     return datetime.now(ist).strftime("%Y-%m-%d")
 
 
+# Weekly expiry WEEKDAY rule (NSE 2025+ spec): NSE weeklies = Tuesday
+# (weekday 1); BSE (SENSEX/BANKEX) = Thursday (weekday 3). Same rule as
+# routes/broker._resolve_expiry - paper, live aur backtest sab ekahi rule.
+def _weekly_weekday(symbol: str = "") -> int:
+    return 3 if str(symbol or "").upper().replace(" ", "") in ("SENSEX", "BANKEX") else 1
+
+
+def next_weekly_on_or_after(symbol: str = "", from_ymd: str = "") -> str:
+    """Pehla REAL weekly expiry date (>= from_ymd, exchange weekday).
+    Fallback jab broker/NSE expiry list available na ho - phantom
+    'today+7' (10-22 + 7 = 10-29 Thursday, jo kabhi expire hota hi nahi
+    tha) ki jagah. Caller normally from_ymd=tomorrow bhejta hai."""
+    try:
+        import datetime as _dt
+        base = str(from_ymd or _ist_today())[:10]
+        d = _dt.datetime.strptime(base, "%Y-%m-%d").date()
+        wd = _weekly_weekday(symbol)
+        for _ in range(35):
+            if d.weekday() == wd:
+                return d.strftime("%Y-%m-%d")
+            d += _dt.timedelta(days=1)
+    except Exception:
+        pass
+    return ""
+
+
+def _weekly_on_or_before(symbol: str = "", upto_ymd: str = "") -> str:
+    """Pichla REAL weekly expiry (<= upto_ymd, exchange weekday)."""
+    try:
+        import datetime as _dt
+        base = str(upto_ymd or _ist_today())[:10]
+        d = _dt.datetime.strptime(base, "%Y-%m-%d").date()
+        wd = _weekly_weekday(symbol)
+        for _ in range(35):
+            if d.weekday() == wd:
+                return d.strftime("%Y-%m-%d")
+            d -= _dt.timedelta(days=1)
+    except Exception:
+        pass
+    return ""
+
+
+def _snap_future_expiry(symbol: str, ymd: str) -> str:
+    """Future explicit date jo REAL expiry nahi hai -> nearest real weekly
+    expiry (same weekday, pehle/baad me jo zyada paas ho; barabar par
+    pehle wali). Ye paper, live aur backtest ko ek hi contract par le
+    aata hai - 10-29 (Thursday) jaisi ghayr-existent dates katam."""
+    try:
+        import datetime as _dt
+        d = _dt.datetime.strptime(str(ymd or "")[:10], "%Y-%m-%d").date()
+    except Exception:
+        return str(ymd or "")
+    wd = _weekly_weekday(symbol)
+    txt = d.strftime("%Y-%m-%d")
+    if d.weekday() == wd:
+        return txt
+    prev = _weekly_on_or_before(symbol, txt)
+    nxt = next_weekly_on_or_after(symbol, txt)
+    try:
+        _d0 = _dt.datetime.strptime(txt, "%Y-%m-%d").date()
+        opts = [(abs((_dt.datetime.strptime(x, "%Y-%m-%d").date() - _d0).days), i, x)
+                for i, x in enumerate((prev, nxt)) if x]
+        if not opts:
+            return str(ymd)[:10]
+        opts.sort()
+        # tie -> earlier date (dono options me pehla index = prev)
+        return opts[0][2]
+    except Exception:
+        return (prev or nxt) or str(ymd)[:10]
+
+
 def resolve_weekly_expiry(symbol: str = "") -> str:
     """Next weekly expiry YYYY-MM-DD shared by scanner suggestion AND order
     entry (pehle dono alag-alag expiry/DTE par price karte the - suggestion
     DTE=7 par >=20 dikhata, order real DTE=2 par <20 nikalta -> floor error).
     Priority: the CONNECTED BROKER's live expiry list (exactly the date a
     live order will be routed to - paper & live same contract), else the NSE
-    map, else IST today+7."""
+    map, else the REAL weekday rule (Tue NSE / Thu BSE). Phantom
+    'today+7' fallback hata diya - 10-29 jaisi fake expiry par paper
+    entries model-price par lagti thi aur backtest se door bhaagti thi."""
     try:
         from core.services.symbol_resolver import _nearest_on_or_after
         _exps = _fyers_expiry_list()
@@ -65,7 +138,9 @@ def resolve_weekly_expiry(symbol: str = "") -> str:
         pass
     try:
         import datetime as _dt
-        return (_dt.datetime.strptime(_ist_today(), "%Y-%m-%d") + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
+        _tom = (_dt.datetime.strptime(_ist_today(), "%Y-%m-%d")
+                + _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        return next_weekly_on_or_after(symbol, _tom)
     except Exception:
         return ""
 
@@ -83,7 +158,13 @@ def resolve_expiry_hint(symbol: str = "", hint: str = "") -> str:
             import datetime as _dt
             _d = _dt.datetime.strptime(h[:10], "%Y-%m-%d").date()
             if _d >= _dt.datetime.strptime(_ist_today(), "%Y-%m-%d").date():
-                return _d.strftime("%Y-%m-%d")
+                # Explicit date ka snap guard: date jo is symbol ki REAL
+                # exchange expiry weekday par na ho (10-29 Thursday NIFTY ho
+                # hi nahi sakta) -> nearest real weekly par le jao. Warna
+                # phantom contract par broker/NSE quotes aate hi nahi aur
+                # paper model-price par lag jata tha (backtest se gap).
+                snapped = _snap_future_expiry(symbol, _d.strftime("%Y-%m-%d"))
+                return snapped
     except Exception:
         pass
     if h.lower().startswith("month"):
