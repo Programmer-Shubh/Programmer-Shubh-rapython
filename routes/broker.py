@@ -1350,7 +1350,7 @@ def _dhan_direct_ltp(security_id: str, symbol: str, debug: dict = None):
     if debug is None:
         debug = {}
     try:
-        from core.services.contract_pricer import _dhan_post, _real_token, _broker_cfg
+        from core.services.contract_pricer import _dhan_post, _real_token, _broker_cfg, _DHAN_BASE
         cfg = _broker_cfg("dhan")
         token = str((cfg or {}).get("access_token", "") or "")
         cid = str((cfg or {}).get("client_id", "") or "")
@@ -1358,25 +1358,37 @@ def _dhan_direct_ltp(security_id: str, symbol: str, debug: dict = None):
             debug["dhan_quote"] = "no-token/creds"
             return 0.0
         seg = "BSE_FNO" if (symbol or "").upper() in ("SENSEX", "BANKEX") else "NSE_FNO"
-        # status/body bhi dikhao - empty res ka asli reason pakadne ke liye
-        try:
-            from core.services.contract_pricer import _DHAN_BASE
-            from core.services.egress_proxy import sync_request as _sreq
-            r = _sreq("POST", _DHAN_BASE + "/marketfeed/quote",
-                      headers={"Content-Type": "application/json",
-                               "access-token": token, "client-id": cid},
-                      json_body={seg: [int(float(security_id))]}, timeout=8)
-            debug["dhan_http"] = int(getattr(r, "status_code", 0) or 0)
-            debug["dhan_body"] = str((r.text or "")[:200]) if getattr(r, "text", None) else "empty"
-            q = {}
-            if r.status_code == 200:
-                try:
-                    q = r.json() or {}
-                except Exception:
-                    q = {}
-        except Exception as _e2:
-            debug["dhan_http"] = f"req-err: {str(_e2)[:80]}"
-            q = (locals().get("q") or {})
+        _sid = int(float(security_id))
+        _hdr = {"Content-Type": "application/json", "access-token": token, "client-id": cid}
+        _url = _DHAN_BASE + "/marketfeed/quote"
+        _payload = {seg: [_sid]}
+        r = None
+        _last_err = ""
+        # Rasta 1: egress proxy (fixed IP), Rasta 2: direct httpx
+        for _mode in ("proxy", "direct"):
+            try:
+                if _mode == "proxy":
+                    from core.services.egress_proxy import sync_request as _sreq
+                    r = _sreq("POST", _url, headers=_hdr, json_body=_payload, timeout=10)
+                else:
+                    import httpx as _hx
+                    r = _hx.post(_url, headers=_hdr, json=_payload, timeout=10)
+                if getattr(r, "status_code", 0) == 200:
+                    break
+                _last_err = f"{_mode}: http {getattr(r, 'status_code', 0)} {str((getattr(r, 'text', '') or '')[:120])}"
+            except Exception as _e3:
+                _last_err = f"{_mode}: {str(_e3)[:80]}"
+                r = None
+        debug["dhan_http"] = int(getattr(r, "status_code", 0) or 0) if r is not None else 0
+        if _last_err:
+            debug["dhan_err"] = _last_err
+        debug["dhan_body"] = str((getattr(r, "text", "") or "")[:200]) if r is not None else "empty"
+        q = {}
+        if r is not None and getattr(r, "status_code", 0) == 200:
+            try:
+                q = r.json() or {}
+            except Exception:
+                q = {}
         debug["dhan_quote_keys"] = list((q or {}).keys())
         debug["dhan_quote_status"] = str((q or {}).get("status")) if isinstance(q, dict) else "node"
         data = (q.get("data") or {})
@@ -1441,11 +1453,13 @@ async def place_live_order(req: LiveOrderRequest):
         except Exception:
             pass
         # 3:00 PM entry cutoff (user rule, REAL MONEY): iske baad live
-        # order bhi nahi. Exits broker par hamesha allowed.
+        # order bhi nahi. Exits broker par hamescha allowed.
+        # dry_run preview cutoff ke baad bhi allowed (kuch nahi bheja jata,
+        # sirf REAL LTP + LIMIT price dikhana zaroori hai).
         try:
             from core.services.sl_monitor import entry_open_ist as _eok5
             from core.services.sl_monitor import entry_block_reason as _ebr5
-            if not bool(_eok5()):
+            if not bool(_eok5()) and not req.dry_run:
                 return {"error": _ebr5()}
         except Exception:
             pass
