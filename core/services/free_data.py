@@ -262,46 +262,25 @@ def fetch_cloud_spot(symbol: str) -> dict:
             chg = float(d.get("change") or 0)
     except Exception:
         pass
-    # 1b) Dhan marketfeed (user's connected broker).
-    # WS streaming tick first, REST quote as backup.
-    if not spot and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX"):
+    # 1b) Connected broker quote (Fyers) - real index tick, same broker the
+    # live orders go to (so paper/live strike + premium align).
+    if not spot:
         try:
-            from core.services.dhan_feed import ensure_feed_from_config as _effc
-            from core.services.broker_dhan_live import UNDERLYING as _UL
-            _uinfo = _UL.get(symbol.upper())
-            _udf = _effc()
-            if _udf and _uinfo:
-                _udf.subscribe(_uinfo[1], str(_uinfo[0]), 15)
-                _wpx = _udf.get_ltp(_uinfo[1], str(_uinfo[0])) or 0
-                if _wpx and float(_wpx) > 0:
-                    spot, source = float(_wpx), "dhan-ws"
-        except Exception:
-            pass
-    if not spot and symbol.upper() in ("NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX"):
-        try:
-            import json as _js
-            from core.models.database import Database as _DB
-            from core.services.broker_dhan_live import DhanLive as _DL
-            _row = _DB.get_instance().fetch_one(
-                "SELECT setting_value FROM settings WHERE setting_key='broker_dhan'")
-            _cfg = _js.loads(_row["setting_value"]) if _row and _row.get("setting_value") else {}
-            if _cfg.get("client_id") and _cfg.get("access_token"):
-                import asyncio as _aio
-                import concurrent.futures as _cf
-                _dl = _DL(client_id=_cfg["client_id"], access_token=_cfg["access_token"])
-                # Own thread+loop so it works in sync AND async (server) contexts
-                _ex = _cf.ThreadPoolExecutor(max_workers=1)
-                try:
-                    _px = _ex.submit(lambda: _aio.run(_dl.get_index_spot(symbol))).result(timeout=6)
-                except Exception:
-                    _px = 0
-                finally:
-                    try:
-                        _ex.shutdown(wait=False, cancel_futures=True)
-                    except Exception:
-                        pass
-                if _px and _px > 0:
-                    spot, source = float(_px), "dhan"
+            from core.services.contract_pricer import _fyers_auth, _fyers_get, _fyers_underlying
+            _app_id, _tok = _fyers_auth()
+            _under = _fyers_underlying(symbol)
+            if _app_id and _tok and _under:
+                _body = _fyers_get(f"/api/v3/quotes?symbols={_under}", _app_id, _tok, timeout=6)
+                _node = (_body.get("data") or {}).get(_under) or {}
+                if isinstance(_node, dict):
+                    for _f in ("last_price", "lastPrice", "ltp"):
+                        try:
+                            _px = float(_node.get(_f, 0) or 0)
+                        except Exception:
+                            _px = 0
+                        if _px > 0:
+                            spot, source = _px, "fyers"
+                            break
         except Exception:
             pass
     # 2) Yahoo v8 API (works on cloud, indices included) - labelled 'live', never 'yahoo'

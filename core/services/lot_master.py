@@ -1,12 +1,12 @@
-"""Broker instrument-master lot sizes (dynamic, official).
+"""Instrument-master lot sizes (dynamic, official).
 
-Priority: Dhan scrip master (public CSV, no auth) -> caller falls back to
-NSE lots / static map (see utils.helpers.get_lot_size).
+Priority: public scrip master CSV (no auth, no broker account needed) ->
+caller falls back to NSE lots / static map (see utils.helpers.get_lot_size).
 
-Dhan master columns used: SEM_EXM_EXCH_ID (NSE), SEM_SEGMENT (D derivatives),
+Master columns used: SEM_EXM_EXCH_ID (NSE), SEM_SEGMENT (D derivatives),
 SEM_INSTRUMENT_NAME / SEM_TRADING_SYMBOL (underlying), SEM_LOT_UNITS.
 
-Caches: memory 24h + disk data/dhan_lots.json (survives restarts within a
+Caches: memory 24h + disk data/scrip_lots.json (survives restarts within a
 deploy); negative-fail TTL 10 min (no hot-loop hammering on outage).
 First call with cold cache returns (None, 'cold') instantly - call
 warm_lot_cache() in a background thread at boot so values converge without
@@ -17,6 +17,8 @@ import json
 import os
 import time as _time
 
+# Public scrip master CSV (no auth, no broker account) - the only free
+# source with official SEM_LOT_UNITS per underlying.
 _MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
 _TTL = 24 * 3600
 _FAIL_TTL = 600
@@ -29,12 +31,12 @@ _WARMING = False
 
 def _disk_path():
     try:
-        here = os.path.join(os.path.dirname(__file__), "..", "data", "dhan_lots.json")
+        here = os.path.join(os.path.dirname(__file__), "..", "data", "scrip_lots.json")
         if os.path.exists(here):
             return here
     except Exception:
         pass
-    return os.path.join("data", "dhan_lots.json")
+    return os.path.join("data", "scrip_lots.json")
 
 
 def _norm_underlying(iname: str, tsym: str):
@@ -110,7 +112,7 @@ def _read_cache():
     return None
 
 
-def _fetch_dhan_lots(timeout=45):
+def _fetch_master_lots(timeout=45):
     """Download + parse master. Returns dict (may be empty). Never raises."""
     global _MEM, _MEM_TS, _FAIL_TS
     if _time.time() - _FAIL_TS < _FAIL_TTL:
@@ -147,7 +149,7 @@ def broker_lots(force=False):
         if hit:
             return hit
         if force:
-            return _fetch_dhan_lots()
+            return _fetch_master_lots()
     except Exception:
         pass
     return {}
@@ -161,7 +163,7 @@ def warm_lot_cache():
     except Exception:
         pass
     try:
-        return len(_fetch_dhan_lots() or {})
+        return len(_fetch_master_lots() or {})
     except Exception:
         return 0
 

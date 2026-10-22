@@ -378,39 +378,52 @@ def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> 
         return []
 
 
-def _fetch_dhan_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
-    """DhanHQ charts/historical (user ka connected broker token).
-    FINNIFTY ka Yahoo dead + NSE cloud-blocked hai - yehi official source
-    bachta hai. Token na ho to turant [] (koi network nahi, chain aage).
-    Overall 25s cap (thread-guarded) taaki backtest hang na ho."""
+def _fetch_fyers_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Fyers API v3 daily candles (connected broker token).
+    FINNIFTY ka Yahoo dead + NSE cloud-blocked hai - yehi official broker
+    source bachta hai. Token na ho to turant [] (koi network nahi, chain aage).
+    Overall 25s cap taaki backtest hang na ho."""
     try:
-        from core.services.broker_dhan_live import UNDERLYING as _UL
+        import datetime as _dt
         sym = str(symbol or "").upper()
-        if sym not in (_UL or {}):
+        from core.services.contract_pricer import _fyers_underlying, _fyers_auth
+        under = _fyers_underlying(sym)
+        if not under:
             return []
-        from core.services.contract_pricer import _broker_cfg as _bcfg, _real_token as _rtok
-        cfg = _bcfg("dhan") or {}
-        token = str(cfg.get("access_token") or "")
-        cid = str(cfg.get("client_id") or "")
-        if not _rtok(token) or not cid:
+        app_id, token = _fyers_auth()
+        if not app_id or not token:
             return []
-        from core.services.broker_dhan_live import DhanLive as _DL
-        import asyncio as _aio
-        import concurrent.futures as _cf
-        _dl = _DL(client_id=cid, access_token=token)
-        _ex = _cf.ThreadPoolExecutor(max_workers=1)
-        try:
-            bars = _ex.submit(
-                lambda: _aio.run(_dl.get_index_history(sym, start_date, end_date))
-            ).result(timeout=25)
-        except Exception:
-            bars = []
-        finally:
+        import requests as _rq
+        _payload = {"symbol": under, "resolution": "D", "date_format": 1,
+                    "range_from": str(start_date)[:10], "range_to": str(end_date)[:10],
+                    "cont_flag": "1"}
+        _r = _rq.get("https://api-t1.fyers.in/data/history", params=_payload,
+                     headers={"Authorization": f"{app_id}:{token}",
+                              "Content-Type": "application/json", "version": "3"},
+                     timeout=25)
+        if getattr(_r, "status_code", 0) != 200:
+            return []
+        body = _r.json() or {}
+        candles = body.get("candles") or []
+        out = []
+        for row in candles:
             try:
-                _ex.shutdown(wait=False, cancel_futures=True)
+                epoch = int(row[0])
+                o = float(row[1]); h = float(row[2]); l = float(row[3])
+                c = float(row[4]); v = int(float(row[5] or 0))
+                day = _dt.datetime.utcfromtimestamp(epoch).strftime("%Y-%m-%d")
+                if c <= 0:
+                    continue
+                out.append({"symbol": sym, "trade_date": day,
+                            "open_price": round(o or c, 2),
+                            "high_price": round(h or c, 2),
+                            "low_price": round(l or c, 2),
+                            "close_price": round(c, 2),
+                            "volume": v, "oi": 0})
             except Exception:
-                pass
-        return [b for b in (bars or []) if b.get("close_price")] or []
+                continue
+        out.sort(key=lambda r: r["trade_date"])
+        return out if len(out) >= 5 else []
     except Exception:
         return []
 
@@ -426,7 +439,7 @@ _NSE_INDEX_NAMES = {
 def _fetch_nseindex_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
     """NSE official index archive (ind_close_all_DDMMYYYY.csv, ~17KB/day).
     FINNIFTY ka Yahoo dead + NSE-API cloud-blocked hai - yehi broker-free
-    official source bachta hai (Dhan token ki zaroorat nahi).
+    official source bachta hai (kisi broker token ki zaroorat nahi).
     Parallel fetch (8 workers), overall ~60s cap. Na mile to [] (chain aage)."""
     try:
         import datetime as _dt
@@ -528,7 +541,7 @@ def _fetch_stooq_historical(symbol: str, start_date: str, end_date: str) -> List
         import datetime as _dt
         # NOTE: FINNIFTY (^cnxfin galat/stale levels deta hai) STOOQ MAP SE
         # HATAYA - galat instrument par backtest se bada nuksaan hota. Ye
-        # symbol Dhan-historical (upar) ya NSE se aata hai, warna honest empty.
+        # symbol Fyers-historical (upar) ya NSE se aata hai, warna honest empty.
         _STOOQ = {"NIFTY": "^nsei", "BANKNIFTY": "^nsebank", "SENSEX": "^sensex"}
         ssym = _STOOQ.get(symbol.upper(), f"{symbol.lower()}.in")
         sd = _dt.datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d")
@@ -616,7 +629,7 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
 
     for _name, _fn in (("nsepython", _fetch_nsepython_historical),
                        ("nse_index_archive", _fetch_nseindex_historical),
-                       ("dhan", _fetch_dhan_historical),
+                       ("fyers", _fetch_fyers_historical),
                        ("yahoo", _fetch_yahoo_hist),
                        ("stooq", _fetch_stooq_historical),
                        ("alphavantage", _dv._fetch_alphavantage_daily),

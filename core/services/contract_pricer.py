@@ -3,12 +3,17 @@
 Chain table and open-positions table MUST show the same price for the same
 contract. Priority per (symbol, strike, CE/PE, expiry):
   1. Broker live quote keyed by the contract's EXACT instrument token
-     (Dhan security_id via /marketfeed/quote, Angel symboltoken via /quote/).
-     One batched HTTP call per symbol. Never the underlying spot.
+     (Fyers contract symbol via /api/v3/quotes or /api/v3/options-chain,
+     Angel symboltoken via /quote/). One batched HTTP call per symbol.
+     Never the underlying spot.
   2. Fresh-today DB close (same IST date only - never stale EOD).
   3. Black-Scholes model with CURRENT model_iv + real DTE from expiry
      (identical formula for chain and positions - no entry-IV pin, no
      neighbour-strike substitution).
+
+Paper AND live orders price off THIS module (entry_price()), so a paper
+trade and a live trade of the same contract can never drift apart - they
+quote the same broker tick through the same slippage model.
 
 Caches: TOKENS 6h (tokens are static identifiers, not prices);
 PRICES 10s (rate-limit courtesy, never served as "live" beyond that).
@@ -20,10 +25,8 @@ import time
 _TOKEN_CACHE = {}   # key -> (ts, value); 6h
 _TOKEN_TTL = 6 * 3600
 _PRICE_CACHE = {}   # key -> (ts, ltp); 10s
-_DHAN_429_UNTIL = 0.0  # Dhan 429 cooldown (5 min)
 _PRICE_TTL = 10
 
-_DHAN_BASE = "https://api.dhan.co/v2"
 _ANGEL_BASE = "https://apiconnect.angelone.in"
 
 
@@ -37,7 +40,18 @@ def resolve_weekly_expiry(symbol: str = "") -> str:
     """Next weekly expiry YYYY-MM-DD shared by scanner suggestion AND order
     entry (pehle dono alag-alag expiry/DTE par price karte the - suggestion
     DTE=7 par >=20 dikhata, order real DTE=2 par <20 nikalta -> floor error).
-    NSE map (same-day reachable) else IST today+7."""
+    Priority: the CONNECTED BROKER's live expiry list (exactly the date a
+    live order will be routed to - paper & live same contract), else the NSE
+    map, else IST today+7."""
+    try:
+        from core.services.symbol_resolver import _nearest_on_or_after
+        _exps = _fyers_expiry_list()
+        if _exps:
+            _snap = _nearest_on_or_after(_exps)
+            if _snap:
+                return _snap[:10]
+    except Exception:
+        pass
     try:
         _ne, _nm = _nse_map((symbol or "").upper())
         try:
@@ -54,6 +68,43 @@ def resolve_weekly_expiry(symbol: str = "") -> str:
         return (_dt.datetime.strptime(_ist_today(), "%Y-%m-%d") + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
     except Exception:
         return ""
+
+
+def resolve_expiry_hint(symbol: str = "", hint: str = "") -> str:
+    """Normalise ANY expiry hint to a concrete YYYY-MM-DD expiry date.
+
+    'weekly' / '' / 'live' / 'today' -> the live weekly expiry (same date the
+    live order routes to, so paper and live price the SAME contract).
+    'monthly'                      -> last weekly expiry of the month.
+    'YYYY-MM-DD'                   -> kept as-is (explicit date)."""
+    h = str(hint or "").strip()
+    try:
+        if h and h[:10].count("-") == 2:
+            import datetime as _dt
+            _d = _dt.datetime.strptime(h[:10], "%Y-%m-%d").date()
+            if _d >= _dt.datetime.strptime(_ist_today(), "%Y-%m-%d").date():
+                return _d.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    if h.lower().startswith("month"):
+        try:
+            import calendar as _cal
+            import datetime as _dt
+            _today = _dt.datetime.strptime(_ist_today(), "%Y-%m-%d").date()
+            _wd = 3 if (symbol or "").upper() == "SENSEX" else 1
+            _last = _dt.date(_today.year, _today.month, _cal.monthrange(_today.year, _today.month)[1])
+            while _last.weekday() != _wd:
+                _last -= _dt.timedelta(days=1)
+            if _last < _today:
+                _m = _today.month + 1 if _today.month < 12 else 1
+                _y = _today.year if _today.month < 12 else _today.year + 1
+                _last = _dt.date(_y, _m, _cal.monthrange(_y, _m)[1])
+                while _last.weekday() != _wd:
+                    _last -= _dt.timedelta(days=1)
+            return _last.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    return resolve_weekly_expiry(symbol)
 
 
 def dte_to_expiry(expiry_ymd: str, default: int = 7, cap: int = 45) -> int:
@@ -91,11 +142,13 @@ def _broker_cfg(name):
                 try:
                     import os
                     _seeds = {}
-                    if name == "dhan":
-                        _seeds = {
-                            "client_id": os.environ.get("RATRADE_DHAN_CLIENT_ID") or os.environ.get("DHAN_CLIENT_ID") or "",
-                            "access_token": os.environ.get("RATRADE_DHAN_ACCESS_TOKEN") or os.environ.get("DHAN_ACCESS_TOKEN") or "",
-                        }
+                    if name == "fyers":
+                        for k, e in (("app_id", "RATRADE_FYERS_APP_ID"),
+                                     ("secret", "RATRADE_FYERS_SECRET"),
+                                     ("redirect_uri", "RATRADE_FYERS_REDIRECT_URI"),
+                                     ("pin", "RATRADE_FYERS_PIN")):
+                            if os.environ.get(e):
+                                _seeds[k] = os.environ[e]
                     elif name == "angel":
                         for k, e in (("api_key", "ANGEL_API_KEY"), ("client_code", "ANGEL_CLIENT_CODE"),
                                      ("access_token", "ANGEL_ACCESS_TOKEN")):
@@ -112,171 +165,196 @@ def _broker_cfg(name):
     return {}
 
 
-# ---------------- Dhan: token resolve + batch LTP (sync) ----------------
+# ---------------- Fyers: batch LTP (sync, best-effort) ----------------
 
-def _dhan_post(path, token, client_id, payload, timeout=6):
-    # Dhan IP-whitelisting: proxy ON par httpx Client (Bearer proxy-header).
-    global _DHAN_429_UNTIL
-    if time.time() < _DHAN_429_UNTIL:
-        return {}  # 429 cooldown: Dhan ko hammer mat karo
+def _fyers_auth():
+    """(app_id, access_token) from the stored Fyers config, '' if not linked."""
     try:
-        from core.services.egress_proxy import sync_request as _sreq
-        r = _sreq(
-            "POST", _DHAN_BASE + path,
-            headers={"Content-Type": "application/json",
-                     "access-token": token, "client-id": client_id},
-            json_body=payload, timeout=timeout)
+        cfg = _broker_cfg("fyers") or {}
+        app_id = str(cfg.get("app_id") or "").strip()
+        token = str(cfg.get("access_token") or "").strip()
+        if not app_id or not _real_token(token):
+            return "", ""
+        return app_id, token
     except Exception:
-        import requests
-        r = requests.post(
-            _DHAN_BASE + path,
-            headers={"Content-Type": "application/json", "access-token": token, "client-id": client_id},
-            json=payload, timeout=timeout,
-        )
-    if r.status_code != 200:
-        if int(r.status_code or 0) == 429:
-            _DHAN_429_UNTIL = time.time() + 300
-        return {}
+        return "", ""
+
+
+def _fyers_headers(app_id, token):
+    return {
+        "Authorization": f"{app_id}:{token}" if app_id else token,
+        "Content-Type": "application/json",
+        "version": "3",
+    }
+
+
+def _fyers_underlying(symbol: str) -> str:
+    """Fyers index instrument symbol (NSE:NIFTY50-INDEX etc)."""
     try:
-        return r.json() or {}
+        from core.services.symbol_resolver import FYERS_UNDERLYING
+        return FYERS_UNDERLYING.get((symbol or "").upper(), "")
     except Exception:
-        return {}
+        return ""
 
 
-def _dhan_tokens(symbol, expiry_ymd):
-    """{ (strike, OPT) -> security_id } via Dhan optionchain. Cached 6h."""
-    sym = (symbol or "").upper()
-    exp = str(expiry_ymd or "")[:10]
-    ckey = f"dhan_tok_{sym}_{exp}"
-    hit = _TOKEN_CACHE.get(ckey)
-    if hit and time.time() - hit[0] < _TOKEN_TTL:
-        return hit[1]
-    out = {}
+def _fyers_expiry_param(expiry_ymd: str) -> str:
+    """Fyers options-chain expiry param (dd-MMM-yyyy, e.g. 22-OCT-2026)."""
     try:
-        from core.services.broker_dhan_live import UNDERLYING
-        info = UNDERLYING.get(sym)
-        if not info:
-            return out  # stock options: no index map; skip broker tier
-        cfg = _broker_cfg("dhan")
-        token = str(cfg.get("access_token", "") or "")
-        cid = str(cfg.get("client_id", "") or "")
-        if not _real_token(token) or not cid:
-            return out
-        scrip, seg = info
-        exps = _dhan_post("/optionchain/expirylist", token, cid,
-                          {"UnderlyingScrip": scrip, "UnderlyingSeg": seg})
-        exp_data = (exps.get("data") or [])
-        exp_list = exp_data if isinstance(exp_data, list) else (exp_data.get("data") or [])
-        match = ""
-        for e in exp_list if isinstance(exp_list, list) else []:
-            es = str(e if isinstance(e, str) else e.get("expiry", e.get("date", "")))[:10]
-            if es == exp:
-                match = es
+        import datetime as _dt
+        d = _dt.datetime.strptime(str(expiry_ymd or "")[:10], "%Y-%m-%d").date()
+        return d.strftime("%d-%b-%Y").upper()
+    except Exception:
+        return str(expiry_ymd or "")[:10]
+
+
+def _fyers_expiry_list() -> list:
+    """Live Fyers expiry list (YYYY-MM-DD), sync + best-effort.
+
+    This is the SAME expiry the live order is routed to - so the paper trade
+    and the live trade of a strategy hit the SAME contract (same LTP)."""
+    app_id, token = _fyers_auth()
+    if not app_id or not token:
+        return []
+    body = _fyers_get("/api/v3/options-chain?symbol=NSE:NIFTY50-INDEX&strikecount=1",
+                      app_id, token)
+    if not body:
+        return []
+    data = body.get("data") or {}
+    raw = data.get("expiryData") or data.get("expiry_dates") or []
+    out = []
+    import datetime as _dt
+    for e in raw if isinstance(raw, list) else []:
+        val = ""
+        if isinstance(e, str):
+            val = e
+        elif isinstance(e, dict):
+            for k in ("date", "expiry", "expiryDate"):
+                if e.get(k):
+                    val = str(e[k])
+                    break
+        if not val:
+            continue
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d-%b-%Y", "%d-%B-%Y", "%d-%b-%y"):
+            try:
+                out.append(_dt.datetime.strptime(val[:10], fmt).strftime("%Y-%m-%d"))
                 break
-        if not match:
-            return out  # broker has no such expiry: fall through, never snap
-        oc = _dhan_post("/optionchain", token, cid,
-                        {"UnderlyingScrip": scrip, "UnderlyingSeg": seg, "Expiry": match})
-        data = (oc.get("data") or {})
-        strikes = data.get("oc") or data.get("strikes") or {}
-        if isinstance(strikes, dict):
-            for k, v in strikes.items():
-                try:
-                    strike = float(str(k).replace(",", ""))
-                except Exception:
-                    continue
-                if not isinstance(v, dict):
-                    continue
-                for opt in ("CE", "PE"):
-                    leg = v.get(opt.lower()) or v.get(opt) or {}
-                    for key in ("security_id", "securityId", "instrument_token", "token"):
-                        if leg.get(key):
-                            out[(strike, opt)] = str(leg[key])
-                            break
-        if out:
-            _TOKEN_CACHE[ckey] = (time.time(), out)
+            except Exception:
+                continue
+    return sorted(set(out))
+
+
+def _fyers_get(path: str, app_id: str, token: str, timeout: int = 8):
+    """GET on Fyers v3 host. Returns parsed json dict or {}."""
+    try:
+        import requests
+        url = f"https://api-t1.fyers.in{path}"
+        r = requests.get(url, headers=_fyers_headers(app_id, token), timeout=timeout)
+        if getattr(r, "status_code", 0) != 200:
+            return {}
+        body = r.json() or {}
     except Exception:
-        pass
-    return out
+        return {}
+    if not isinstance(body, dict):
+        return {}
+    s = str(body.get("s") or "").strip().lower()
+    if s and s not in ("ok", "success"):
+        return {}
+    return body
 
 
-def _dhan_batch_ltp(symbol, token_map):
-    """{ (strike, OPT) -> ltp } via ONE /marketfeed/quote call. Strict parse."""
+def _fyers_chain_ltp(symbol, expiry_ymd, contracts):
+    """{(strike, OPT): ltp} from ONE Fyers options-chain call (index underlyings)."""
     res = {}
     try:
-        if not token_map:
+        app_id, token = _fyers_auth()
+        if not app_id or not token:
             return res
-        cfg = _broker_cfg("dhan")
-        token = str(cfg.get("access_token", "") or "")
-        cid = str(cfg.get("client_id", "") or "")
-        if not _real_token(token) or not cid:
+        under = _fyers_underlying(symbol)
+        if not under:
             return res
-        seg = "BSE_FNO" if (symbol or "").upper() in ("SENSEX", "BANKEX") else "NSE_FNO"
-        ids = sorted(set(token_map.values()))
-        q = _dhan_post("/marketfeed/quote", token, cid, {seg: [int(float(x)) if str(x).replace(".", "").isdigit() else x for x in ids]}, timeout=8)
-        data = (q.get("data") or {})
-        node = data.get(seg, data) if isinstance(data, dict) else {}
-        if not isinstance(node, dict):
+        exp = _fyers_expiry_param(expiry_ymd)
+        body = _fyers_get(f"/api/v3/options-chain?symbol={under}&strikecount=100&expiry={exp}",
+                          app_id, token)
+        if not body:
+            # some deployments answer the chain without an expiry filter
+            body = _fyers_get(f"/api/v3/options-chain?symbol={under}&strikecount=100",
+                              app_id, token)
+        if not body:
             return res
-        rev = {str(v): k for k, v in token_map.items()}
-        for sid, entry in node.items():
-            key = rev.get(str(sid))
-            if not key or not isinstance(entry, dict):
+        data = body.get("data") or {}
+        records = data.get("records") or {}
+        rows = records.get("data") if isinstance(records, dict) else records
+        want = {(float(s), "CE" if str(o).upper().startswith("C") else "PE")
+                for s, o in (contracts or [])}
+        for row in (rows if isinstance(rows, list) else []):
+            if not isinstance(row, dict):
                 continue
-            for f in ("last_price", "LTP", "ltp", "lastPrice"):
-                try:
-                    v = float(entry.get(f, 0) or 0)
-                except Exception:
-                    v = 0
-                if v > 0:
-                    res[key] = v
-                    break
+            try:
+                strike = float(row.get("strikePrice", row.get("strike_price", 0)) or 0)
+            except Exception:
+                continue
+            if strike <= 0:
+                continue
+            for opt in ("CE", "PE"):
+                key = (strike, opt)
+                if key not in want or key in res:
+                    continue
+                leg = row.get(opt) or row.get(opt.lower()) or {}
+                if not isinstance(leg, dict):
+                    continue
+                for f in ("lastPrice", "last_price", "ltp", "LTP"):
+                    try:
+                        v = float(leg.get(f, 0) or 0)
+                    except Exception:
+                        v = 0
+                    if v > 0:
+                        res[key] = v
+                        break
     except Exception:
         pass
     return res
 
 
-def _dhan_master_tokens(symbol, expiry_ymd, contracts):
-    """STOCK options ke liye Dhan master se security ids (24h cache).
-    (_dhan_tokens sirf index underlyings ke liye chalta tha.)"""
-    out = {}
-    try:
-        from core.services.broker_dhan_live import DhanLive
-        dl = DhanLive(client_id="", access_token="")
-        for (strike, opt) in contracts:
-            try:
-                r = dl._resolve_via_master(symbol, expiry_ymd, strike, opt, False)
-                sid = (r or {}).get("security_id")
-                if sid:
-                    out[(float(strike), "CE" if str(opt).upper().startswith("C") else "PE")] = str(sid)
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return out
-
-
-def _dhan_feed_ltps(symbol, token_map):
-    """Dhan WebSocket feed se REAL LTP (REST quote par 429 aata hai)."""
+def _fyers_quote_ltp(symbol, expiry_ymd, contracts):
+    """{(strike, OPT): ltp} from Fyers /quotes for the EXACT contract symbols
+    (works for stock options too, where no index chain exists)."""
     res = {}
     try:
-        from core.services.dhan_feed import get_feed, ensure_feed_from_config
-        fd = ensure_feed_from_config() or get_feed()
-        if not fd or not token_map:
+        app_id, token = _fyers_auth()
+        if not app_id or not token:
             return res
-        seg = "BSE_FNO" if (symbol or "").upper() in ("SENSEX", "BANKEX") else "NSE_FNO"
-        for _k, _sid in token_map.items():
+        from core.services.symbol_resolver import _fyers_symbol as _fsym
+        syms = {}
+        for (strike, opt) in (contracts or []):
             try:
-                fd.subscribe(seg, _sid)
+                fs = _fsym(symbol, expiry_ymd, float(strike), opt)
             except Exception:
-                pass
-        for _k, _sid in token_map.items():
-            try:
-                v = fd.get_ltp(seg, _sid, max_age=20)
-            except Exception:
-                v = 0
-            if v and float(v) > 0:
-                res[_k] = round(float(v), 2)
+                continue
+            if fs:
+                syms[fs] = (float(strike), opt)
+        if not syms:
+            return res
+        keys = list(syms.keys())
+        for _i in range(0, len(keys), 20):          # chunked (URL length safe)
+            chunk = keys[_i:_i + 20]
+            body = _fyers_get("/api/v3/quotes?symbols=" + ",".join(chunk), app_id, token)
+            data = body.get("data") or {}
+            if not isinstance(data, dict):
+                continue
+            for fs, key in syms.items():
+                if fs not in data:
+                    continue
+                node = data.get(fs)
+                if not isinstance(node, dict):
+                    continue
+                for f in ("last_price", "lastPrice", "ltp", "LTP"):
+                    try:
+                        v = float(node.get(f, 0) or 0)
+                    except Exception:
+                        v = 0
+                    if v > 0:
+                        res[key] = v
+                        break
     except Exception:
         pass
     return res
@@ -369,12 +447,16 @@ def _angel_batch_ltp(symbol, contracts, expiry_ymd):
 
 # ---------------- shared fallback: fresh DB -> model ----------------
 
-def _fallback_ltp(symbol, strike, option_type, expiry_ymd):
+def _fallback_ltp(symbol, strike, option_type, expiry_ymd, with_source=False):
+    """Fresh-today DB close -> Black-Scholes model.
+
+    with_source=True returns (ltp, source) where source is
+    'db-close' | 'model' (never None when a price was found)."""
     sym = (symbol or "").upper()
     try:
         strike_f = float(strike)
     except Exception:
-        return None
+        return (None, "none") if with_source else None
     # Fresh-today DB close only (same IST date; stale EOD never served as live)
     try:
         from core.models.database import Database
@@ -385,7 +467,7 @@ def _fallback_ltp(symbol, strike, option_type, expiry_ymd):
             [sym, strike_f, option_type, _ist_today()],
         )
         if row and row.get("close_price") and float(row["close_price"]) > 0:
-            return float(row["close_price"])
+            return (float(row["close_price"]), "db-close") if with_source else float(row["close_price"])
     except Exception:
         pass
     # Model with CURRENT iv + real DTE (same formula chain and positions share)
@@ -400,7 +482,7 @@ def _fallback_ltp(symbol, strike, option_type, expiry_ymd):
         except Exception:
             pass
         if spot <= 0:
-            return None
+            return (None, "none") if with_source else None
         import datetime as _dt
         dte = 7
         if expiry_ymd:
@@ -410,9 +492,11 @@ def _fallback_ltp(symbol, strike, option_type, expiry_ymd):
             except Exception:
                 dte = 7
         bs = model_premium(spot, strike_f, dte, option_type, symbol=sym, iv=model_iv(sym))
-        return round(float(bs), 2) if bs and float(bs) > 0 else None
+        if bs and float(bs) > 0:
+            return (round(float(bs), 2), "model") if with_source else round(float(bs), 2)
+        return (None, "none") if with_source else None
     except Exception:
-        return None
+        return (None, "none") if with_source else None
 
 
 # ---------------- Tier 0: NSE full-chain map (local only, expiry-matched) ----------------
@@ -455,11 +539,13 @@ def _nse_map(symbol):
 
 # ---------------- public API ----------------
 
-def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False):
+def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False, sources=None):
     """Batch: contracts=[(strike, OPT)]. Returns {(strike, OPT): ltp} for hits.
     Tier 1 broker-token quotes, Tier 2/3 shared fallback per missing contract.
     fresh=True skips the 10s price-cache READ (open positions always want the
-    live tick; cache is still written)."""
+    live tick; cache is still written).
+    sources: optional dict - filled with the tier that produced each price
+    ('broker-quote' | 'nse-chain' | 'db-close' | 'model' | 'cache')."""
     sym = (symbol or "").upper()
     norm = []
     for s, o in (contracts or []):
@@ -478,10 +564,13 @@ def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False):
         hit = None if fresh else _PRICE_CACHE.get(pk)
         if hit and now - hit[0] < _PRICE_TTL:
             out[key] = hit[1]
+            if sources is not None:
+                sources[key] = "cache"
         else:
             missing.append(key)
     if missing:
         live = {}
+        _tier = {}          # key -> source tier
         # Tier 0: NSE chain map, ONLY when its expiry == requested expiry
         # (a weekly LTP must never price a monthly contract).
         try:
@@ -490,36 +579,29 @@ def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False):
                 for key in missing:
                     if key in _nmap:
                         live[key] = _nmap[key]
+                        _tier[key] = "nse-chain"
         except Exception:
             pass
-        # Tier 1a: Dhan token batch (index underlyings).
-        # Streaming first: subscribe contracts on the WS feed and read live
-        # ticks; REST quote only covers contracts with no fresh tick.
+        # Tier 1a: Fyers broker quote (exact contract LTP). Paper AND live
+        # both read this tier, so a paper trade and a live trade of the same
+        # contract land on the SAME price.
         try:
-            tmap = _dhan_tokens(sym, expiry_ymd) if expiry_ymd else {}
-            if tmap:
-                want = {k: tmap[k] for k in missing if k in tmap}
-                try:
-                    from core.services.dhan_feed import get_feed, ensure_feed_from_config
-                    _fd = ensure_feed_from_config() or get_feed()
-                    _seg = "BSE_FNO" if sym in ("SENSEX", "BANKEX") else "NSE_FNO"
-                    for _k, _sid in want.items():
-                        _fd.subscribe(_seg, _sid)
-                    for _k, _sid in want.items():
-                        try:
-                            _fl = _fd.get_ltp(_seg, _sid)
-                        except Exception:
-                            _fl = 0
-                        if _fl and float(_fl) > 0:
-                            live[_k] = round(float(_fl), 2)
-                except Exception:
-                    pass
-                want_rest = {k: v for k, v in want.items() if k not in live}
-                live.update(_dhan_batch_ltp(sym, want_rest))
+            _need = [k for k in missing if k not in live]
+            if _need:
+                _fc = _fyers_chain_ltp(sym, expiry_ymd, _need)
+                for _k, _v in _fc.items():
+                    live[_k] = _v
+                    _tier[_k] = "broker-quote"
+                _need2 = [k for k in _need if k not in live]
+                if _need2:
+                    _fq = _fyers_quote_ltp(sym, expiry_ymd, _need2)
+                    for _k, _v in _fq.items():
+                        live[_k] = _v
+                        _tier[_k] = "broker-quote"
         except Exception:
             pass
         # Tier 1c: NSE live option chain (index options) - real LTP bina
-        # Dhan Data-API subscription ke.
+        # kisi broker data-subscription ke.
         try:
             _nse_missing = [k for k in missing if k not in live]
             if _nse_missing:
@@ -528,37 +610,30 @@ def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False):
                     _v = _nlt(sym, _k[0], _k[1], expiry_ymd)
                     if _v and _v > 0:
                         live[_k] = _v
-        except Exception:
-            pass
-        # Tier 1b: STOCK options - Dhan master se security id + feed tick
-        # (index hi nahi, har stock option ka real LTP milna chahiye).
-        try:
-            _stock_missing = [k for k in missing if k not in live]
-            if _stock_missing and expiry_ymd:
-                _smap = _dhan_master_tokens(sym, expiry_ymd, _stock_missing)
-                if _smap:
-                    _fl = _dhan_feed_ltps(sym, _smap)
-                    for k, v in _fl.items():
-                        live[k] = v
-                    _rest = {k: v for k, v in _smap.items() if k not in live}
-                    if _rest:
-                        live.update(_dhan_batch_ltp(sym, _rest))
+                        _tier[_k] = "nse-chain"
         except Exception:
             pass
         # Tier 1b: Angel token batch (anything with NFO symbol)
         try:
             still = [k for k in missing if k not in live]
             if still:
-                live.update(_angel_batch_ltp(sym, still, expiry_ymd))
+                _ab = _angel_batch_ltp(sym, still, expiry_ymd)
+                for _k, _v in _ab.items():
+                    live[_k] = _v
+                    _tier[_k] = "broker-quote"
         except Exception:
             pass
         for key in missing:
             if key in live and live[key] and float(live[key]) > 0:
                 out[key] = round(float(live[key]), 2)
+                if sources is not None:
+                    sources[key] = _tier.get(key, "broker-quote")
             else:
-                fb = _fallback_ltp(sym, key[0], key[1], expiry_ymd)
+                fb, fsrc = _fallback_ltp(sym, key[0], key[1], expiry_ymd, with_source=True)
                 if fb and float(fb) > 0:
                     out[key] = round(float(fb), 2)
+                    if sources is not None:
+                        sources[key] = fsrc or "model"
         # Stamp price cache
         for key, val in out.items():
             if key in missing:
@@ -576,3 +651,87 @@ def get_contract_ltp(symbol, strike, option_type, expiry_ymd="", fresh=False):
     except Exception:
         pass
     return None
+
+
+# ---------------- Shared entry price (paper == live) ----------------
+
+def entry_price(symbol, strike, option_type, expiry_ymd, side="BUY",
+                fresh=True, apply_slippage=True):
+    """THE single entry-price function for BOTH paper and live orders.
+
+    Returns (price, source):
+      price  - rounded fill price (LTP + slippage, same slippage model for
+               paper and live so the two never drift apart)
+      source - 'broker-quote' | 'model' | 'none'
+
+    Paper (routes/option_chain.place_trade) and live
+    (routes/broker.place_live_order) BOTH call this - same contract, same
+    moment-ish tick, same slippage = same price on paper and on the
+    exchange feed.
+    """
+    try:
+        from core.services.transaction_costs import TransactionCosts
+    except Exception:
+        TransactionCosts = None
+    ltp = 0.0
+    src = "none"
+    try:
+        _srcs = {}
+        _res = get_contract_ltps(symbol, [(strike, option_type)], expiry_ymd,
+                                 fresh=fresh, sources=_srcs)
+        for _v in _res.values():
+            ltp = float(_v)
+            break
+        for _k, _v in _srcs.items():
+            src = _v
+            break
+    except Exception:
+        ltp = 0.0
+    if ltp <= 0:
+        src = "none"
+    if ltp <= 0:
+        # Model fallback (DB close -> Black-Scholes) - same numbers the chain
+        # table shows, so paper/live still agree with each other.
+        fb = _fallback_ltp((symbol or "").upper(), strike, option_type, expiry_ymd)
+        if fb and float(fb) > 0:
+            ltp = float(fb)
+            src = "model"
+    if ltp <= 0:
+        return 0.0, "none"
+    price = ltp
+    if apply_slippage and TransactionCosts is not None:
+        try:
+            price = float(TransactionCosts.apply_fill_slippage(
+                ltp, str(side or "BUY").upper(), is_live=True))
+        except Exception:
+            price = ltp
+    return round(float(price), 2), src
+
+
+def price_source_detail(symbol, strike, option_type, expiry_ymd):
+    """Human-readable origin of the current price (UI diagnostics).
+    source: broker-quote | nse-chain | db-close | model | cache | none"""
+    try:
+        _srcs = {}
+        _res = get_contract_ltps(symbol, [(strike, option_type)], expiry_ymd,
+                                 fresh=True, sources=_srcs)
+        ltp = None
+        for _v in _res.values():
+            ltp = float(_v)
+            break
+        src = "none"
+        for _v in _srcs.values():
+            src = _v
+            break
+        if ltp and float(ltp) > 0:
+            return {"ltp": round(float(ltp), 2), "source": src}
+    except Exception:
+        pass
+    try:
+        fb, fsrc = _fallback_ltp((symbol or "").upper(), strike, option_type,
+                                 expiry_ymd, with_source=True)
+    except Exception:
+        fb, fsrc = None, "none"
+    if fb and float(fb) > 0:
+        return {"ltp": round(float(fb), 2), "source": fsrc or "model"}
+    return {"ltp": None, "source": "none"}

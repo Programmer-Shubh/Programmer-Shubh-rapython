@@ -1,8 +1,8 @@
-"""Static-IP egress proxy support (Dhan IP-whitelisting ke liye).
+"""Static-IP egress proxy support (broker IP pinning ke liye).
 
-Problem: Render (free tier) ke outgoing IPs shared/rotating hote hain - Dhan
-jhola "Invalid IP" (DH-905) par reject karta hai jab tak server IP whitelist
-me na ho. Solution: har Dhan API call ek fixed-IP proxy (e.g. snipy zeroip,
+Problem: Render (free tier) ke outgoing IPs shared/rotating hote hain - kuch
+broker APIs IP whitelist ke bina requests reject kar dete hain ("Invalid IP").
+Solution: broker API calls ek fixed-IP proxy (e.g. snipy zeroip,
 https://host:8443) ke PIPE (HTTP CONNECT) par se jaye -> broker ko wahi
 whitelisted IP dikhta hai.
 
@@ -18,9 +18,9 @@ Usage:
   (proxy ON par httpx.Client - Bearer Proxy-Authorization waise hi BHEJTA
   hai jo requests nahi kar sakta).
 
-Sirf Dhan-internal endpoints (api.dhan.co / auth.dhan.co) proxy par jaate
-hain - public data sources (NSE bhavcopy, Yahoo, stooq, scrip-master CDN)
-direct hi jaate hain taaki proxy load/latency na badhe.
+Broker-internal endpoints (api.*/auth.*) proxy par jaate hain - public data
+sources (NSE bhavcopy, Yahoo, stooq, scrip-master CDN) direct hi jaate hain
+taaki proxy load/latency na badhe.
 """
 import json
 import logging
@@ -102,7 +102,7 @@ def sync_request(method, url, headers=None, params=None, json_body=None,
                                    params=params, json=json_body, content=data)
         except Exception as exc:
             # Fail-open: proxy network par hi fail ho to ek DIRECT attempt
-            # (Dhan-side HTTP errors yahan nahi pahunchte - sirf layer fail).
+            # (broker-side HTTP errors yahan nahi pahunchte - sirf layer fail).
             try:
                 logger.warning("egress sync_request proxy fail, direct fallback: %s", exc)
             except Exception:

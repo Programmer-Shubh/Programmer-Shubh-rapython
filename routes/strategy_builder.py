@@ -248,10 +248,10 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
 
 def _daily_fallback_range(sym, start_date, end_date):
     """Daily fallback, poora requested range: nsepython (NSE official) pehle,
-    phir NSE index-archive, phir Dhan broker-history (FINNIFTY ka Yahoo dead
+    phir NSE index-archive, phir Fyers broker-history (FINNIFTY ka Yahoo dead
     hai), phir Yahoo (60-day cut). Single source jo pehle 15+ bars de (koi
     date-merge nahi). Returns (bars, src) - src: nsepython_daily /
-    nse_index_archive / dhan_daily / yahoo_daily / ""."""
+    nse_index_archive / fyers_daily / yahoo_daily / ""."""
     try:
         from core.services.historical_fetcher import _fetch_nsepython_historical as _fnp
         try:
@@ -279,15 +279,15 @@ def _daily_fallback_range(sym, start_date, end_date):
     except Exception:
         pass
     try:
-        from core.services.historical_fetcher import _fetch_dhan_historical as _fdh
+        from core.services.historical_fetcher import _fetch_fyers_historical as _fdf
         try:
-            _db2 = _fdh(sym, start_date, end_date) or []
+            _db2 = _fdf(sym, start_date, end_date) or []
         except Exception:
             _db2 = []
         _db2 = [b for b in (_db2 or [])
                 if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
         if _db2 and len(_db2) >= 15:
-            return _db2, "dhan_daily"
+            return _db2, "fyers_daily"
     except Exception:
         pass
     try:
@@ -962,7 +962,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         # Daily DB preload (local, tez) + Yahoo-daily parallel supplement un
         # symbols ke liye jinke DB bars <15 hain YA window coverage <70% hai.
         # Pehle partial-coverage symbols loop ke ANDAR serial network call
-        # karte the (nsepython 15s + dhan 25s + yahoo 21s = 70s/symbol on
+        # karte the (nsepython 15s + fyers 25s + yahoo 21s = 70s/symbol on
         # Render) - wahi "Run click -> bahut der me result" ka bada kaaran.
         _preDB, _preY = {}, {}
         try:

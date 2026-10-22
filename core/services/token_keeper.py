@@ -1,15 +1,15 @@
-"""Dhan token auto-renewal + valid-token-wins sync (the 'auto fetch').
+"""Broker token keep-alive (auto refresh) - the 'auto fetch' automation.
 
-Reality: Dhan issues tokens via web login only - no API mints a token
-from thin air. What runs automatically here:
-1. Every 6h (and 60s after boot): validate DB token AND env/dashboard
-   tokens; whichever validates is synced INTO the DB (dashboard rotation
-   heals itself even though env can't be rewritten from the app).
-2. On the valid token: RenewToken extends its life without manual login,
-   so an active token stays alive indefinitely instead of dying at midnight.
+Fyers tokens expire daily. What runs automatically here:
+1. Every cycle (and 60s after boot): validate the stored access token.
+2. If the token is dead (or about to die) but a refresh token + PIN are
+   saved, refresh it and persist the NEW token in the DB - so the app
+   never needs a manual browser login again.
+3. Bigul / Angel: re-login with the saved credentials when the session
+   died (TOTP is generated locally, no user action needed).
 
 DB is the live truth (env/dashboard = seed). This pairs with the
-DB-wins precedence in _get_config/_broker_cfg.
+DB-wins precedence in routes/broker._get_config.
 """
 import threading
 import time
@@ -17,130 +17,8 @@ import time
 _LAST = {"ts": 0, "result": {}}
 _LOCK = threading.Lock()
 
-
-def _env_dhan():
-    import os
-    return {
-        "client_id": (os.environ.get("RATRADE_DHAN_CLIENT_ID")
-                      or os.environ.get("DHAN_CLIENT_ID") or "").strip(),
-        "access_token": (os.environ.get("RATRADE_DHAN_ACCESS_TOKEN")
-                         or os.environ.get("DHAN_ACCESS_TOKEN") or "").strip(),
-    }
-
-
-def _db_dhan():
-    try:
-        import json as _js
-        from core.models.database import Database
-        row = Database.get_instance().fetch_one(
-            "SELECT setting_value FROM settings WHERE setting_key='broker_dhan'")
-        cfg = _js.loads(row["setting_value"]) if row and row.get("setting_value") else {}
-        if isinstance(cfg, dict):
-            return {"client_id": str(cfg.get("client_id") or "").strip(),
-                    "access_token": str(cfg.get("access_token") or "").strip()}
-    except Exception:
-        pass
-    return {"client_id": "", "access_token": ""}
-
-
-def _save_db_token(client_id, access_token):
-    try:
-        import json as _js
-        from core.models.database import Database
-        db = Database.get_instance()
-        row = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key='broker_dhan'")
-        cfg = {"client_id": client_id, "access_token": access_token}
-        if row:
-            cur = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key='broker_dhan'")
-            try:
-                old = _js.loads(cur["setting_value"]) if cur and cur.get("setting_value") else {}
-                if isinstance(old, dict):
-                    for k, v in old.items():
-                        cfg.setdefault(k, v)
-            except Exception:
-                pass
-            db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key='broker_dhan'",
-                       [_js.dumps(cfg)])
-        else:
-            db.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('broker_dhan', ?)",
-                       [_js.dumps(cfg)])
-        return True
-    except Exception:
-        return False
-
-
-def dhan_totp_login(client_id, pin, totp_secret):
-    """Fully automatic Dhan login (official API): TOTP from saved secret +
-    POST auth.dhan.co/app/generateAccessToken. Needs one-time TOTP setup on
-    Dhan Web. Returns access_token or ''."""
-    try:
-        import pyotp
-        import requests as _rq
-        cid = str(client_id or "").strip()
-        pin = str(pin or "").strip()
-        sec = str(totp_secret or "").strip().replace(" ", "")
-        if not (cid and len(pin) == 6 and sec):
-            return ""
-        totp = pyotp.TOTP(sec).now()
-        # Dhan IP-whitelisting: login/auth call bhi fixed-IP proxy par se
-        # (jab EGRESS_PROXY_* on ho; warna direct requests).
-        try:
-            from core.services.egress_proxy import sync_request as _sreq
-            r = _sreq("POST", "https://auth.dhan.co/app/generateAccessToken",
-                      params={"dhanClientId": cid, "pin": pin, "totp": totp},
-                      timeout=20)
-        except ImportError:
-            r = _rq.post(
-                "https://auth.dhan.co/app/generateAccessToken",
-                params={"dhanClientId": cid, "pin": pin, "totp": totp},
-                timeout=20)
-        if r.status_code != 200:
-            return ""
-        try:
-            body = r.json() or {}
-        except Exception:
-            return ""
-        data = body.get("data") if isinstance(body.get("data"), dict) else body
-        tok = str((data or {}).get("accessToken") or (data or {}).get("access_token") or "")
-        return tok
-    except Exception:
-        return ""
-
-
-def angel_auto_login(cfg):
-    """Angel full auto-login from saved api_key + client_code + password +
-    totp_secret (SmartAPI login). Returns jwt or ''."""
-    try:
-        import asyncio as _aio
-        from core.services.broker_angel_live import AngelLive
-        if not (cfg.get("api_key") and cfg.get("client_code") and cfg.get("password")):
-            return ""
-        al = AngelLive(api_key=cfg.get("api_key", ""), client_code=cfg.get("client_code", ""),
-                       password=cfg.get("password", ""), totp_secret=cfg.get("totp_secret", ""))
-        try:
-            r = _aio.run(al.login())
-        except Exception:
-            return ""
-        return str((r or {}).get("jwt") or "")
-    except Exception:
-        return ""
-
-
-def _validate(client_id, token):
-    """True if Dhan accepts the token (read-only holdings ping)."""
-    try:
-        import asyncio as _aio
-        from core.services.broker_dhan_live import DhanLive
-        if not token or token.startswith(("SIM-", "ANG-")) or not client_id:
-            return False
-        dl = DhanLive(client_id=client_id, access_token=token)
-        try:
-            r = _aio.run(dl.validate())
-        except Exception:
-            return False
-        return bool((r or {}).get("success"))
-    except Exception:
-        return False
+# Token is refreshed when it expires within this window (seconds).
+_REFRESH_MARGIN = 45 * 60
 
 
 def _db_cfg(name):
@@ -162,104 +40,145 @@ def _save_cfg(name, cfg):
         db = Database.get_instance()
         row = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key=?", [f"broker_{name}"])
         if row:
-            db.execute(f"UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key='broker_{name}'",
-                       [_js.dumps(cfg)])
+            db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key=?",
+                       [_js.dumps(cfg), f"broker_{name}"])
         else:
-            db.execute(f"INSERT INTO settings (setting_key, setting_value) VALUES ('broker_{name}', ?)",
-                       [_js.dumps(cfg)])
+            db.execute("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                       [f"broker_{name}", _js.dumps(cfg)])
         return True
     except Exception:
         return False
 
 
-def sync_once():
-    """Full automation ladder (Dhan):
-    1. existing valid token -> renew to extend;
-    2. PIN + TOTP saved -> generate fresh via official API (no web login);
-    3. else manual reconnect needed.
-    Angel: password-login when creds saved. Winner synced to DB."""
-    res = {"kept": "", "renewed": False, "generated": "", "detail": ""}
+def _broker_disconnected(name):
+    """User ne 'Disconnect' daba diya -> env/db creds revive NAHI hone chahiye."""
     try:
-        dbc = _db_dhan()
-        enc = _env_dhan()
-        cands = []
-        for src, c in (("db", dbc), ("env", enc)):
-            t = c.get("access_token", "")
-            if t and t not in [x[1] for x in cands]:
-                cands.append((src, c.get("client_id", ""), t))
-        winner = None
-        for src, cid, tok in cands:
-            try:
-                if _validate(cid, tok):
-                    winner = (src, cid, tok)
-                    break
-            except Exception:
-                continue
-        if not winner:
-            # Ladder step 2: full auto-login via PIN + TOTP
-            try:
-                import os as _os
-                _cfg = dict(dbc)
-                _cid = _cfg.get("client_id") or enc.get("client_id")
-                _pin = (_cfg.get("pin") or _os.environ.get("RATRADE_DHAN_PIN") or "").strip()
-                _tsec = (_cfg.get("totp_secret") or _os.environ.get("RATRADE_DHAN_TOTP_SECRET") or "").strip()
-                _nt = dhan_totp_login(_cid, _pin, _tsec) if (_cid and _pin and _tsec) else ""
-                if _nt and _validate(_cid, _nt):
-                    winner = ("totp-login", _cid, _nt)
-                    res["generated"] = "fresh token via PIN+TOTP (fully automatic)"
-            except Exception:
-                pass
-        # Angel full auto-login (password + TOTP creds)
-        if not winner:
-            try:
-                _ac = _db_cfg("angel")
-                _jwt = angel_auto_login(_ac)
-                if _jwt:
-                    _ac["access_token"] = _jwt
-                    _save_cfg("angel", _ac)
-                    res["kept"] = "angel auto-login ok"
-                    with _LOCK:
-                        _LAST["ts"] = time.time()
-                        _LAST["result"] = res
-                    return res
-            except Exception:
-                pass
-        if not winner:
-            res["detail"] = "no valid token and no PIN+TOTP saved - save Dhan PIN + TOTP once for full automation"
-            with _LOCK:
-                _LAST["ts"] = time.time()
-                _LAST["result"] = res
-            return res
-        src, cid, tok = winner
-        res["kept"] = f"{src} token valid"
-        if tok != dbc.get("access_token"):
-            _save_db_token(cid, tok)
-            res["kept"] += " (synced to DB)"
-        # Extend life without manual login
-        try:
-            import asyncio as _aio
-            from core.services.broker_dhan_live import DhanLive
-            dl = DhanLive(client_id=cid, access_token=tok)
+        from core.models.database import Database
+        row = Database.get_instance().fetch_one(
+            "SELECT setting_value FROM settings WHERE setting_key=?",
+            [f"broker_disconnected_{name}"])
+        return str((row or {}).get("setting_value") or "") == "1"
+    except Exception:
+        return False
 
-            async def _rn():
-                return await dl.renew_token()
-            try:
-                rr = _aio.run(_rn())
-            except Exception:
-                rr = {}
-            if (rr or {}).get("success") and (rr or {}).get("access_token"):
-                _save_db_token(cid, rr["access_token"])
-                res["renewed"] = True
-                res["kept"] += " + renewed"
-        except Exception as e:
-            res["detail"] = f"renew skipped: {e}"[:120]
-        with _LOCK:
-            _LAST["ts"] = time.time()
-            _LAST["result"] = res
-        return res
+
+def _fyers_refresh(cfg):
+    """Refresh the Fyers token (needs app_id + secret + refresh_token).
+    Returns (ok, new_access_token, detail)."""
+    try:
+        import asyncio as _aio
+        from core.services.broker_fyers import FyersV3
+        if not (cfg.get("app_id") and cfg.get("secret") and cfg.get("refresh_token")):
+            return False, "", "missing app_id/secret/refresh_token"
+        fy = FyersV3(app_id=cfg.get("app_id", ""), secret_key=cfg.get("secret", ""),
+                     redirect_uri=cfg.get("redirect_uri", ""),
+                     access_token=cfg.get("access_token", ""),
+                     refresh_token=cfg.get("refresh_token", ""),
+                     pin=cfg.get("pin", ""))
+        r = _aio.run(fy.refresh_access_token())
+        if r.get("success") and fy.access_token:
+            return True, fy.access_token, "refreshed"
+        return False, "", str(r.get("error") or "refresh failed")[:150]
     except Exception as e:
-        res["detail"] = str(e)[:150]
-        return res
+        return False, "", str(e)[:150]
+
+
+def _fyers_valid(cfg):
+    """Live ping: is the stored token still accepted by Fyers?"""
+    try:
+        import asyncio as _aio
+        from core.services.broker_fyers import FyersV3
+        if not cfg.get("access_token"):
+            return False, "no token"
+        fy = FyersV3(app_id=cfg.get("app_id", ""), secret_key=cfg.get("secret", ""),
+                     redirect_uri=cfg.get("redirect_uri", ""),
+                     access_token=cfg.get("access_token", ""),
+                     refresh_token=cfg.get("refresh_token", ""),
+                     pin=cfg.get("pin", ""))
+        r = _aio.run(fy.validate())
+        if r.get("success"):
+            return True, "valid"
+        return False, str(r.get("error") or "invalid")[:150]
+    except Exception as e:
+        return False, str(e)[:120]
+
+
+def _bigul_login(cfg):
+    """Bigul/Angel password+TOTP login -> new access token ('' on failure)."""
+    try:
+        import asyncio as _aio
+        from core.services.broker_angel_live import AngelLive
+        if not (cfg.get("api_key") and cfg.get("client_id") and cfg.get("password")):
+            return ""
+        an = AngelLive(api_key=cfg.get("api_key", ""), client_code=cfg.get("client_id", ""),
+                       password=cfg.get("password", ""), totp_secret=cfg.get("totp_secret", ""))
+        r = _aio.run(an.login())
+        if r.get("success"):
+            return str(an.jwt or "")
+        return ""
+    except Exception:
+        return ""
+
+
+def sync_once():
+    """One keep-alive pass over every linked broker.
+
+    Fyers : validate -> refresh (refresh_token + PIN) -> persist new token.
+    Bigul : re-login with saved creds when the session is gone.
+    """
+    res = {"fyers": "", "bigul": "", "detail": ""}
+    # ---- Fyers (main broker) ----
+    try:
+        if _broker_disconnected("fyers"):
+            res["fyers"] = "disconnected (skipped)"
+        else:
+            cfg = _db_cfg("fyers")
+            if cfg.get("access_token"):
+                ok, detail = _fyers_valid(cfg)
+                if ok:
+                    res["fyers"] = "token valid"
+                else:
+                    ok2, new_tok, det2 = _fyers_refresh(cfg)
+                    if ok2:
+                        cfg["access_token"] = new_tok
+                        _save_cfg("fyers", cfg)
+                        res["fyers"] = "token refreshed (auto)"
+                    else:
+                        res["fyers"] = f"needs login ({det2 or detail})"
+            elif cfg.get("refresh_token"):
+                ok2, new_tok, det2 = _fyers_refresh(cfg)
+                if ok2:
+                    cfg["access_token"] = new_tok
+                    _save_cfg("fyers", cfg)
+                    res["fyers"] = "token refreshed (auto)"
+                else:
+                    res["fyers"] = f"needs login ({det2})"
+            else:
+                res["fyers"] = "not configured"
+    except Exception as e:
+        res["fyers"] = f"error: {str(e)[:100]}"
+    # ---- Bigul ----
+    try:
+        if _broker_disconnected("bigul"):
+            res["bigul"] = "disconnected (skipped)"
+        else:
+            bcfg = _db_cfg("bigul")
+            if bcfg.get("client_id") and bcfg.get("password"):
+                jwt = _bigul_login(bcfg)
+                if jwt:
+                    bcfg["access_token"] = jwt
+                    _save_cfg("bigul", bcfg)
+                    res["bigul"] = "session renewed (auto)"
+                else:
+                    res["bigul"] = "login failed (check creds)"
+            else:
+                res["bigul"] = "not configured"
+    except Exception as e:
+        res["bigul"] = f"error: {str(e)[:100]}"
+    with _LOCK:
+        _LAST["ts"] = time.time()
+        _LAST["result"] = dict(res)
+    return res
 
 
 def status():
@@ -271,7 +190,7 @@ def status():
         return {}
 
 
-def start_background(interval_s=6 * 3600):
+def start_background(interval_s=30 * 60):
     def _loop():
         try:
             time.sleep(60)

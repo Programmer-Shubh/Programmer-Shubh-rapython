@@ -1,8 +1,8 @@
 """Fyers API v3 broker automation - Historical Data (OHLC candles).
 
-Dhan automation jaisa hi: Client ID + Access Token se automated auth,
-/efm/v3/history par candles, raw list -> pandas DataFrame, epoch -> readable
-IST datetime, basic error-handling + rate-limit safety.
+Automated auth (Client ID + Access Token) + /data/history candles,
+raw list -> pandas DataFrame, epoch -> readable IST datetime, basic
+error-handling + rate-limit safety.
 
 Symbols: 'NSE:NIFTY50-INDEX', 'NSE:SBIN-EQ', NFO options 'NSE:SBIN24500CE'
 Docs: Fyers API v3 fyers-apiv3 SDK (SessionModel + FyersModel.history).

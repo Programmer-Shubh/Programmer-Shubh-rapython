@@ -93,11 +93,12 @@ async def _startup_background():
         _th4.Thread(target=_ap_loop, daemon=True).start()
     except: pass
     try:
-        # Dhan token keeper: validate + sync + renew every 6h (auto fetch).
+        # Broker token keeper: Fyers token auto-refresh (refresh_token + PIN)
+        # every 30 min - token 24h expire hone se pehle hi renew ho jata hai.
         def _tk_loop():
             try:
                 from core.services.token_keeper import start_background as _tk
-                _tk(6 * 3600)
+                _tk(30 * 60)
             except: pass
         import threading as _th5
         _th5.Thread(target=_tk_loop, daemon=True).start()

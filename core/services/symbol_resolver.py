@@ -147,23 +147,6 @@ async def resolve_contract(broker: str, creds: dict, underlying: str,
     explicit = is_explicit_date(expiry_hint)
     guess = snap_hint_to_expiry(underlying, expiry_hint or "weekly")
 
-    if broker == "dhan":
-        try:
-            from core.services.broker_dhan_live import DhanLive
-        except Exception as e:
-            return {"ok": False, "error": f"Dhan client missing: {e}"}
-        dl = DhanLive(client_id=(creds or {}).get("client_id", ""),
-                      access_token=(creds or {}).get("access_token", ""))
-        r = await dl.resolve_fo(underlying, guess, strike, opt, exact=explicit)
-        if r.get("security_id"):
-            return {"ok": True, "refs": {"security_id": r["security_id"],
-                                         "lot_size": int(r.get("lot_size") or 0),
-                                         "symbol": r.get("symbol", "")},
-                    "expiry_used": r.get("expiry", guess)[:10] or guess,
-                    "source": r.get("source", "dhan")}
-        return {"ok": False, "error": r.get("error", "Dhan resolution failed"),
-                "available_expiries": []}
-
     if broker == "fyers":
         try:
             from core.services.broker_fyers import FyersV3

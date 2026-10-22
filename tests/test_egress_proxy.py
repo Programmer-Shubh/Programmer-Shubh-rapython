@@ -58,7 +58,7 @@ def test_sync_request_plain_path(monkeypatch):
         return object()
     import requests
     monkeypatch.setattr(requests, "request", _fake_req)
-    ep.sync_request("POST", "https://api.dhan.co/v2/x", headers={"a": "b"},
+    ep.sync_request("POST", "https://api.example.com/v2/x", headers={"a": "b"},
                     json_body={"k": 1})
     assert calls["m"] == "POST"
 
@@ -108,7 +108,7 @@ def test_ws_tunnel_off(monkeypatch):
     import core.services.egress_proxy as ep
     for k in ("EGRESS_PROXY_URL", "EGRESS_PROXY_TOKEN", "EGRESS_PROXY_IP"):
         monkeypatch.delenv(k, raising=False)
-    assert ep.ws_connect_kwargs("api-feed.dhan.co", 443) == {}
+    assert ep.ws_connect_kwargs("api.example.com", 443) == {}
 
 
 def test_ws_tunnel_ok(monkeypatch):
@@ -124,10 +124,10 @@ def test_ws_tunnel_ok(monkeypatch):
         return fake
     import socket
     monkeypatch.setattr(socket, "create_connection", _fc)
-    kw = ep.ws_connect_kwargs("api-feed.dhan.co", 443)
+    kw = ep.ws_connect_kwargs("api.example.com", 443)
     assert kw and isinstance(kw.get("sock"), _FakeSock)
     req = fake.sent.decode()
-    assert req.startswith("CONNECT api-feed.dhan.co:443 HTTP/1.1")
+    assert req.startswith("CONNECT api.example.com:443 HTTP/1.1")
     assert "Proxy-Authorization: Bearer zero_ip_ws_t" in req
     assert "X-Snipy-Proxy-IPv6: 2001:db8::7" in req
     assert not fake.closed  # tunnel socket websockets ko diya
@@ -144,7 +144,7 @@ def test_ws_tunnel_reject(monkeypatch):
         return fake
     import socket
     monkeypatch.setattr(socket, "create_connection", _fc)
-    assert ep.ws_connect_kwargs("api-feed.dhan.co", 443) == {}
+    assert ep.ws_connect_kwargs("api.example.com", 443) == {}
     assert fake.closed  # reject par tunnel socket band
 
 
@@ -166,44 +166,7 @@ def test_sync_request_proxy_fail_falls_back_direct(monkeypatch):
         return "direct-resp"
     import requests
     monkeypatch.setattr(requests, "request", _fake_req)
-    r = ep.sync_request("POST", "https://api.dhan.co/v2/x", headers={"a": "b"},
+    r = ep.sync_request("POST", "https://api.example.com/v2/x", headers={"a": "b"},
                         json_body={"k": 1})
     assert r == "direct-resp"
     assert calls["m"] == "POST"
-
-
-def test_dhan_feed_session_connects_via_tunnel(monkeypatch):
-    """dhan_feed._session proxy kwargs use karta hai (wss + sock+sslTak)."""
-    import asyncio
-    import core.services.dhan_feed as df
-    captured = {}
-
-    def fake_connect(url, **kw):
-        captured.update(kw, url=url)
-
-        class _WSCtx:
-            async def __aenter__(self):
-                raise RuntimeError("stop-after-connect-sim")
-
-            async def __aexit__(self, *a):
-                pass
-        return _WSCtx()
-    import websockets
-    monkeypatch.setattr(websockets, "connect", fake_connect)
-
-    async def fake_tunnel(host, port):
-        captured["tunnel_host"] = host
-        captured["tunnel_port"] = port
-        return {"sock": object()}
-    monkeypatch.setattr("core.services.egress_proxy.ws_connect_kwargs_async",
-                        fake_tunnel)
-    f = df.DhanFeed()
-    f._client_id, f._token = "cid", "tok"
-    coro = f._session()
-    try:
-        asyncio.run(coro)
-    except RuntimeError as e:
-        assert "stop-after-connect-sim" in str(e)
-    assert captured.get("tunnel_host") == "api-feed.dhan.co"
-    assert captured.get("tunnel_port") == 443
-    assert "sock" in captured and "ssl" in captured

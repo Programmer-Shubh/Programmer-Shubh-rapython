@@ -570,7 +570,7 @@
             <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
                 <div>
                     <h4 class="fw-bold"><i class="bi bi-plug"></i> Broker Integration</h4>
-                    <p class="text-muted small mb-0">Auto-connect Dhan, Fyers, Bigul - No daily login required</p>
+                    <p class="text-muted small mb-0">Fyers (main broker) + Bigul - Auto-connect, no daily login</p>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
                     <span id="live-status" class="small text-muted"></span>
@@ -580,50 +580,30 @@
                 </div>
             </div>
             <div class="row" id="broker-cards">
-                 <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
-                    <div style="margin-bottom:12px"><i class="bi bi-bank text-primary" style="font-size:36px"></i></div>
-                    <h6 class="fw-bold">Dhan</h6><p class="text-muted small">Client ID + Access Token + Refresh Token</p>
-                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
-                    <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
-                        <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('dhan')"><i class="bi bi-gear"></i> Setup</button>
-                        <button class="btn btn-sm btn-success" onclick="connectSingleBroker('dhan')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
-                        <button class="btn btn-sm btn-danger" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>
-                        <a class="btn btn-sm btn-outline-dark" href="https://login.dhan.co/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>
-                        <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('dhan')"><i class="bi bi-wallet2"></i> Account</button>
-                    </div>
-                </div></div></div>
-                <div class="col" style="min-width:240px"><div class="card" style="border:2px solid #ff9800"><div class="card-body text-center" style="padding:20px">
-                    <div style="margin-bottom:12px"><i class="bi bi-funnel-fill" style="font-size:36px;color:#ff9800"></i></div>
-                    <h6 class="fw-bold">ScanX by Dhan</h6><p class="text-muted small">50+ readymade screeners, live insights — Dhan login se khulta hai</p>
-                    <div style="margin-bottom:10px"><span class="badge bg-warning text-dark">Redirect link</span></div>
-                    <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
-                        <a class="btn btn-sm text-white" style="background:#ff9800" href="https://scanx.trade" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> ScanX kholo</a>
-                    </div>
-                    <small class="text-muted d-block mt-2">ScanX Dhan ka apna product hai — login wahi Dhan ID se hota hai (auto-login/SSO third-party sites ko Dhan deta nahi). Signal mile to dashboard ke signal cards se 1-tap order lagao.</small>
-                </div></div></div>
-                <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
+                 <div class="col" style="min-width:240px"><div class="card" style="border:2px solid #dc3545"><div class="card-body text-center" style="padding:20px">
                     <div style="margin-bottom:12px"><i class="bi bi-currency-exchange text-danger" style="font-size:36px"></i></div>
-                    <h6 class="fw-bold">Fyers</h6><p class="text-muted small">App ID + Secret — OAuth login, Historical OHLC + LIVE orders</p>
+                    <h6 class="fw-bold">Fyers <span class="badge bg-danger" style="font-size:10px">MAIN BROKER</span></h6><p class="text-muted small">App ID + Secret — OAuth login, Historical OHLC + LIVE orders</p>
                     <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
                     <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                         <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('fyers')"><i class="bi bi-gear"></i> Setup</button>
                         <button class="btn btn-sm btn-success" onclick="connectSingleBroker('fyers')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
                         <button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>
                         <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('fyers')"><i class="bi bi-wallet2"></i> Account</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="disconnectBroker('fyers')"><i class="bi bi-power"></i> Disconnect</button>
                     </div>
                     <small class="text-muted d-block mt-2">Fyers app me Redirect URI EXACTLY: https://ratrade-iwi2.onrender.com/api/broker/fyers-callback</small>
                 </div></div></div>
             </div>
             <div class="card mt-2"><div class="card-body" style="padding:12px 16px">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h6 class="fw-bold mb-0"><i class="bi bi-shield-shaded"></i> Static IP Proxy — Dhan Whitelisting</h6>
+                    <h6 class="fw-bold mb-0"><i class="bi bi-shield-shaded"></i> Static IP Proxy — Broker IP Pinning</h6>
                     <span id="e-status-chip" class="badge bg-secondary" style="font-size:10px">checking...</span>
                 </div>
-                <p class="text-muted small mb-2">Render (free) ka outgoing IP bachta hi nahi - Dhan API whitenlist hone par "Invalid IP (DH-905)" deta hai. Ye proxy sab Dhan broker calls ko aapke whitelisted IPv6 par se bhejta hai. Dhan dashboard me whitelisted IP: <code id="e-ip-show">—</code></p>
+                <p class="text-muted small mb-2">Render (free) ka outgoing IP bachta hi nahi - kuch broker APIs IP whitelist ke bina order reject kar dete hain ("Invalid IP"). Ye proxy broker calls ko aapke fixed IPv6 par se bhejta hai. Whitelisted IP: <code id="e-ip-show">—</code></p>
                 <div class="row g-2">
                     <div class="col-md-3"><label class="form-label small mb-0">Proxy URL</label><input type="text" id="e-url" class="form-control form-control-sm" placeholder="https://zeroip.snipy.in:8443"></div>
                     <div class="col-md-3"><label class="form-label small mb-0">Proxy API Key (Bearer)</label><input type="password" id="e-token" class="form-control form-control-sm" placeholder="zero_ip_..."></div>
-                    <div class="col-md-3"><label class="form-label small mb-0">Whitelisted IPv6</label><input type="text" id="e-ip" class="form-control form-control-sm" placeholder="2406:...</div>
+                    <div class="col-md-3"><label class="form-label small mb-0">Whitelisted IPv6</label><input type="text" id="e-ip" class="form-control form-control-sm" placeholder="2406:..."></div>
                     <div class="col-md-3" style="display:flex;gap:6px;align-items:end;flex-wrap:wrap">
                         <div class="form-check ms-1"><input type="checkbox" class="form-check-input" id="e-on" checked><label class="form-check-label small" for="e-on">On</label></div>
                         <button class="btn btn-sm btn-success" onclick="saveEgress()">Save</button>
@@ -631,7 +611,7 @@
                     </div>
                 </div>
                 <div id="e-test-out" class="small mt-2"></div>
-                <small class="text-muted d-block mt-1">Env vars (Render dashboard me) zyada priority rakhte hain: EGRESS_PROXY_URL / EGRESS_PROXY_TOKEN / EGRESS_PROXY_IP. Sirf Dhan ke api/auth endpoints proxy par jaate hain, baaki data sources direct.</small>
+                <small class="text-muted d-block mt-1">Env vars (Render dashboard me) zyada priority rakhte hain: EGRESS_PROXY_URL / EGRESS_PROXY_TOKEN / EGRESS_PROXY_IP. Broker API endpoints proxy par jaate hain, baaki data sources direct.</small>
             </div></div>
             <div id="broker-config-modal" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center">
                 <div style="background:#fff;border-radius:8px;width:90%;max-width:500px;max-height:80vh;overflow-y:auto">
@@ -1043,8 +1023,9 @@
             P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry||'',date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),dry_run:true})}).then(pv=>{
                 if(pv.error){alert('Live blocked: '+pv.error);return;}
                 const p=pv.preview||{};const mg=p.margin||{};const mgTxt=mg.required!=null?('Margin req: Rs'+Number(mg.required).toLocaleString('en-IN')):(mg.note||'Margin: n/a');const snapTxt=(p.expiry_note?'\nNOTE: '+p.expiry_note:'')+(p.strike_note?'\nNOTE: '+p.strike_note:'');
-                if(!confirm('REAL MONEY preview\nBroker: '+p.broker+'\nSymbol: '+(p.symbol||p.security_id||p.tsym)+'\nSide: '+p.side+' Qty: '+p.quantity+'\n'+mgTxt+snapTxt+'\n\nSend to exchange?'))return;
-                P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry||'',date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),dry_run:false})}).then(r=>{if(r.error)alert('Live error: '+r.error);else{alert('LIVE order sent! Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id);loadDashPositions();}}).catch(e=>alert('Live order failed: '+e.message));
+                const ltpTxt2=(p.ltp?'\nLTP: Rs'+p.ltp+(p.price_source?' ('+p.price_source+')':''):'');
+                if(!confirm('REAL MONEY preview\nBroker: '+p.broker+'\nSymbol: '+(p.symbol||p.tsym)+'\nSide: '+p.side+' Qty: '+p.quantity+'\nExpiry: '+p.expiry+ltpTxt2+'\n'+mgTxt+snapTxt+'\n\nSend to exchange?'))return;
+                P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:strike,expiry:expiry||'',date:new Date().toISOString().split('T')[0],transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),dry_run:false})}).then(r=>{if(r.error)alert('Live error: '+r.error);else{alert('LIVE order sent! Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id+' @ Rs'+r.entry_price);showPriceParity([{leg:1,sym:sym,opt:type,strike:(r.strike!=null?r.strike:strike),exp:(r.expiry||p.expiry),ltp:(r.ltp!=null?r.ltp:p.ltp),live:r.entry_price,paper:(r.paper_ref?r.paper_ref.entry_price:null),delta:(r.paper_live_delta!=null?r.paper_live_delta:null)}],'Paper vs Live price — '+sym);loadDashPositions();}}).catch(e=>alert('Live order failed: '+e.message));
             }).catch(e=>alert('Live preview failed: '+e.message));
             return;
         }
@@ -1173,7 +1154,7 @@
         if(window._chainBusy) return;
         cLoadChain();
     }catch(e){}},8000);
-    async function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp0=document.getElementById('c-exp').value;const exp=(exp0==='Live'||exp0==='Live Data'||!exp0)?(window._liveExp||''):exp0;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','3000');const modePick=(prompt('Mode: paper ya live? (default paper)','paper')||'paper').toLowerCase(); const isLive=modePick==='live'; if(isLive) setDashMode('live'); else setDashMode('paper'); if(!isLive){ try{const _mk3=isMarketOpenIST();if(!_mk3.open){alert(_mk3.reason+'\n\nPaper order market open par hi lagega (Mon-Fri 9:15-3:30 IST).');return;}}catch(e){} } const tt=((prompt('Type intraday/positional:','intraday')||'intraday').toLowerCase()==='positional')?'positional':'intraday'; if(isLive){ const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt,dry_run:true})}); if(pv.error){alert('Live blocked: '+pv.error); return;} const p=pv.preview||{}; const _mg2=p.margin&&p.margin.required!=null?('Margin req: Rs'+Number(p.margin.required).toLocaleString('en-IN')+' ('+((p.margin.note||'').slice(0,40))+')\n'):(p.margin&&p.margin.note?p.margin.note+'\n':''); if(!confirm('REAL MONEY preview\nBroker: '+p.broker+'\nSymbol: '+(p.symbol||p.security_id||p.tsym)+'\nSide: '+p.side+' Qty: '+p.quantity+'\n'+_mg2+'\nSend to exchange?'))return; const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt,dry_run:false})}); if(r.error){alert('Live error: '+r.error);return;} alert('LIVE order sent! Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id); setTimeout(()=>{loadDashPositions();loadTrades();},150); return; } showOptimisticOrder(sym,type,strike,lots); const body={symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt}; for(let a=0;a<3;a++){try{const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error&&r.error.includes('429')){await new Promise(res=>setTimeout(res,700*(a+1))); continue;} if(r.error){alert('Error: '+r.error); return;} const _mg3=r.margin&&r.margin.required!=null?('\nMargin req: ₹'+Number(r.margin.required).toLocaleString('en-IN')+' (estimate)'):''; alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price+_mg3); setTimeout(()=>{loadDashPositions();loadTrades();}, 600); return;}catch(e){ if(a===2) alert('Network: '+e.message+' — 5s me auto retry'); await new Promise(res=>setTimeout(res,700*(a+1)));}}}
+    async function cTrade(action,type,strike){const sym=document.getElementById('c-sym').value;const exp0=document.getElementById('c-exp').value;const exp=(exp0==='Live'||exp0==='Live Data'||!exp0)?(window._liveExp||''):exp0;const date=document.getElementById('c-date').value||new Date().toISOString().split('T')[0];const lots=prompt('Lots:','1');if(!lots)return;const sl=prompt('SL (₹):','1500');const tp=prompt('TP (₹):','3000');const modePick=(prompt('Mode: paper ya live? (default paper)','paper')||'paper').toLowerCase(); const isLive=modePick==='live'; if(isLive) setDashMode('live'); else setDashMode('paper'); if(!isLive){ try{const _mk3=isMarketOpenIST();if(!_mk3.open){alert(_mk3.reason+'\n\nPaper order market open par hi lagega (Mon-Fri 9:15-3:30 IST).');return;}}catch(e){} } const tt=((prompt('Type intraday/positional:','intraday')||'intraday').toLowerCase()==='positional')?'positional':'intraday'; if(isLive){ const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt,dry_run:true})}); if(pv.error){alert('Live blocked: '+pv.error); return;} const p=pv.preview||{}; const _mg2=p.margin&&p.margin.required!=null?('Margin req: Rs'+Number(p.margin.required).toLocaleString('en-IN')+' ('+((p.margin.note||'').slice(0,40))+')\n'):(p.margin&&p.margin.note?p.margin.note+'\n':''); const _ltp2=(p.ltp?('\nLTP: Rs'+p.ltp+(p.price_source?' ('+p.price_source+')':'')):''); if(!confirm('REAL MONEY preview\nBroker: '+p.broker+'\nSymbol: '+(p.symbol||p.tsym)+'\nSide: '+p.side+' Qty: '+p.quantity+'\nExpiry: '+p.expiry+_ltp2+'\n'+_mg2+'\nSend to exchange?'))return; const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt,dry_run:false})}); if(r.error){alert('Live error: '+r.error);return;} alert('LIVE order sent! Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id); setTimeout(()=>{loadDashPositions();loadTrades();},150); return; } showOptimisticOrder(sym,type,strike,lots); const body={symbol:sym,option_type:type,strike:parseFloat(strike),expiry:exp,date,transaction_type:action,quantity:parseInt(lots),stop_loss:parseFloat(sl||1500),take_profit:parseFloat(tp||3000),trade_type:tt}; for(let a=0;a<3;a++){try{const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error&&r.error.includes('429')){await new Promise(res=>setTimeout(res,700*(a+1))); continue;} if(r.error){alert('Error: '+r.error); return;} const _mg3=r.margin&&r.margin.required!=null?('\nMargin req: ₹'+Number(r.margin.required).toLocaleString('en-IN')+' (estimate)'):''; alert(action+' Trade #'+r.trade_id+' @ ₹'+r.entry_price+_mg3); setTimeout(()=>{loadDashPositions();loadTrades();}, 600); return;}catch(e){ if(a===2) alert('Network: '+e.message+' — 5s me auto retry'); await new Promise(res=>setTimeout(res,700*(a+1)));}}}
 
     function openTradeTV(sym){
         if(!sym)return;
@@ -1237,7 +1218,7 @@ let _lastOpenTrdHTML = null;
         const m=await P('/api/broker/margin-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,option_type:opt,strike:parseFloat(strike)||0,quantity:parseInt(lots)||1,transaction_type:txn,mode:mode||'paper'})});
         const nk=(m&&m.naked)||String(txn||'').toUpperCase()==='SELL';
         const nkTxt=nk?'\nNAKED SELL: unlimited loss ho sakta hai - hedge (spread) lagao!':'';
-        if(m&&m.required!=null)return 'Margin req: ₹'+Number(m.required).toLocaleString('en-IN')+' ('+(m.source==='dhan-official'?'Dhan official':'estimate')+')'+nkTxt;
+        if(m&&m.required!=null)return 'Margin req: ₹'+Number(m.required).toLocaleString('en-IN')+' ('+(m.source==='fyers-official'?'Fyers official':'estimate')+')'+nkTxt;
         return ((m&&(m.note||m.error))||'Margin: n/a')+nkTxt;
     }catch(e){return 'Margin: n/a';}}
     function rSymsRestore(){try{const saved=JSON.parse(localStorage.getItem('rSyms')||'[]');if(!saved.length)return false;const b=document.getElementById('r-syms');if(!b)return false;let hit=false;b.querySelectorAll('input').forEach(i=>{i.checked=saved.includes(i.value);if(i.checked)hit=true;});return hit;}catch(e){return false;}}
@@ -2406,6 +2387,29 @@ let _lastOpenTrdHTML = null;
             window._directBT=r;await runBacktest({direct:r});
         }catch(e){alert('Error: '+(e.message||e));}
     }
+    // Paper vs Live price parity report (Trading Center - saved strategy LIVE)
+    function showPriceParity(rows, title){
+        try{
+            let h='<div id="parityModal" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">';
+            h+='<div style="background:#fff;border-radius:10px;max-width:820px;width:94%;max-height:84vh;overflow:auto;padding:14px">';
+            h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><strong>'+(title||'Paper vs Live price check')+'</strong><button class="btn btn-sm btn-outline-dark" onclick="document.getElementById(&apos;parityModal&apos;).remove()">Close</button></div>';
+            h+='<div class="small text-muted mb-2">Paper trade aur live trade SAME contract par SAME pricer se price lete hain (broker LTP + same slippage). Neeche dono ka entry price side-by-side hai.</div>';
+            if(!rows||!rows.length){h+='<p class="text-muted small">Koi order nahi gaya.</p>';}
+            else{
+                h+='<table class="table table-sm"><thead><tr><th>#</th><th>Contract</th><th>Strike</th><th>Expiry</th><th>LTP (broker)</th><th>Paper entry</th><th>Live entry</th><th>Δ</th></tr></thead><tbody>';
+                rows.forEach(r=>{
+                    const d=(r.delta==null||r.delta===undefined)?null:Number(r.delta);
+                    const cls=d==null?'':(Math.abs(d)<=0.5?'text-success':(Math.abs(d)<=2?'text-warning':'text-danger'));
+                    const dTxt=d==null?'—':(d>0?'+':'')+d.toFixed(2);
+                    h+='<tr><td>'+r.leg+'</td><td>'+(r.sym||'')+' '+r.opt+'</td><td>'+(r.strike||'—')+'</td><td>'+(r.exp||'—')+'</td><td>₹'+(r.ltp!=null?Number(r.ltp).toFixed(2):'—')+'</td><td>'+(r.paper!=null?'₹'+Number(r.paper).toFixed(2):'— (koi paper trade nahi)')+'</td><td>₹'+(r.live!=null?Number(r.live).toFixed(2):'—')+'</td><td class="'+cls+'">'+dTxt+'</td></tr>';
+                });
+                h+='</tbody></table>';
+                h+='<div class="small text-muted">Δ = Live entry − Paper entry. ₹0.50 se zyada gap = price source me farak (ya market move).</div>';
+            }
+            h+='</div></div>';
+            const w=document.createElement('div');w.innerHTML=h;document.body.appendChild(w.firstChild);
+        }catch(e){}
+    }
     async function liveFromRobot(id){
         // REAL-MONEY live trade from a saved strategy (all legs, preview + confirm per safety)
         try{
@@ -2419,7 +2423,6 @@ let _lastOpenTrdHTML = null;
             const sl=rm.daily_stop_loss||1500, tp=rm.daily_take_profit||3000;
             const ao=_parseJsonField(s.advanced_options,{});
             const ttype=(ao.trade_mode||'intraday').toLowerCase();
-            const today=new Date().toISOString().split('T')[0];
             const previews=[];
             for(const leg of legs){
                 const opt=String(leg.option_type||'CE').toUpperCase();
@@ -2429,10 +2432,10 @@ let _lastOpenTrdHTML = null;
                 if(pv.error){alert('Live blocked: '+pv.error);return;}
                 previews.push(pv.preview||{});
             }
-            let msg='REAL MONEY ORDER ('+previews.length+' legs)\n';
-            previews.forEach(p=>{msg+='Broker: '+p.broker+' | '+p.side+' '+(p.symbol||p.security_id||'')+' Qty: '+p.quantity+'\n';});
+            let msg='REAL MONEY ORDER ('+previews.length+' legs) — '+(previews[0]&&previews[0].broker?previews[0].broker.toUpperCase():'')+'\n';
+            previews.forEach(p=>{msg+='Contract: '+(p.symbol||'')+'\n  '+p.side+' Qty '+p.quantity+' | Strike '+p.strike+' | Expiry '+p.expiry+'\n  LTP: Rs'+(p.ltp||0)+(p.price_source?' ('+p.price_source+')':'')+'\n';});
             if(!confirm(msg+'\nConfirm to SEND to exchange?'))return;
-            const sent=[];let rolledMsg='';
+            const sent=[];let rolledMsg='';const rows=[];
             for(let i=0;i<legs.length;i++){
                 const leg=legs[i];
                 const opt=String(leg.option_type||'CE').toUpperCase();
@@ -2440,11 +2443,14 @@ let _lastOpenTrdHTML = null;
                 const base={symbol:s.symbol,option_type:opt,transaction_type:txn,quantity:parseInt(leg.lots)||1,strike:0,expiry:leg.expiry||'weekly',stop_loss:sl,take_profit:tp,trade_type:ttype,strategy_id:id};
                 const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:false})});
                 if(r.error){alert('Live error (leg '+(i+1)+'): '+r.error);break;}
-                sent.push('Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id);
+                sent.push('Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id+' @ Rs'+r.entry_price);
+                rows.push({leg:i+1,sym:s.symbol,opt:opt,strike:(r.strike!=null?r.strike:previews[i].strike),exp:(r.expiry||previews[i].expiry),ltp:(r.ltp!=null?r.ltp:previews[i].ltp),live:r.entry_price,paper:(r.paper_ref?r.paper_ref.entry_price:null),delta:(r.paper_live_delta!=null?r.paper_live_delta:null)});
                 if(r.rolled_to)rolledMsg='Strategy next expiry '+r.rolled_to+' par shift hui';
             }
             if(rolledMsg)sent.push(rolledMsg);
-            alert('LIVE orders sent!\n'+sent.join('\n'));loadDashPositions();loadTrades();try{loadStrats();loadRobotSaved();}catch(e){}
+            alert('LIVE orders sent!\n'+sent.join('\n'));
+            showPriceParity(rows,'Paper vs Live price — '+(s.name||('#'+id)));
+            loadDashPositions();loadTrades();try{loadStrats();loadRobotSaved();}catch(e){}
         }catch(e){ alert('Error: '+e.message); }
     }
     async function robotPaperTrade(){ await robotStart(); document.getElementById('robot-status').innerHTML+='<br><small class="text-muted">Mode: Paper Trade (default)</small>'; }
@@ -2462,10 +2468,15 @@ let _lastOpenTrdHTML = null;
             const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:true})});
             if(pv.error){alert('Live blocked: '+pv.error);return;}
             const p=pv.preview||{};const mg=p.margin||{};const mgTxt=mg.required!=null?('Margin req: Rs'+Number(mg.required).toLocaleString('en-IN')):(mg.note||'Margin: n/a');const snapTxt=(p.expiry_note?'\nNOTE: '+p.expiry_note:'')+(p.strike_note?'\nNOTE: '+p.strike_note:'');
-            if(!confirm('REAL MONEY ORDER\nBroker: '+p.broker+'\nSymbol: '+p.symbol+'\nSide: '+p.side+'  Qty: '+p.quantity+' ('+p.lots+' lots x '+p.lot_size+')\nExpiry: '+p.expiry+'\n'+mgTxt+snapTxt+'\n\nConfirm to SEND to exchange?'))return;
+            const ltpTxt=(p.ltp?'\nLTP: Rs'+p.ltp+(p.price_source?' ('+p.price_source+')':''):'');
+            if(!confirm('REAL MONEY ORDER\nBroker: '+p.broker+'\nSymbol: '+p.symbol+'\nSide: '+p.side+'  Qty: '+p.quantity+' ('+p.lots+' lots x '+p.lot_size+')\nExpiry: '+p.expiry+ltpTxt+'\n'+mgTxt+snapTxt+'\n\nConfirm to SEND to exchange?'))return;
             const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:false})});
             if(r.error)alert('Live error: '+r.error);
-            else{alert('LIVE order sent! Broker order #'+(r.broker_order_id||'')+' | Trade #'+r.trade_id+' @ Rs'+r.entry_price);loadDashPositions();loadTrades();}
+            else{
+                alert('LIVE order sent! Broker order #'+(r.broker_order_id||'')+' | Trade #'+r.trade_id+' @ Rs'+r.entry_price);
+                showPriceParity([{leg:1,sym:(r.symbol||sym),opt:(optR||'CE'),strike:(r.strike!=null?r.strike:p.strike),exp:(r.expiry||p.expiry),ltp:(r.ltp!=null?r.ltp:p.ltp),live:r.entry_price,paper:(r.paper_ref?r.paper_ref.entry_price:null),delta:(r.paper_live_delta!=null?r.paper_live_delta:null)}],'Paper vs Live price — '+sym);
+                loadDashPositions();loadTrades();
+            }
         }catch(e){
             await robotStart();
             alert('Live endpoint error - started as Paper Trade');
@@ -2616,7 +2627,7 @@ let _lastOpenTrdHTML = null;
 
     let currentBroker='';
     let brokerData=[];
-    // ---- Static IP egress proxy (Dhan whitelisting) ----
+    // ---- Static IP egress proxy (broker IP pinning) ----
     async function loadEgress(){
         try{
             const r=await A('/api/broker/egress');
@@ -2645,26 +2656,40 @@ let _lastOpenTrdHTML = null;
         out.innerHTML='<span class="text-muted">Testing proxy...</span>';
         try{
             const r=await P('/api/broker/egress-test',{method:'POST'});
-            if(r.proxy_ok){out.innerHTML='<span class="badge bg-success">Proxy OK</span> <span class="text-muted small">Dhan/Kite tak request whitelisted IPv6 ('+(r.whitelisted_ip||'')+') par se gayi. Direct IP (Render): '+(r.direct_ip||'—')+'</span>';}
+            if(r.proxy_ok){out.innerHTML='<span class="badge bg-success">Proxy OK</span> <span class="text-muted small">Broker tak request whitelisted IPv6 ('+(r.whitelisted_ip||'')+') par se gayi. Direct IP (Render): '+(r.direct_ip||'—')+'</span>';}
             else{out.innerHTML='<span class="badge bg-danger">Proxy FAIL</span> <span class="small text-muted">'+((r.proxy_detail||r.proxy_error||'')+'').replace(/</g,'&lt;')+' — token/IP check karo ya Rotate karke naya key bharo.</span>';}
         }catch(e){out.innerHTML='<span class="badge bg-danger">Test fail:</span> <span class="small text-muted">'+e.message+'</span>';}
     }
 
     // Fallback list (mirrors backend BROKER_DEFAULTS) so Connect/OAuth buttons
     // ALWAYS render even if /api/broker/list is unreachable (server down/deploy).
-    // login_url = official broker login page (new tab) - verified Sep 2026.
+    // ORDER = PRIORITY: Fyers is the main broker (#1), Bigul next.
+    // login_url = official broker login page (new tab).
     const FALLBACK_BROKERS=[
-        {key:'dhan',name:'Dhan',icon:'bi-bank',color:'text-primary',desc:'PIN + TOTP = fully automatic (no daily login)',fields:['client_id','access_token','refresh_token','pin','totp_secret'],configured:false,config:{},login_url:'https://login.dhan.co/',token_hint:'BEST: Dhan PIN (6-digit) + TOTP Secret save karo (Dhan Web > API > Setup TOTP, ek baar) — phir token roz khud banega, login ki zaroorat nahi. Ya token paste karo.'},
-        {key:'fyers',name:'Fyers',icon:'bi-currency-exchange',color:'text-danger',desc:'App ID + Secret — OAuth login (Historical OHLC Pandas Frame drawer + LIVE orders)',fields:['app_id','secret','redirect_uri','access_token','refresh_token','pin'],configured:false,config:{},login_url:'https://myaccount.fyers.in/',token_hint:'Fyers Developer Portal (myapi.fyers.in/dashboard) se app banao. App ID format XXXXXXXXX-100 (sirf XXXXXXXXX daalo to app khud -100 jod dega) + Secret save karo, phir OAuth Login dabao. Redirect URI app settings me EXACTLY: https://ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye. PIN daal do to token 24h ke baad auto-refresh ho jayega.'},
-        {key:'bigul',name:'Bigul',icon:'bi-bullseye',color:'text-warning',desc:'Mobile se login — OTP auto-fetch, token auto-connect',fields:['client_id','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://bigul.co/login',token_hint:'Mobile number se login karo — OTP dalte hi token auto-fetch ho jayega. Ya API token paste karke Auto-connect dabao.'}
+        {key:'fyers',name:'Fyers',icon:'bi-currency-exchange',color:'text-danger',desc:'App ID + Secret — OAuth login (Historical OHLC Pandas Frame drawer + LIVE orders)',fields:['app_id','secret','redirect_uri','access_token','refresh_token','pin'],configured:false,connected:false,disconnected:false,config:{},login_url:'https://myaccount.fyers.in/',token_hint:'Fyers Developer Portal (myapi.fyers.in/dashboard) se app banao. App ID format XXXXXXXXX-100 (sirf XXXXXXXXX daalo to app khud -100 jod dega) + Secret save karo, phir OAuth Login dabao. Redirect URI app settings me EXACTLY: https://ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye. PIN daal do to token 24h ke baad auto-refresh ho jayega.'},
+        {key:'bigul',name:'Bigul',icon:'bi-bullseye',color:'text-warning',desc:'Mobile se login — OTP auto-fetch, token auto-connect',fields:['client_id','password','api_key','totp_secret'],configured:false,connected:false,disconnected:false,config:{},login_url:'https://bigul.co/login',token_hint:'Mobile number se login karo — OTP dalte hi token auto-fetch ho jayega. Ya API token paste karke Auto-connect dabao.'}
     ];
     function bigulOAuth(){ P('/api/broker/bigul-auth-url').then(r=>{ if(r.success&&r.url) window.open(r.url,'_blank'); else alert(r.error||'Bigul auth failed'); }); }
     function brokerLoginUrl(key){
         const b=(brokerData||[]).find(x=>x.key===key)||FALLBACK_BROKERS.find(x=>x.key===key);
-        return (b&&b.login_url)||({dhan:'https://login.dhan.co/',angel:'https://www.angelone.in/login/',bigul:'https://bigul.co/login'})[key]||'';
+        return (b&&b.login_url)||({fyers:'https://myaccount.fyers.in/',angel:'https://www.angelone.in/login/',bigul:'https://bigul.co/login'})[key]||'';
     }
     function brokerByKey(key){
         return (brokerData||[]).find(x=>x.key===key)||FALLBACK_BROKERS.find(x=>x.key===key);
+    }
+    // Disconnect: broker session tod do (creds delete + flag ON) - env vars se
+    // wapas revive NAHI hoga. Re-connect ke liye Setup + Connect.
+    async function disconnectBroker(key){
+        const b=brokerByKey(key);
+        const nm=(b&&b.name)||key;
+        if(!confirm(nm+' ko DISCONNECT karna hai?\n\n- Saved credentials delete ho jayenge\n- Live orders band ho jayenge (agar ye hi ek-connected broker hai)\n- Re-connect ke liye Setup + Connect dabao.'))return;
+        try{
+            const r=await P('/api/broker/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker:key})});
+            if(r&&r.success){showToast((r.message||nm+' disconnected'),'success');}
+            else{showToast('Disconnect fail: '+((r&&r.error)||''),'danger');}
+            await loadBrokers();
+            try{liveStatus();}catch(e){}
+        }catch(e){showToast('Disconnect fail: '+e.message,'danger');}
     }
     async function autoConnectAll(){
         const r=await P('/api/broker/auto-connect',{method:'POST'});
@@ -2677,17 +2702,21 @@ let _lastOpenTrdHTML = null;
         if(offline) h+='<div class="alert alert-warning w-100 mb-2">Server unreachable — showing brokers offline. Setup/Login will retry the connection. <button class="btn btn-sm btn-outline-warning ms-2" onclick="loadBrokers()">Retry</button></div>';
         list.forEach(b=>{
             const hasRealToken = b.config && b.config.access_token && !String(b.config.access_token).startsWith('SIM-') && !String(b.config.access_token).startsWith('ANG-') && String(b.config.access_token).length>10;
-            const isConnected = b.configured && hasRealToken;
-            const statusH=isConnected?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Connected</span>':(b.configured?'<span class="badge" style="background:#fff3cd;color:#664d03"><i class="bi bi-exclamation-circle"></i> Configured - Hit Connect</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>');
-            h+=`<div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
+            const isConnected = (b.connected===true) || (b.configured && hasRealToken);
+            const isDisc = b.disconnected===true;
+            const statusH=isConnected?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Connected</span>':(isDisc?'<span class="badge" style="background:#f8d7da;color:#842029"><i class="bi bi-power"></i> Disconnected</span>':(b.configured?'<span class="badge" style="background:#fff3cd;color:#664d03"><i class="bi bi-exclamation-circle"></i> Configured - Hit Connect</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>'));
+            const mainTag = b.key==='fyers'?' <span class="badge bg-danger" style="font-size:10px">MAIN BROKER</span>':'';
+            const border = b.key==='fyers'?'border:2px solid #dc3545;':'';
+            h+=`<div class="col" style="min-width:240px"><div class="card" style="${border}"><div class="card-body text-center" style="padding:20px">
                 <div style="margin-bottom:12px"><i class="bi ${b.icon} ${b.color}" style="font-size:36px"></i></div>
-                <h6 class="fw-bold">${b.name}</h6><p class="text-muted small">${b.desc}</p>
+                <h6 class="fw-bold">${b.name}${mainTag}</h6><p class="text-muted small">${b.desc}</p>
                 <div style="margin-bottom:10px">${statusH}</div>
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                     <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('${b.key}')"><i class="bi bi-gear"></i> Setup</button>
                     <button class="btn btn-sm btn-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
-                    ${b.key==='dhan'?`<button class="btn btn-sm btn-primary" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='angel'?`<button class="btn btn-sm btn-danger" onclick="angelOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='bigul'?`<button class="btn btn-sm btn-warning" onclick="bigulOAuth()"><i class="bi bi-phone"></i> Mobile Login</button>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
+                    ${b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='bigul'?`<button class="btn btn-sm btn-warning" onclick="bigulOAuth()"><i class="bi bi-phone"></i> Mobile Login</button>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
                     <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('${b.key}')"><i class="bi bi-wallet2"></i> Account</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="disconnectBroker('${b.key}')"><i class="bi bi-power"></i> Disconnect</button>
                 </div>
             </div></div></div>`;
         });
@@ -2783,11 +2812,6 @@ let _lastOpenTrdHTML = null;
         }catch(e){showToast('Connect failed (server unreachable?): '+e.message, 'danger'); await loadBrokers();}
     }
 
-     async function dhanOAuth(){
-        const r=await A('/api/broker/dhan-auth-url');
-        if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; showToast('Dhan login page opened — login karke Profile se Access Token copy karo, phir site pe wapas aao — Auto-callback me save ho jaega.', 'info'); return;}
-        showToast('Dhan Setup pe jaake Client ID paste karo — OAuth Login auto-connect karega.', 'info');
-    }
     async function angelOAuth(){
         const r=await A('/api/broker/angel-auth-url');
         if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; showToast('Angel One login page opened — login karke SmartAPI se Client Code + API Key + TOTP copy karo.', 'info'); return;}
@@ -2800,8 +2824,8 @@ let _lastOpenTrdHTML = null;
             showToast(r.error||'Fyers Setup pe jaake App ID + Secret save karo, phir OAuth Login dabao.', 'info');
         }catch(e){showToast('Fyers OAuth failed: '+e.message, 'danger');}
     }
-    // Auto-capture callback tokens
-    setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);const p='/api/broker/dhan-callback';const ap='/api/broker/angel-callback';if(q.get('access_token')){P(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:q.get('access_token'),client_id:q.get('client_id')||''})}).then(r=>{if(r.success){showToast('Dhan token auto-saved!', 'success');loadBrokers();}else{showToast('Dhan callback failed: '+r.error, 'danger');}}).catch(()=>{});}if(q.get('code')&&window.location.pathname.includes('angel-callback')){P(ap,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:q.get('code'),client_code:q.get('client_code')||''})}).then(r=>{if(r.success){showToast('Angel token auto-saved!', 'success');loadBrokers();}else{showToast('Angel callback failed', 'danger');}}).catch(()=>{});}document.history.replaceState({},document.title,window.location.pathname);}catch(e){}},800);
+    // Auto-capture callback tokens (Angel)
+    setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);const ap='/api/broker/angel-callback';if(q.get('code')&&window.location.pathname.includes('angel-callback')){P(ap,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:q.get('code'),client_code:q.get('client_code')||''})}).then(r=>{if(r.success){showToast('Angel token auto-saved!', 'success');loadBrokers();}else{showToast('Angel callback failed', 'danger');}}).catch(()=>{});}document.history.replaceState({},document.title,window.location.pathname);}catch(e){}},800);
 
     async function autoConnectAll(){
         const r=await A('/api/broker/auto-connect',{method:'POST'});
@@ -3294,8 +3318,8 @@ def run(data):
     }catch(e){el.textContent='UI ?';}})();}catch(e){}
 
     const BROKER_FIELD_LABELS={
-    dhan:{client_id:'Client ID',access_token:'Access Token',refresh_token:'Refresh Token',pin:'Dhan PIN (6-digit, auto-login)',totp_secret:'TOTP Secret (one-time, then fully automatic)'},
     fyers:{app_id:'App ID (XXXXXXXXX-100)',secret:'Secret Key',redirect_uri:'Redirect URI (https://ratrade-iwi2.onrender.com/api/broker/fyers-callback)',access_token:'Access Token (auto)',refresh_token:'Refresh Token (auto)',pin:'Fyers Trading PIN (4-digit, auto-refresh)'},
+    bigul:{client_id:'Client ID',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'},
     angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
     };
 

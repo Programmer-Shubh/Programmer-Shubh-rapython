@@ -337,9 +337,9 @@ def get_live_chain(symbol: str, expiry: str = ""):
         # Source label: broker token-quote active when a real token is saved
         try:
             from core.services.contract_pricer import _broker_cfg as _bcfg, _real_token as _rtok
-            _dc = _bcfg("dhan")
+            _fc = _bcfg("fyers")
             _ac = _bcfg("angel")
-            if _rtok(_dc.get("access_token", "")) or _rtok(_ac.get("access_token", "") or _ac.get("jwt", "")):
+            if _rtok(_fc.get("access_token", "")) or _rtok(_ac.get("access_token", "") or _ac.get("jwt", "")):
                 src = "broker"
         except Exception:
             pass
@@ -398,15 +398,16 @@ def ltp_diag(symbol: str = "NIFTY", strike: float = 0.0, opt: str = "CE", expiry
         out["tiers"]["nse_chain"] = {"ltp": _r, "sec": round(_t.time()-_t0, 1)}
     except Exception as e:
         out["tiers"]["nse_chain"] = {"err": str(e)[:120], "sec": round(_t.time()-_t0, 1)}
-    # Tier: Dhan feed tick
+    # Tier: Fyers broker quote (exact contract LTP - same tier paper+live use)
     try:
         _t1 = _t.time()
-        from core.services.contract_pricer import _dhan_master_tokens, _dhan_feed_ltps
-        _m = _dhan_master_tokens(sym, expiry, [(strike, opt)])
-        _fl = _dhan_feed_ltps(sym, _m) if _m else {}
-        out["tiers"]["dhan_feed"] = {"tokens": _m, "ltp": _fl, "sec": round(_t.time()-_t1, 1)}
+        from core.services.contract_pricer import _fyers_chain_ltp, _fyers_quote_ltp
+        _fl = _fyers_chain_ltp(sym, expiry, [(strike, opt)])
+        if not _fl:
+            _fl = _fyers_quote_ltp(sym, expiry, [(strike, opt)])
+        out["tiers"]["fyers_quote"] = {"ltp": _fl, "sec": round(_t.time()-_t1, 1)}
     except Exception as e:
-        out["tiers"]["dhan_feed"] = {"err": str(e)[:120]}
+        out["tiers"]["fyers_quote"] = {"err": str(e)[:120]}
     # Tier: full pricer result
     try:
         _t2 = _t.time()
@@ -459,25 +460,33 @@ def place_trade(req: TradeRequest):
                         _rolled_to = _roll(req.strategy_id) or ""
             except Exception:
                 pass
-        # Expiry normalize: dashboard forms send today/''/'Live' - a same-day
-        # expiry collapses model DTE to 1 while the chain shows weekly, so
-        # entry price never matches chain LTP. Normalize to the live weekly
-        # expiry for pricing AND storage. Shared helper (contract_pricer.
-        # resolve_weekly_expiry) = scanner suggestion wali SAME expiry, taaki
-        # suggestion premium == order premium (floor-error khatm).
+        # Expiry normalize: dashboard forms send today/''/'Live'/'weekly' - a
+        # same-day expiry collapses model DTE to 1 while the chain shows
+        # weekly, so entry price never matches chain LTP. Normalize to the
+        # live weekly expiry for pricing AND storage. Shared helper
+        # (contract_pricer.resolve_expiry_hint) = the SAME date the live
+        # order is routed to (broker's live expiry) - so a paper trade and a
+        # live trade of the same strategy hit the SAME contract at the SAME
+        # price.
         try:
             import datetime as _nx
             _ist_t = (_nx.datetime.utcnow() + _nx.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
             _exp = str(req.expiry or "").strip()[:10]
-            if (not _exp) or (_exp.lower() in ("live", "live data")) or (_exp < _ist_t and "-" in _exp) or (_exp == _ist_t):
+            _needs = (not _exp) or (_exp.lower() in ("live", "live data", "weekly", "monthly", "today")) \
+                or (_exp < _ist_t and "-" in _exp) or (_exp == _ist_t)
+            if _needs:
                 try:
-                    from core.services.contract_pricer import resolve_weekly_expiry as _rwe
-                    _weekly = _rwe(req.symbol) or ""
+                    from core.services.contract_pricer import resolve_expiry_hint as _reh
+                    req.expiry = _reh(req.symbol, req.expiry or "") or ""
                 except Exception:
-                    _weekly = ""
-                if not _weekly:
-                    _weekly = (_nx.datetime.strptime(_ist_t, "%Y-%m-%d") + _nx.timedelta(days=7)).strftime("%Y-%m-%d")
-                req.expiry = _weekly
+                    try:
+                        from core.services.contract_pricer import resolve_weekly_expiry as _rwe
+                        _weekly = _rwe(req.symbol) or ""
+                    except Exception:
+                        _weekly = ""
+                    if not _weekly:
+                        _weekly = (_nx.datetime.strptime(_ist_t, "%Y-%m-%d") + _nx.timedelta(days=7)).strftime("%Y-%m-%d")
+                    req.expiry = _weekly
         except Exception:
             pass
         # Mandatory SL/Target validation
@@ -599,9 +608,9 @@ def place_trade(req: TradeRequest):
             _ist = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
         except Exception:
             _ist = ""
-        # Aaj ka trade -> REAL broker LTP (feed/quote) sabse pehle, DB
-        # bhavcopy uske baad (bhavcopy EOD par update hoti hai, isliye
-        # paper entry aur Dhan LTP alag hote the).
+        # Aaj ka trade -> REAL broker LTP sabse pehle, DB bhavcopy uske
+        # baad (bhavcopy EOD par update hoti hai) - paper entry aur live
+        # entry dono SAME pricer se price lete hain.
         _today = bool(req.date) and str(req.date)[:10] == _ist
         if _today or premium <= 0:
             try:
@@ -733,6 +742,9 @@ def place_trade(req: TradeRequest):
                 return {"error": _merr}
         except Exception:
             pass
+        # Shared slippage model: paper entry = LTP + slippage, exactly like the
+        # LIVE path (contract_pricer.entry_price) - so paper and live of the
+        # same contract land on the same price.
         adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
         lot_size = get_lot_size(req.symbol)
         costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
@@ -758,7 +770,9 @@ def place_trade(req: TradeRequest):
             }, atomic_dedup=True)
         except ValueError as _de:
             return {"error": str(_de)[:200]}
-        _resp = {"trade_id": trade_id, "entry_price": round(adj_premium, 2), "costs": costs}
+        _resp = {"trade_id": trade_id, "entry_price": round(adj_premium, 2), "costs": costs,
+                 "ltp": round(float(premium), 2), "price_source": "broker-quote" if premium else "model",
+                 "expiry": req.expiry, "strike": req.strike}
         try:
             _tqty = int(req.quantity or 1) * int(lot_size or 0)
             if str(req.transaction_type or "").upper() == "BUY":

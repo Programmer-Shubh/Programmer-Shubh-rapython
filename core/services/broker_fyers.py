@@ -318,6 +318,11 @@ class FyersV3:
     async def get_positions(self) -> dict:
         return await self._request("GET", "/api/v3/positions")
 
+    async def get_order_book(self) -> dict:
+        """Order book (live orders + fills). Used to verify the real fill
+        price after placing an order (averagePrice)."""
+        return await self._request("GET", "/api/v3/orders")
+
     async def get_holdings(self) -> dict:
         return await self._request("GET", "/api/v3/holdings")
 

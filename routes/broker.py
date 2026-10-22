@@ -5,11 +5,10 @@ import json
 import asyncio
 from core.models.database import Database
 from core.services.broker_fyers import FyersV3
-from core.services.broker_dhan import DhanHQ
 
 router = APIRouter()
 
-# ---------------- Static-IP egress proxy (Dhan whitelisting) ----------------
+# ---------------- Static-IP egress proxy (broker IP pinning) ----------------
 
 class EgressConfig(BaseModel):
     enabled: bool = True
@@ -93,13 +92,20 @@ async def egress_test():
 
 
 BROKER_DEFAULTS = {
-    "dhan": {"name": "Dhan", "icon": "bi-bank", "color": "text-primary", "fields": ["client_id", "access_token", "refresh_token", "pin", "totp_secret"], "desc": "Client ID + token (auto) / PIN + TOTP = fully automatic login"},
     "fyers": {"name": "Fyers", "icon": "bi-currency-exchange", "color": "text-danger", "fields": ["app_id", "secret", "redirect_uri", "access_token", "refresh_token", "pin"], "desc": "App ID + Secret - OAuth login (Historical OHLC + LIVE orders)"},
     "bigul": {"name": "Bigul", "icon": "bi-bullseye", "color": "text-warning", "fields": ["client_id", "password", "api_key", "totp_secret"], "desc": "Mobile se login — OTP auto-fetch, token auto-connect"},
 }
 
+# API-only brokers (UI me nahi dikhte) - direct API calls ke liye.
+BROKER_INTERNAL = {
+    "angel": {"name": "Angel One", "icon": "bi-bullseye", "color": "text-info", "fields": ["api_key", "client_code", "password", "totp_secret"], "desc": "SmartAPI"},
+    "shoonya": {"name": "Shoonya", "icon": "bi-bullseye", "color": "text-info", "fields": ["uid", "pwd", "vc", "apikey", "secret"], "desc": "Noren"},
+}
+
+# Live-order priority: FYERS is the MAIN broker (#1), Bigul next.
+BROKER_ORDER = ("fyers", "bigul", "angel", "shoonya")
+
 BROKER_FIELD_LABELS = {
-    "dhan": {"client_id": "Client ID", "access_token": "Access Token", "refresh_token": "Refresh Token", "pin": "Dhan PIN (6-digit, for auto-login)", "totp_secret": "TOTP Secret (one-time setup, then fully automatic)"},
     "fyers": {"app_id": "App ID (MyAPI dashboard se, format XXXXXXXXX-100)", "secret": "Secret Key", "redirect_uri": "Redirect URI (Wahan sirf ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye)", "access_token": "Access Token (auto-fill ka rahega)", "refresh_token": "Refresh Token (auto-fill ka rahega)", "pin": "Fyers Trading PIN (4-digit, token auto-refresh ke liye)"},
     "bigul": {"client_id": "Client ID", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
 }
@@ -139,9 +145,10 @@ class LiveToggleRequest(BaseModel):
 
 
 def _auto_live_broker() -> str:
-    """Real broker connected -> LIVE stays ON by itself (no toggle needed)."""
+    """Real broker connected -> LIVE stays ON by itself (no toggle needed).
+    Priority: Fyers (main broker) first, then Bigul."""
     try:
-        for b in ("dhan", "fyers", "bigul"):
+        for b in BROKER_ORDER:
             if _real_token(b):
                 return b
     except Exception:
@@ -166,11 +173,54 @@ def _real_token(broker: str) -> bool:
     return bool(tok) and not str(tok).startswith(("SIM-", "ANG-"))
 
 
+def _is_disconnected(broker: str) -> bool:
+    """User ne 'Disconnect' daba diya -> ye broker ab use nahi hoga, chahe
+    env vars me creds maujood hon (env seed se wapas revive nahi hona chahiye)."""
+    try:
+        db = Database.get_instance()
+        row = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key=?",
+                           [f"broker_disconnected_{broker}"])
+        return str((row or {}).get("setting_value") or "") == "1"
+    except Exception:
+        return False
+
+
+def _set_disconnected(broker: str, flag: bool):
+    """Persist the disconnect flag (1 = disconnected, 0 = connected again)."""
+    db = Database.get_instance()
+    key = f"broker_disconnected_{broker}"
+    try:
+        n = db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key=?",
+                       ["1" if flag else "0", key])
+    except Exception:
+        n = 0
+    if not n:
+        try:
+            row = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key=?", [key])
+            if row:
+                db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key=?",
+                           ["1" if flag else "0", key])
+            else:
+                db.execute("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                           [key, "1" if flag else "0"])
+        except Exception:
+            pass
+
+
+def _clear_broker_row(broker: str):
+    """Delete the stored credentials row for a broker."""
+    try:
+        db = Database.get_instance()
+        db.execute("DELETE FROM settings WHERE setting_key=?", [f"broker_{broker}"])
+    except Exception:
+        pass
+
+
 def _resolve_expiry(symbol: str, hint: str) -> str:
     """Return YYYY-MM-DD expiry: YYYY-MM-DD hint as-is; Weekly -> next expiry
     weekday (Tue for NSE F&O, Thu for SENSEX); Monthly (or stocks) -> last such
     weekday of month. (NSE moved expiries: NIFTY Tue, BANKNIFTY/FINNIFTY monthly
-    last-Tue - verified against Dhan scrip master Sep 2026.)"""
+    last-Tue - verified against the broker scrip master Sep 2026.)"""
     import datetime as _dt
     import calendar as _cal
     hint = str(hint or "").strip()
@@ -235,11 +285,28 @@ def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str)
 
 @router.get("/live-status")
 def live_status():
-    real = [b for b in ("fyers", "dhan") if _real_token(b)]
+    real = [b for b in BROKER_ORDER if _real_token(b)]
     auto = _auto_live_broker()
     return {"enabled": _live_enabled(), "real_brokers": real, "auto": bool(auto),
             "auto_broker": auto,
-            "note": "Fyers/Dhan/Angel/Shoonya live supported. Dry-run first to verify broker symbol/token."}
+            "note": "Fyers is the main broker (priority #1). Dry-run first to verify symbol/token."}
+
+
+@router.post("/disconnect")
+def disconnect_broker(req: ConnectRequest):
+    """Broker ka session tod do: stored creds delete + disconnect flag ON
+    (env vars se wapas revive nahi hoga). Re-enable ke liye Setup/Connect."""
+    broker = (req.broker or "").lower()
+    if broker not in BROKER_DEFAULTS and broker not in BROKER_INTERNAL:
+        return {"success": False, "error": f"Unknown broker '{req.broker}'"}
+    had = bool(_get_config(broker))
+    _clear_broker_row(broker)
+    _set_disconnected(broker, True)
+    name = (BROKER_DEFAULTS.get(broker) or BROKER_INTERNAL.get(broker) or {}).get("name", broker)
+    return {"success": True, "broker": broker, "disconnected": True,
+            "had_session": had,
+            "message": f"{name} disconnected. LIVE band (agar koi aur broker connected nahi hai). "
+                       f"Re-connect ke liye Setup + Connect dabao."}
 
 
 @router.post("/live-toggle")
@@ -275,7 +342,7 @@ def live_toggle(req: LiveToggleRequest):
 def _env_config(broker: str) -> dict:
     """Broker credentials from environment variables (survive Render redeploys
     + opencode edits, unlike the ephemeral SQLite DB which wipes on deploy).
-    Naming: RATRADE_<BROKER>_<FIELD> e.g. RATRADE_DHAN_CLIENT_ID.
+    Naming: RATRADE_<BROKER>_<FIELD> e.g. RATRADE_FYERS_APP_ID.
     Also accepted: <BROKER>_<FIELD> (FYERS_APP_ID) and per-field aliases
     (RATRADE_FYERS_SECRET_ID / _SECRET_KEY / _APP_SECRET -> 'secret')."""
     import os
@@ -336,6 +403,10 @@ _ENV_PRIORITY_FIELDS = {
 
 
 def _get_config(broker: str) -> dict:
+    # Disconnected broker: koi bhi cred (DB ya env) use nahi hoti - jab tak
+    # user dobara Setup/Connect na kare.
+    if _is_disconnected(broker):
+        return {}
     db = Database.get_instance()
     cfg = {}
     row = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key=?", [f"broker_{broker}"])
@@ -366,6 +437,12 @@ def _get_config(broker: str) -> dict:
 
 
 def _save_config(broker: str, config: dict):
+    # Naya credential save = broker dobara connected (disconnect flag hatao).
+    try:
+        if _is_disconnected(broker):
+            _set_disconnected(broker, False)
+    except Exception:
+        pass
     db = Database.get_instance()
     try:
         config = {k: (v.strip() if isinstance(v, str) else v) for k, v in (config or {}).items()}
@@ -395,38 +472,6 @@ def _fyers_client(config: dict):
 
 def _is_configured(broker: str) -> bool:
     return bool(_get_config(broker))
-
-
-@router.get("/dhan-callback")
-async def dhan_callback(request: Request):
-    """Auto-capture Dhan access_token after login via ?code= or ?access_token= redirect.
-    User logs in at login.dhan.co → copies token → returns to this URL with token."""
-    from fastapi.responses import HTMLResponse
-    try:
-        qp = dict(request.query_params)
-    except Exception:
-        qp = {}
-    access_token = (qp.get("access_token") or "").strip()
-    client_id = (qp.get("client_id") or "").strip()
-    refresh_token = (qp.get("refresh_token") or "").strip()
-    if not access_token:
-        return HTMLResponse("<h3 style='color:red'>No access_token received.</h3><p>Paste the token from Dhan dashboard <a href='/' style='color:#0d6efd'>back to RaTrade</a> and setup.</p>", status_code=400)
-    config = _get_config("dhan")
-    config["access_token"] = access_token
-    if client_id: config["client_id"] = client_id
-    if refresh_token: config["refresh_token"] = refresh_token
-    _save_config("dhan", config)
-    return HTMLResponse("<h3 style='color:green'>Dhan connected! Token auto-saved.</h3><p>You can close this tab and return to RaTrade → Brokers. Token auto-validates on every trade.</p>")
-
-
-@router.get("/dhan-auth-url")
-def dhan_auth_url():
-    """Returns the Dhan login URL for OAuth flow."""
-    config = _get_config("dhan")
-    if not config or not config.get("client_id"):
-        return {"success": False, "error": "Dhan not configured. Set Client ID first."}
-    # Dhan uses direct API key auth — just open login page
-    return {"success": True, "url": "https://login.dhan.co/"}
 
 
 @router.get("/bigul-auth-url")
@@ -490,100 +535,6 @@ async def angel_callback(request: Request):
         return HTMLResponse(f"<h3 style='color:red'>Angel One login failed.</h3><p>{str(e)[:200]}</p>", status_code=400)
 
 
-@router.get("/dhan-feed-check")
-async def dhan_feed_check(symbol: str = "FINNIFTY"):
-    """Diagnose Dhan marketfeed (no secrets exposed): tries quote + LTP shapes,
-    returns which worked + spot. Helps debug Render IP blocks on weekends."""
-    from core.services.broker_dhan_live import DhanLive, UNDERLYING
-    out = {"symbol": symbol.upper(), "quote": {}, "ltp": {}}
-    try:
-        cfg = _get_config("dhan") or {}
-        if not cfg.get("access_token"):
-            return {"error": "Dhan not connected"}
-        dl = DhanLive(client_id=cfg.get("client_id", ""), access_token=cfg.get("access_token", ""))
-        info = UNDERLYING.get(symbol.upper(), (261, "IDX_I"))
-        scrip, seg = info
-        for name, path in (("quote", "/marketfeed/quote"), ("ltp", "/marketfeed/ltp")):
-            try:
-                res = await dl._request("POST", path, data={seg: [scrip]})
-                data = res.get("data") or {}
-                keys: list = []
-                try:
-                    import json as _js
-                    keys = list(data.keys()) if isinstance(data, dict) else [type(data).__name__]
-                except Exception:
-                    pass
-                out[name] = {"success": res.get("success"), "keys": keys[:6],
-                             "error": str(res.get("error", ""))[:150],
-                             "spot": await dl.get_index_spot(symbol) if name == "quote" else 0}
-            except Exception as e:
-                out[name] = {"error": str(e)[:150]}
-    except Exception as e:
-        out["error"] = str(e)[:200]
-    return out
-
-
-@router.get("/dhan-feed")
-async def dhan_feed_status():
-    """WebSocket streaming status: connection, subscriptions, tick freshness
-    (no secrets exposed). Start the feed with ?start=1 when token is saved."""
-    try:
-        from core.services.dhan_feed import ensure_feed_from_config, get_feed
-        from core.services.broker_dhan_live import UNDERLYING
-        import time as _tt
-        feed = ensure_feed_from_config() or get_feed()
-        try:
-            for _s, (_sc, _sg) in UNDERLYING.items():
-                feed.subscribe(_sg, str(_sc), 15)
-        except Exception:
-            pass
-        st = feed.state()
-        try:
-            from core.services import tick_engine as _te
-            st["tick_engine"] = _te.state()
-            st["tick_signals"] = _te.get_signals()
-        except Exception:
-            pass
-        try:
-            from core.services import token_keeper as _tk
-            st["token_keeper"] = _tk.status()
-        except Exception:
-            pass
-        try:
-            _ticks = []
-            for (seg, secid), t in list(feed._ticks.items())[:12]:
-                _ticks.append({"seg": seg, "secid": secid, "ltp": t.get("ltp"),
-                               "age_s": round(_tt.time() - t.get("ts", 0), 1)})
-            st["sample_ticks"] = _ticks
-        except Exception:
-            pass
-        return st
-    except Exception as e:
-        return {"running": False, "connected": False, "error": str(e)[:150]}
-
-
-@router.post("/dhan-auto-login")
-async def dhan_auto_login_now():
-    """Force one keeper pass now: validate -> renew -> PIN+TOTP generate.
-    Returns exactly what happened (no manual login when creds are saved)."""
-    try:
-        from core.services import token_keeper as _tk
-        return {"success": True, **_tk.sync_once()}
-    except Exception as e:
-        return {"success": False, "error": str(e)[:200]}
-
-
-@router.post("/dhan-callback")
-async def dhan_callback_post(req: dict):
-    """POST version for frontend P() call — saves Dhan token directly."""
-    config = _get_config("dhan")
-    if isinstance(req, dict):
-        if req.get("access_token"): config["access_token"] = req["access_token"]
-        if req.get("code"): config["access_token"] = req["code"]
-    _save_config("dhan", config)
-    return {"success": True, "message": "Dhan token saved"}
-
-
 @router.post("/angel-callback")
 async def angel_callback_post(req: dict):
     """POST version for frontend P() call — saves Angel token directly."""
@@ -597,32 +548,16 @@ async def angel_callback_post(req: dict):
 
 @router.post("/auto-connect")
 async def auto_connect_brokers():
-    """Auto-connect all configured brokers (Dhan + Fyers + Bigul) by validating
+    """Auto-connect all configured brokers (Fyers + Bigul) by validating
     tokens live. If a token is invalid, attempts refresh. Returns results."""
     results = []
-    for key in ("dhan", "fyers", "bigul"):
+    for key in ("fyers", "bigul"):
         config = _get_config(key)
         if not config:
             results.append({"broker": key, "status": "not_configured"})
             continue
         try:
-            if key == "dhan":
-                from core.services.broker_dhan_live import DhanLive
-                dl = DhanLive(client_id=config.get("client_id",""), access_token=config.get("access_token",""))
-                v = await dl.validate()
-                if v.get("success"):
-                    results.append({"broker": key, "status": "connected"})
-                elif "807" in str(v.get("raw","")):
-                    rr = await dl.renew_token()
-                    if rr.get("success"):
-                        config["access_token"] = rr["access_token"]
-                        _save_config("dhan", config)
-                        results.append({"broker": key, "status": "renewed"})
-                    else:
-                        results.append({"broker": key, "status": "needs_login"})
-                else:
-                    results.append({"broker": key, "status": "failed", "error": str(v.get("error",""))})
-            elif key == "fyers":
+            if key == "fyers":
                 if not (config.get("app_id") and config.get("secret")):
                     results.append({"broker": key, "status": "failed",
                                     "error": "App ID + Secret missing (Setup ya env)"})
@@ -683,21 +618,21 @@ async def auto_connect_brokers():
 def broker_config_get():
     """Get current broker config status for auto-connect."""
     configs = {}
-    for key in ("dhan", "fyers", "bigul"):
+    for key in BROKER_DEFAULTS:
         c = _get_config(key)
-        configs[key] = {"configured": bool(c), "has_token": bool(c.get("access_token",""))}
+        configs[key] = {"configured": bool(c), "has_token": bool(c.get("access_token","")),
+                        "disconnected": _is_disconnected(key)}
     return {"success": True, "configs": configs}
 
 
 @router.get("/list")
 def list_brokers():
     brokers = []
-    # Dhan, Fyers, Bigul shown on frontend (Angel One removed per user request)
-    for key in ("dhan", "fyers", "bigul"):
-        info = BROKER_DEFAULTS.get(key)
-        if not info: continue
+    # Order = priority: Fyers (#1, main broker) then Bigul.
+    for key, info in BROKER_DEFAULTS.items():
         config = _get_config(key)
         configured = bool(config)
+        disconnected = _is_disconnected(key)
         try:
             from_env = sorted(_env_config(key).keys())
         except Exception:
@@ -710,6 +645,8 @@ def list_brokers():
             "desc": info["desc"],
             "fields": info["fields"],
             "configured": configured,
+            "connected": bool(configured and _real_token(key)),
+            "disconnected": disconnected,
             "config": config,
             "from_env": from_env,
         })
@@ -718,7 +655,7 @@ def list_brokers():
 
 @router.post("/save-config")
 def save_config(req: BrokerConfig):
-    if req.broker not in BROKER_DEFAULTS:
+    if req.broker not in BROKER_DEFAULTS and req.broker not in BROKER_INTERNAL:
         return {"success": False, "error": "Invalid broker"}
     config = req.config
     _save_config(req.broker, config)
@@ -861,7 +798,7 @@ async def fyers_history(symbol: str = "NSE:NIFTY50-INDEX",
 
 @router.post("/connect")
 async def connect_broker(req: ConnectRequest):
-    if req.broker not in BROKER_DEFAULTS:
+    if req.broker not in BROKER_DEFAULTS and req.broker not in BROKER_INTERNAL:
         return {"success": False, "error": "Invalid broker"}
     config = _get_config(req.broker)
     if not config:
@@ -908,29 +845,6 @@ async def connect_broker(req: ConnectRequest):
             return {"success": False, "error": f"Token refresh failed: {str(result.get('error',''))[:150]}"}
         return {"success": False, "error": "Fyers needs OAuth login. Click 'OAuth Login'."}
 
-    if req.broker == "dhan":
-        if not config.get("access_token") or not config.get("client_id"):
-            return {"success": False, "error": "Dhan needs Client ID + Access Token. Paste both in Setup."}
-        # REAL validation: fake "connected" is what caused confusion earlier.
-        v = {"success": False, "error": "Dhan check did not run"}
-        try:
-            from core.services.broker_dhan_live import DhanLive
-            dl = DhanLive(client_id=config.get("client_id", ""),
-                          access_token=config.get("access_token", ""))
-            v = await dl.validate()
-            if not v.get("success") and "807" in str(v.get("raw", "")):
-                # Expired: one renew attempt with the stored token before giving up
-                rr = await dl.renew_token()
-                if rr.get("success") and rr.get("access_token"):
-                    config["access_token"] = rr["access_token"]
-                    _save_config("dhan", config)
-                    return {"success": True, "message": "Dhan connected! Expired token auto-renewed (no manual login)."}
-        except Exception as e:
-            return {"success": False, "error": f"Dhan check failed: {str(e)[:150]}"}
-        if v.get("success"):
-            return {"success": True, "message": "Dhan connected! Token verified live with Dhan."}
-        return {"success": False, "error": v.get("error")}
-
     if req.broker == "shoonya":
         # REAL Noren QuickAuth login (TOTP auto-generated from stored secret).
         # No simulated tokens: success stores the real session token.
@@ -970,80 +884,10 @@ async def connect_broker(req: ConnectRequest):
     return {"success": True, "message": f"{req.broker} connected (demo mode)"}
 
 
-@router.post("/auto-connect")
-async def auto_connect_all():
-    """Auto-connect Dhan+Angel+Bigul."""
-    results = []
-    for key in ("dhan", "angel", "bigul"):
-        config = _get_config(key)
-        if not config:
-            results.append({"broker": key, "status": "not_configured"})
-            continue
-        try:
-            if key == "dhan":
-                from core.services.broker_dhan_live import DhanLive
-                dl = DhanLive(client_id=config.get("client_id",""), access_token=config.get("access_token",""))
-                v = await dl.validate()
-                if v.get("success"):
-                    results.append({"broker": key, "status": "connected"})
-                elif "807" in str(v.get("raw","")):
-                    rr = await dl.renew_token()
-                    if rr.get("success"):
-                        config["access_token"] = rr["access_token"]
-                        _save_config("dhan", config)
-                        results.append({"broker": key, "status": "renewed"})
-                    else:
-                        results.append({"broker": key, "status": "needs_login"})
-                else:
-                    results.append({"broker": key, "status": "failed", "error": str(v.get("error",""))})
-            elif key == "angel":
-                from core.services.broker_angel_live import AngelLive
-                # OAuth mode: access_token exists but no password/totp
-                if config.get("access_token") and not config.get("password"):
-                    an = AngelLive(api_key=config.get("api_key",""), client_code=config.get("client_code",""), password="", totp_secret="")
-                    result = await an.login_by_oauth(config.get("access_token",""))
-                    if result.get("success"):
-                        config["access_token"] = an.jwt
-                        _save_config("angel", config)
-                        results.append({"broker": key, "status": "connected"})
-                    else:
-                        results.append({"broker": key, "status": "needs_login"})
-                else:
-                    an = AngelLive(
-                        api_key=config.get("api_key",""),
-                        client_code=config.get("client_code",""),
-                        password=config.get("password",""),
-                        totp_secret=config.get("totp_secret","")
-                    )
-                    result = await an.login()
-                    if result.get("success"):
-                        config["access_token"] = an.jwt
-                        config["refresh_token"] = an.refresh_token
-                        config["feed_token"] = an.feed_token
-                        _save_config("angel", config)
-                        results.append({"broker": key, "status": "connected"})
-                    else:
-                        results.append({"broker": key, "status": "failed", "error": result.get("error","")})
-            elif key == "bigul":
-                # Bigul uses same Angel-like API (client_id + password + api_key + totp)
-                from core.services.broker_angel_live import AngelLive
-                an = AngelLive(api_key=config.get("api_key",""), client_code=config.get("client_id",""), password=config.get("password",""), totp_secret=config.get("totp_secret",""))
-                result = await an.login()
-                if result.get("success"):
-                    config["access_token"] = an.jwt
-                    _save_config("bigul", config)
-                    results.append({"broker": key, "status": "connected"})
-                else:
-                    results.append({"broker": key, "status": "failed", "error": result.get("error","")})
-        except Exception as e:
-            results.append({"broker": key, "status": "error", "error": str(e)[:150]})
-    return {"success": True, "results": results}
-
-
 @router.post("/refresh-tokens")
 async def refresh_tokens():
     results = {}
-    for key in ("dhan", "fyers", "angel", "bigul"):
+    for key in BROKER_ORDER:
         config = _get_config(key)
         if not config:
             results[key] = {"success": False, "error": "Not configured"}
@@ -1062,22 +906,6 @@ async def refresh_tokens():
                 results[key] = {"success": True, "message": "Token refreshed"}
             else:
                 results[key] = {"success": False, "error": result["error"]}
-        elif key == "dhan":
-            # Renew with ACTIVE token first (no manual login); fall back to cached.
-            try:
-                from core.services.broker_dhan_live import DhanLive
-                dl = DhanLive(client_id=config.get("client_id", ""),
-                              access_token=config.get("access_token", ""))
-                rr = await dl.renew_token()
-                if rr.get("success") and rr.get("access_token"):
-                    config["access_token"] = rr["access_token"]
-                    _save_config("dhan", config)
-                    results[key] = {"success": True, "message": "Token renewed (no manual login)"}
-                else:
-                    results[key] = {"success": bool(config.get("access_token")),
-                                    "message": "Renew failed — manual login needed" if not config.get("access_token") else "Cached token kept (renew failed: %s)" % str(rr.get("error", ""))[:120]}
-            except Exception as e:
-                results[key] = {"success": bool(config.get("access_token")), "error": str(e)[:150]}
         elif key == "angel":
             # OAuth mode: access_token exists but no password
             if config.get("access_token") and not config.get("password"):
@@ -1093,45 +921,17 @@ _TOKEN_CHECK_RES = {}
 
 @router.get("/token-status")
 async def token_status():
-    """Real validity: Dhan token is pinged (holdings read-only, 60s cache)
-    so the UI never shows 'Connected' for an expired token while the feed
-    is actually dead."""
+    """Real validity: the broker token is pinged live (60s cache) so the UI
+    never shows 'Connected' for an expired token."""
     import time as _tt
     status = {}
-    for key in ("dhan", "fyers", "bigul"):
+    for key in BROKER_DEFAULTS:
         config = _get_config(key)
         tok = str(config.get("access_token", "") or "")
         if not (tok and not tok.startswith(("SIM-", "ANG-"))):
             status[key] = {"valid": False, "expires_at": "", "detail": "not connected"}
             continue
-        if key == "dhan":
-            try:
-                if _tt.time() - _TOKEN_CHECK_TS.get(key, 0) < 60 and key in _TOKEN_CHECK_RES:
-                    status[key] = _TOKEN_CHECK_RES[key]
-                    continue
-                from core.services.broker_dhan_live import DhanLive
-                dl = DhanLive(client_id=config.get("client_id", ""), access_token=tok)
-                v = await dl.validate()
-                res = {"valid": bool(v.get("success")),
-                       "expires_at": "",
-                       "detail": str(v.get("message") or v.get("error", ""))[:150]}
-                try:
-                    from core.services.dhan_feed import ensure_feed_from_config as _eff2
-                    _fdf = _eff2()
-                    if _fdf:
-                        from core.services.broker_dhan_live import UNDERLYING as _UL2
-                        for _s2, (_sc2, _sg2) in _UL2.items():
-                            _fdf.subscribe(_sg2, str(_sc2), 15)
-                    from core.services.dhan_feed import get_feed as _gf
-                    res["feed"] = _gf().state()
-                except Exception:
-                    pass
-                _TOKEN_CHECK_TS[key] = _tt.time()
-                _TOKEN_CHECK_RES[key] = res
-                status[key] = res
-            except Exception as e:
-                status[key] = {"valid": False, "expires_at": "", "detail": str(e)[:120]}
-        elif key == "fyers":
+        if key == "fyers":
             # Live ping (profile) so 'Connected' never means 'token saved but dead'
             try:
                 if _tt.time() - _TOKEN_CHECK_TS.get(key, 0) < 60 and key in _TOKEN_CHECK_RES:
@@ -1159,7 +959,7 @@ async def token_status():
 
 @router.post("/account")
 async def view_account(req: ConnectRequest):
-    if req.broker not in BROKER_DEFAULTS:
+    if req.broker not in BROKER_DEFAULTS and req.broker not in BROKER_INTERNAL:
         return {"success": False, "error": "Invalid broker"}
     config = _get_config(req.broker)
     if not config:
@@ -1181,27 +981,6 @@ async def view_account(req: ConnectRequest):
             "positions": positions.get("data", []) if positions.get("data") else [],
             "holdings": holdings.get("data", []) if holdings.get("data") else [],
             "orders": [],
-        }
-
-    if req.broker == "dhan" and config.get("access_token"):
-        # v2 DhanLive (proxied + egress-proxy aware) - purana v1 DhanHQ
-        # client dead endpoints (HTML 4xx) par resp.json() 500 karta tha.
-        from core.services.broker_dhan_live import DhanLive
-        dh = DhanLive(
-            client_id=config.get("client_id", ""),
-            access_token=config.get("access_token", ""),
-        )
-        funds = await dh.get_funds()
-        positions = await dh.get_positions()
-        holdings = await dh.get_holdings()
-        _f_err = (funds.get("error") or "")
-        return {
-            "success": True,
-            "funds": funds.get("data", {}) if funds.get("success") or funds.get("data") else {"message": _f_err or "Live fetch pending"},
-            "positions": positions.get("data", []) if isinstance(positions.get("data"), list) else [],
-            "holdings": holdings.get("data", []) if isinstance(holdings.get("data"), list) else [],
-            "orders": [],
-            "dhan_error": _f_err,
         }
 
     if req.broker == "shoonya" and config.get("access_token"):
@@ -1236,8 +1015,8 @@ async def view_account(req: ConnectRequest):
 async def _estimate_margin(broker: str, cfg: dict, preview: dict,
                            symbol: str, opt: str, strike: float) -> dict:
     """Required margin preview per broker (dry-run only, never orders).
-    Dhan: official margin calculator. Fyers/Angel: best-effort official
-    endpoints. Shoonya: no public margin API -> unavailable note."""
+    Fyers/Angel: best-effort official endpoints.
+    Shoonya: no public margin API -> unavailable note."""
     def _num(x):
         try:
             return round(float(x), 2)
@@ -1276,29 +1055,6 @@ async def _estimate_margin(broker: str, cfg: dict, preview: dict,
             px = 50.0
     qty = int(preview.get("quantity", 0) or 0)
     side = str(preview.get("side", "BUY")).upper()
-
-    if broker == "dhan":
-        try:
-            from core.services.broker_dhan_live import DhanLive
-            dl = DhanLive(client_id=cfg.get("client_id", ""),
-                          access_token=cfg.get("access_token", ""))
-            res = await dl._request("POST", "/margincalculator", data={
-                "dhanClientId": dl.client_id,
-                "exchangeSegment": "NSE_FO",
-                "transactionType": side,
-                "quantity": qty,
-                "productType": preview.get("product", "INTRADAY"),
-                "securityId": str(preview.get("security_id", "")),
-                "price": px,
-            })
-            if res.get("success"):
-                m = _pick_margin(res.get("data") or {})
-                if m:
-                    return {"required": m, "note": "Dhan SPAN+exposure estimate"}
-            return {"required": None,
-                    "note": f"Dhan margin unavailable ({str(res.get('error', ''))[:100]})"}
-        except Exception as e:
-            return {"required": None, "note": f"Dhan margin error: {str(e)[:100]}"}
 
     if broker == "fyers":
         try:
@@ -1367,7 +1123,7 @@ class MarginPreviewRequest(BaseModel):
 @router.post("/margin-preview")
 async def margin_preview(req: MarginPreviewRequest):
     """Har order window me required margin dikhane ke liye.
-    live + Dhan connected => official margin calculator.
+    live + Fyers connected => official margin calculator.
     paper / no-broker => honest local estimate (BUY = premium×qty exact,
     SELL = ~12% underlying SPAN estimate). Kabhi order nahi lagata."""
     try:
@@ -1405,30 +1161,30 @@ async def margin_preview(req: MarginPreviewRequest):
             except Exception:
                 px = 0.0
         total_qty = lots * lot
-        # LIVE + Dhan connected => official SPAN calculator
+        # LIVE + Fyers connected => official margin calculator
         if str(req.mode or "").lower() == "live":
             try:
-                want = (req.broker or "").lower() or "dhan"
-                if want == "dhan" and _real_token("dhan"):
+                want = (req.broker or "").lower() or _auto_live_broker() or "fyers"
+                if want == "fyers" and _real_token("fyers"):
                     from core.services.symbol_resolver import resolve_contract
-                    _res = await resolve_contract("dhan", _get_config("dhan") or {},
+                    _res = await resolve_contract("fyers", _get_config("fyers") or {},
                                                   symbol, req.expiry or "weekly", strike, opt)
                     if _res.get("ok"):
                         _tt = str(req.trade_type or "intraday").lower()
                         _pv = {"quantity": total_qty, "side": txn,
-                               "security_id": (_res.get("refs") or {}).get("security_id", ""),
+                               "symbol": (_res.get("refs") or {}).get("symbol", ""),
                                "expiry": _res.get("expiry_used", ""),
                                "product": "MARGIN" if _tt == "positional" else "INTRADAY"}
-                        m = await _estimate_margin("dhan", _get_config("dhan") or {}, _pv, symbol, opt, strike)
+                        m = await _estimate_margin("fyers", _get_config("fyers") or {}, _pv, symbol, opt, strike)
                         if m.get("required"):
                             _naked = (txn == "SELL")
-                            return {"required": m["required"], "source": "dhan-official",
+                            return {"required": m["required"], "source": "fyers-official",
                                     "premium": round(px, 2), "lot_size": lot, "total_qty": total_qty,
                                     "naked": _naked,
-                                    "note": "Dhan SPAN+exposure (official)" + (" NAKED SELL: unlimited loss possible - hedge lagao" if _naked else "")}
+                                    "note": "Fyers SPAN+exposure (official)" + (" NAKED SELL: unlimited loss possible - hedge lagao" if _naked else "")}
             except Exception as e:
                 return {"required": None, "premium": round(px, 2),
-                        "note": f"Dhan margin unavailable: {str(e)[:100]}"}
+                        "note": f"Fyers margin unavailable: {str(e)[:100]}"}
         # Local estimate (paper ya no-broker): BUY exact, SELL ~SPAN
         if txn == "BUY":
             return {"required": round(px * total_qty, 2), "source": "estimate",
@@ -1452,20 +1208,21 @@ def _round_tick(px: float, tick: float = 0.05) -> float:
 
 
 async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str, txn: str):
-    """Strategy ke hisab se LIMIT price: premium (DB/broker/model) + Sirf chhota
-    buffer - SELL par thoda NICHE, BUY par thoda UPAR (marketable limit,
-    fast fill, slippage cap). None = price nahi mila (MARKET fallback)."""
-    from core.models.trade_model import TradeModel
-    from core.services.live_market_data import LiveMarketData
-    from utils.helpers import model_premium as _mp
-    # PRIORITY 1: broker ka REAL token-quote (Dhan/Angel) - yahi LTP se batti
-    # match hogi. DB bhavcopy/model stale hota hai (93.10 vs 85.60 wala case).
-    ltp = 0.0
+    """LIMIT price = the SHARED contract LTP (contract_pricer).
+
+    Yahi wahi pricer hai jo paper trade use karta hai (contract_pricer.
+    entry_price) - isliye paper trade aur live trade ek hi price par land
+    karte hain (same broker tick, same slippage model). None = price nahi
+    mila (MARKET fallback)."""
     try:
-        ltp = float(LiveMarketData().get_option_ltp(symbol, strike, opt, exp_ymd, fresh=True) or 0)
+        from core.services.contract_pricer import get_contract_ltp
+        ltp = float(get_contract_ltp(symbol, strike, opt, exp_ymd, fresh=True) or 0)
     except Exception:
         ltp = 0.0
     if ltp <= 0:
+        from core.models.trade_model import TradeModel
+        from core.services.live_market_data import LiveMarketData
+        from utils.helpers import model_premium as _mp
         premium = None
         try:
             premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
@@ -1482,133 +1239,8 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
             ltp = 0.0
     if ltp <= 0:
         return None
-    # Price EXACT LTP par (strategy ke hisab se, 0.05 tick me rounded).
-    # SELL @ LTP, BUY @ LTP - koi buffer nahi.
+    # Price EXACT LTP par (0.05 tick me rounded) - koi extra buffer nahi.
     return _round_tick(ltp)
-
-
-_DHAN_LTP_CACHE = {}  # security_id -> (ts, ltp)
-_DHAN_429_UNTIL = 0.0  # Dhan 429 cooldown (REST hammer mat karo)
-
-
-def _dhan_feed_ltp(security_id: str, symbol: str) -> float:
-    """Dhan WebSocket feed se REAL LTP (REST quote par 429 rate-limit
-    lagta hai, feed par nahi)."""
-    try:
-        from core.services.dhan_feed import get_feed, ensure_feed_from_config
-        fd = ensure_feed_from_config() or get_feed()
-        if not fd:
-            return 0.0
-        seg = "BSE_FNO" if (symbol or "").upper() in ("SENSEX", "BANKEX") else "NSE_FNO"
-        sid = str(int(float(security_id)))
-        try:
-            fd.subscribe(seg, sid)
-        except Exception:
-            pass
-        v = fd.get_ltp(seg, sid, max_age=20)
-        return float(v or 0)
-    except Exception:
-        return 0.0
-
-
-def _dhan_direct_ltp(security_id: str, symbol: str, debug: dict = None):
-    """Exact security_id ka REAL Dhan LTP (/marketfeed/quote). Stock options
-    contract_pricer ke broker-tier se skip hoti hain - isliye yahan direct."""
-    if debug is None:
-        debug = {}
-    # 1) CACHE (20s) - baar baar REST call na ho (Dhan 429 deta hai)
-    import time as _t
-    try:
-        _sid_k = str(int(float(security_id)))
-    except Exception:
-        _sid_k = str(security_id)
-    _hit = _DHAN_LTP_CACHE.get(_sid_k)
-    if _hit and (_t.time() - _hit[0]) < 20:
-        debug["dhan_src"] = "cache"
-        return _hit[1]
-    # 2) WEBSOCKET feed (real tick, no rate limit)
-    _feed = _dhan_feed_ltp(_sid_k, symbol)
-    if _feed > 0:
-        _DHAN_LTP_CACHE[_sid_k] = (_t.time(), _feed)
-        debug["dhan_src"] = "feed"
-        debug["dhan_ltp"] = _feed
-        return _feed
-    try:
-        from core.services.contract_pricer import _dhan_post, _real_token, _broker_cfg, _DHAN_BASE
-        cfg = _broker_cfg("dhan")
-        token = str((cfg or {}).get("access_token", "") or "")
-        cid = str((cfg or {}).get("client_id", "") or "")
-        if not _real_token(token) or not cid or not security_id:
-            debug["dhan_quote"] = "no-token/creds"
-            return 0.0
-        seg = "BSE_FNO" if (symbol or "").upper() in ("SENSEX", "BANKEX") else "NSE_FNO"
-        _sid = int(float(security_id))
-        _hdr = {"Content-Type": "application/json", "access-token": token, "client-id": cid}
-        _url = _DHAN_BASE + "/marketfeed/quote"
-        _payload = {seg: [_sid]}
-        r = None
-        _last_err = ""
-        # 429 cooldown: Dhan ne block kiya hai -> REST mat todo (feed try karo)
-        global _DHAN_429_UNTIL
-        if _t.time() < _DHAN_429_UNTIL:
-            debug["dhan_src"] = "cooldown-429"
-            _old = _DHAN_LTP_CACHE.get(_sid_k)
-            if _old and (_t.time() - _old[0]) < 300:
-                return _old[1]
-            return 0.0
-        # DIRECT call (user rule: proxy nahi) - Dhan IP whitelist server IP par hai
-        try:
-            import httpx as _hx
-            r = _hx.post(_url, headers=_hdr, json=_payload, timeout=10)
-            if getattr(r, "status_code", 0) != 200:
-                _last_err = f"direct: http {getattr(r, 'status_code', 0)} {str((getattr(r, 'text', '') or '')[:120])}"
-                if int(getattr(r, "status_code", 0) or 0) == 429:
-                    _DHAN_429_UNTIL = _t.time() + 300
-                    debug["dhan_429_cooldown"] = 300
-        except Exception as _e3:
-            _last_err = f"direct: {str(_e3)[:80]}"
-            r = None
-        debug["dhan_http"] = int(getattr(r, "status_code", 0) or 0) if r is not None else 0
-        if _last_err:
-            debug["dhan_err"] = _last_err
-        debug["dhan_body"] = str((getattr(r, "text", "") or "")[:200]) if r is not None else "empty"
-        q = {}
-        if r is not None and getattr(r, "status_code", 0) == 200:
-            try:
-                q = r.json() or {}
-            except Exception:
-                q = {}
-        debug["dhan_quote_keys"] = list((q or {}).keys())
-        debug["dhan_quote_status"] = str((q or {}).get("status")) if isinstance(q, dict) else "node"
-        data = (q.get("data") or {})
-        debug["dhan_data_keys"] = list((data or {}).keys()) if isinstance(data, dict) else str(type(data))
-        node = data.get(seg, data) if isinstance(data, dict) else {}
-        debug["dhan_node_keys"] = list((node or {}).keys())[:5] if isinstance(node, dict) else "not-dict"
-        entry = node.get(str(int(float(security_id)))) if isinstance(node, dict) else None
-        if isinstance(entry, dict):
-            debug["dhan_entry_keys"] = list(entry.keys())[:8]
-            for f in ("last_price", "LTP", "ltp", "lastPrice"):
-                try:
-                    v = float(entry.get(f, 0) or 0)
-                    if v > 0:
-                        debug["dhan_ltp"] = v
-                        debug["dhan_src"] = "rest"
-                        _DHAN_LTP_CACHE[_sid_k] = (_t.time(), v)
-                        return v
-                except Exception:
-                    continue
-            debug["dhan_quote"] = "entry-parse-fail"
-        else:
-            debug["dhan_quote"] = "entry-missing"
-    except Exception as e:
-        debug["dhan_quote"] = f"err: {str(e)[:100]}"
-    # REST fail/429 hua to bhi purana REAL LTP (cache) use karo - model/DB
-    # se behtar, kyunki wo abhi bhi broker ka hi tick hai.
-    _old = _DHAN_LTP_CACHE.get(_sid_k)
-    if _old and (_t.time() - _old[0]) < 180:
-        debug["dhan_src"] = "stale-cache"
-        return _old[1]
-    return 0.0
 
 
 def _angel_direct_ltp(symbol: str, strike: float, opt: str, expiry_ymd: str) -> float:
@@ -1625,15 +1257,45 @@ def _angel_direct_ltp(symbol: str, strike: float, opt: str, expiry_ymd: str) -> 
     return 0.0
 
 
+def _latest_paper_entry(strategy_id: int, symbol: str, opt: str) -> dict:
+    """Latest PAPER entry of the same strategy+symbol+option (price parity
+    check between paper and live). {} = no paper trade yet."""
+    try:
+        from core.models.database import Database
+        db = Database.get_instance()
+        if strategy_id:
+            row = db.fetch_one(
+                "SELECT entry_price, entry_date, strike_price, expiry_date, id "
+                "FROM paper_trades WHERE strategy_id=? AND symbol=? AND option_type=? "
+                "ORDER BY id DESC LIMIT 1",
+                [int(strategy_id), str(symbol or "").upper(), str(opt or "").upper()])
+        else:
+            row = db.fetch_one(
+                "SELECT entry_price, entry_date, strike_price, expiry_date, id "
+                "FROM paper_trades WHERE symbol=? AND option_type=? "
+                "ORDER BY id DESC LIMIT 1",
+                [str(symbol or "").upper(), str(opt or "").upper()])
+        if not row:
+            return {}
+        return {"entry_price": float(row.get("entry_price") or 0),
+                "entry_date": str(row.get("entry_date") or ""),
+                "strike": float(row.get("strike_price") or 0),
+                "expiry": str(row.get("expiry_date") or ""),
+                "trade_id": row.get("id")}
+    except Exception:
+        return {}
+
 @router.post("/place-live")
 async def place_live_order(req: LiveOrderRequest):
     """REAL live order execution (real money). Safety chain:
     1. dry_run=true -> only previews the exact broker payload, sends nothing.
     2. Global kill-switch: live_trading_enabled must be ON (Brokers tab).
     3. Broker must hold a REAL token (simulated SIM-/ANG- tokens rejected).
-    4. Fyers supported (symbol auto-built). Dhan needs securityId mapping.
+    4. Fyers is the main broker (priority #1); symbol auto-built.
     Quantity sent to broker = lots x lot_size (never raw lots).
     Fills are tracked trade_mode='live' with broker_order_id stored.
+    The price used = the SHARED contract LTP (same pricer the paper trade
+    uses), so paper and live of the same contract land on the same price.
     """
     try:
         from core.models.trade_model import TradeModel
@@ -1750,11 +1412,11 @@ async def place_live_order(req: LiveOrderRequest):
         # (Simulated SIM-/ANG- tokens are rejected by _real_token below.)
         if want and not _real_token(want):
             return {"error": f"{want} has no REAL session (old simulated token?). Hit Connect in Brokers tab to login for real - order NOT placed."}
-        broker = want or next((b for b in ("fyers", "dhan", "angel", "bigul", "shoonya") if _real_token(b)), "")
+        broker = want or next((b for b in BROKER_ORDER if _real_token(b)), "")
         if not broker:
-            return {"error": "No broker with a REAL token connected. Connect Fyers, Dhan, Angel, Bigul or Shoonya first - order NOT placed."}
-        if broker not in ("fyers", "dhan", "angel", "bigul", "shoonya"):
-            return {"error": f"Live execution supports Fyers/Dhan/Angel/Bigul/Shoonya (got {broker})."}
+            return {"error": "No broker with a REAL token connected. Connect Fyers (main broker) or Bigul first - order NOT placed."}
+        if broker not in BROKER_ORDER:
+            return {"error": f"Live execution supports Fyers/Bigul (got {broker})."}
         # ---- Universal resolution: NEVER route an unvalidated expiry ----
         try:
             from core.services.symbol_resolver import resolve_contract
@@ -1791,17 +1453,6 @@ async def place_live_order(req: LiveOrderRequest):
                        "lots": lots, "lot_size": lot, "quantity": broker_qty,
                        "order_type": "MARKET", "product": "INTRADAY",
                        "source": _res.get("source", "")}
-        elif broker == "dhan":
-            _dlot = int(_refs.get("lot_size") or 0) or lot
-            preview = {"broker": "dhan", "security_id": _refs.get("security_id", ""),
-                       "resolved_symbol": _refs.get("symbol", ""), "underlying": symbol,
-                       "strike": strike, "expiry": exp_ymd, "side": txn,
-                       "lots": lots, "lot_size": _dlot, "quantity": lots * _dlot,
-                       "order_type": "MARKET",
-                       "product": "MARGIN" if _tt == "positional" else "INTRADAY",
-                       "source": _res.get("source", "")}
-            broker_qty = lots * _dlot
-            lot = _dlot
         elif broker in ("angel", "bigul"):
             preview = {"broker": broker, "symbol": _refs.get("tradingsymbol", ""),
                        "symboltoken": _refs.get("symboltoken", ""), "underlying": symbol,
@@ -1821,9 +1472,8 @@ async def place_live_order(req: LiveOrderRequest):
                        "source": _res.get("source", "")}
             broker_qty = lots * _slot
             lot = _slot
-        # Strategy-compatible LIMIT price (Dhan/Angel/Bigul par LIMIT order
-        # taaki app aur broker ki price na tedhi ho; MARKET par broker LIMIT
-        # me badal ke reject kar deta hai).
+        # Strategy-compatible LIMIT price (Angel/Bigul par LIMIT order taaki
+        # app aur broker ki price na tedhi ho; Fyers MARKET bhejta hai).
         _limit_px = None
         try:
             _limit_px = await _broker_limit_price(symbol, opt, strike, exp_ymd, txn)
@@ -1831,25 +1481,25 @@ async def place_live_order(req: LiveOrderRequest):
             _limit_px = None
         if _limit_px:
             preview["limit_price"] = _limit_px
-            for _b in ("dhan", "angel", "bigul"):
+            for _b in ("angel", "bigul"):
                 if preview.get("broker") == _b:
                     preview["order_type"] = "LIMIT"
-        # OVERRIDE: resolved contract ka REAL broker LTP (order price == LTP)
+        # The SHARED LTP (contract_pricer) is the single price source for
+        # paper AND live. Recorded here so the UI can compare paper vs live.
+        _ltp_price = 0.0
+        _ltp_source = "none"
         try:
-            _real_ltp = 0.0
-            _qdbg = {}
-            if preview.get("broker") == "dhan":
-                _real_ltp = _dhan_direct_ltp(str(preview.get("security_id") or ""), symbol, debug=_qdbg)
-            elif preview.get("broker") in ("angel", "bigul"):
-                _real_ltp = _angel_direct_ltp(symbol, strike, opt, exp_ymd)
-            if req.dry_run and _qdbg:
-                preview["_quote_debug"] = _qdbg
-            if _real_ltp > 0:
-                preview["ltp"] = _round_tick(_real_ltp)
-                _limit_px = _round_tick(_real_ltp)
-                preview["limit_price"] = _limit_px
+            from core.services.contract_pricer import price_source_detail
+            _det = price_source_detail(symbol, strike, opt, exp_ymd)
+            _ltp_price = float(_det.get("ltp") or 0)
+            _ltp_source = str(_det.get("source") or "none")
         except Exception:
             pass
+        if _ltp_price <= 0 and _limit_px:
+            _ltp_price = float(_limit_px)
+            _ltp_source = "limit-price"
+        preview["ltp"] = _round_tick(_ltp_price) if _ltp_price > 0 else 0
+        preview["price_source"] = _ltp_source
         if req.dry_run:
             try:
                 _req_exp = str(exp_hint or "")[:10]
@@ -1897,54 +1547,34 @@ async def place_live_order(req: LiveOrderRequest):
                         "preview": preview, "broker_response": res.get("data", {})}
             order_id = str((res.get("data") or {}).get("order_id", ""))
             broker_ref = preview["symbol"]
-        elif broker == "dhan":
-            from core.services.broker_dhan_live import DhanLive
-            dl = DhanLive(client_id=(_get_config("dhan") or {}).get("client_id", ""),
-                          access_token=(_get_config("dhan") or {}).get("access_token", ""))
-            import asyncio
-            res = await dl.place_order(preview["security_id"], txn, broker_qty,
-                                       order_type=("LIMIT" if _limit_px else "MARKET"),
-                                       price=(_limit_px or 0),
-                                       product=preview.get("product", "INTRADAY"))
-            if not res.get("success"):
-                _derr = str(res.get("error") or "")
-                # DH-905 Invalid IP: Dhan needs the server IP whitelisted in Dhan
-                # app/API settings. Render free has no static IP, so guide user.
-                if "DH-905" in _derr or "Invalid IP" in _derr:
-                    return {"error": ("Dhan DH-905 Invalid IP: Dhan ne server ka IP block kiya. "
-                                      "login.dhan.co par API settings me server IP whitelist karo. "
-                                      "Render free ka IP fix nahi hota — Starter plan par static outbound IP milta hai. "
-                                      "Tab tak paper trading use karo."),
-                            "preview": preview, "broker_response": res.get("data", {})}
-                return {"error": f"Dhan rejected order: {res.get('error')}",
-                        "preview": preview, "broker_response": res.get("data", {})}
-            order_id = str((res.get("data") or {}).get("order_id", ""))
-            broker_ref = preview["security_id"]
-            # Fill verify: order FAILED/REJECTED ho to fake position NAHI
-            # likhenge; EXECUTED ho to asli avgTradedPrice entry price hoga.
+            # Fill verify: real average price (or a clear rejection). FAILED
+            # order par fake position NAHI likhenge.
             _fill_px = None
             for _i in range(5):
                 try:
                     await asyncio.sleep(1.2)
-                    _od = await dl.get_order(order_id)
-                    _data = (_od or {}).get("data") if isinstance(_od, dict) else _od
-                    if not isinstance(_data, dict):
-                        continue
-                    _st = str(_data.get("orderStatus") or _data.get("order_status") or "").upper()
-                    try:
-                        _avg = float(_data.get("averageTradedPrice") or 0)
-                    except Exception:
-                        _avg = 0.0
-                    if _avg > 0:
-                        _fill_px = _round_tick(_avg)
-                    if _st in ("REJECTED", "FAILED", "CANCELLED"):
-                        _rsn = str(_data.get("rejectReason") or _data.get("reasonDescription")
-                                   or _data.get("remarks") or _st)
-                        return {"error": (f"Dhan order FAILED/REJECTED: {_rsn}. "
-                                          f"Open position record NAHI hua (broker verify fail)."),
-                                "preview": preview, "broker_response": _data}
-                    if _st in ("EXECUTED", "TRADED", "COMPLETE", "COMPLETED"):
-                        break
+                    _ob = await fy.get_order_book()
+                    _rows = ((_ob or {}).get("data") or {}).get("orderBook") or []
+                    for _r0 in (_rows if isinstance(_rows, list) else []):
+                        if not isinstance(_r0, dict):
+                            continue
+                        if str(_r0.get("id") or _r0.get("orderId") or "") != str(order_id):
+                            continue
+                        try:
+                            _avg = float(_r0.get("averagePrice") or _r0.get("average_price") or 0)
+                        except Exception:
+                            _avg = 0.0
+                        if _avg > 0:
+                            _fill_px = _round_tick(_avg)
+                        _st = str(_r0.get("status") or _r0.get("orderStatus") or "").upper()
+                        if _st in ("REJECTED", "FAILED", "CANCELLED", "CANCELED"):
+                            _rsn = str(_r0.get("statusMessage") or _r0.get("message")
+                                       or _r0.get("remarks") or _st)
+                            return {"error": (f"Fyers order FAILED/REJECTED: {_rsn}. "
+                                              f"Open position record NAHI hua (broker verify fail)."),
+                                    "preview": preview, "broker_response": _r0}
+                        if _st in ("EXECUTED", "TRADED", "COMPLETE", "COMPLETED", "FILLED"):
+                            break
                 except Exception:
                     continue
             if _fill_px:
@@ -2013,28 +1643,43 @@ async def place_live_order(req: LiveOrderRequest):
                         "preview": preview, "broker_response": res.get("data", {})}
             order_id = str((res.get("data") or {}).get("order_id", ""))
             broker_ref = preview["symbol"]
-        # Track the live fill locally (entry: broker real fill > premium estimate)
+        # Track the live fill locally (entry: broker real fill > SHARED pricer
+        # price). The shared pricer (contract_pricer.entry_price) is the SAME
+        # function the paper trade uses - so paper and live of one contract
+        # land on the same price.
         _px_src = float(preview.get("fill_price") or 0)
+        _price_source = "broker-fill"
         if _px_src > 0:
             adj = _round_tick(_px_src)
         else:
-            premium = None
+            adj = 0.0
             try:
-                premium = LiveMarketData().get_option_ltp(symbol, strike, opt, exp_ymd, fresh=True)
+                from core.services.contract_pricer import entry_price as _shared_entry
+                _adj2, _src2 = _shared_entry(symbol, strike, opt, exp_ymd, side=txn, fresh=True)
+                if _adj2 and float(_adj2) > 0:
+                    adj = _round_tick(float(_adj2))
+                    _price_source = _src2 or "shared-pricer"
             except Exception:
+                adj = 0.0
+            if adj <= 0:
                 premium = None
-            if not premium or float(premium) <= 0:
                 try:
-                    premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
+                    premium = LiveMarketData().get_option_ltp(symbol, strike, opt, exp_ymd, fresh=True)
                 except Exception:
                     premium = None
-            if not premium or float(premium) <= 0:
-                spot = LiveMarketData().get_spot_price(symbol)
-                if not spot or spot <= 0:
-                    return {"error": f"Live premium/spot nahi mila {symbol} {strike}{opt} - bina price ke live fill record nahi hoga"}
-                premium = model_premium(spot, strike, 7, opt, symbol=symbol)
-            premium = TransactionCosts.apply_fill_slippage(float(premium), txn, is_live=True)
-            adj = _round_tick(float(premium))
+                if not premium or float(premium) <= 0:
+                    try:
+                        premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
+                    except Exception:
+                        premium = None
+                if not premium or float(premium) <= 0:
+                    spot = LiveMarketData().get_spot_price(symbol)
+                    if not spot or spot <= 0:
+                        return {"error": f"Live premium/spot nahi mila {symbol} {strike}{opt} - bina price ke live fill record nahi hoga"}
+                    premium = model_premium(spot, strike, 7, opt, symbol=symbol)
+                premium = TransactionCosts.apply_fill_slippage(float(premium), txn, is_live=True)
+                adj = _round_tick(float(premium))
+                _price_source = "model"
         costs = TransactionCosts.calculate(adj * lots * lot, txn == "SELL", is_live=True)
         import datetime as _dt
         tm = TradeModel()
@@ -2050,7 +1695,22 @@ async def place_live_order(req: LiveOrderRequest):
         })
         _lresp = {"success": True, "trade_id": tid, "broker_order_id": order_id,
                 "broker": broker, "broker_symbol": broker_ref, "quantity": broker_qty,
-                "entry_price": round(adj, 2), "mode": "live"}
+                "entry_price": round(adj, 2), "mode": "live",
+                "ltp": float(preview.get("ltp") or 0) or None,
+                "price_source": _price_source,
+                "expiry": exp_ymd, "strike": strike, "option_type": opt}
+        # Paper-vs-live price check: same strategy + same symbol + same option
+        # type ka latest PAPER entry - UI isko side-by-side dikhata hai.
+        try:
+            _paper_ref = _latest_paper_entry(req.strategy_id, symbol, opt)
+            if _paper_ref:
+                _lresp["paper_ref"] = _paper_ref
+                _pl = float(_paper_ref.get("entry_price") or 0)
+                if _pl > 0:
+                    _lresp["paper_live_delta"] = round(adj - _pl, 2)
+                    _lresp["paper_live_delta_pct"] = round((adj - _pl) / _pl * 100, 2) if _pl else 0.0
+        except Exception:
+            pass
         if _rolled_to:
             _lresp["rolled_to"] = _rolled_to
         return _lresp

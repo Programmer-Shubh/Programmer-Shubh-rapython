@@ -82,12 +82,12 @@ _STATIC_LOTS = {
     "SHREECEM": 25, "NESTLEIND": 500, "BAJAJFINSV": 300, "HEROMOTOCO": 150,
     "APOLLOHOSP": 125, "UPL": 1355, "BAJAJHLDNG": 75, "ALKEM": 125,
     "TITAN": 175,
-    # Naye F&O additions (Dhan broker-master verified 2026-10-15 - taaki
+    # Naye F&O additions (scrip-master verified 2026-10-15 - taaki
     # cold-start par bhi lot block na ho).
     "BOSCHLTD": 25, "EICHERMOT": 100, "FORCEMOT": 25, "HDFCAMC": 300,
     "MPHASIS": 275, "OFSS": 100, "PAGEIND": 20, "POWERINDIA": 25,
     "SOLARINDS": 50, "SRF": 200, "WAAREEENER": 175,
-    # BAJAJ-AUTO 75 (NSE market-lots file Oct-2026, 2 sources; Dhan master me
+    # BAJAJ-AUTO 75 (NSE market-lots file Oct-2026, 2 sources; scrip master me
     # naam alag hone se broker lookup miss hota hai).
     "BAJAJ-AUTO": 75,
     "GOLDBEES": 100, "SILVERBEES": 100,

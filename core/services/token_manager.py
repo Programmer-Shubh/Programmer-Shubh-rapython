@@ -85,45 +85,6 @@ class TokenManager:
         except httpx.RequestError as exc:
             return {"success": False, "error": str(exc)}
 
-    async def refresh_dhan(self, cfg: dict) -> dict:
-        if not (cfg.get("client_id") and cfg.get("refresh_token")):
-            return {"success": False, "error": "Missing client_id/refresh_token"}
-        payload = {
-            "client_id": cfg["client_id"],
-            "client_secret": cfg.get("access_token", ""),
-            "refresh_token": cfg["refresh_token"],
-        }
-        try:
-            try:
-                from core.services.egress_proxy import httpx_kwargs as _ekw
-                _proxy = _ekw()
-            except Exception:
-                _proxy = {}
-            try:
-                async with httpx.AsyncClient(timeout=30, **_proxy) as client:
-                    resp = await client.post(
-                        "https://api.dhan.co/oauth2/token/refresh", json=payload
-                    )
-            except httpx.RequestError:
-                # Fail-open: proxy network fail -> ek direct attempt.
-                if not _proxy:
-                    raise
-                async with httpx.AsyncClient(timeout=30) as client:
-                    resp = await client.post(
-                        "https://api.dhan.co/oauth2/token/refresh", json=payload
-                    )
-            body = resp.json()
-            if resp.status_code in (200, 201) and body.get("accessToken"):
-                cfg["access_token"] = body["accessToken"]
-                if body.get("refreshToken"):
-                    cfg["refresh_token"] = body["refreshToken"]
-                cfg["token_valid_until"] = time.time() + body.get("expiresIn", 86400)
-                self._save("dhan", cfg)
-                return {"success": True, "message": "Dhan token refreshed"}
-            return {"success": False, "error": body.get("message", "Dhan refresh failed")}
-        except httpx.RequestError as exc:
-            return {"success": False, "error": str(exc)}
-
     async def refresh_shoonya(self, cfg: dict) -> dict:
         if not (cfg.get("uid") and cfg.get("pwd") and cfg.get("vc") and cfg.get("apikey")):
             return {"success": False, "error": "Missing uid/pwd/vc/apikey"}
@@ -198,7 +159,6 @@ class TokenManager:
             return {"success": False, "error": "Not configured"}
         handlers = {
             "fyers": self.refresh_fyers,
-            "dhan": self.refresh_dhan,
             "shoonya": self.refresh_shoonya,
             "angel": self.refresh_angel,
         }
@@ -209,13 +169,13 @@ class TokenManager:
 
     async def refresh_all(self) -> dict:
         results = {}
-        for broker in ["shoonya", "dhan", "fyers", "angel"]:
+        for broker in ["fyers", "shoonya", "angel"]:
             results[broker] = await self.refresh_broker(broker)
         return results
 
     def token_status(self) -> dict:
         status = {}
-        for broker in ["shoonya", "dhan", "fyers", "angel"]:
+        for broker in ["fyers", "shoonya", "angel"]:
             cfg = self._load(broker)
             has = bool(cfg.get("access_token") or (cfg.get("client_id") and cfg.get("refresh_token")))
             valid_until = cfg.get("token_valid_until")

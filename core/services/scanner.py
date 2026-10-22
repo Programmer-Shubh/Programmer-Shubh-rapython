@@ -1554,9 +1554,23 @@ class OptionScanner:
             sug = self._suggest_option(symbol, spot, option_type) or {}
         except Exception:
             sug = {}
+        _min = float(min_prem or 0)
         try:
-            if sug.get("strike") and float(sug.get("premium") or 0) >= float(min_prem or 0):
-                return sug
+            _sp = float(sug.get("spot") or spot)
+            if sug.get("strike") and float(sug.get("premium") or 0) >= _min:
+                # Order-side parity: DB-close yash model premium par floor
+                # pass hota hai, par OFFLINE order SAME model_premium se
+                # entry hota hai. Model check bhi pass na ho to DB premium
+                # stale hai - model math par walk karo (floor-error khatm).
+                from utils.helpers import model_premium as _mp
+                from core.services.contract_pricer import dte_to_expiry as _dtew
+                try:
+                    _wed = _dtew(sug.get("expiry", ""), 7)
+                except Exception:
+                    _wed = 7
+                if _mp(_sp, float(sug["strike"]), _wed, option_type,
+                       symbol=symbol) >= _min - 0.01:
+                    return sug
         except Exception:
             pass
         if str(side or "").upper() != "BUY":
@@ -1566,8 +1580,9 @@ class OptionScanner:
             from core.services.contract_pricer import dte_to_expiry as _dtew
             step = get_strike_step(symbol) or 0
             base = int(sug.get("strike") or 0)
-            if step <= 0 or base <= 0 or spot <= 0:
-                return {"strike": 0, "premium": 0, "expiry": sug.get("expiry", ""), "spot": spot}
+            _sp = float(sug.get("spot") or spot)
+            if step <= 0 or base <= 0 or _sp <= 0:
+                return {"strike": 0, "premium": 0, "expiry": sug.get("expiry", ""), "spot": _sp}
             # Order-entry parity: walk strikes on the SAME real DTE (sug expiry),
             # warna DTE=7 wala premium floor paas karke order me fail hota tha.
             try:
@@ -1576,15 +1591,15 @@ class OptionScanner:
                 _wed = 7
             for k in (1, 2):
                 s2 = base - k * step if option_type == "CE" else base + k * step
-                if s2 <= 0 or abs(s2 - spot) / spot > 0.06:
+                if s2 <= 0 or abs(s2 - _sp) / _sp > 0.06:
                     break
                 try:
-                    px = float(model_premium(spot, s2, _wed, option_type, symbol=symbol) or 0)
+                    px = float(model_premium(_sp, s2, _wed, option_type, symbol=symbol) or 0)
                 except Exception:
                     px = 0
-                if px >= float(min_prem or 0):
+                if px >= _min:
                     return {"strike": s2, "premium": round(px, 2),
-                            "expiry": sug.get("expiry", ""), "spot": spot}
+                            "expiry": sug.get("expiry", ""), "spot": _sp}
         except Exception:
             pass
         return {"strike": 0, "premium": 0, "expiry": sug.get("expiry", "") if isinstance(sug, dict) else "", "spot": spot}

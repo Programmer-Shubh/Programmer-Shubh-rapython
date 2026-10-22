@@ -99,12 +99,12 @@ def _big_csv():
 
 
 def test_daily_fallback_prefers_archive(monkeypatch):
-    """nsepython+dhan khaali ho to archive se 15+ bars (Yahoo tak jaaye bina)."""
+    """nsepython+fyers khaali ho to archive se 15+ bars (Yahoo tak jaaye bina)."""
     import routes.strategy_builder as sb
     import core.services.historical_fetcher as hf
     import core.services.free_data as fd
     monkeypatch.setattr(hf, "_fetch_nsepython_historical", lambda *a, **k: [])
-    monkeypatch.setattr(hf, "_fetch_dhan_historical", lambda *a, **k: [])
+    monkeypatch.setattr(hf, "_fetch_fyers_historical", lambda *a, **k: [])
 
     class _Big:
         status_code = 200

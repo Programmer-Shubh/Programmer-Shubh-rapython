@@ -1,4 +1,4 @@
-"""Unified execution: Paper -> Dhan/Fyers/Angel. Single router for Strategy/Webhook/Live."""
+"""Unified execution: Paper -> Fyers. Single router for Strategy/Webhook/Live."""
 from typing import Dict, List
 from core.services.live_market_data import LiveMarketData
 from utils.helpers import get_lot_size, get_strike_step
@@ -73,17 +73,43 @@ def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500
             _eiv = None
         tid = tm.insert_trade({"symbol":symbol,"option_type":leg["option_type"],"strike_price":strike,"expiry_date":"","transaction_type":leg["transaction"].upper(),"quantity":int(leg.get("lots",1)),"lot_size":lot,"entry_price":adj,"stop_loss":sl,"target":tp,"total_cost":costs["total"],"entry_date":__import__("datetime").date.today().strftime("%Y-%m-%d"),"entry_iv":_eiv})
         return {"mode":"PAPER","trade_id":tid,"strike":strike,"premium":adj}
-    # Live: route to broker
-    broker_map = {"DHAN":"dhan","FYERS":"fyers","ANGEL":"angel"}
-    broker = broker_map.get(mode, "dhan")
+    # Live: route to the broker (Fyers is the main broker).
+    broker_map = {"FYERS": "fyers", "FYN": "fyers", "ANGEL": "angel", "BIGUL": "bigul"}
+    broker = broker_map.get(mode, "fyers")
     try:
-        if broker == "dhan":
-            from core.services.broker_dhan import place_order as dhan_place
-            return dhan_place(symbol, legs, sl, tp)
-        elif broker == "fyers":
-            from core.services.broker_fyers import place_order as fyers_place
-            return fyers_place(symbol, legs, sl, tp)
+        if broker == "fyers":
+            from core.services.broker_fyers import FyersV3
+            cfg = _broker_config("fyers")
+            fy = FyersV3(app_id=cfg.get("app_id", ""), secret_key=cfg.get("secret", ""),
+                         redirect_uri=cfg.get("redirect_uri", ""),
+                         access_token=cfg.get("access_token", ""),
+                         refresh_token=cfg.get("refresh_token", ""))
+            if not fy.access_token:
+                return {"error": "Fyers connected nahi hai - Brokers tab se Connect karo"}
+            leg = legs[0] if legs else {"option_type": "CE", "transaction": "BUY", "lots": 1}
+            lot = get_lot_size(symbol)
+            qty = int(leg.get("lots", 1)) * lot
+            expiry = leg.get("expiry") or ""
+            strike = leg.get("strike") or 0
+            from core.services.symbol_resolver import _fyers_symbol
+            fy_sym = _fyers_symbol(symbol, expiry, float(strike or 0), leg.get("option_type", "CE"))
+            import asyncio as _aio
+            res = _aio.run(fy.place_order(fy_sym, str(leg.get("transaction", "BUY")).upper(),
+                                          qty, order_type="MARKET"))
+            if not res.get("success"):
+                return {"error": f"Fyers rejected order: {res.get('error')}"}
+            return {"mode": "LIVE", "broker": "fyers", "symbol": fy_sym,
+                    "order_id": (res.get("data") or {}).get("order_id", "")}
         else:
             return {"error": f"Live broker {mode} not configured"}
     except Exception as e:
         return {"error": str(e)}
+
+
+def _broker_config(name):
+    """Stored broker config (DB + env seed) for the live router."""
+    try:
+        from routes.broker import _get_config
+        return _get_config(name) or {}
+    except Exception:
+        return {}
