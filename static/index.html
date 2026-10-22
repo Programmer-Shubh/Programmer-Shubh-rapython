@@ -570,7 +570,7 @@
             <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
                 <div>
                     <h4 class="fw-bold"><i class="bi bi-plug"></i> Broker Integration</h4>
-                    <p class="text-muted small mb-0">Auto-connect Dhan, Angel One, Bigul - No daily login required</p>
+                    <p class="text-muted small mb-0">Auto-connect Dhan, Fyers, Bigul - No daily login required</p>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
                     <span id="live-status" class="small text-muted"></span>
@@ -602,15 +602,16 @@
                     <small class="text-muted d-block mt-2">ScanX Dhan ka apna product hai — login wahi Dhan ID se hota hai (auto-login/SSO third-party sites ko Dhan deta nahi). Signal mile to dashboard ke signal cards se 1-tap order lagao.</small>
                 </div></div></div>
                 <div class="col" style="min-width:240px"><div class="card"><div class="card-body text-center" style="padding:20px">
-                    <div style="margin-bottom:12px"><i class="bi bi-graph-up-arrow text-success" style="font-size:36px"></i></div>
-                    <h6 class="fw-bold">Angel One</h6><p class="text-muted small">Client Code + Password + API Key</p>
+                    <div style="margin-bottom:12px"><i class="bi bi-currency-exchange text-danger" style="font-size:36px"></i></div>
+                    <h6 class="fw-bold">Fyers</h6><p class="text-muted small">App ID + Secret — OAuth login, Historical OHLC + LIVE orders</p>
                     <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
                     <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
-                        <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('angel')"><i class="bi bi-gear"></i> Setup</button>
-                        <button class="btn btn-sm btn-success" onclick="connectSingleBroker('angel')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
-                        <a class="btn btn-sm btn-outline-dark" href="https://www.angelone.in/login/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>
-                        <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('angel')"><i class="bi bi-wallet2"></i> Account</button>
+                        <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('fyers')"><i class="bi bi-gear"></i> Setup</button>
+                        <button class="btn btn-sm btn-success" onclick="connectSingleBroker('fyers')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
+                        <button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>
+                        <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('fyers')"><i class="bi bi-wallet2"></i> Account</button>
                     </div>
+                    <small class="text-muted d-block mt-2">Fyers app me Redirect URI EXACTLY: https://ratrade-iwi2.onrender.com/api/broker/fyers-callback</small>
                 </div></div></div>
             </div>
             <div class="card mt-2"><div class="card-body" style="padding:12px 16px">
@@ -2654,7 +2655,7 @@ let _lastOpenTrdHTML = null;
     // login_url = official broker login page (new tab) - verified Sep 2026.
     const FALLBACK_BROKERS=[
         {key:'dhan',name:'Dhan',icon:'bi-bank',color:'text-primary',desc:'PIN + TOTP = fully automatic (no daily login)',fields:['client_id','access_token','refresh_token','pin','totp_secret'],configured:false,config:{},login_url:'https://login.dhan.co/',token_hint:'BEST: Dhan PIN (6-digit) + TOTP Secret save karo (Dhan Web > API > Setup TOTP, ek baar) — phir token roz khud banega, login ki zaroorat nahi. Ya token paste karo.'},
-        {key:'angel',name:'Angel One',icon:'bi-graph-up-arrow',color:'text-success',desc:'Client Code + Password + API Key',fields:['client_code','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://www.angelone.in/login/',token_hint:'angelone.in par login karke SmartAPI se Client Code + API Key + TOTP Secret copy karo — Auto-connect dabao token save hoga.'},
+        {key:'fyers',name:'Fyers',icon:'bi-currency-exchange',color:'text-danger',desc:'App ID + Secret — OAuth login (Historical OHLC Pandas Frame drawer + LIVE orders)',fields:['app_id','secret','redirect_uri','access_token','refresh_token'],configured:false,config:{},login_url:'https://myaccount.fyers.in/',token_hint:'Fyers Developer Portal me app banao. App ID (Client ID) + Secret save karo, phir OAuth Login dabao. Redirect URI app settings me EXACTLY: https://ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye.'},
         {key:'bigul',name:'Bigul',icon:'bi-bullseye',color:'text-warning',desc:'Mobile se login — OTP auto-fetch, token auto-connect',fields:['client_id','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://bigul.co/login',token_hint:'Mobile number se login karo — OTP dalte hi token auto-fetch ho jayega. Ya API token paste karke Auto-connect dabao.'}
     ];
     function bigulOAuth(){ P('/api/broker/bigul-auth-url').then(r=>{ if(r.success&&r.url) window.open(r.url,'_blank'); else alert(r.error||'Bigul auth failed'); }); }
@@ -2685,7 +2686,7 @@ let _lastOpenTrdHTML = null;
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                     <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('${b.key}')"><i class="bi bi-gear"></i> Setup</button>
                     <button class="btn btn-sm btn-success" onclick="connectSingleBroker('${b.key}')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
-                    ${b.key==='dhan'?`<button class="btn btn-sm btn-primary" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='angel'?`<button class="btn btn-sm btn-danger" onclick="angelOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='bigul'?`<button class="btn btn-sm btn-warning" onclick="bigulOAuth()"><i class="bi bi-phone"></i> Mobile Login</button>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
+                    ${b.key==='dhan'?`<button class="btn btn-sm btn-primary" onclick="dhanOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='fyers'?`<button class="btn btn-sm btn-danger" onclick="fyersOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='angel'?`<button class="btn btn-sm btn-danger" onclick="angelOAuth()"><i class="bi bi-shield-lock"></i> OAuth Login</button>`:b.key==='bigul'?`<button class="btn btn-sm btn-warning" onclick="bigulOAuth()"><i class="bi bi-phone"></i> Mobile Login</button>`:`<a class="btn btn-sm btn-outline-dark" href="${brokerLoginUrl(b.key)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Login Page</a>`}
                     <button class="btn btn-sm btn-outline-info" onclick="viewBrokerAccount('${b.key}')"><i class="bi bi-wallet2"></i> Account</button>
                 </div>
             </div></div></div>`;
@@ -2791,6 +2792,13 @@ let _lastOpenTrdHTML = null;
         const r=await A('/api/broker/angel-auth-url');
         if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; showToast('Angel One login page opened — login karke SmartAPI se Client Code + API Key + TOTP copy karo.', 'info'); return;}
         showToast('Angel Setup pe jaake Client Code paste karo — Auto-connect dabao.', 'info');
+    }
+    async function fyersOAuth(){
+        try{
+            const r=await A('/api/broker/fyers-auth-url');
+            if(r.success&&r.url){const w=window.open(r.url,'_blank'); if(!w) window.location.href=r.url; showToast('Fyers login page khula — login karo, token auto-save ho jayega (fyers-callback).', 'info'); return;}
+            showToast(r.error||'Fyers Setup pe jaake App ID + Secret save karo, phir OAuth Login dabao.', 'info');
+        }catch(e){showToast('Fyers OAuth failed: '+e.message, 'danger');}
     }
     // Auto-capture callback tokens
     setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);const p='/api/broker/dhan-callback';const ap='/api/broker/angel-callback';if(q.get('access_token')){P(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_token:q.get('access_token'),client_id:q.get('client_id')||''})}).then(r=>{if(r.success){showToast('Dhan token auto-saved!', 'success');loadBrokers();}else{showToast('Dhan callback failed: '+r.error, 'danger');}}).catch(()=>{});}if(q.get('code')&&window.location.pathname.includes('angel-callback')){P(ap,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:q.get('code'),client_code:q.get('client_code')||''})}).then(r=>{if(r.success){showToast('Angel token auto-saved!', 'success');loadBrokers();}else{showToast('Angel callback failed', 'danger');}}).catch(()=>{});}document.history.replaceState({},document.title,window.location.pathname);}catch(e){}},800);

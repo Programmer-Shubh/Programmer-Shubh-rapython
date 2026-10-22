@@ -94,13 +94,13 @@ async def egress_test():
 
 BROKER_DEFAULTS = {
     "dhan": {"name": "Dhan", "icon": "bi-bank", "color": "text-primary", "fields": ["client_id", "access_token", "refresh_token", "pin", "totp_secret"], "desc": "Client ID + token (auto) / PIN + TOTP = fully automatic login"},
-    "angel": {"name": "Angel One", "icon": "bi-graph-up-arrow", "color": "text-success", "fields": ["client_code", "password", "api_key", "totp_secret"], "desc": "Client Code + Password + API Key"},
+    "fyers": {"name": "Fyers", "icon": "bi-currency-exchange", "color": "text-danger", "fields": ["app_id", "secret", "redirect_uri", "access_token", "refresh_token"], "desc": "App ID + Secret - OAuth login (Historical OHLC + LIVE orders)"},
     "bigul": {"name": "Bigul", "icon": "bi-bullseye", "color": "text-warning", "fields": ["client_id", "password", "api_key", "totp_secret"], "desc": "Mobile se login — OTP auto-fetch, token auto-connect"},
 }
 
 BROKER_FIELD_LABELS = {
     "dhan": {"client_id": "Client ID", "access_token": "Access Token", "refresh_token": "Refresh Token", "pin": "Dhan PIN (6-digit, for auto-login)", "totp_secret": "TOTP Secret (one-time setup, then fully automatic)"},
-    "angel": {"client_code": "Client Code", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
+    "fyers": {"app_id": "App ID (e.g. XXXXXXXX-1)", "secret": "Secret Key", "redirect_uri": "Redirect URI (Wahan sirf ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye)", "access_token": "Access Token (auto-fill ka rahega)", "refresh_token": "Refresh Token (auto-fill ka rahega)"},
     "bigul": {"client_id": "Client ID", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
 }
 
@@ -141,7 +141,7 @@ class LiveToggleRequest(BaseModel):
 def _auto_live_broker() -> str:
     """Real broker connected -> LIVE stays ON by itself (no toggle needed)."""
     try:
-        for b in ("dhan", "angel"):
+        for b in ("dhan", "fyers", "bigul"):
             if _real_token(b):
                 return b
     except Exception:
@@ -551,7 +551,7 @@ async def auto_connect_brokers():
     """Auto-connect all configured brokers (Dhan + Angel One) by validating tokens.
     If token invalid, attempts refresh. Returns results."""
     results = []
-    for key in ("dhan", "angel"):
+    for key in ("dhan", "fyers", "bigul"):
         config = _get_config(key)
         if not config:
             results.append({"broker": key, "status": "not_configured"})
@@ -599,7 +599,7 @@ async def auto_connect_brokers():
 def broker_config_get():
     """Get current broker config status for auto-connect."""
     configs = {}
-    for key in ("dhan", "angel"):
+    for key in ("dhan", "fyers", "bigul"):
         c = _get_config(key)
         configs[key] = {"configured": bool(c), "has_token": bool(c.get("access_token",""))}
     return {"success": True, "configs": configs}
@@ -608,8 +608,8 @@ def broker_config_get():
 @router.get("/list")
 def list_brokers():
     brokers = []
-    # Only Dhan and Angel One shown on frontend (Fyers/Shoonya hidden per user request)
-    for key in ("dhan", "angel"):
+    # Dhan, Fyers, Bigul shown on frontend (Angel One removed per user request)
+    for key in ("dhan", "fyers", "bigul"):
         info = BROKER_DEFAULTS.get(key)
         if not info: continue
         config = _get_config(key)
@@ -1008,7 +1008,7 @@ async def token_status():
     is actually dead."""
     import time as _tt
     status = {}
-    for key in ("dhan", "angel"):
+    for key in ("dhan", "fyers", "bigul"):
         config = _get_config(key)
         tok = str(config.get("access_token", "") or "")
         if not (tok and not tok.startswith(("SIM-", "ANG-"))):
