@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 import urllib.parse
 from datetime import datetime
@@ -22,6 +23,9 @@ class FyersV3:
     TOKEN_URL = "https://api-t1.fyers.in/api/v3/validate-authcode"
     REFRESH_URL = "https://api-t1.fyers.in/api/v3/validate-refresh-token"
     MAX_RETRIES = 3
+    # Fyers App ID format = "<appId>-<appType>" (e.g. ABCDEFGH-100 for web apps).
+    # Without the suffix the API answers "invalid clientId" on the login page.
+    DEFAULT_APP_TYPE = "100"
 
     def __init__(
         self,
@@ -30,13 +34,29 @@ class FyersV3:
         redirect_uri: str,
         access_token: str = None,
         refresh_token: str = None,
+        pin: str = None,
     ):
-        self.app_id = app_id
+        self.app_id = self.normalize_app_id(app_id)
         self.secret_key = secret_key
         self.redirect_uri = redirect_uri
         self.access_token = access_token
         self.refresh_token = refresh_token
+        self.pin = str(pin or "").strip()
         self._token_expiry: float = 0
+        # True when an access token was refreshed mid-flight (caller must persist it)
+        self.refreshed: bool = False
+
+    @classmethod
+    def normalize_app_id(cls, app_id: str) -> str:
+        """Accept 'ABCDEFGH' or 'ABCDEFGH-100' -> always 'ABCDEFGH-100'.
+        Fyers MyAPI dashboard shows the id WITH the appType suffix; users often
+        paste only the first part, which the API rejects as 'invalid clientId'."""
+        aid = str(app_id or "").strip()
+        if not aid:
+            return ""
+        if re.search(r"-\d+$", aid):
+            return aid
+        return f"{aid}-{cls.DEFAULT_APP_TYPE}"
 
     def app_id_hash(self) -> str:
         import hashlib
@@ -99,6 +119,7 @@ class FyersV3:
             "appIdHash": self.app_id_hash(),
             "refresh_token": self.refresh_token,
         }
+        pin = str(pin or self.pin or "").strip()
         if pin:
             payload["pin"] = pin
         try:
@@ -109,6 +130,7 @@ class FyersV3:
                 self.access_token = body["access_token"]
                 self.refresh_token = body.get("refresh_token", self.refresh_token)
                 self._token_expiry = time.time() + body.get("expires_in", 86400)
+                self.refreshed = True
                 logger.info("Fyers token refreshed successfully")
                 return {"success": True, "data": body, "error": ""}
             msg = body.get("message", "")
@@ -164,7 +186,11 @@ class FyersV3:
                     logger.warning("Fyers token expired or invalid")
                     refresh_result = await self.refresh_access_token()
                     if refresh_result["success"]:
-                        headers["Authorization"] = self.access_token
+                        # Fyers v3 header must stay "<app_id>:<access_token>"
+                        headers["Authorization"] = (
+                            f"{self.app_id}:{self.access_token}"
+                            if self.app_id else self.access_token
+                        )
                         continue
                     return {
                         "success": False,
@@ -258,6 +284,22 @@ class FyersV3:
 
     async def get_funds(self) -> dict:
         return await self._request("GET", "/api/v3/funds")
+
+    async def get_profile(self) -> dict:
+        """Cheap read-only call used to verify a token for real (readiness
+        ping) - a stored token alone does not mean 'connected'."""
+        return await self._request("GET", "/api/v3/profile")
+
+    async def validate(self) -> dict:
+        """True/False with reason: token alive or not."""
+        if not self.access_token:
+            return {"success": False, "error": "No access token. OAuth login required."}
+        prof = await self.get_profile()
+        if prof.get("success"):
+            data = prof.get("data") or {}
+            name = data.get("display_name") or data.get("name") or ""
+            return {"success": True, "error": "", "detail": f"token valid ({name})" if name else "token valid"}
+        return {"success": False, "error": str(prof.get("error") or "token invalid")[:200]}
 
     async def get_option_chain(self, symbol: str, expiry: str) -> dict:
         return await self._request(

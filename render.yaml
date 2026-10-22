@@ -18,6 +18,18 @@ services:
       - key: DATABASE_URL
         value: ""
         sync: false
+      # Fyers credentials (Render Dashboard > Environment me fill karo).
+      # App ID format = <appId>-<appType> (e.g. 4mncDFS3DU07JmJO-100).
+      # Secret = MyAPI dashboard ka app secret. PIN optional (token refresh ke liye).
+      - key: RATRADE_FYERS_APP_ID
+        sync: false
+      - key: RATRADE_FYERS_SECRET
+        sync: false
+      - key: RATRADE_FYERS_REDIRECT_URI
+        value: "https://ratrade-iwi2.onrender.com/api/broker/fyers-callback"
+        sync: false
+      - key: RATRADE_FYERS_PIN
+        sync: false
     # FREE persistence (no paid disk): set DATABASE_URL to a free Postgres
     # e.g. Supabase (supabase.com) or Neon (neon.tech) or Render Postgres.
     # Example: postgresql://user:pass@host:5432/dbname?sslmode=require

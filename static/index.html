@@ -2655,7 +2655,7 @@ let _lastOpenTrdHTML = null;
     // login_url = official broker login page (new tab) - verified Sep 2026.
     const FALLBACK_BROKERS=[
         {key:'dhan',name:'Dhan',icon:'bi-bank',color:'text-primary',desc:'PIN + TOTP = fully automatic (no daily login)',fields:['client_id','access_token','refresh_token','pin','totp_secret'],configured:false,config:{},login_url:'https://login.dhan.co/',token_hint:'BEST: Dhan PIN (6-digit) + TOTP Secret save karo (Dhan Web > API > Setup TOTP, ek baar) — phir token roz khud banega, login ki zaroorat nahi. Ya token paste karo.'},
-        {key:'fyers',name:'Fyers',icon:'bi-currency-exchange',color:'text-danger',desc:'App ID + Secret — OAuth login (Historical OHLC Pandas Frame drawer + LIVE orders)',fields:['app_id','secret','redirect_uri','access_token','refresh_token'],configured:false,config:{},login_url:'https://myaccount.fyers.in/',token_hint:'Fyers Developer Portal me app banao. App ID (Client ID) + Secret save karo, phir OAuth Login dabao. Redirect URI app settings me EXACTLY: https://ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye.'},
+        {key:'fyers',name:'Fyers',icon:'bi-currency-exchange',color:'text-danger',desc:'App ID + Secret — OAuth login (Historical OHLC Pandas Frame drawer + LIVE orders)',fields:['app_id','secret','redirect_uri','access_token','refresh_token','pin'],configured:false,config:{},login_url:'https://myaccount.fyers.in/',token_hint:'Fyers Developer Portal (myapi.fyers.in/dashboard) se app banao. App ID format XXXXXXXXX-100 (sirf XXXXXXXXX daalo to app khud -100 jod dega) + Secret save karo, phir OAuth Login dabao. Redirect URI app settings me EXACTLY: https://ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye. PIN daal do to token 24h ke baad auto-refresh ho jayega.'},
         {key:'bigul',name:'Bigul',icon:'bi-bullseye',color:'text-warning',desc:'Mobile se login — OTP auto-fetch, token auto-connect',fields:['client_id','password','api_key','totp_secret'],configured:false,config:{},login_url:'https://bigul.co/login',token_hint:'Mobile number se login karo — OTP dalte hi token auto-fetch ho jayega. Ya API token paste karke Auto-connect dabao.'}
     ];
     function bigulOAuth(){ P('/api/broker/bigul-auth-url').then(r=>{ if(r.success&&r.url) window.open(r.url,'_blank'); else alert(r.error||'Bigul auth failed'); }); }
@@ -3293,10 +3293,11 @@ def run(data):
         try{console.log('[UI] build',v.commit);}catch(_){}
     }catch(e){el.textContent='UI ?';}})();}catch(e){}
 
-      const BROKER_FIELD_LABELS={
-          dhan:{client_id:'Client ID',access_token:'Access Token',refresh_token:'Refresh Token',pin:'Dhan PIN (6-digit, auto-login)',totp_secret:'TOTP Secret (one-time, then fully automatic)'},
-          angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
-      };
+    const BROKER_FIELD_LABELS={
+    dhan:{client_id:'Client ID',access_token:'Access Token',refresh_token:'Refresh Token',pin:'Dhan PIN (6-digit, auto-login)',totp_secret:'TOTP Secret (one-time, then fully automatic)'},
+    fyers:{app_id:'App ID (XXXXXXXXX-100)',secret:'Secret Key',redirect_uri:'Redirect URI (https://ratrade-iwi2.onrender.com/api/broker/fyers-callback)',access_token:'Access Token (auto)',refresh_token:'Refresh Token (auto)',pin:'Fyers Trading PIN (4-digit, auto-refresh)'},
+    angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
+    };
 
     </script>
 </body>

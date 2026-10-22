@@ -94,13 +94,13 @@ async def egress_test():
 
 BROKER_DEFAULTS = {
     "dhan": {"name": "Dhan", "icon": "bi-bank", "color": "text-primary", "fields": ["client_id", "access_token", "refresh_token", "pin", "totp_secret"], "desc": "Client ID + token (auto) / PIN + TOTP = fully automatic login"},
-    "fyers": {"name": "Fyers", "icon": "bi-currency-exchange", "color": "text-danger", "fields": ["app_id", "secret", "redirect_uri", "access_token", "refresh_token"], "desc": "App ID + Secret - OAuth login (Historical OHLC + LIVE orders)"},
+    "fyers": {"name": "Fyers", "icon": "bi-currency-exchange", "color": "text-danger", "fields": ["app_id", "secret", "redirect_uri", "access_token", "refresh_token", "pin"], "desc": "App ID + Secret - OAuth login (Historical OHLC + LIVE orders)"},
     "bigul": {"name": "Bigul", "icon": "bi-bullseye", "color": "text-warning", "fields": ["client_id", "password", "api_key", "totp_secret"], "desc": "Mobile se login — OTP auto-fetch, token auto-connect"},
 }
 
 BROKER_FIELD_LABELS = {
     "dhan": {"client_id": "Client ID", "access_token": "Access Token", "refresh_token": "Refresh Token", "pin": "Dhan PIN (6-digit, for auto-login)", "totp_secret": "TOTP Secret (one-time setup, then fully automatic)"},
-    "fyers": {"app_id": "App ID (e.g. XXXXXXXX-1)", "secret": "Secret Key", "redirect_uri": "Redirect URI (Wahan sirf ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye)", "access_token": "Access Token (auto-fill ka rahega)", "refresh_token": "Refresh Token (auto-fill ka rahega)"},
+    "fyers": {"app_id": "App ID (MyAPI dashboard se, format XXXXXXXXX-100)", "secret": "Secret Key", "redirect_uri": "Redirect URI (Wahan sirf ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye)", "access_token": "Access Token (auto-fill ka rahega)", "refresh_token": "Refresh Token (auto-fill ka rahega)", "pin": "Fyers Trading PIN (4-digit, token auto-refresh ke liye)"},
     "bigul": {"client_id": "Client ID", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
 }
 
@@ -307,6 +307,22 @@ def _env_config(broker: str) -> dict:
     return out
 
 
+def _normalize_broker_cfg(broker: str, cfg: dict) -> dict:
+    """Fyers App ID must be '<appId>-<appType>' (e.g. ABCDEFGH-100) - the API
+    answers 'invalid clientId' without the suffix. Normalize everywhere so
+    DB values, dashboard values and env values all behave the same."""
+    if broker != "fyers" or not isinstance(cfg, dict):
+        return cfg
+    try:
+        from core.services.broker_fyers import FyersV3
+        aid = str(cfg.get("app_id") or "").strip()
+        if aid:
+            cfg["app_id"] = FyersV3.normalize_app_id(aid)
+    except Exception:
+        pass
+    return cfg
+
+
 def _get_config(broker: str) -> dict:
     db = Database.get_instance()
     cfg = {}
@@ -328,7 +344,7 @@ def _get_config(broker: str) -> dict:
                 cfg[k] = v
     except Exception:
         pass
-    return cfg
+    return _normalize_broker_cfg(broker, cfg)
 
 
 def _save_config(broker: str, config: dict):
@@ -337,11 +353,26 @@ def _save_config(broker: str, config: dict):
         config = {k: (v.strip() if isinstance(v, str) else v) for k, v in (config or {}).items()}
     except Exception:
         pass
+    config = _normalize_broker_cfg(broker, config)
     existing = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key=?", [f"broker_{broker}"])
     if existing:
         db.execute("UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key=?", [json.dumps(config), f"broker_{broker}"])
     else:
         db.execute("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)", [f"broker_{broker}", json.dumps(config)])
+
+
+def _fyers_client(config: dict):
+    """Build a FyersV3 client from saved/env config (app id normalized)."""
+    from core.services.broker_fyers import FyersV3
+    cfg = _normalize_broker_cfg("fyers", dict(config or {}))
+    return FyersV3(
+        app_id=cfg.get("app_id", ""),
+        secret_key=cfg.get("secret", ""),
+        redirect_uri=(cfg.get("redirect_uri") or "").strip() or _default_redirect(),
+        access_token=cfg.get("access_token", ""),
+        refresh_token=cfg.get("refresh_token", ""),
+        pin=cfg.get("pin", ""),
+    )
 
 
 def _is_configured(broker: str) -> bool:
@@ -548,8 +579,8 @@ async def angel_callback_post(req: dict):
 
 @router.post("/auto-connect")
 async def auto_connect_brokers():
-    """Auto-connect all configured brokers (Dhan + Angel One) by validating tokens.
-    If token invalid, attempts refresh. Returns results."""
+    """Auto-connect all configured brokers (Dhan + Fyers + Bigul) by validating
+    tokens live. If a token is invalid, attempts refresh. Returns results."""
     results = []
     for key in ("dhan", "fyers", "bigul"):
         config = _get_config(key)
@@ -573,20 +604,55 @@ async def auto_connect_brokers():
                         results.append({"broker": key, "status": "needs_login"})
                 else:
                     results.append({"broker": key, "status": "failed", "error": str(v.get("error",""))})
-            elif key == "angel":
+            elif key == "fyers":
+                if not (config.get("app_id") and config.get("secret")):
+                    results.append({"broker": key, "status": "failed",
+                                    "error": "App ID + Secret missing (Setup ya env)"})
+                    continue
+                fy = _fyers_client(config)
+                if fy.access_token:
+                    v = await fy.validate()
+                    if v.get("success"):
+                        if fy.refreshed and fy.access_token:
+                            config["access_token"] = fy.access_token
+                            _save_config("fyers", config)
+                        results.append({"broker": key, "status": "connected"})
+                    elif fy.refresh_token:
+                        rr = await fy.refresh_access_token()
+                        if rr.get("success"):
+                            config["access_token"] = fy.access_token
+                            if fy.refresh_token:
+                                config["refresh_token"] = fy.refresh_token
+                            _save_config("fyers", config)
+                            results.append({"broker": key, "status": "renewed"})
+                        else:
+                            results.append({"broker": key, "status": "needs_login",
+                                            "error": str(rr.get("error",""))[:150]})
+                    else:
+                        results.append({"broker": key, "status": "needs_login",
+                                        "error": str(v.get("error",""))[:150]})
+                elif fy.refresh_token:
+                    rr = await fy.refresh_access_token()
+                    if rr.get("success"):
+                        config["access_token"] = fy.access_token
+                        if fy.refresh_token:
+                            config["refresh_token"] = fy.refresh_token
+                        _save_config("fyers", config)
+                        results.append({"broker": key, "status": "renewed"})
+                    else:
+                        results.append({"broker": key, "status": "needs_login",
+                                        "error": str(rr.get("error",""))[:150]})
+                else:
+                    results.append({"broker": key, "status": "needs_login",
+                                    "error": "OAuth login required (browser)"})
+            elif key == "bigul":
                 from core.services.broker_angel_live import AngelLive
-                an = AngelLive(
-                    api_key=config.get("api_key",""),
-                    client_code=config.get("client_code",""),
-                    password=config.get("password",""),
-                    totp_secret=config.get("totp_secret","")
-                )
+                an = AngelLive(api_key=config.get("api_key",""), client_code=config.get("client_id",""),
+                               password=config.get("password",""), totp_secret=config.get("totp_secret",""))
                 result = await an.login()
                 if result.get("success"):
                     config["access_token"] = an.jwt
-                    config["refresh_token"] = an.refresh_token
-                    config["feed_token"] = an.feed_token
-                    _save_config("angel", config)
+                    _save_config("bigul", config)
                     results.append({"broker": key, "status": "connected"})
                 else:
                     results.append({"broker": key, "status": "failed", "error": result.get("error","")})
@@ -646,11 +712,7 @@ async def fyers_auth(req: AuthRequest):
     config = _get_config("fyers")
     if not config:
         return {"success": False, "error": "Fyers not configured. Setup first."}
-    fy = FyersV3(
-        app_id=config.get("app_id", ""),
-        secret_key=config.get("secret", ""),
-        redirect_uri=config.get("redirect_uri", ""),
-    )
+    fy = _fyers_client(config)
     result = await fy.generate_token(req.code)
     if result["success"]:
         config["access_token"] = fy.access_token
@@ -712,11 +774,7 @@ async def fyers_callback(request: Request, code: str = "", state: str = ""):
     if not config:
         return HTMLResponse("<h3>Fyers not configured.</h3><p>Set App ID + Secret in RaTrade Brokers tab first.</p>", status_code=400)
     ruri_cb = (config.get("redirect_uri") or "").strip() or _default_redirect()
-    fy = FyersV3(
-        app_id=config.get("app_id", ""),
-        secret_key=config.get("secret", ""),
-        redirect_uri=ruri_cb,
-    )
+    fy = _fyers_client({**config, "redirect_uri": ruri_cb})
     result = await fy.generate_token(auth_code)
     if result["success"]:
         config["access_token"] = fy.access_token
@@ -741,11 +799,7 @@ def fyers_auth_url():
             if os.environ.get("RENDER_EXTERNAL_URL"):
                 ruri = os.environ["RENDER_EXTERNAL_URL"].rstrip("/") + "/api/broker/fyers-callback"
         except: pass
-    fy = FyersV3(
-        app_id=config.get("app_id", ""),
-        secret_key=config.get("secret", ""),
-        redirect_uri=ruri,
-    )
+    fy = _fyers_client({**config, "redirect_uri": ruri})
     return {"success": True, "url": fy.get_auth_url()}
 
 
@@ -791,30 +845,45 @@ async def connect_broker(req: ConnectRequest):
         return {"success": False, "error": "No credentials configured. Click Setup first."}
 
     if req.broker == "fyers":
-        # Don't auto-refresh on Connect - just verify token exists. Refresh is
-        # explicit via Refresh Tokens button and auto on 401. This avoids
-        # "Invalid Request" noise when Fyers refresh needs PIN or method mismatch.
+        # REAL validation: token is verified live against Fyers (profile ping)
+        # so the UI never shows 'Connected' for a dead token.
+        if not config.get("app_id") or not config.get("secret"):
+            return {"success": False, "error": "Fyers App ID + Secret missing. Save Setup / env first."}
+        fy = _fyers_client(config)
         if config.get("access_token"):
-            return {"success": True, "message": "Fyers connected (token valid - use Refresh Tokens if expired)"}
+            v = await fy.validate()
+            if v.get("success"):
+                if fy.refreshed and fy.access_token:
+                    config["access_token"] = fy.access_token
+                    _save_config("fyers", config)
+                return {"success": True, "message": "Fyers connected! Token verified live."}
+            detail = str(v.get("error") or "")[:150]
+            # Expired token -> try refresh (needs refresh_token, PIN optional)
+            if config.get("refresh_token"):
+                rr = await fy.refresh_access_token()
+                if rr.get("success"):
+                    config["access_token"] = fy.access_token
+                    if fy.refresh_token:
+                        config["refresh_token"] = fy.refresh_token
+                    _save_config("fyers", config)
+                    v2 = await fy.validate()
+                    if v2.get("success"):
+                        return {"success": True, "message": "Fyers connected! Token refreshed + verified."}
+                    return {"success": False, "error": f"Token refreshed but verify failed: {str(v2.get('error',''))[:120]}"}
+                return {"success": False, "error": f"{detail} | Refresh failed: {str(rr.get('error',''))[:120]}"}
+            return {"success": False, "error": f"{detail} - Click 'OAuth Login' (browser) to connect again."}
         if config.get("refresh_token"):
             # Try refresh once, but don't fail Connect if it errors - token may still be valid
-            try:
-                fy = FyersV3(
-                    app_id=config.get("app_id", ""),
-                    secret_key=config.get("secret", ""),
-                    redirect_uri=config.get("redirect_uri", ""),
-                    access_token=config.get("access_token", ""),
-                    refresh_token=config.get("refresh_token", ""),
-                )
-                result = await fy.refresh_access_token()
-                if result["success"]:
-                    config["access_token"] = fy.access_token
-                    config["refresh_token"] = fy.refresh_token
-                    _save_config("fyers", config)
-                    return {"success": True, "message": "Fyers connected (token auto-refreshed)"}
-            except Exception:
-                pass
-        return {"success": False, "error": "Fyers needs OAuth login or Access Token. Click 'Login with Fyers'."}
+            fy2 = _fyers_client(config)
+            result = await fy2.refresh_access_token()
+            if result["success"]:
+                config["access_token"] = fy2.access_token
+                if fy2.refresh_token:
+                    config["refresh_token"] = fy2.refresh_token
+                _save_config("fyers", config)
+                return {"success": True, "message": "Fyers connected (token auto-refreshed)"}
+            return {"success": False, "error": f"Token refresh failed: {str(result.get('error',''))[:150]}"}
+        return {"success": False, "error": "Fyers needs OAuth login. Click 'OAuth Login'."}
 
     if req.broker == "dhan":
         if not config.get("access_token") or not config.get("client_id"):
@@ -951,23 +1020,21 @@ async def auto_connect_all():
 @router.post("/refresh-tokens")
 async def refresh_tokens():
     results = {}
-    for key in ("dhan", "angel", "bigul"):
+    for key in ("dhan", "fyers", "angel", "bigul"):
         config = _get_config(key)
         if not config:
             results[key] = {"success": False, "error": "Not configured"}
             continue
         if key == "fyers":
-            fy = FyersV3(
-                app_id=config.get("app_id", ""),
-                secret_key=config.get("secret", ""),
-                redirect_uri=config.get("redirect_uri", ""),
-                access_token=config.get("access_token", ""),
-                refresh_token=config.get("refresh_token", ""),
-            )
+            fy = _fyers_client(config)
+            if not fy.refresh_token:
+                results[key] = {"success": False, "error": "No refresh token - OAuth login again"}
+                continue
             result = await fy.refresh_access_token()
             if result["success"]:
                 config["access_token"] = fy.access_token
-                config["refresh_token"] = fy.refresh_token
+                if fy.refresh_token:
+                    config["refresh_token"] = fy.refresh_token
                 _save_config("fyers", config)
                 results[key] = {"success": True, "message": "Token refreshed"}
             else:
@@ -1041,6 +1108,27 @@ async def token_status():
                 status[key] = res
             except Exception as e:
                 status[key] = {"valid": False, "expires_at": "", "detail": str(e)[:120]}
+        elif key == "fyers":
+            # Live ping (profile) so 'Connected' never means 'token saved but dead'
+            try:
+                if _tt.time() - _TOKEN_CHECK_TS.get(key, 0) < 60 and key in _TOKEN_CHECK_RES:
+                    status[key] = _TOKEN_CHECK_RES[key]
+                    continue
+                fy = _fyers_client(config)
+                v = await fy.validate()
+                res = {"valid": bool(v.get("success")), "expires_at": "",
+                       "detail": str(v.get("detail") or v.get("error") or "")[:150]}
+                if v.get("success") and fy.refreshed and fy.access_token:
+                    config["access_token"] = fy.access_token
+                    if fy.refresh_token:
+                        config["refresh_token"] = fy.refresh_token
+                    _save_config("fyers", config)
+                    res["detail"] = "token valid (auto-refreshed)"
+                _TOKEN_CHECK_TS[key] = _tt.time()
+                _TOKEN_CHECK_RES[key] = res
+                status[key] = res
+            except Exception as e:
+                status[key] = {"valid": False, "expires_at": "", "detail": str(e)[:120]}
         else:
             status[key] = {"valid": True, "expires_at": "", "detail": "saved (OAuth mode)"}
     return {"success": True, "status": status}
@@ -1055,16 +1143,15 @@ async def view_account(req: ConnectRequest):
         return {"success": False, "error": "Not connected. Click Setup first."}
 
     if req.broker == "fyers" and config.get("access_token"):
-        fy = FyersV3(
-            app_id=config.get("app_id", ""),
-            secret_key=config.get("secret", ""),
-            redirect_uri=config.get("redirect_uri", ""),
-            access_token=config.get("access_token", ""),
-            refresh_token=config.get("refresh_token", ""),
-        )
+        fy = _fyers_client(config)
         funds = await fy.get_funds()
         positions = await fy.get_positions()
         holdings = await fy.get_holdings()
+        if fy.refreshed and fy.access_token:
+            config["access_token"] = fy.access_token
+            if fy.refresh_token:
+                config["refresh_token"] = fy.refresh_token
+            _save_config("fyers", config)
         return {
             "success": True,
             "funds": funds.get("data", {}).get("fund_limit", [{}])[0] if funds.get("data", {}).get("fund_limit") else {"message": "Live fetch pending"},
