@@ -196,6 +196,12 @@ class DhanFeed:
                 except Exception:
                     pass
                 self._connected = False
+                # Tunnel/socket se connect nahi hua -> agli baar DIRECT try
+                # (proxy nahi, seedha WebSocket - Render IP allowed hai).
+                if not getattr(self, "_force_direct", False):
+                    self._force_direct = True
+                else:
+                    self._force_direct = False
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30)
 
@@ -206,12 +212,14 @@ class DhanFeed:
                f"&clientId={self._client_id}&authType=2")
         # Dhan IP-whitelisting: feed bhi fixed-IP CONNECT tunnel par se
         # (websockets proxy headers nahi bhej sakta -> raw sock tunnel).
+        # User rule: proxy nahi - pehle DIRECT, tunnel sirf fallback.
         kwargs = {}
-        try:
-            from core.services.egress_proxy import ws_connect_kwargs_async
-            kwargs = await ws_connect_kwargs_async("api-feed.dhan.co", 443)
-        except Exception:
-            kwargs = {}
+        if not getattr(self, "_force_direct", False):
+            try:
+                from core.services.egress_proxy import ws_connect_kwargs_async
+                kwargs = await ws_connect_kwargs_async("api-feed.dhan.co", 443)
+            except Exception:
+                kwargs = {}
         _kw = dict(ping_interval=30, ping_timeout=10, close_timeout=5)
         if kwargs.get("sock"):
             _kw["sock"] = kwargs["sock"]
