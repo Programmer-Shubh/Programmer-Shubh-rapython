@@ -383,6 +383,42 @@ def get_live_chain(symbol: str, expiry: str = ""):
     return {"error": "No chain data available"}
 
 
+@router.get("/ltpdiag")
+def ltp_diag(symbol: str = "NIFTY", strike: float = 0.0, opt: str = "CE", expiry: str = ""):
+    """ASLI LTP diagnostics: har tier ka samay & result (no trade side effects).
+    /api/chain/ltpdiag?symbol=NIFTY&strike=24800&opt=CE&expiry=2026-10-30"""
+    import time as _t
+    out = {"symbol": symbol, "strike": strike, "opt": opt, "expiry": expiry, "tiers": {}}
+    sym = symbol.upper()
+    _t0 = _t.time()
+    # Tier: NSE live chain
+    try:
+        from core.services.free_data import nse_chain_ltp as _n
+        _r = _n(sym, strike, opt, expiry)
+        out["tiers"]["nse_chain"] = {"ltp": _r, "sec": round(_t.time()-_t0, 1)}
+    except Exception as e:
+        out["tiers"]["nse_chain"] = {"err": str(e)[:120], "sec": round(_t.time()-_t0, 1)}
+    # Tier: Dhan feed tick
+    try:
+        _t1 = _t.time()
+        from core.services.contract_pricer import _dhan_master_tokens, _dhan_feed_ltps
+        _m = _dhan_master_tokens(sym, expiry, [(strike, opt)])
+        _fl = _dhan_feed_ltps(sym, _m) if _m else {}
+        out["tiers"]["dhan_feed"] = {"tokens": _m, "ltp": _fl, "sec": round(_t.time()-_t1, 1)}
+    except Exception as e:
+        out["tiers"]["dhan_feed"] = {"err": str(e)[:120]}
+    # Tier: full pricer result
+    try:
+        _t2 = _t.time()
+        from core.services.contract_pricer import get_contract_ltps
+        _r2 = get_contract_ltps(sym, [(float(strike), opt.upper())], expiry, fresh=True)
+        out["tiers"]["pricer"] = {"ltp": _r2, "sec": round(_t.time()-_t2, 1)}
+    except Exception as e:
+        out["tiers"]["pricer"] = {"err": str(e)[:120]}
+    out["total_sec"] = round(_t.time()-_t0, 1)
+    return out
+
+
 @router.post("/place-trade")
 def place_trade(req: TradeRequest):
     try:
