@@ -45,15 +45,26 @@ def _today_ist():
 
 def snap_hint_to_expiry(symbol: str, hint: str) -> str:
     """Local weekday guess (Tue NSE / Thu SENSEX) used ONLY as a first
-    candidate — always re-validated against the broker master afterwards."""
+    candidate — always re-validated against the broker master afterwards.
+    Phantom-date guard: explicit future date jo REAL exchange expiry nahi
+    (10-29 Thursday NIFTY jaisa) -> nearest real weekly. Warna broker
+    quote/master us contract par fail ho jata hai aur paper MODEL price
+    par lag jaata tha."""
     import calendar as _cal
     hint = str(hint or "").strip()
+    explicit = False
     try:
-        return _dt.datetime.strptime(hint[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+        explicit = bool(_dt.datetime.strptime(hint[:10], "%Y-%m-%d"))
     except Exception:
         pass
     today = _today_ist()
     wd = 3 if symbol.upper() == "SENSEX" else 1
+    if explicit:
+        try:
+            from core.services.contract_pricer import _snap_future_expiry as _snap
+            return _snap(symbol, hint[:10]) or hint[:10]
+        except Exception:
+            return hint[:10]
     if hint.lower().startswith("month") or (symbol.upper() not in WEEKLY_IDX):
         last = _dt.date(today.year, today.month, _cal.monthrange(today.year, today.month)[1])
         while last.weekday() != wd:
