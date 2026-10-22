@@ -583,7 +583,7 @@
                  <div class="col" style="min-width:240px"><div class="card" style="border:2px solid #dc3545"><div class="card-body text-center" style="padding:20px">
                     <div style="margin-bottom:12px"><i class="bi bi-currency-exchange text-danger" style="font-size:36px"></i></div>
                     <h6 class="fw-bold">Fyers <span class="badge bg-danger" style="font-size:10px">MAIN BROKER</span></h6><p class="text-muted small">App ID + Secret — OAuth login, Historical OHLC + LIVE orders</p>
-                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span></div>
+                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Checking… (auto-connect)</span></div>
                     <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                         <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('fyers')"><i class="bi bi-gear"></i> Setup</button>
                         <button class="btn btn-sm btn-success" onclick="connectSingleBroker('fyers')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
@@ -2523,6 +2523,12 @@ let _lastOpenTrdHTML = null;
     addCondition();
     loadDash();
     loadStrategySymbols();
+    // Broker auto-connect site-load par hi (Broker page click ki zarurat nahi) +
+    // status har 5-min par refresh (sirf jab tab visible ho).
+    try{loadBrokers();}catch(e){}
+    try{silentBrokerConnect();}catch(e){}
+    try{ setInterval(()=>{ if(document.hidden) return; try{loadBrokers();}catch(e){} }, 5*60*1000); }catch(e){}
+    try{ setInterval(()=>{ if(document.hidden) return; try{silentBrokerConnect();}catch(e){} }, 15*60*1000); }catch(e){}
     // Deployed version banner (cache diagnosis: purana page khula ho to turant pata chale)
     async function loadVer(){ try{ const v=await A('/api/version'); const el=document.getElementById('ver-badge'); if(el&&v&&v.commit){ el.textContent='v'+String(v.commit).slice(0,7); el.title='Deployed: '+v.commit+' • '+(v.branch||''); } else if(el){ el.style.display='none'; } }catch(e){ try{document.getElementById('ver-badge').style.display='none';}catch(_){} } }
     try{loadVer();}catch(e){}
@@ -2695,6 +2701,22 @@ let _lastOpenTrdHTML = null;
         const r=await P('/api/broker/auto-connect',{method:'POST'});
         if(r&&r.success){showToast('Auto-connect done! Check results.', 'success');loadBrokers();}else{showToast('Auto-connect failed: '+(r?.error||''), 'danger');}
     }
+    // Silent auto-connect site-load par hi (broker page kholne ki zarurat nahi).
+    // Broker session server-side hota hai - browser refresh/close se disconnect
+    // NAHI hota; sirf status display re-render hota hai. 10-min throttle taki
+    // Fyers validation call baar-baar na chale.
+    async function silentBrokerConnect(force){
+        try{
+            if(!force){
+                const last=Number((function(){try{return localStorage.getItem('ratrade_ac_ts')||0;}catch(_e){return 0;}})());
+                if(Date.now()-last<10*60*1000){ try{loadBrokers();}catch(e){} return; }
+            }
+            await P('/api/broker/auto-connect',{method:'POST'});
+            try{localStorage.setItem('ratrade_ac_ts',String(Date.now()));}catch(e){}
+            try{await loadBrokers();}catch(e){}
+            try{liveStatus();}catch(e){}
+        }catch(e){ try{loadBrokers();}catch(e2){} }
+    }
     // Surface JS errors as visible toasts (no more silent dead buttons)
     window.addEventListener('error',e=>{ try{ showToast('Page error: '+(e.message||'unknown'), 'danger'); }catch(_){} });
     function renderBrokerCards(list, offline){
@@ -2704,7 +2726,7 @@ let _lastOpenTrdHTML = null;
             const hasRealToken = b.config && b.config.access_token && !String(b.config.access_token).startsWith('SIM-') && !String(b.config.access_token).startsWith('ANG-') && String(b.config.access_token).length>10;
             const isConnected = (b.connected===true) || (b.configured && hasRealToken);
             const isDisc = b.disconnected===true;
-            const statusH=isConnected?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Connected</span>':(isDisc?'<span class="badge" style="background:#f8d7da;color:#842029"><i class="bi bi-power"></i> Disconnected</span>':(b.configured?'<span class="badge" style="background:#fff3cd;color:#664d03"><i class="bi bi-exclamation-circle"></i> Configured - Hit Connect</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>'));
+            const statusH=isConnected?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Connected</span>':(isDisc?'<span class="badge" style="background:#f8d7da;color:#842029"><i class="bi bi-power"></i> Disconnected</span>':(b.configured?'<span class="badge" style="background:#fff3cd;color:#664d03"><i class="bi bi-exclamation-circle"></i> Configured - Hit Connect</span>':(offline?'<span class="badge" style="background:#e2e3e5;color:#41464b"><i class="bi bi-arrow-repeat"></i> Checking… (auto-connect)</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>')));
             const mainTag = b.key==='fyers'?' <span class="badge bg-danger" style="font-size:10px">MAIN BROKER</span>':'';
             const border = b.key==='fyers'?'border:2px solid #dc3545;':'';
             h+=`<div class="col" style="min-width:240px"><div class="card" style="${border}"><div class="card-body text-center" style="padding:20px">
@@ -2749,7 +2771,10 @@ let _lastOpenTrdHTML = null;
             try{ liveStatus(); }catch(e2){}
         }catch(e){
             if(isFirstLoad){
-                showToast('Broker server slow/unreachable, offline buttons dikhaye: '+(e.name==='AbortError'?'timeout 15s':e.message), 'warning');
+                // Render free-tier cold start: server uthne me 30-60s lag sakta hai.
+                // "Not Connected" jhooth na dikhe - ek baar auto-retry (7s baad).
+                try{ if(!window._lbRetry){ window._lbRetry=true; setTimeout(()=>{ try{ loadBrokers(); }catch(_e2){} }, 7000); } }catch(_e){}
+                showToast('Broker server slow/unreachable, 7s me auto-retry: '+(e.name==='AbortError'?'timeout 15s':e.message), 'warning');
             } else {
                 // keep showing current connected state, no flicker to offline
                 renderBrokerCards(brokerData, false);
@@ -2826,11 +2851,6 @@ let _lastOpenTrdHTML = null;
     }
     // Auto-capture callback tokens (Angel)
     setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);const ap='/api/broker/angel-callback';if(q.get('code')&&window.location.pathname.includes('angel-callback')){P(ap,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:q.get('code'),client_code:q.get('client_code')||''})}).then(r=>{if(r.success){showToast('Angel token auto-saved!', 'success');loadBrokers();}else{showToast('Angel callback failed', 'danger');}}).catch(()=>{});}document.history.replaceState({},document.title,window.location.pathname);}catch(e){}},800);
-
-    async function autoConnectAll(){
-        const r=await A('/api/broker/auto-connect',{method:'POST'});
-        if(r.success){alert('Auto-connect done!');loadBrokers();}
-    }
 
     async function refreshTokens(){
         const r=await A('/api/broker/refresh-tokens',{method:'POST'});
