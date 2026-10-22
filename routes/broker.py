@@ -1345,6 +1345,7 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
 
 
 _DHAN_LTP_CACHE = {}  # security_id -> (ts, ltp)
+_DHAN_429_UNTIL = 0.0  # Dhan 429 cooldown (REST hammer mat karo)
 
 
 def _dhan_feed_ltp(security_id: str, symbol: str) -> float:
@@ -1404,12 +1405,23 @@ def _dhan_direct_ltp(security_id: str, symbol: str, debug: dict = None):
         _payload = {seg: [_sid]}
         r = None
         _last_err = ""
+        # 429 cooldown: Dhan ne block kiya hai -> REST mat todo (feed try karo)
+        global _DHAN_429_UNTIL
+        if _t.time() < _DHAN_429_UNTIL:
+            debug["dhan_src"] = "cooldown-429"
+            _old = _DHAN_LTP_CACHE.get(_sid_k)
+            if _old and (_t.time() - _old[0]) < 300:
+                return _old[1]
+            return 0.0
         # DIRECT call (user rule: proxy nahi) - Dhan IP whitelist server IP par hai
         try:
             import httpx as _hx
             r = _hx.post(_url, headers=_hdr, json=_payload, timeout=10)
             if getattr(r, "status_code", 0) != 200:
                 _last_err = f"direct: http {getattr(r, 'status_code', 0)} {str((getattr(r, 'text', '') or '')[:120])}"
+                if int(getattr(r, "status_code", 0) or 0) == 429:
+                    _DHAN_429_UNTIL = _t.time() + 300
+                    debug["dhan_429_cooldown"] = 300
         except Exception as _e3:
             _last_err = f"direct: {str(_e3)[:80]}"
             r = None

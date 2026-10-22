@@ -20,6 +20,7 @@ import time
 _TOKEN_CACHE = {}   # key -> (ts, value); 6h
 _TOKEN_TTL = 6 * 3600
 _PRICE_CACHE = {}   # key -> (ts, ltp); 10s
+_DHAN_429_UNTIL = 0.0  # Dhan 429 cooldown (5 min)
 _PRICE_TTL = 10
 
 _DHAN_BASE = "https://api.dhan.co/v2"
@@ -115,6 +116,9 @@ def _broker_cfg(name):
 
 def _dhan_post(path, token, client_id, payload, timeout=6):
     # Dhan IP-whitelisting: proxy ON par httpx Client (Bearer proxy-header).
+    global _DHAN_429_UNTIL
+    if time.time() < _DHAN_429_UNTIL:
+        return {}  # 429 cooldown: Dhan ko hammer mat karo
     try:
         from core.services.egress_proxy import sync_request as _sreq
         r = _sreq(
@@ -130,6 +134,8 @@ def _dhan_post(path, token, client_id, payload, timeout=6):
             json=payload, timeout=timeout,
         )
     if r.status_code != 200:
+        if int(r.status_code or 0) == 429:
+            _DHAN_429_UNTIL = time.time() + 300
         return {}
     try:
         return r.json() or {}
