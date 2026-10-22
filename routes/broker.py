@@ -1344,32 +1344,44 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
     return _round_tick(ltp)
 
 
-def _dhan_direct_ltp(security_id: str, symbol: str) -> float:
+def _dhan_direct_ltp(security_id: str, symbol: str, debug: dict = None):
     """Exact security_id ka REAL Dhan LTP (/marketfeed/quote). Stock options
     contract_pricer ke broker-tier se skip hoti hain - isliye yahan direct."""
+    if debug is None:
+        debug = {}
     try:
         from core.services.contract_pricer import _dhan_post, _real_token, _broker_cfg
         cfg = _broker_cfg("dhan")
         token = str((cfg or {}).get("access_token", "") or "")
         cid = str((cfg or {}).get("client_id", "") or "")
         if not _real_token(token) or not cid or not security_id:
+            debug["dhan_quote"] = "no-token/creds"
             return 0.0
         seg = "BSE_FNO" if (symbol or "").upper() in ("SENSEX", "BANKEX") else "NSE_FNO"
         q = _dhan_post("/marketfeed/quote", token, cid,
                        {seg: [int(float(security_id))]}, timeout=8)
+        debug["dhan_quote_keys"] = list((q or {}).keys())
+        debug["dhan_quote_status"] = str((q or {}).get("status")) if isinstance(q, dict) else "node"
         data = (q.get("data") or {})
+        debug["dhan_data_keys"] = list((data or {}).keys()) if isinstance(data, dict) else str(type(data))
         node = data.get(seg, data) if isinstance(data, dict) else {}
+        debug["dhan_node_keys"] = list((node or {}).keys())[:5] if isinstance(node, dict) else "not-dict"
         entry = node.get(str(int(float(security_id)))) if isinstance(node, dict) else None
         if isinstance(entry, dict):
+            debug["dhan_entry_keys"] = list(entry.keys())[:8]
             for f in ("last_price", "LTP", "ltp", "lastPrice"):
                 try:
                     v = float(entry.get(f, 0) or 0)
                     if v > 0:
+                        debug["dhan_ltp"] = v
                         return v
                 except Exception:
                     continue
-    except Exception:
-        pass
+            debug["dhan_quote"] = "entry-parse-fail"
+        else:
+            debug["dhan_quote"] = "entry-missing"
+    except Exception as e:
+        debug["dhan_quote"] = f"err: {str(e)[:100]}"
     return 0.0
 
 
@@ -1597,10 +1609,13 @@ async def place_live_order(req: LiveOrderRequest):
         # OVERRIDE: resolved contract ka REAL broker LTP (order price == LTP)
         try:
             _real_ltp = 0.0
+            _qdbg = {}
             if preview.get("broker") == "dhan":
-                _real_ltp = _dhan_direct_ltp(str(preview.get("security_id") or ""), symbol)
+                _real_ltp = _dhan_direct_ltp(str(preview.get("security_id") or ""), symbol, debug=_qdbg)
             elif preview.get("broker") in ("angel", "bigul"):
                 _real_ltp = _angel_direct_ltp(symbol, strike, opt, exp_ymd)
+            if req.dry_run and _qdbg:
+                preview["_quote_debug"] = _qdbg
             if _real_ltp > 0:
                 preview["ltp"] = _round_tick(_real_ltp)
                 _limit_px = _round_tick(_real_ltp)
