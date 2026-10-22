@@ -230,6 +230,52 @@ def _dhan_batch_ltp(symbol, token_map):
     return res
 
 
+def _dhan_master_tokens(symbol, expiry_ymd, contracts):
+    """STOCK options ke liye Dhan master se security ids (24h cache).
+    (_dhan_tokens sirf index underlyings ke liye chalta tha.)"""
+    out = {}
+    try:
+        from core.services.broker_dhan_live import DhanLive
+        dl = DhanLive(client_id="", access_token="")
+        for (strike, opt) in contracts:
+            try:
+                r = dl._resolve_via_master(symbol, expiry_ymd, strike, opt, False)
+                sid = (r or {}).get("security_id")
+                if sid:
+                    out[(float(strike), "CE" if str(opt).upper().startswith("C") else "PE")] = str(sid)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def _dhan_feed_ltps(symbol, token_map):
+    """Dhan WebSocket feed se REAL LTP (REST quote par 429 aata hai)."""
+    res = {}
+    try:
+        from core.services.dhan_feed import get_feed, ensure_feed_from_config
+        fd = ensure_feed_from_config() or get_feed()
+        if not fd or not token_map:
+            return res
+        seg = "BSE_FNO" if (symbol or "").upper() in ("SENSEX", "BANKEX") else "NSE_FNO"
+        for _k, _sid in token_map.items():
+            try:
+                fd.subscribe(seg, _sid)
+            except Exception:
+                pass
+        for _k, _sid in token_map.items():
+            try:
+                v = fd.get_ltp(seg, _sid, max_age=20)
+            except Exception:
+                v = 0
+            if v and float(v) > 0:
+                res[_k] = round(float(v), 2)
+    except Exception:
+        pass
+    return res
+
+
 # ---------------- Angel: token resolve + batch LTP (sync, best-effort) ----------------
 
 def _angel_tsym(symbol, expiry_ymd, strike, opt):
@@ -464,6 +510,21 @@ def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False):
                     pass
                 want_rest = {k: v for k, v in want.items() if k not in live}
                 live.update(_dhan_batch_ltp(sym, want_rest))
+        except Exception:
+            pass
+        # Tier 1b: STOCK options - Dhan master se security id + feed tick
+        # (index hi nahi, har stock option ka real LTP milna chahiye).
+        try:
+            _stock_missing = [k for k in missing if k not in live]
+            if _stock_missing and expiry_ymd:
+                _smap = _dhan_master_tokens(sym, expiry_ymd, _stock_missing)
+                if _smap:
+                    _fl = _dhan_feed_ltps(sym, _smap)
+                    for k, v in _fl.items():
+                        live[k] = v
+                    _rest = {k: v for k, v in _smap.items() if k not in live}
+                    if _rest:
+                        live.update(_dhan_batch_ltp(sym, _rest))
         except Exception:
             pass
         # Tier 1b: Angel token batch (anything with NFO symbol)

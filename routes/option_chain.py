@@ -563,7 +563,20 @@ def place_trade(req: TradeRequest):
             _ist = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
         except Exception:
             _ist = ""
-        if premium <= 0 and req.date and _ist and str(req.date) < _ist:
+        # Aaj ka trade -> REAL broker LTP (feed/quote) sabse pehle, DB
+        # bhavcopy uske baad (bhavcopy EOD par update hoti hai, isliye
+        # paper entry aur Dhan LTP alag hote the).
+        _today = bool(req.date) and str(req.date)[:10] == _ist
+        if _today or premium <= 0:
+            try:
+                live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type,
+                                                  req.expiry, fresh=True)
+            except Exception:
+                live_premium = 0
+            if live_premium and live_premium > 0:
+                premium = float(live_premium)
+        # Past date + DB me bhi premium nahi -> live price mix nahi karenge
+        if premium <= 0 and req.date and _ist and str(req.date)[:10] < _ist:
             return {"error": f"No {req.option_type} {req.strike} premium on {req.date} for {req.symbol} - pick a strike visible in that date's chain (live rate not applied to past dates)"}
         # If no DB premium, try live (shared pricer: broker token-quote ->
         # fresh DB -> model; same rate the chain table shows)
