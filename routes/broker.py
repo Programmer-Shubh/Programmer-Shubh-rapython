@@ -1344,6 +1344,49 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
     return _round_tick(ltp)
 
 
+def _dhan_direct_ltp(security_id: str, symbol: str) -> float:
+    """Exact security_id ka REAL Dhan LTP (/marketfeed/quote). Stock options
+    contract_pricer ke broker-tier se skip hoti hain - isliye yahan direct."""
+    try:
+        from core.services.contract_pricer import _dhan_post, _real_token, _broker_cfg
+        cfg = _broker_cfg("dhan")
+        token = str((cfg or {}).get("access_token", "") or "")
+        cid = str((cfg or {}).get("client_id", "") or "")
+        if not _real_token(token) or not cid or not security_id:
+            return 0.0
+        seg = "BSE_FNO" if (symbol or "").upper() in ("SENSEX", "BANKEX") else "NSE_FNO"
+        q = _dhan_post("/marketfeed/quote", token, cid,
+                       {seg: [int(float(security_id))]}, timeout=8)
+        data = (q.get("data") or {})
+        node = data.get(seg, data) if isinstance(data, dict) else {}
+        entry = node.get(str(int(float(security_id)))) if isinstance(node, dict) else None
+        if isinstance(entry, dict):
+            for f in ("last_price", "LTP", "ltp", "lastPrice"):
+                try:
+                    v = float(entry.get(f, 0) or 0)
+                    if v > 0:
+                        return v
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return 0.0
+
+
+def _angel_direct_ltp(symbol: str, strike: float, opt: str, expiry_ymd: str) -> float:
+    """Angel/Bigul resolved contract ka REAL LTP (order se pehle)."""
+    try:
+        from core.services.contract_pricer import _angel_batch_ltp
+        m = _angel_batch_ltp(symbol, [(float(strike), str(opt).upper())], expiry_ymd)
+        for v in m.values():
+            f = float(v or 0)
+            if f > 0:
+                return f
+    except Exception:
+        pass
+    return 0.0
+
+
 @router.post("/place-live")
 async def place_live_order(req: LiveOrderRequest):
     """REAL live order execution (real money). Safety chain:
@@ -1551,6 +1594,19 @@ async def place_live_order(req: LiveOrderRequest):
             for _b in ("dhan", "angel", "bigul"):
                 if preview.get("broker") == _b:
                     preview["order_type"] = "LIMIT"
+        # OVERRIDE: resolved contract ka REAL broker LTP (order price == LTP)
+        try:
+            _real_ltp = 0.0
+            if preview.get("broker") == "dhan":
+                _real_ltp = _dhan_direct_ltp(str(preview.get("security_id") or ""), symbol)
+            elif preview.get("broker") in ("angel", "bigul"):
+                _real_ltp = _angel_direct_ltp(symbol, strike, opt, exp_ymd)
+            if _real_ltp > 0:
+                preview["ltp"] = _round_tick(_real_ltp)
+                _limit_px = _round_tick(_real_ltp)
+                preview["limit_price"] = _limit_px
+        except Exception:
+            pass
         if req.dry_run:
             try:
                 _req_exp = str(exp_hint or "")[:10]
