@@ -326,6 +326,28 @@ async def ready():
         return {"status": "ready - degraded"}
 
 
+# ---- OAuth redirect catch-all (LAST route: kab kuch na pakde tab) ----
+# Fyers login OAuth callback user ke Fyers-app settings ka redirect URI follow
+# karta hai - galat path (e.g. /api/v1/auth/fyers/callback) par bina is route
+# ke {"detail":"Not Found"} dikhta tha aur auth_code kho jata tha. Catch-all
+# fyers*callback* + auth_code/s=ok query -> asli callback handler.
+from fastapi import Request as _Req
+
+
+@app.get("/{path:path}")
+async def _oauth_redirect_catchall(path: str, request: _Req):
+    try:
+        _p = str(path or "").lower()
+        if ("fyers" in _p and ("callback" in _p or "redirect" in _p or "auth" in _p)):
+            _qp = dict(request.query_params)
+            if _qp.get("auth_code") or _qp.get("s", "").lower() in ("ok", "success") or _qp.get("code"):
+                return await broker.fyers_callback(request)
+    except Exception:
+        pass
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"detail": "Not Found"}, status_code=404)
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
