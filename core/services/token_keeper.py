@@ -120,6 +120,12 @@ def _bigul_login(cfg):
         return ""
 
 
+def _sebi_blocked(msg) -> bool:
+    m = str(msg or "").lower()
+    return ("sebi" in m or ("disabled" in m and "refresh" in m)
+            or "regulation" in m)
+
+
 def sync_once():
     """One keep-alive pass over every linked broker.
 
@@ -143,6 +149,12 @@ def sync_once():
                         cfg["access_token"] = new_tok
                         _save_cfg("fyers", cfg)
                         res["fyers"] = "token refreshed (auto)"
+                else:
+                    if _sebi_blocked(det2) or _sebi_blocked(detail):
+                        # Fyers ne refresh-token API khud band kiya (SEBI
+                        # guideline) - hamara bug nahi. Token expired hone
+                        # par hi OAuth login chahiye; isko spam na karo.
+                        res["fyers"] = "refresh blocked (Fyers SEBI notice) - token valid rehte tak trading chalu; expire hone par Connect se login"
                     else:
                         res["fyers"] = f"needs login ({det2 or detail})"
             elif cfg.get("refresh_token"):
@@ -152,7 +164,8 @@ def sync_once():
                     _save_cfg("fyers", cfg)
                     res["fyers"] = "token refreshed (auto)"
                 else:
-                    res["fyers"] = f"needs login ({det2})"
+                    res["fyers"] = ("refresh blocked (Fyers SEBI notice)"
+                                    if _sebi_blocked(det2) else f"needs login ({det2})")
             else:
                 res["fyers"] = "not configured"
     except Exception as e:

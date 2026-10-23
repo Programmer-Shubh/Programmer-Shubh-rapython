@@ -167,6 +167,20 @@ class FyersV3:
             msg = body.get("message", "")
             if "pin" in msg.lower():
                 msg += " (Fyers needs your trading PIN for refresh — else login again)"
+            # SEBI/ECN guideline: Fyers ne validate-refresh-token API disable
+            # kar di hai -> ye USER-ka-nahi-FYERS-ka status hai. Trading tab
+            # tak chalti hai jab tak stored access token valid hai; press
+            # Connect/OAuth login karke naya token liya jaa sakta hai.
+            _mlow = str(msg).lower()
+            if ("sebi" in _mlow or "regulation" in _mlow
+                    or "disabled" in _mlow and "refresh" in _mlow):
+                msg = ("Fyers ne refresh-token API band ki hai (SEBI guideline) "
+                       "- ye Fyers ka notice hai, app ka fault nahi. "
+                       "Trading tab tak chalti rahegi jab tak ye token valid hai; "
+                       "token khatam hone par Brokers tab me 'Connect' (OAuth "
+                       "login) karke naya token le lena.")
+                return {"success": False, "data": body,
+                        "error": msg, "sebi_disabled": True}
             return {"success": False, "data": body, "error": msg or "Token refresh failed — Login with Fyers again"}
         except httpx.RequestError as exc:
             logger.error("Fyers token refresh error: %s", exc)
@@ -279,27 +293,65 @@ class FyersV3:
         price: float = 0,
         exchange: str = "NSE",
     ) -> dict:
+        """REAL order to Fyers v3. STRICT spec (user-confirmed):
+        - type: 1 = LIMIT, 2 = MARKET, 3 = SL, 4 = SL-M (pehle INVERTED tha -
+          MARKET ko 1 bhej rahe the -> Fyers usse LIMIT samajhta tha
+          limitPrice=0 par -> order broker me rest/reject, kabhi execute nahi)
+        - side: 1 = BUY, -1 = SELL (strict int)
+        - qty: strict int, lot-size multiple (caller ki zimmedari), >= 1
+        - Poori response (code + message) error me detail-log hoti hai taaki
+          order rejection ka ASLI reason turant dikhe."""
         fy_order_type_map = {
-            "MARKET": 1,
-            "LIMIT": 2,
+            "LIMIT": 1,
+            "MARKET": 2,
             "SL": 3,
             "SL-M": 4,
         }
+        try:
+            qty_i = int(quantity)
+        except Exception:
+            return {"success": False, "data": {}, "error": f"Invalid qty: {quantity!r} (int hona chahiye)"}
+        if qty_i < 1:
+            return {"success": False, "data": {}, "error": f"Invalid qty: {qty_i} (< 1)"}
+        _ot = str(order_type or "MARKET").upper()
+        _txn = str(transaction_type or "BUY").upper()
+        _px = float(price or 0)
+        if _ot == "LIMIT" and _px <= 0:
+            return {"success": False, "data": {}, "error": "LIMIT order ke liye price>0 chahiye (market-order bhejo ya price do)"}
         payload = {
             "symbol": symbol,
-            "qty": quantity,
-            "type": fy_order_type_map.get(order_type.upper(), 1),
-            "side": 1 if transaction_type.upper() == "BUY" else -1,
+            "qty": qty_i,
+            "type": int(fy_order_type_map.get(_ot, 2)),
+            "side": 1 if _txn == "BUY" else -1,
             "productType": "INTRADAY",
-            "limitPrice": price if order_type.upper() == "LIMIT" else 0,
+            "limitPrice": _px if _ot == "LIMIT" else 0,
             "stopPrice": 0,
             "validity": "DAY",
             "disclosedQty": 0,
             "offlineOrder": False,
         }
-        result = await self._request("POST", "/api/v3/orders/sync", data=payload)
+        logger.info("Fyers place_order payload: %s", json.dumps(payload))
+        try:
+            result = await self._request("POST", "/api/v3/orders/sync", data=payload)
+        except Exception as e:
+            # API call crash (network/loop) - exact reason log + return, phir
+            # kabhi "silent no-order" na lage.
+            logger.error("Fyers place_order CRASH %s: %s", symbol, e, exc_info=True)
+            return {"success": False, "data": {}, "error": f"Fyers place_order crashed: {str(e)[:200]}"}
         if result["success"]:
-            result["data"] = {"order_id": result["data"].get("id", "")}
+            _d = result.get("data") or {}
+            result["data"] = {"order_id": _d.get("id", ""), "raw": _d}
+            logger.info("Fyers order SENT: %s -> order_id=%s", symbol, _d.get("id", ""))
+        else:
+            # Poora broker response log (code/message jaise -300, margin,
+            # invalid symbol) - rejection ka real reason yahan dikhega.
+            _body = result.get("data") or {}
+            logger.error(
+                "Fyers ORDER REJECTED %s %s qty=%s: status_msg=%r | code=%s | body=%s",
+                _txn, symbol, qty_i,
+                str(result.get("error") or "")[:300],
+                _body.get("code"), json.dumps(_body)[:500],
+            )
         return result
 
     async def modify_order(

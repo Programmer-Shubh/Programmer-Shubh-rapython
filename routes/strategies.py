@@ -538,15 +538,18 @@ def _strat_live_key(strat_id: int) -> str:
 
 
 def _strat_live_enabled(db, strat_id: int) -> bool:
+    """Live profile: sirf EXPLICIT '1' par. Pehle missing-row/crash par
+    True (open) wapas aata tha - nahi chhune wali strategy bhi Live-ON
+    maani jaati thi (galat orders + GHWAT LIVE tag). Ab fail-CLOSED: OFF."""
     try:
         row = db.fetch_one(
             "SELECT setting_value FROM settings WHERE setting_key=?",
             [_strat_live_key(strat_id)])
         if not row:
-            return True
+            return False
         return str(row.get("setting_value") or "") == "1"
     except Exception:
-        return True
+        return False
 
 
 class LotsUpdateRequest(BaseModel):

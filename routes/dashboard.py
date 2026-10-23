@@ -167,6 +167,7 @@ def get_portfolio():
                 "tp": t["trade"]["target"],
                 "status": t["trade"]["status"],
                 "trade_mode": t["trade"].get("trade_mode", "paper"),
+                "broker_order_id": t["trade"].get("broker_order_id", ""),
                 "trade_type": t["trade"].get("trade_type", "intraday"),
                 "qty": t["trade"].get("quantity", 1),
                 "lot_size": effective_lot_size(t["trade"].get("symbol"), t["trade"].get("lot_size")),

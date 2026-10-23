@@ -442,7 +442,14 @@ def _intraday_signal(sid, s, today):
 
 
 def _execute_legs(s, legs, db, tm, today):
-    """Shared leg executor: live ATM + place_trade per leg. Returns (placed, notes)."""
+    """Shared leg executor: live ATM + place_trade per leg. Returns (placed, notes).
+
+    LIVE ROUTING (user fix): is strategy ka Live toggle ON ho + khud REAL
+    broker session (token) baitha ho to signal legs REAL broker order ki tarah
+    gayengi (place-live ki poori safety-chain: lot-guard, entry cutoff, real
+    LTP, fill-verify) — pehle ye hamesha sirf PAPER me jaati thi, isliye
+    Live-ON strategy kabhi broker me order nahi janti thi. Live fail ho to
+    wadi ki purani tarah paper leg lagegi + error note me raas reason."""
     import json as _js
     from core.services.live_market_data import LiveMarketData
     from utils.helpers import get_strike_step
@@ -465,6 +472,23 @@ def _execute_legs(s, legs, db, tm, today):
         return placed, [f"{s.get('name')}: no live spot - skipped"]
     step = get_strike_step(sym)
     atm = round(spot / step) * step if step > 0 else spot
+    # ---- LIVE mode detection (strict, fail-CLOSED) ----
+    _live_mode, _live_broker = False, ""
+    try:
+        from routes.strategies import _strat_live_enabled as _sle
+        if bool(_sle(db, sid)):
+            try:
+                from routes.broker import _real_token as _rt, BROKER_ORDER as _BO
+                for _b in _BO:
+                    if _rt(_b):
+                        _live_mode, _live_broker = True, _b
+                        break
+            except Exception:
+                _live_mode = False
+    except Exception:
+        _live_mode = False
+    if _live_mode:
+        notes.append(f"{s.get('name')}: LIVE route via {_live_broker}")
     from routes.option_chain import place_trade, TradeRequest
     for leg in legs:
         try:
@@ -481,6 +505,34 @@ def _execute_legs(s, legs, db, tm, today):
                 strike = atm + (dist * step if opt == "CE" else -dist * step)
             elif sel == "itm":
                 strike = atm + (-dist * step if opt == "CE" else dist * step)
+            # ---- LIVE leg (Live toggle ON + real broker) ----
+            if _live_mode:
+                _done = False
+                try:
+                    import asyncio as _aio
+                    from routes.broker import LiveOrderRequest, place_live_order
+                    _lreq = LiveOrderRequest(
+                        symbol=sym, option_type=opt, transaction_type=txn,
+                        quantity=max(1, int(leg.get("lots") or 1)),
+                        strike=float(strike or 0), expiry=str(leg.get("expiry") or ""),
+                        stop_loss=sl, take_profit=tp, trade_type="intraday",
+                        strategy_id=int(sid or 0), dry_run=False)
+                    _lres = _aio.run(place_live_order(_lreq))
+                    if isinstance(_lres, dict) and _lres.get("success"):
+                        placed.append({
+                            "strategy": s.get("name"), "mode": "live",
+                            "broker_order_id": _lres.get("broker_order_id", ""),
+                            "trade_id": _lres.get("trade_id"),
+                            "entry": _lres.get("entry_price"),
+                            "rolled_to": _lres.get("rolled_to", ""),
+                            "strike_snapped": None})
+                        _done = True
+                        continue
+                    notes.append(f"{s.get('name')}: LIVE fail ({str(_lres.get('error') or 'unknown')[:90]}) - paper par gayi")
+                except Exception as e:
+                    notes.append(f"{s.get('name')}: LIVE crash ({str(e)[:90]}) - paper par gayi")
+                if _done:
+                    continue
             req = TradeRequest(
                 symbol=sym, option_type=opt, strike=float(strike),
                 expiry="", date=today, transaction_type=txn,

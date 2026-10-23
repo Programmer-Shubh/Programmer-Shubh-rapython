@@ -62,6 +62,23 @@ async def lifespan(app: FastAPI):
 
 async def _startup_background():
     """Fire-and-forget boot of every background system (never blocks health)."""
+    # Data-fix (permanent): bina ASLI broker order wale 'live' tags ko wapas
+    # paper karo - iske bina Live toggle OFF strategy ke open trades bhi
+    # LIVE dikh rahe the (NIFTY/BOSCHLTD tag bug).
+    try:
+        def _fix_live_tags():
+            try:
+                from core.models.database import Database as _dbs
+                _dbs.get_instance().execute(
+                    "UPDATE paper_trades SET trade_mode='paper' "
+                    "WHERE trade_mode='live' AND (broker_order_id IS NULL "
+                    "OR TRIM(broker_order_id)='')", [])
+            except Exception:
+                pass
+        import threading as _th0
+        _th0.Thread(target=_fix_live_tags, daemon=True).start()
+    except Exception:
+        pass
     try:
         await _start_background_refresh()
     except: pass

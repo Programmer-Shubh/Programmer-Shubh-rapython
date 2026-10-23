@@ -893,6 +893,13 @@ async def connect_broker(req: ConnectRequest):
     return {"success": True, "message": f"{req.broker} connected (demo mode)"}
 
 
+def _is_sebi_refresh_error(msg) -> bool:
+    """Fyers 'refresh token api disabled (SEBI regulation)' style messages."""
+    m = str(msg or "").lower()
+    return ("sebi" in m or ("disabled" in m and "refresh" in m)
+            or "regulation" in m)
+
+
 @router.post("/refresh-tokens")
 async def refresh_tokens():
     results = {}
@@ -913,6 +920,23 @@ async def refresh_tokens():
                     config["refresh_token"] = fy.refresh_token
                 _save_config("fyers", config)
                 results[key] = {"success": True, "message": "Token refreshed"}
+            elif result.get("sebi_disabled") or _is_sebi_refresh_error(result.get("error")):
+                # Fyers ne refresh-token API band ki hai (SEBI guideline) -
+                # ye user se nahi, Fyers se aata hai. CURRENT token abhi bhi
+                # valid ho sakta hai: live-verify karke ASLI status batao.
+                _sub = ""
+                try:
+                    _val = await fy.validate()
+                    _sub = " - Aur current token LIVE valid hai, trading chalu rahegi" if _val.get("success") else ""
+                    _sub += f" (validity: {str(_val.get('detail') or 'unknown')[:40]})" if _val.get("success") else \
+                        " - Current token bhi invalid hai: Brokers tab me 'Connect' (OAuth login) karo"
+                except Exception:
+                    _sub = " - Brokers tab me 'Connect' (OAuth login) karke naya token le sakte ho"
+                results[key] = {"success": False,
+                                "error": (f"Fyers refresh-token API Fyers ne khud disable ki hai "
+                                          f"(SEBI guideline){_sub}. Token roz expire hota hai - roz "
+                                          f"naaya token Connect se aana zaroori hai."),
+                                "token_valid": bool(_sub and "valid hai" in _sub.replace("LIVE", ""))}
             else:
                 results[key] = {"success": False, "error": result["error"]}
         elif key == "angel":

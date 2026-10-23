@@ -92,6 +92,7 @@ def get_open_trades():
                 "sl": t["trade"]["stop_loss"],
                 "tp": t["trade"]["target"],
                 "trade_mode": t["trade"].get("trade_mode", "paper"),
+                "broker_order_id": t["trade"].get("broker_order_id", ""),
                 "trade_type": t["trade"].get("trade_type", "intraday"),
                 "entry_date": t["trade"].get("entry_date", ""),
                 "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
@@ -340,7 +341,20 @@ def delete_trade(trade_id: int):
 
 @router.post("/mode")
 def set_trade_mode(req: TradeModeRequest):
+    """Manual paper/live flip. LIVE tag par strict guard: ye tag SIRF us
+    trade ko milega jisme bina RL ASLI broker order (broker_order_id) hai -
+    warna bina order ke trade 'LIVE' dikhate the (NIFTY/BOSCHLTD wala galat
+    task). Paper flip hamescha allowed."""
     trade_model = TradeModel()
+    if str(req.trade_mode or "").lower() == "live":
+        row = trade_model.db.fetch_one(
+            "SELECT broker_order_id FROM paper_trades WHERE id=?",
+            [int(req.trade_id or 0)])
+        if not row:
+            return {"error": f"Trade #{req.trade_id} not found"}
+        _bid = str(row.get("broker_order_id") or "").strip()
+        if not _bid:
+            return {"error": "Is trade me ASLI broker order nahi hai (broker_order_id khali) - LIVE tag sirf real broker fills ke liye hai. Trade PAPER hi rahegi."}
     n = trade_model.set_trade_mode(req.trade_id, req.trade_mode)
     if n == -1:
         return {"error": "Mode must be paper or live"}
