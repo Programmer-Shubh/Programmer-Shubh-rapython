@@ -11,7 +11,11 @@ from utils.helpers import get_strike_step, get_lot_size, black_scholes, align_st
 # Saved-result hash me shamil hai - purana saved result naye logic par
 # dobara nahi dikhega, ek fresh run hoga (stale "kuch nahi hua" khatm).
 # v2: confluence votes (13 ids) + dynaboll ATR + squeeze[i-1] + min_bars 5
-ENGINE_VERSION = "v2"
+# v3 (LOCKED - user decision): ye wahi PURANA v2 behavior hai, hamesha ke
+#     liye baseline. Koi bhi "realism"/fills/costs/cutoff change yahan na
+#     gholna - backtest results 17-19-Oct wale OLD behavior par hi rehna
+#     hain. Logic badalna ho to alag engine file banao, isko na chheno.
+ENGINE_VERSION = "v3"
 
 
 class BacktestEngine:
