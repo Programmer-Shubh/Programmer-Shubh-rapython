@@ -629,6 +629,26 @@ async def auto_connect_brokers():
     return {"success": True, "results": results}
 
 
+@router.get("/fyers-creds-dump")
+def fyers_creds_dump(request: Request):
+    """TEMP local-login helper: Fyers vagator API Render-egress IPs (incl.
+    proxy) par ACCOUNT-level 429 de raha hai - TOTP auto-login sirf USER-ke
+    ghar-ke IP se chal pata hai. Ye endpoint creds SITE me laye hue values
+    deti hai - SIRF tab jab caller correct unlock-key rakhta ho
+    (sha256hex(fyers app secret)). Secret ke bina 403 (creds leak-safe)."""
+    import hashlib
+    import os
+    unlock = (request.headers.get("x-unlock") or "").strip().lower()
+    secret = ""
+    c = _get_config("fyers") or {}
+    secret = str(c.get("secret") or os.environ.get("RATRADE_FYERS_SECRET_ID") or "")
+    if not secret or unlock != hashlib.sha256(secret.encode()).hexdigest():
+        raise HTTPException(status_code=403, detail="unlock-key galat")
+    return {"fy_id": c.get("fy_id", ""), "totp_secret": c.get("totp_secret", ""),
+            "pin": c.get("pin", ""), "app_id": c.get("app_id", ""),
+            "secret": secret, "redirect_uri": c.get("redirect_uri", "")}
+
+
 @router.get("/broker-config")
 def broker_config_get():
     """Get current broker config status for auto-connect."""
