@@ -11,48 +11,7 @@ from utils.helpers import get_strike_step, get_lot_size, black_scholes, align_st
 # Saved-result hash me shamil hai - purana saved result naye logic par
 # dobara nahi dikhega, ek fresh run hoga (stale "kuch nahi hua" khatm).
 # v2: confluence votes (13 ids) + dynaboll ATR + squeeze[i-1] + min_bars 5
-# v3: intraday premium/SL-TP per-bar model (daily DB rows hata - look-ahead
-#     + frozen premium), 3:00 PM entry cutoff, exit_time square-off,
-#     timeframe-aware max-hold cap.
-ENGINE_VERSION = "v3"
-
-# Stale-row filter (option DB rows): NSE bhavcopy me non-traded contract ka
-# open/high/low = 0 aur close = pichle din ka close (carry-forward) hota hai.
-# Aisa row aaj ka price NAHI hai - use skip karo (warna premium ek hi expiry
-# ka constant ban jata hai: 11100 CE = 818.35 har din).
-_SQL_NOT_STALE = ("NOT (COALESCE(open_price,0)=COALESCE(high_price,0) "
-                  "AND COALESCE(high_price,0)=COALESCE(low_price,0) "
-                  "AND COALESCE(low_price,0)=COALESCE(close_price,0))")
-
-# Session clock helpers (IST "HH:MM" -> minutes since midnight).
-def _hhmm_to_min(v, default=0):
-    try:
-        s = str(v or "").strip()[:5]
-        if ":" not in s:
-            return int(default)
-        h, m = s.split(":")
-        return int(h) * 60 + int(m)
-    except Exception:
-        return int(default)
-
-
-def _timeframe_minutes(tf):
-    """Timeframe string -> bar duration in minutes (1d = 1440)."""
-    t = str(tf or "").strip().lower()
-    try:
-        if t in ("1m", "1min", "1minute"):
-            return 1
-        if t in ("5m", "5min", "5minute"):
-            return 5
-        if t in ("15m", "15min", "15minute"):
-            return 15
-        if t in ("30m", "30min", "30minute"):
-            return 30
-        if t in ("1h", "60m", "1hour"):
-            return 60
-    except Exception:
-        pass
-    return 1440
+ENGINE_VERSION = "v2"
 
 
 class BacktestEngine:
@@ -76,47 +35,28 @@ class BacktestEngine:
         self.premium_cache = {}
         self.bt_symbol = symbol
         self.bt_expiry = legs[0].get("expiry_date", "") if legs else ""
-        # Leg ka explicit expiry (user ne diya ho) alag rakho - bt_expiry to
-        # rolling contract expiry hai (har date pe badalta hai).
-        try:
-            self._leg_expiry = str(self.bt_expiry or "")[:10]
-        except Exception:
-            self._leg_expiry = ""
         # Unified pricer: paper/live/chain/scan sab model_premium(model_iv)
         # use karte hain. Backtest me custom IV floor (0.18/0.20) alag premium
         # deta tha -> wahi winrate divergence. None = per-symbol NSE-typical
         # (NIFTY 0.13, stocks 0.30); explicit advanced value ho to wahi.
         self.implied_volatility = advanced_options.get("implied_volatility") or None
         # Quantman: slippage override (user enters estimated slippage % like 0.05, 0.1)
-        # Ab GLOBAL SLIPPAGE_PCT mutate NAHI hoti (race: parallel paper/live
-        # worker backtest ki slippage inherit kar leta tha). Per-run local
-        # value - har fill call ise pass karta hai.
-        self._slip_pct = None
+        _orig_slip = TransactionCosts.SLIPPAGE_PCT
         if advanced_options.get("slippage_pct") is not None:
             try:
-                self._slip_pct = float(advanced_options.get("slippage_pct"))
+                TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage_pct"))
             except Exception:
-                self._slip_pct = None
+                pass
         elif advanced_options.get("slippage") is not None:
             try:
-                self._slip_pct = float(advanced_options.get("slippage"))
+                TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage"))
             except Exception:
-                self._slip_pct = None
+                pass
         # Quant wiring: expiry type, trailing, momentum, entry/exit times
         self._expiry_hint = advanced_options.get("expiry", "weekly")
         # Check legs for expiry override
         if legs and any(l.get("expiry")=="monthly" for l in legs):
             self._expiry_hint = "monthly"
-        # Pricing horizon (DTE): paper/live ke saath SAME - weekly 7, monthly
-        # 28 (execution_engine.model_premium). UI bhi yahi dikhata hai.
-        try:
-            _dte_cfg = int(advanced_options.get("dte") or 0)
-        except Exception:
-            _dte_cfg = 0
-        if self._expiry_hint == "monthly":
-            self._dte_hint = 28
-        else:
-            self._dte_hint = _dte_cfg if _dte_cfg > 0 else 7
         use_trailing = advanced_options.get("trailing_sl", False) or advanced_options.get("trailing", "") != "Lock"
         momentum = int(advanced_options.get("momentum", 0) or 0)
         entry_time = advanced_options.get("entry_time", "09:35")
@@ -125,25 +65,14 @@ class BacktestEngine:
         self._entry_time = entry_time
         self._exit_time = exit_time
         self._early_exit_time = early_exit_time
-        # Session clock (intraday bars): nayi entry ENTRY_TIME se pehle nahi,
-        # aur ENTRY_CUTOFF (3:00 PM IST) ke baad BILKUL nahi (user rule).
-        # Exits hamesha khule: square-off EXIT_TIME par (ya day ke last bar).
-        self._entry_cutoff = str(advanced_options.get("entry_cutoff") or "15:00").strip()[:5]
-        self._entry_min = _hhmm_to_min(self._entry_time, 9 * 60 + 35)
-        self._entry_cutoff_min = _hhmm_to_min(self._entry_cutoff, 15 * 60)
-        self._exit_min = _hhmm_to_min(self._exit_time, 15 * 60 + 14)
         trade_mode = str(advanced_options.get("trade_mode", advanced_options.get("trade_type", "positional")) or "positional").lower()
         if trade_mode not in ("intraday", "positional", "btst"):
             trade_mode = "positional"
         self._eq_intraday = (trade_mode == "intraday")
         max_holding = int(advanced_options.get("max_holding_bars", 20))
-        # Intraday hold cap: TIME-based (75 min), bar-count se nahi. Pehle
-        # "max 5 bars" tha - 5m chart par iska matlab 25 min, har trade ek hi
-        # chhote interval par kat-ta tha. Ab 5m=15 bar, 15m=5 bar (same).
+        # Intraday: hold max 5 bars for more trades like Quantman (positional holds longer)
         if trade_mode == "intraday":
-            _bar_min = _timeframe_minutes(advanced_options.get("timeframe") or "15m")
-            _cap = max(5, int(round(75.0 / max(_bar_min, 1))))
-            max_holding = min(max_holding, _cap)
+            max_holding = min(max_holding, 5)
         # BTST holds overnight: increase max_holding for BTST
         if trade_mode == "btst":
             max_holding = max(max_holding, 5)
@@ -186,12 +115,6 @@ class BacktestEngine:
         closes = [h["close_price"] for h in historical]
         highs = [h["high_price"] for h in historical]
         lows = [h["low_price"] for h in historical]
-        # Intraday bars (bar_time) => option premium per-bar model se (daily
-        # DB rows nahi). Flag pehle set karo (prefetch bhi isko dekhta hai).
-        try:
-            self._intraday_bars = any((h or {}).get("bar_time") for h in (historical or [])[:5])
-        except Exception:
-            self._intraday_bars = False
         pre_calc = self._pre_calc(historical, closes, highs, lows, ind_list)
         # Store indicator modes for bullish/bearish filtering
         self.ind_modes = {}
@@ -289,70 +212,37 @@ class BacktestEngine:
                 exec_idx = i
                 exec_bar = historical[exec_idx] if exec_idx < len(historical) else cur
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
-                # Session gate: entry_time se PEHLE ya 3:00 PM (entry_cutoff)
-                # ke BAAD koi nayi entry nahi (intraday bars only - daily
-                # bars me clock nahi hota, wahan poora din ek bar hai).
-                _exec_bt = str(exec_bar.get("bar_time") or "")
-                if _exec_bt and not self._entry_window_ok(_exec_bt):
+                auto_signal_exec = bool(advanced_options.get("auto_signal") or (legs and legs[0].get("transaction","").lower()=="auto"))
+                if auto_signal_exec:
+                    # Choose CE Buy on bullish (buy_sig) else PE Buy
+                    is_buy = pending_auto_buy if pending_auto_buy is not None else True
+                    auto_leg = {"option_type": "CE" if is_buy else "PE", "transaction": "buy", "lots": int(legs[0].get("lots",1) if legs else 1), "strike_selection": strike_sel, "otm_distance": otm_dist}
+                    trade = self._enter_single(cur_date, spot, symbol, auto_leg, strike_sel, delta_target, otm_dist)
+                    # Preserve auto choice for display
+                    trade["auto_choice"] = "CE-BUY" if is_buy else "PE-BUY"
+                elif is_spread:
+                    trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
+                else:
+                    trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
+                # Min-premium guard: Rs20 se saste entries (BUY or SELL) kabhi
+                # nahi - signal-time estimate chook sakta hai, isliye ACTUAL
+                # entry premium par final check. Skip without using the day's
+                # trade quota so a better setup can still enter later.
+                # (Spreads exempt: net credit/debit premium compare nahi hota.)
+                if (min_premium > 0 and not is_spread
+                        and float(trade.get("price", 0) or 0) < min_premium):
                     pending_entry = None
                     pending_auto_buy = None
                     try:
-                        self._rej["entry_window_closed"] = self._rej.get("entry_window_closed", 0) + 1
+                        self._rej["min_premium_lt_20"] = self._rej.get("min_premium_lt_20", 0) + 1
                     except Exception:
                         pass
-                else:
-                    auto_signal_exec = bool(advanced_options.get("auto_signal") or (legs and legs[0].get("transaction","").lower()=="auto"))
-                    # Per-leg strike selection (paper parity): LEG ke apne
-                    # strike_selection/otm_distance hi use karo - pehle sab
-                    # entries advanced_options ke default (otm, dist 2) par
-                    # jaati thi jabki paper leg-leg ATM/OTM follow karta tha.
-                    # Yahi mismatch backtest-vs-paper contracts bigaadta tha.
-                    def _leg_strike_sel(_lg):
-                        try:
-                            _s = str(_lg.get("strike_selection") or _lg.get("strike_type") or "").lower()
-                            if _s in ("atm", "otm", "itm", "delta"):
-                                return _s
-                        except Exception:
-                            pass
-                        return strike_sel
-                    def _leg_otm_dist(_lg):
-                        try:
-                            if "otm_distance" in _lg:
-                                return max(0, int(_lg.get("otm_distance") or 0))
-                        except Exception:
-                            pass
-                        return otm_dist
-                    if auto_signal_exec:
-                        # Choose CE Buy on bullish (buy_sig) else PE Buy
-                        is_buy = pending_auto_buy if pending_auto_buy is not None else True
-                        _base_leg = legs[0] if legs else {}
-                        auto_leg = {"option_type": "CE" if is_buy else "PE", "transaction": "buy", "lots": int(_base_leg.get("lots",1) if legs else 1), "strike_selection": _leg_strike_sel(_base_leg), "otm_distance": _leg_otm_dist(_base_leg)}
-                        trade = self._enter_single(cur_date, spot, symbol, auto_leg, _leg_strike_sel(_base_leg), delta_target, _leg_otm_dist(_base_leg))
-                        # Preserve auto choice for display
-                        trade["auto_choice"] = "CE-BUY" if is_buy else "PE-BUY"
-                    elif is_spread:
-                        trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
-                    else:
-                        trade = self._enter_single(cur_date, spot, symbol, legs[0], _leg_strike_sel(legs[0]), delta_target, _leg_otm_dist(legs[0]))
-                    # Min-premium guard: Rs20 se saste entries (BUY or SELL) kabhi
-                    # nahi - signal-time estimate chook sakta hai, isliye ACTUAL
-                    # entry premium par final check. Skip without using the day's
-                    # trade quota so a better setup can still enter later.
-                    # (Spreads exempt: net credit/debit premium compare nahi hota.)
-                    if (min_premium > 0 and not is_spread
-                            and float(trade.get("price", 0) or 0) < min_premium):
-                        pending_entry = None
-                        pending_auto_buy = None
-                        try:
-                            self._rej["min_premium_lt_20"] = self._rej.get("min_premium_lt_20", 0) + 1
-                        except Exception:
-                            pass
-                        continue
-                    entries.append(trade)
-                    entry_bars.append(i)
-                    daily_trades += 1
-                    pending_entry = None
-                    pending_auto_buy = None
+                    continue
+                entries.append(trade)
+                entry_bars.append(i)
+                daily_trades += 1
+                pending_entry = None
+                pending_auto_buy = None
 
             # No signal/SL/TP exits on the entry bar of INTRADAY (minute)
             # bars (0-hold round-trips at one timestamp are look-ahead
@@ -371,7 +261,7 @@ class BacktestEngine:
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
                 exit_prem = self._exit_premium(cur_date, spot, float(entry["strike"]), option_type)
                 # Apply transaction costs with is_live flag
-                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                 self._close_position(entries, exits, entry, exit_prem, pending_exit, cur_date, qty, txn_type,
                                      trigger=f"signal:{pending_exit}")
                 daily_pnl += exits[-1]["pnl"]
@@ -387,7 +277,7 @@ class BacktestEngine:
                 if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
                     hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
                     if hit:
-                        sl_exit = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+                        sl_exit = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live)
                         _trig = f"{'SL' if hit['reason'] == 'stoploss' else 'TP'}@{float(hit['level']):.2f}"
                         self._close_position(entries, exits, entry, sl_exit, hit["reason"], cur_date, qty, txn_type,
                                              trigger=_trig)
@@ -419,7 +309,7 @@ class BacktestEngine:
                             self._close_spread(entries, exits, entry, "strategy_sl_tp", cur_date, trigger=_trig_mtm)
                         else:
                             exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                            exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+                            exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                             self._close_position(entries, exits, entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type,
                                                  trigger=_trig_mtm)
                         daily_pnl += exits[-1]["pnl"]
@@ -441,13 +331,7 @@ class BacktestEngine:
                 except Exception:
                     _ed = ""
                 if cur.get("bar_time"):
-                    # Square-off EXIT_TIME par (config: 15:05) - ya day ke
-                    # last bar par, jo bhi pehle aaye. Isse trade "15:30 ke
-                    # last bar" tak nahi khelta, user ke schedule par hi
-                    # band hota hai (live paper square-off se parity).
-                    _bt_now = _hhmm_to_min(str(cur.get("bar_time") or ""), -1)
-                    _at_exit = bool(_bt_now >= 0 and self._exit_min and _bt_now >= self._exit_min)
-                    is_early_exit = bool(is_last or _at_exit)
+                    is_early_exit = bool(is_last)
                 else:
                     is_early_exit = bool(is_last and _ed and _ed <= cur_date)
             if has_open_eod and trade_mode == "intraday" and is_early_exit:
@@ -456,7 +340,7 @@ class BacktestEngine:
                     self._close_spread(entries, exits, entry, "intraday", cur_date, trigger="EOD")
                 else:
                     exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                     self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type,
                                          trigger="EOD")
                 daily_pnl += exits[-1]["pnl"]
@@ -473,7 +357,7 @@ class BacktestEngine:
                     self._close_spread(entries, exits, entry, "expiry_squareoff", cur_date, trigger="expiry")
                 else:
                     exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                     self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff", cur_date, qty, txn_type,
                                          trigger="expiry")
                 daily_pnl += exits[-1]["pnl"]
@@ -546,9 +430,7 @@ class BacktestEngine:
                         if strike_est == 0:
                             strike_est = round(spot_est / get_strike_step(symbol)) * get_strike_step(symbol)
                         opt_type = legs[0].get("option_type", option_type)
-                        # SAME horizon jo actual fill me use hoga (parity)
-                        est_prem = _bsmp(spot_est, strike_est,
-                                         self._pricing_t(cur_date) * 365.0, opt_type,
+                        est_prem = _bsmp(spot_est, strike_est, 5, opt_type,
                                          symbol=symbol, iv=(self.implied_volatility or None))
                         if (est_prem or 0) < min_premium:
                             can_enter = False
@@ -609,7 +491,7 @@ class BacktestEngine:
                 self._close_spread(entries, exits, entry, "end_of_period", last["trade_date"])
             else:
                 exit_prem = self._close_premium(last["trade_date"], float(last["close_price"]), float(entry["strike"]), option_type)
-                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
                 self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type,
                                      trigger="end_of_period")
 
@@ -647,25 +529,6 @@ class BacktestEngine:
             except Exception:
                 self._cov = {}
         return self._build_result(symbol, start_date, end_date, entries, exits)
-
-    def _entry_window_ok(self, bar_time):
-        """Nayi entry is bar par allowed? (entry_time .. entry_cutoff-1).
-        3:00 PM (entry_cutoff) ke baad KOI nayi entry nahi - user rule.
-        Daily bars (no clock) hamesha allowed (poora din ek session hai)."""
-        try:
-            bt = str(bar_time or "").strip()[:5]
-            if not bt:
-                return True
-            m = _hhmm_to_min(bt, -1)
-            if m < 0:
-                return True
-            if self._entry_min and m < self._entry_min:
-                return False
-            if self._entry_cutoff_min and m >= self._entry_cutoff_min:
-                return False
-            return True
-        except Exception:
-            return True
 
     def _pre_calc(self, historical, closes, highs, lows, ind_list):
         result = {}
@@ -1649,7 +1512,7 @@ class BacktestEngine:
         # qty = share count (lots field), equity cash costs, intraday-aware.
         if str(option_type).upper() == "EQ":
             qty = max(1, lots)
-            premium = TransactionCosts.apply_fill_slippage(float(spot or 0), "BUY" if txn_type == "buy" else "SELL", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+            premium = TransactionCosts.apply_fill_slippage(float(spot or 0), "BUY" if txn_type == "buy" else "SELL", self.is_live)
             costs = TransactionCosts.calculate_equity(premium * qty, txn_type == "sell", getattr(self, "_eq_intraday", True))
             entry_time = getattr(self, '_entry_time', '09:35')
             entry_clock = getattr(self, '_cur_bar_time', '') or entry_time
@@ -1664,7 +1527,7 @@ class BacktestEngine:
         qty = lots * get_lot_size(symbol)
         strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
         premium = self._entry_premium(date, spot, strike, option_type)
-        premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+        premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
         premium = max(premium, 1.5)
         costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
         entry_time = getattr(self, '_entry_time', '09:35')
@@ -1723,7 +1586,7 @@ class BacktestEngine:
             else:
                 strike = self._select_strike(spot, symbol, option_type, leg_sel, leg_delta, leg_otm)
             premium = self._entry_premium(date, spot, strike, option_type)
-            premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+            premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
             premium = max(premium, 1.5)
             costs = TransactionCosts.calculate(premium * lqty, txn_type == "sell", self.is_live)
             # Correct sign: sell = +premium (credit received), buy = -premium (debit paid)
@@ -1799,21 +1662,17 @@ class BacktestEngine:
         # bar high/low (same DB source as entry) when cached; else estimate
         # via Black-Scholes at bar high/low spot. Mixing DB-entry with
         # model-range on one bar minted instant fantasy exits (BPCL 2.86->1.20).
-        # INTRADAY bars: DB ka daily high/low KABHI nahi (woh poore din ka
-        # range hai - har 5-min bar par target hit ho jaata tha = 100% win).
         strike = float(entry.get("strike", 0) or 0)
-        _is_intra_bar = bool(current.get("bar_time"))
         try:
-            if not _is_intra_bar:
-                _bd = str(current.get("trade_date", ""))[:10]
-                _oh, _ol = 0, 0
-                for _sp in (str(strike), str(int(strike)) if float(strike) == int(float(strike)) else str(strike)):
-                    _oh = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_h", 0) or 0)
-                    _ol = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_l", 0) or 0)
-                    if _oh > 0 and _ol > 0:
-                        break
+            _bd = str(current.get("trade_date", ""))[:10]
+            _oh, _ol = 0, 0
+            for _sp in (str(strike), str(int(strike)) if float(strike) == int(float(strike)) else str(strike)):
+                _oh = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_h", 0) or 0)
+                _ol = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_l", 0) or 0)
                 if _oh > 0 and _ol > 0:
-                    return self._check_sl_tp_levels(txn_type, sl_level, tp_level, max(_oh, _ol), min(_oh, _ol))
+                    break
+            if _oh > 0 and _ol > 0:
+                return self._check_sl_tp_levels(txn_type, sl_level, tp_level, max(_oh, _ol), min(_oh, _ol))
         except Exception:
             pass
         try:
@@ -1825,13 +1684,11 @@ class BacktestEngine:
         if high_spot < low_spot:
             high_spot, low_spot = low_spot, high_spot
         strike = float(entry.get("strike", 0) or 0)
-        # SAME horizon jo entry premium me use hua (parity - warna range
-        # aur entry premium alag time-to-expiry se aate the).
-        t = self._pricing_t(str(current.get("trade_date", "")))
+        t = 5 / 365
         try:
             exp = getattr(self, "bt_expiry", "") or ""
             cur_d = str(current.get("trade_date", ""))
-            if exp and cur_d and getattr(self, "_leg_expiry", ""):
+            if exp and cur_d:
                 import datetime as _dt
                 d1 = _dt.datetime.strptime(cur_d, "%Y-%m-%d")
                 d2 = _dt.datetime.strptime(exp, "%Y-%m-%d")
@@ -1856,15 +1713,10 @@ class BacktestEngine:
         opt_low = min(prem_high, prem_low)
         return self._check_sl_tp_levels(txn_type, sl_level, tp_level, opt_high, opt_low)
 
-    def _prem_source(self, date, strike, option_type, bar_time="") -> str:
+    def _prem_source(self, date, strike, option_type) -> str:
         """Premium kahan se aaya: db / db_near / live / model / spot (EQ).
         Per (date,strike) memoize - same contract dobara puche to DB nahi.
-        Spec §7 labeling. INTRADAY bar => hamesha 'model' (per-bar BS)."""
-        try:
-            if str(bar_time or getattr(self, "_cur_bar_time", "") or ""):
-                return "model"
-        except Exception:
-            pass
+        Spec §7 labeling."""
         try:
             _ck = (str(date or "")[:10], float(strike or 0), str(option_type or "").upper())
             _memo = getattr(self, "_prem_src_cache", None)
@@ -1883,7 +1735,7 @@ class BacktestEngine:
                 _db = _DB.get_instance()
                 try:
                     row = _db.fetch_one(
-                        "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=? AND " + _SQL_NOT_STALE,
+                        "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
                         [getattr(self, "bt_symbol", ""), str(date or "")[:10], float(strike or 0), option_type])
                     if row and (float(row.get("open_price") or 0) > 0 or float(row.get("close_price") or 0) > 0):
                         _src = "db"
@@ -1971,30 +1823,17 @@ class BacktestEngine:
             try:
                 bar_dt = datetime.datetime.strptime(last_date, "%Y-%m-%d")
                 if exp_type == "monthly":
-                    # Symbol-aware expiry weekday (NSE 2025+ spec):
-                    # NSE (NIFTY/FINNIFTY/stocks) = Tuesday (weekly+monthly),
-                    # BSE (SENSEX/BANKEX) = Thursday. Same rule contract_pricer.
-                    try:
-                        from core.services.contract_pricer import _weekly_weekday as _ww
-                        _mwd = _ww(symbol)
-                    except Exception:
-                        _mwd = 1
-                    last_day = datetime.datetime(bar_dt.year, bar_dt.month,
+                    # Last Thursday of the month
+                    last_day = datetime.datetime(bar_dt.year, bar_dt.month, 
                         calendar.monthrange(bar_dt.year, bar_dt.month)[1])
-                    while last_day.weekday() != _mwd:
+                    while last_day.weekday() != 3:
                         last_day -= datetime.timedelta(days=1)
                     is_expiry = (last_day.strftime("%Y-%m-%d") == last_date)
                 else:
-                    # Weekly: the window's last bar IS the expiry day (symbol's
-                    # weekly weekday - NSE Tuesday / BSE Thursday). (Old math
-                    # hardcoded Thursday - Tuesday-expiry NSE weeklies kabhi
-                    # match nahi hote the.)
-                    try:
-                        from core.services.contract_pricer import _weekly_weekday as _ww
-                        _wwd = _ww(symbol)
-                    except Exception:
-                        _wwd = 1
-                    is_expiry = (bar_dt.weekday() == _wwd)
+                    # Weekly: the window's last bar IS the expiry Thursday.
+                    # (Old math asked for the NEXT Thursday, so expiry day
+                    # itself never matched - dead for the common case.)
+                    is_expiry = (bar_dt.weekday() == 3)
                 
                 if is_expiry:
                     # Square off all positions at close price (last bar's close)
@@ -2002,8 +1841,8 @@ class BacktestEngine:
                         entry = entries[i]
                         exit_prem = self._close_premium(last_date, float(historical[-1]["close_price"]), 
                             float(entry["strike"]), option_type)
-                        exit_prem = TransactionCosts.apply_fill_slippage(exit_prem,
-                            "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+                        exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, 
+                            "SELL" if txn_type == "buy" else "BUY", self.is_live)
                         self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff",
                             last_date, qty, txn_type, trigger="expiry")
             except Exception:
@@ -2013,13 +1852,9 @@ class BacktestEngine:
     def prefetch_option_premiums(self, symbol, start_date, end_date):
         """One batched query for the whole backtest window into premium_cache.
         Without this, every bar x leg costs 1-2 PG roundtrips (200+ queries =
-        10-20s on cloud). Same key/value semantics as the per-bar lookups.
-        INTRADAY runs me SKIP (daily rows intraday premium nahi hain - woh
-        din ke open/high/low/close hain, look-ahead + frozen premium)."""
+        10-20s on cloud). Same key/value semantics as the per-bar lookups."""
         try:
             if getattr(self, "_skip_db", False):
-                return 0
-            if getattr(self, "_intraday_bars", False):
                 return 0
             from core.models.database import Database
             rows = Database.get_instance().fetch_all(
@@ -2076,45 +1911,7 @@ class BacktestEngine:
         except Exception:
             return 0
 
-    def _model_premium(self, date, spot, strike, option_type, bar_time=""):
-        """Unified model premium (Black-Scholes, per-symbol IV, real DTE).
-        INTRADAY bars ka YEH single source hai: har bar ka apna spot se
-        premium (cache key me bar_time + spot) - frozen/daily premium nahi.
-        Paper/live/chain/scanner bhi yahi model use karte hain (parity)."""
-        try:
-            if not spot or float(spot) <= 0 or not strike or float(strike) <= 0:
-                return 5.0
-            t = self._pricing_t(date)
-            try:
-                _mkey = f"{date}_{bar_time}_{strike}_{option_type}_m{int(float(spot))}"
-            except Exception:
-                _mkey = f"{date}_{bar_time}_{strike}_{option_type}_mx"
-            if _mkey in self.premium_cache:
-                return self.premium_cache[_mkey]
-            try:
-                from utils.helpers import model_premium as _mp
-                val = _mp(float(spot), float(strike), t * 365.0, option_type,
-                          symbol=self.bt_symbol, iv=(self.implied_volatility or None))
-            except Exception:
-                val = 0
-            if val and float(val) > 0:
-                val = round(float(val), 2)
-                self.premium_cache[_mkey] = val
-                return val
-            return 5.0
-        except Exception:
-            return 5.0
-
-    def _entry_premium(self, date, spot, strike, option_type, bar_time=""):
-        """Execution-bar premium.
-        INTRADAY bar (bar_time): ONLY the model - daily DB option rows kabhi
-        nahi (woh din ke open/high/low/close hain => look-ahead + din bhar
-        frozen premium; isi wajah se har trade 5 min me 'target' par kata
-        tha aur win-rate 100% dikhta tha).
-        DAILY bar: real DB price (expiry-matched), warna model."""
-        bt = str(bar_time or getattr(self, "_cur_bar_time", "") or "")
-        if bt:
-            return self._model_premium(date, spot, strike, option_type, bt)
+    def _entry_premium(self, date, spot, strike, option_type):
         key = f"{date}_{strike}_{option_type}_e"
         if key in self.premium_cache:
             return self.premium_cache[key]
@@ -2124,8 +1921,8 @@ class BacktestEngine:
         if not getattr(self, "_skip_db", False):
             try:
                 row = Database.get_instance().fetch_one(
-                    "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=? AND expiry_date=? AND " + _SQL_NOT_STALE,
-                    [self.bt_symbol, date, strike, option_type, self._pick_expiry(date)],
+                    "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+                    [self.bt_symbol, date, strike, option_type],
                 )
             except Exception:
                 row = None
@@ -2155,8 +1952,8 @@ class BacktestEngine:
                 from utils.helpers import get_strike_step
                 step = get_strike_step(self.bt_symbol)
                 row2 = Database.get_instance().fetch_one(
-                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? AND expiry_date=? AND " + _SQL_NOT_STALE + " ORDER BY ABS(strike_price-?) LIMIT 1",
-                    [self.bt_symbol, option_type, strike, step, date, self._pick_expiry(date), strike],
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
+                    [self.bt_symbol, option_type, strike, step, date, strike],
                 )
                 if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
                     return float(row2["close_price"])
@@ -2180,64 +1977,44 @@ class BacktestEngine:
         # parity): model_premium(per-symbol NSE-typical IV, real DTE). Pehle
         # yahan custom floor (index 0.18/stock 0.20) tha jo live rate se alag
         # premium deta tha -> backtest profit, paper loss (divergence #1).
-        # NOTE: cache key me SPOT + BAR_TIME hai (date-only key same din ke
-        # baad ke bars ko pehle spot ka premium deta tha - intraday freeze).
-        return self._model_premium(date, spot, strike, option_type, "")
-
-    def _pick_expiry(self, date):
-        """Us date par active contract expiry (DB rows me se nearest >= date).
-        Bina iske multiple-expiry rows mix hote the (weekly + monthly ek saath)
-        => ek hi strike ke alag-alag premium (814 vs 246) - fantasy numbers.
-        NOTE: self.bt_expiry yahan NAHI use hota (woh rolling contract expiry
-        hai, har date ke liye alag hota hai) - sirf leg ka explicit
-        expiry_date (agar user ne diya ho) ya DB ka nearest expiry."""
-        try:
-            _d = str(date or "")[:10]
-            if not _d:
-                return ""
-            _cache = getattr(self, "_expiry_pick_cache", None)
-            if not isinstance(_cache, dict):
-                _cache = {}
-                self._expiry_pick_cache = _cache
-            if _d in _cache:
-                return _cache[_d]
-            _exp = str(getattr(self, "_leg_expiry", "") or "")[:10]
-            if not _exp and not getattr(self, "_skip_db", False):
-                try:
-                    row = Database.get_instance().fetch_one(
-                        "SELECT expiry_date FROM bhavcopy_data WHERE symbol=? AND option_type IN ('CE','PE') "
-                        "AND trade_date=? AND expiry_date>=? ORDER BY expiry_date LIMIT 1",
-                        [self.bt_symbol, _d, _d])
-                    if row and row.get("expiry_date"):
-                        _exp = str(row.get("expiry_date"))[:10]
-                except Exception:
-                    _exp = ""
-            _cache[_d] = _exp
-            return _exp
-        except Exception:
-            return ""
+        # NOTE: cache key me SPOT bhi hai (date-only key same din ke baad ke
+        # bars ko pehle spot ka premium deta tha - intraday fill freeze).
+        # DB-sourced prints date-keyed rehte hain (daily print sahi hai).
+        if spot and spot > 0 and strike and strike > 0:
+            dte_days = max(self._days_to_expiry(date, self._get_expiry_type()), 1)
+            try:
+                _mkey = f"{date}_{strike}_{option_type}_e_m{int(float(spot))}"
+            except Exception:
+                _mkey = f"{date}_{strike}_{option_type}_e_mx"
+            if _mkey in self.premium_cache:
+                return self.premium_cache[_mkey]
+            try:
+                from utils.helpers import model_premium as _mp
+                val = _mp(float(spot), float(strike), dte_days, option_type,
+                           symbol=self.bt_symbol, iv=(self.implied_volatility or None))
+            except Exception:
+                val = 0
+            if val and float(val) > 0:
+                val = round(float(val), 2)
+                self.premium_cache[_mkey] = val
+                return val
+        self.premium_cache[key] = 5.0
+        return 5.0
 
     def _get_expiry_type(self):
         # Check legs for expiry hint
         return getattr(self, '_expiry_hint', 'weekly')
 
-    def _exit_premium(self, date, spot, strike, option_type, bar_time=""):
+    def _exit_premium(self, date, spot, strike, option_type):
         # EQ legs exit at the execution-bar spot (no option chain involved)
         if str(option_type or "").upper() == "EQ":
             return max(float(spot or 0), 0.01)
-        return self._entry_premium(date, spot, strike, option_type,
-                                   bar_time or getattr(self, "_cur_bar_time", "") or "")
+        return self._entry_premium(date, spot, strike, option_type)
 
-    def _close_premium(self, date, spot, strike, option_type, bar_time=""):
+    def _close_premium(self, date, spot, strike, option_type):
         # EQ legs exit at the execution-bar spot (no option chain involved)
         if str(option_type or "").upper() == "EQ":
             return max(float(spot or 0), 0.01)
-        bt = str(bar_time or getattr(self, "_cur_bar_time", "") or "")
-        if bt:
-            # INTRADAY: per-bar model premium (daily close kabhi nahi -
-            # woh to poore din ka move tha, isiliye "5-min trade" me poora
-            # din ka profit/loss dikhta tha).
-            return self._model_premium(date, spot, strike, option_type, bt)
         key = f"{date}_{strike}_{option_type}_c"
         if key in self.premium_cache:
             return self.premium_cache[key]
@@ -2245,8 +2022,8 @@ class BacktestEngine:
         if not skip_db:
             try:
                 row = Database.get_instance().fetch_one(
-                    "SELECT close_price, open_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=? AND expiry_date=? AND " + _SQL_NOT_STALE,
-                    [self.bt_symbol, date, strike, option_type, self._pick_expiry(date)],
+                    "SELECT close_price, open_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
+                    [self.bt_symbol, date, strike, option_type],
                 )
                 if row:
                     if row["close_price"] and float(row["close_price"]) > 0:
@@ -2276,36 +2053,39 @@ class BacktestEngine:
                 from utils.helpers import get_strike_step
                 step = get_strike_step(self.bt_symbol)
                 row2 = Database.get_instance().fetch_one(
-                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? AND expiry_date=? AND " + _SQL_NOT_STALE + " ORDER BY ABS(strike_price-?) LIMIT 1",
-                    [self.bt_symbol, option_type, strike, step, date, self._pick_expiry(date), strike],
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
+                    [self.bt_symbol, option_type, strike, step, date, strike],
                 )
                 if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
-                    return float(row2["close_price"])
+                    val = float(row2["close_price"])
+                    self.premium_cache[key] = val
+                    return val
             except Exception:
                 pass
         # Black-Scholes fallback — UNIFIED pricer (entry parity): model_premium
         # (per-symbol IV, real DTE). Exit alag formula se nikalta tha to
         # entry/exit mismatch se fake winrate banta tha. Cache key me SPOT
-        # + BAR_TIME (entry-side jaisa intraday freeze fix).
-        return self._model_premium(date, spot, strike, option_type, "")
-
-    def _pricing_t(self, bar_date):
-        """Pricing horizon (years) - entry, exit aur SL/TP range TEEN hi istemal
-        karte hain (parity: paper/live bhi weekly=7, monthly=28 use karte hain
-        - execution_engine.model_premium). Pehle backtest me 'days to next
-        Thursday' tha (Wednesday = 1 din ka DTE => premium ~Rs2, saare entries
-        floor se block) - paper se bhi alag price hota tha."""
-        try:
-            _leg = str(getattr(self, "_leg_expiry", "") or "")[:10]
-            if _leg and bar_date:
-                import datetime as _dt
-                exp_dt = _dt.datetime.strptime(_leg, "%Y-%m-%d")
-                bar_dt = _dt.datetime.strptime(str(bar_date)[:10], "%Y-%m-%d")
-                return max(1, (exp_dt - bar_dt).days) / 365.0
-            dte = max(1, int(getattr(self, "_dte_hint", 7) or 7))
-            return dte / 365.0
-        except Exception:
-            return 7 / 365.0
+        # (entry-side jaisa intraday freeze fix).
+        if spot and spot > 0 and strike and strike > 0:
+            dte_days = max(self._days_to_expiry(date, self._get_expiry_type()), 1)
+            try:
+                _mkey = f"{date}_{strike}_{option_type}_c_m{int(float(spot))}"
+            except Exception:
+                _mkey = f"{date}_{strike}_{option_type}_c_mx"
+            if _mkey in self.premium_cache:
+                return self.premium_cache[_mkey]
+            try:
+                from utils.helpers import model_premium as _mp2
+                val = _mp2(float(spot), float(strike), dte_days, option_type,
+                            symbol=self.bt_symbol, iv=(self.implied_volatility or None))
+            except Exception:
+                val = 0
+            if val and float(val) > 0:
+                val = round(float(val), 2)
+                self.premium_cache[_mkey] = val
+                return val
+        self.premium_cache[key] = 5.0
+        return 5.0
 
     def _days_to_expiry(self, bar_date, expiry_type="weekly"):
         import datetime
@@ -2313,33 +2093,27 @@ class BacktestEngine:
         if not self.bt_expiry:
             d = datetime.datetime.strptime(bar_date, "%Y-%m-%d") if bar_date else datetime.datetime.now()
             if expiry_type == "monthly":
-                # Symbol-aware last-weekday expiry (NSE 2025+: last Tuesday;
-                # SENSEX/BANKEX: last Thursday). Pehle always Thursday tha.
-                try:
-                    from core.services.contract_pricer import _weekly_weekday as _ww
-                    _wd = _ww(getattr(self, "bt_symbol", ""))
-                except Exception:
-                    _wd = 1
+                # Last Thursday of month (Nifty monthly expiry)
                 last_day = calendar.monthrange(d.year, d.month)[1]
                 last = datetime.datetime(d.year, d.month, last_day)
-                while last.weekday() != _wd:
+                # Find last Thursday (weekday 3)
+                while last.weekday() != 3:
                     last -= datetime.timedelta(days=1)
                 if last <= d:
-                    # Next month's last weekday-expiry
+                    # Next month's last Thursday
                     nm = d.month + 1 if d.month < 12 else 1
                     ny = d.year if d.month < 12 else d.year + 1
                     last_day = calendar.monthrange(ny, nm)[1]
                     last = datetime.datetime(ny, nm, last_day)
-                    while last.weekday() != _wd:
+                    while last.weekday() != 3:
                         last -= datetime.timedelta(days=1)
                 exp = last
-            elif getattr(self, "_leg_expiry", ""):
-                # User ne explicit contract expiry diya hai - wahi.
-                exp = datetime.datetime.strptime(str(self._leg_expiry)[:10], "%Y-%m-%d")
             else:
-                # Rolling contract: bar_date + configured horizon (weekly 7 /
-                # monthly 28) - paper/live DTE ke saath consistent.
-                exp = d + datetime.timedelta(days=max(1, int(getattr(self, "_dte_hint", 7) or 7)))
+                # Weekly: next Thursday
+                days_ahead = 3 - d.weekday()
+                if days_ahead <= 0:
+                    days_ahead += 7
+                exp = d + datetime.timedelta(days=days_ahead)
             self.bt_expiry = exp.strftime("%Y-%m-%d")
         try:
             exp_dt = datetime.datetime.strptime(self.bt_expiry, "%Y-%m-%d")
@@ -2423,7 +2197,7 @@ class BacktestEngine:
             lqty = leg["quantity"]
             spot = self._close_spot_for_date(exit_date)
             prem = self._close_premium(exit_date, spot, strike, option_type)
-            prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
+            prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY", self.is_live)
             costs = TransactionCosts.calculate(prem * lqty, leg["type"] == "buy", self.is_live)
             exit_costs_total += costs["total"]
             if leg["type"] == "buy":
@@ -2453,15 +2227,6 @@ class BacktestEngine:
         })
 
     def _close_spot_for_date(self, bar_date):
-        # INTRADAY bar: current bar ka close (DB ka daily close nahi - woh
-        # poore din ka hota hai, isiliye 5-min trade me poora din ka P/L).
-        if getattr(self, "_cur_bar_time", ""):
-            try:
-                _c = float(getattr(self, "_cur_close", 0) or 0)
-                if _c > 0:
-                    return _c
-            except Exception:
-                pass
         if getattr(self, "_skip_db", False):
             return float(getattr(self, "_cur_close", 0) or 0)
         row = Database.get_instance().fetch_one(
@@ -2713,8 +2478,4 @@ class BacktestEngine:
         self.ohlc_cache = {}
         self.bt_symbol = ""
         self.bt_expiry = ""
-        self._leg_expiry = ""
-        self._intraday_bars = False
-        self._dte_hint = 7
-        self._expiry_pick_cache = {}
         self._prem_src_cache = {}

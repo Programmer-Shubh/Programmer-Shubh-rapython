@@ -146,23 +146,6 @@ class HistoricalReplayEngine:
         strike_sel = self.advanced_options.get("strike_selection", "otm")
         delta_target = self.advanced_options.get("delta_target")
         otm_dist = int(self.advanced_options.get("otm_distance", 2))
-        # Per-leg strike selection (backtest engine parity): leg ke apne
-        # strike_selection/otm_distance pehle, warna advanced default.
-        def _leg_strike_sel(_lg):
-            try:
-                _s = str(_lg.get("strike_selection") or _lg.get("strike_type") or "").lower()
-                if _s in ("atm", "otm", "itm", "delta"):
-                    return _s
-            except Exception:
-                pass
-            return strike_sel
-        def _leg_otm_dist(_lg):
-            try:
-                if "otm_distance" in (_lg or {}):
-                    return max(0, int(_lg.get("otm_distance") or 0))
-            except Exception:
-                pass
-            return otm_dist
         trade_mode = str(self.advanced_options.get("trade_mode", self.advanced_options.get("trade_type", "positional")) or "positional").lower()
         if trade_mode not in ("intraday", "positional", "btst"):
             trade_mode = "positional"
@@ -233,21 +216,18 @@ class HistoricalReplayEngine:
                 
                 if auto_signal_exec:
                     is_buy = self.pending_auto_buy if self.pending_auto_buy is not None else True
-                    _base_leg = self.legs[0] if self.legs else {}
-                    _lsel = _leg_strike_sel(_base_leg)
-                    _ldist = _leg_otm_dist(_base_leg)
-                    auto_leg = {"option_type": "CE" if is_buy else "PE", "transaction": "buy",
-                               "lots": int(self.legs[0].get("lots",1) if self.legs else 1),
-                               "strike_selection": _lsel, "otm_distance": _ldist}
-                    trade = self.bt_engine._enter_single(cur_date, spot, self.symbol, auto_leg,
-                                                         _lsel, delta_target, _ldist)
+                    auto_leg = {"option_type": "CE" if is_buy else "PE", "transaction": "buy", 
+                               "lots": int(self.legs[0].get("lots",1) if self.legs else 1), 
+                               "strike_selection": strike_sel, "otm_distance": otm_dist}
+                    trade = self.bt_engine._enter_single(cur_date, spot, self.symbol, auto_leg, 
+                                                         strike_sel, delta_target, otm_dist)
                     trade["auto_choice"] = "CE-BUY" if is_buy else "PE-BUY"
                 elif is_spread:
-                    trade = self.bt_engine._enter_spread(cur_date, spot, self.symbol, self.legs,
+                    trade = self.bt_engine._enter_spread(cur_date, spot, self.symbol, self.legs, 
                                                          strike_sel, delta_target, otm_dist)
                 else:
                     trade = self.bt_engine._enter_single(cur_date, spot, self.symbol, self.legs[0],
-                                                         _leg_strike_sel(self.legs[0]), delta_target, _leg_otm_dist(self.legs[0]))
+                                                         strike_sel, delta_target, otm_dist)
 
                 # Min-premium guard (same as backtest engine): Rs20 se saste
                 # BUY aur SELL entries dono skip (spreads exempt)
