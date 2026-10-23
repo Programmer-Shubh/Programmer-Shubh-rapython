@@ -88,17 +88,20 @@ class BacktestEngine:
         # (NIFTY 0.13, stocks 0.30); explicit advanced value ho to wahi.
         self.implied_volatility = advanced_options.get("implied_volatility") or None
         # Quantman: slippage override (user enters estimated slippage % like 0.05, 0.1)
-        _orig_slip = TransactionCosts.SLIPPAGE_PCT
+        # Ab GLOBAL SLIPPAGE_PCT mutate NAHI hoti (race: parallel paper/live
+        # worker backtest ki slippage inherit kar leta tha). Per-run local
+        # value - har fill call ise pass karta hai.
+        self._slip_pct = None
         if advanced_options.get("slippage_pct") is not None:
             try:
-                TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage_pct"))
+                self._slip_pct = float(advanced_options.get("slippage_pct"))
             except Exception:
-                pass
+                self._slip_pct = None
         elif advanced_options.get("slippage") is not None:
             try:
-                TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage"))
+                self._slip_pct = float(advanced_options.get("slippage"))
             except Exception:
-                pass
+                self._slip_pct = None
         # Quant wiring: expiry type, trailing, momentum, entry/exit times
         self._expiry_hint = advanced_options.get("expiry", "weekly")
         # Check legs for expiry override
@@ -299,17 +302,38 @@ class BacktestEngine:
                         pass
                 else:
                     auto_signal_exec = bool(advanced_options.get("auto_signal") or (legs and legs[0].get("transaction","").lower()=="auto"))
+                    # Per-leg strike selection (paper parity): LEG ke apne
+                    # strike_selection/otm_distance hi use karo - pehle sab
+                    # entries advanced_options ke default (otm, dist 2) par
+                    # jaati thi jabki paper leg-leg ATM/OTM follow karta tha.
+                    # Yahi mismatch backtest-vs-paper contracts bigaadta tha.
+                    def _leg_strike_sel(_lg):
+                        try:
+                            _s = str(_lg.get("strike_selection") or _lg.get("strike_type") or "").lower()
+                            if _s in ("atm", "otm", "itm", "delta"):
+                                return _s
+                        except Exception:
+                            pass
+                        return strike_sel
+                    def _leg_otm_dist(_lg):
+                        try:
+                            if "otm_distance" in _lg:
+                                return max(0, int(_lg.get("otm_distance") or 0))
+                        except Exception:
+                            pass
+                        return otm_dist
                     if auto_signal_exec:
                         # Choose CE Buy on bullish (buy_sig) else PE Buy
                         is_buy = pending_auto_buy if pending_auto_buy is not None else True
-                        auto_leg = {"option_type": "CE" if is_buy else "PE", "transaction": "buy", "lots": int(legs[0].get("lots",1) if legs else 1), "strike_selection": strike_sel, "otm_distance": otm_dist}
-                        trade = self._enter_single(cur_date, spot, symbol, auto_leg, strike_sel, delta_target, otm_dist)
+                        _base_leg = legs[0] if legs else {}
+                        auto_leg = {"option_type": "CE" if is_buy else "PE", "transaction": "buy", "lots": int(_base_leg.get("lots",1) if legs else 1), "strike_selection": _leg_strike_sel(_base_leg), "otm_distance": _leg_otm_dist(_base_leg)}
+                        trade = self._enter_single(cur_date, spot, symbol, auto_leg, _leg_strike_sel(_base_leg), delta_target, _leg_otm_dist(_base_leg))
                         # Preserve auto choice for display
                         trade["auto_choice"] = "CE-BUY" if is_buy else "PE-BUY"
                     elif is_spread:
                         trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
                     else:
-                        trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
+                        trade = self._enter_single(cur_date, spot, symbol, legs[0], _leg_strike_sel(legs[0]), delta_target, _leg_otm_dist(legs[0]))
                     # Min-premium guard: Rs20 se saste entries (BUY or SELL) kabhi
                     # nahi - signal-time estimate chook sakta hai, isliye ACTUAL
                     # entry premium par final check. Skip without using the day's
@@ -347,7 +371,7 @@ class BacktestEngine:
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
                 exit_prem = self._exit_premium(cur_date, spot, float(entry["strike"]), option_type)
                 # Apply transaction costs with is_live flag
-                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
                 self._close_position(entries, exits, entry, exit_prem, pending_exit, cur_date, qty, txn_type,
                                      trigger=f"signal:{pending_exit}")
                 daily_pnl += exits[-1]["pnl"]
@@ -363,7 +387,7 @@ class BacktestEngine:
                 if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
                     hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
                     if hit:
-                        sl_exit = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                        sl_exit = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
                         _trig = f"{'SL' if hit['reason'] == 'stoploss' else 'TP'}@{float(hit['level']):.2f}"
                         self._close_position(entries, exits, entry, sl_exit, hit["reason"], cur_date, qty, txn_type,
                                              trigger=_trig)
@@ -395,7 +419,7 @@ class BacktestEngine:
                             self._close_spread(entries, exits, entry, "strategy_sl_tp", cur_date, trigger=_trig_mtm)
                         else:
                             exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                            exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                            exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
                             self._close_position(entries, exits, entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type,
                                                  trigger=_trig_mtm)
                         daily_pnl += exits[-1]["pnl"]
@@ -432,7 +456,7 @@ class BacktestEngine:
                     self._close_spread(entries, exits, entry, "intraday", cur_date, trigger="EOD")
                 else:
                     exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
                     self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type,
                                          trigger="EOD")
                 daily_pnl += exits[-1]["pnl"]
@@ -449,7 +473,7 @@ class BacktestEngine:
                     self._close_spread(entries, exits, entry, "expiry_squareoff", cur_date, trigger="expiry")
                 else:
                     exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
                     self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff", cur_date, qty, txn_type,
                                          trigger="expiry")
                 daily_pnl += exits[-1]["pnl"]
@@ -585,7 +609,7 @@ class BacktestEngine:
                 self._close_spread(entries, exits, entry, "end_of_period", last["trade_date"])
             else:
                 exit_prem = self._close_premium(last["trade_date"], float(last["close_price"]), float(entry["strike"]), option_type)
-                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
                 self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type,
                                      trigger="end_of_period")
 
@@ -1625,7 +1649,7 @@ class BacktestEngine:
         # qty = share count (lots field), equity cash costs, intraday-aware.
         if str(option_type).upper() == "EQ":
             qty = max(1, lots)
-            premium = TransactionCosts.apply_fill_slippage(float(spot or 0), "BUY" if txn_type == "buy" else "SELL", self.is_live)
+            premium = TransactionCosts.apply_fill_slippage(float(spot or 0), "BUY" if txn_type == "buy" else "SELL", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
             costs = TransactionCosts.calculate_equity(premium * qty, txn_type == "sell", getattr(self, "_eq_intraday", True))
             entry_time = getattr(self, '_entry_time', '09:35')
             entry_clock = getattr(self, '_cur_bar_time', '') or entry_time
@@ -1640,7 +1664,7 @@ class BacktestEngine:
         qty = lots * get_lot_size(symbol)
         strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
         premium = self._entry_premium(date, spot, strike, option_type)
-        premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
+        premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
         premium = max(premium, 1.5)
         costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
         entry_time = getattr(self, '_entry_time', '09:35')
@@ -1699,7 +1723,7 @@ class BacktestEngine:
             else:
                 strike = self._select_strike(spot, symbol, option_type, leg_sel, leg_delta, leg_otm)
             premium = self._entry_premium(date, spot, strike, option_type)
-            premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
+            premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
             premium = max(premium, 1.5)
             costs = TransactionCosts.calculate(premium * lqty, txn_type == "sell", self.is_live)
             # Correct sign: sell = +premium (credit received), buy = -premium (debit paid)
@@ -1947,17 +1971,30 @@ class BacktestEngine:
             try:
                 bar_dt = datetime.datetime.strptime(last_date, "%Y-%m-%d")
                 if exp_type == "monthly":
-                    # Last Thursday of the month
-                    last_day = datetime.datetime(bar_dt.year, bar_dt.month, 
+                    # Symbol-aware expiry weekday (NSE 2025+ spec):
+                    # NSE (NIFTY/FINNIFTY/stocks) = Tuesday (weekly+monthly),
+                    # BSE (SENSEX/BANKEX) = Thursday. Same rule contract_pricer.
+                    try:
+                        from core.services.contract_pricer import _weekly_weekday as _ww
+                        _mwd = _ww(symbol)
+                    except Exception:
+                        _mwd = 1
+                    last_day = datetime.datetime(bar_dt.year, bar_dt.month,
                         calendar.monthrange(bar_dt.year, bar_dt.month)[1])
-                    while last_day.weekday() != 3:
+                    while last_day.weekday() != _mwd:
                         last_day -= datetime.timedelta(days=1)
                     is_expiry = (last_day.strftime("%Y-%m-%d") == last_date)
                 else:
-                    # Weekly: the window's last bar IS the expiry Thursday.
-                    # (Old math asked for the NEXT Thursday, so expiry day
-                    # itself never matched - dead for the common case.)
-                    is_expiry = (bar_dt.weekday() == 3)
+                    # Weekly: the window's last bar IS the expiry day (symbol's
+                    # weekly weekday - NSE Tuesday / BSE Thursday). (Old math
+                    # hardcoded Thursday - Tuesday-expiry NSE weeklies kabhi
+                    # match nahi hote the.)
+                    try:
+                        from core.services.contract_pricer import _weekly_weekday as _ww
+                        _wwd = _ww(symbol)
+                    except Exception:
+                        _wwd = 1
+                    is_expiry = (bar_dt.weekday() == _wwd)
                 
                 if is_expiry:
                     # Square off all positions at close price (last bar's close)
@@ -1965,8 +2002,8 @@ class BacktestEngine:
                         entry = entries[i]
                         exit_prem = self._close_premium(last_date, float(historical[-1]["close_price"]), 
                             float(entry["strike"]), option_type)
-                        exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, 
-                            "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                        exit_prem = TransactionCosts.apply_fill_slippage(exit_prem,
+                            "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
                         self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff",
                             last_date, qty, txn_type, trigger="expiry")
             except Exception:
@@ -2276,19 +2313,24 @@ class BacktestEngine:
         if not self.bt_expiry:
             d = datetime.datetime.strptime(bar_date, "%Y-%m-%d") if bar_date else datetime.datetime.now()
             if expiry_type == "monthly":
-                # Last Thursday of month (Nifty monthly expiry)
+                # Symbol-aware last-weekday expiry (NSE 2025+: last Tuesday;
+                # SENSEX/BANKEX: last Thursday). Pehle always Thursday tha.
+                try:
+                    from core.services.contract_pricer import _weekly_weekday as _ww
+                    _wd = _ww(getattr(self, "bt_symbol", ""))
+                except Exception:
+                    _wd = 1
                 last_day = calendar.monthrange(d.year, d.month)[1]
                 last = datetime.datetime(d.year, d.month, last_day)
-                # Find last Thursday (weekday 3)
-                while last.weekday() != 3:
+                while last.weekday() != _wd:
                     last -= datetime.timedelta(days=1)
                 if last <= d:
-                    # Next month's last Thursday
+                    # Next month's last weekday-expiry
                     nm = d.month + 1 if d.month < 12 else 1
                     ny = d.year if d.month < 12 else d.year + 1
                     last_day = calendar.monthrange(ny, nm)[1]
                     last = datetime.datetime(ny, nm, last_day)
-                    while last.weekday() != 3:
+                    while last.weekday() != _wd:
                         last -= datetime.timedelta(days=1)
                 exp = last
             elif getattr(self, "_leg_expiry", ""):
@@ -2381,7 +2423,7 @@ class BacktestEngine:
             lqty = leg["quantity"]
             spot = self._close_spot_for_date(exit_date)
             prem = self._close_premium(exit_date, spot, strike, option_type)
-            prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY", self.is_live)
+            prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY", self.is_live, slippage_pct=getattr(self, "_slip_pct", None))
             costs = TransactionCosts.calculate(prem * lqty, leg["type"] == "buy", self.is_live)
             exit_costs_total += costs["total"]
             if leg["type"] == "buy":

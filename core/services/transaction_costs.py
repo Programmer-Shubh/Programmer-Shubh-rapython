@@ -23,14 +23,20 @@ class TransactionCosts:
     LATENCY_MS = 50  # 50ms typical broker API latency
 
     @classmethod
-    def apply_fill_slippage(cls, price: float, side: str, is_live: bool = False) -> float:
+    def apply_fill_slippage(cls, price: float, side: str, is_live: bool = False, slippage_pct: float = None) -> float:
         """Apply slippage - SAME rate paper/live/backtest (spec: align execution
         logic). Live fills slip at least as much as backtest assumes.
-        side: "BUY" or "SELL" - indicates order side
-        """
+        side: "BUY" or "SELL" - indicates order side.
+        slippage_pct: per-run override (backtest advanced.slippage_pct) - pehle
+        ye GLOBAL SLIPPAGE_PCT mutate hoti thi (race: paper worker usi waqt ki
+        backtest slippage inherit kar leta tha). Ab caller apni local value
+        pass karta hai, global untouched rahti hai."""
         if price <= 0:
             return price
-        slippage = cls.SLIPPAGE_PCT / 100
+        try:
+            slippage = (float(slippage_pct) if slippage_pct is not None else cls.SLIPPAGE_PCT) / 100
+        except Exception:
+            slippage = cls.SLIPPAGE_PCT / 100
         # Apply slippage: price moves against the order
         # For BUY: price increases (we pay more); for SELL: price decreases (we receive less)
         if side == "BUY":

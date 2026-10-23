@@ -234,6 +234,17 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
             _got = []
         _got = [b for b in _got
                 if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        # Forming-bar look-ahead fix: aaj ka AADHURA 15m/5m bar backtest me na
+        # aaye (paper engine khud aakhri bar hata kar sirf closed bars par
+        # signal banata hai). Iske bina end_date=aaj ke runs wo partial bar
+        # close ka use karke (future se) jhoota signal laga lete the.
+        try:
+            import datetime as _istdt
+            _today = _istdt.datetime.now(_istdt.timezone(_istdt.timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+            if _got and str(_got[-1].get("trade_date", ""))[:10] == _today:
+                _got = _got[:-1]
+        except Exception:
+            pass
         # Span-aware minimum: ek 15m din me max ~25 bars hote hain, to
         # single-day request par 40-bar gate kabhi pass nahi hota tha
         # (hamesha INSUFFICIENT = intraday auto/backtest dead). Engine
@@ -1892,8 +1903,45 @@ def run_master_confluence(req: MasterConfluenceRequest):
 
         min_bars = max(ema_long_p, st_period, macd_slow + macd_sig, vol_sma_p, 30)
         open_trade = None
+        # Look-ahead fix (main engine jaisa): signal bar i ka CLOSE par banta
+        # hai, lekin ENTRY bar (i+1) ke OPEN par execute hoti hai. Pehle
+        # entry usi bar ke close par ho rahi thi (signal + fill ek saath =
+        # future ki jaankari ka use) aur koi transaction cost bhi nahi laga
+        # tha - isliye /master har backtest bacha-mochaka winrate dikhata tha.
+        pending_entry = None
+        pending_exit = False
+        from core.services.transaction_costs import TransactionCosts as _TC
 
         for i in range(min_bars, len(historical)):
+            # Pending entry execute: is bar ke OPEN par (wo bar sirf shuru ho
+            # chuka hai, ya bar chal raha hai - open known hai, close NAHI).
+            if open_trade is None and pending_entry is not None:
+                _sig_i = pending_entry["sig_i"]
+                _opt = pending_entry["option_type"]
+                _reg = pending_entry["regime"]
+                pending_entry = None
+                if i > _sig_i:
+                    spot_exec = chart_opens[i]
+                    if spot_exec and spot_exec > 0:
+                        strike = round(spot_exec / step) * step
+                        entry_prem = spot_exec * 0.01
+                        entry_prem = _TC.apply_fill_slippage(entry_prem, "BUY")
+                        _cost_in = _TC.calculate(entry_prem * lot, False, False)
+                        sl_level = entry_prem * (1 - sl_pct / 100)
+                        tp_level = entry_prem * (1 + (sl_pct * tp_rr) / 100)
+                        open_trade = {
+                            "date": chart_dates[i],
+                            "entry_idx": i,
+                            "strike": strike,
+                            "option_type": _opt,
+                            "entry_prem": entry_prem,
+                            "sl_level": sl_level,
+                            "tp_level": tp_level,
+                            "lots": 1,
+                            "regime": _reg,
+                            "costs": _cost_in["total"],
+                        }
+
             if open_trade is not None:
                 entry_price = open_trade["entry_prem"]
                 entry_idx = open_trade["entry_idx"]
@@ -1917,24 +1965,42 @@ def run_master_confluence(req: MasterConfluenceRequest):
 
                 exit_price = None
                 exit_reason = None
-                if hit_sl:
+                _is_eod = req.trade_mode == "intraday" and is_last
+                if pending_exit:
+                    # max_hold exit signal pichli bar ka - is bar ke OPEN par
+                    # fill (signal exits kabhi bhi usi bar ke close par fill
+                    # nahi hone chahiye).
+                    pending_exit = False
+                    exit_price = chart_opens[i] * 0.01
+                    exit_reason = "max_hold"
+                elif hit_sl:
                     exit_price = sl_level
                     exit_reason = "SL"
                 elif hit_tp:
                     exit_price = tp_level
                     exit_reason = "TP"
-                elif req.trade_mode == "intraday" and is_last:
+                elif _is_eod:
                     exit_price = bar_close
                     exit_reason = "intraday_close"
                 elif i - entry_idx >= 10:
-                    exit_price = bar_close
-                    exit_reason = "max_hold"
+                    if is_last:
+                        # Forced period-end: data khatam - last close par hi
+                        # band karo (main engine end_of_period jaisa).
+                        exit_price = bar_close
+                        exit_reason = "max_hold"
+                    else:
+                        # Ab anchor karo - next bar open par exit hoga
+                        pending_exit = True
 
                 if exit_price is not None:
+                    _exit_slip = _TC.apply_fill_slippage(exit_price, "SELL")
+                    _cost_out = _TC.calculate(_exit_slip * lot, True, False)
+                    _c_tot = float(open_trade.get("costs", 0.0) or 0.0) + _cost_out["total"]
                     if open_trade["option_type"] == "CE":
-                        pnl = (exit_price - entry_price) * lot * open_trade["lots"]
+                        pnl = (_exit_slip - entry_price) * lot * open_trade["lots"] - _c_tot
                     else:
-                        pnl = (entry_price - exit_price) * lot * open_trade["lots"]
+                        pnl = (entry_price - _exit_slip) * lot * open_trade["lots"] - _c_tot
+                    exit_price = _exit_slip
                     total_pnl += pnl
                     capital += pnl
                     if pnl > 0:
@@ -2033,22 +2099,9 @@ def run_master_confluence(req: MasterConfluenceRequest):
                 buy_pe = True
 
             if buy_ce or buy_pe:
+                # Sirf signal REGISTER hota hai - entry agli bar ke OPEN par.
                 opt_type = "CE" if buy_ce else "PE"
-                strike = round(c / step) * step
-                entry_prem = c * 0.01
-                sl_level = entry_prem * (1 - sl_pct / 100)
-                tp_level = entry_prem * (1 + (sl_pct * tp_rr) / 100)
-                open_trade = {
-                    "date": chart_dates[i],
-                    "entry_idx": i,
-                    "strike": strike,
-                    "option_type": opt_type,
-                    "entry_prem": entry_prem,
-                    "sl_level": sl_level,
-                    "tp_level": tp_level,
-                    "lots": 1,
-                    "regime": regime,
-                }
+                pending_entry = {"sig_i": i, "option_type": opt_type, "regime": regime}
 
         n = len(trades)
         win_rate = (wins / n * 100) if n > 0 else 0
