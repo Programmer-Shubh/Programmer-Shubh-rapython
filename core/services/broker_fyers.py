@@ -59,6 +59,8 @@ class FyersV3:
         access_token: str = None,
         refresh_token: str = None,
         pin: str = None,
+        fy_id: str = None,
+        totp_secret: str = None,
     ):
         self.app_id = self.normalize_app_id(app_id)
         self.secret_key = secret_key
@@ -70,9 +72,46 @@ class FyersV3:
         self.pin = re.sub(r"\D", "", str(pin or ""))
         if self.pin and len(self.pin) != 4:
             logger.warning("Fyers PIN length %d (expected 4 digits)", len(self.pin))
+        # Daily headless auto-login creds (refresh API SEBI-disabled hai).
+        self.fy_id = str(fy_id or "").strip()
+        self.totp_secret = str(totp_secret or "").strip()
+        self._auto_login_ts: float = 0
         self._token_expiry: float = 0
         # True when an access token was refreshed mid-flight (caller must persist it)
         self.refreshed: bool = False
+
+    def _auto_login_cfg(self) -> dict:
+        return {
+            "fy_id": self.fy_id, "totp_secret": self.totp_secret,
+            "pin": self.pin, "app_id": self.app_id,
+            "secret": self.secret_key, "redirect_uri": self.redirect_uri,
+        }
+
+    async def try_auto_login(self) -> bool:
+        """Headless login (TOTP+PIN) jab refresh-token available na ho.
+        Skipped if creds missing; at most once per 5 min per client."""
+        if not (self.fy_id and self.totp_secret and self.pin):
+            return False
+        try:
+            import time as _t
+            if _t.time() - getattr(self, "_auto_login_ts", 0) < 300:
+                return False
+            self._auto_login_ts = _t.time()
+            from core.services.fyers_auto_login import auto_login
+            r = await auto_login(self._auto_login_cfg())
+            if r.get("success") and r.get("access_token"):
+                self.access_token = r["access_token"]
+                if r.get("refresh_token"):
+                    self.refresh_token = r["refresh_token"]
+                self._token_expiry = _t.time() + 86400 - 600
+                self.refreshed = True
+                logger.info("Fyers AUTO-LOGIN succeeded (headless TOTP+PIN)")
+                return True
+            logger.error("Fyers AUTO-LOGIN failed: %s", str(r.get("error"))[:250])
+            return False
+        except Exception as e:
+            logger.error("Fyers AUTO-LOGIN crash: %s", e, exc_info=True)
+            return False
 
     @classmethod
     def normalize_app_id(cls, app_id: str) -> str:
@@ -196,11 +235,15 @@ class FyersV3:
             logger.warning("Fyers access token expired, attempting refresh")
             refresh_result = await self.refresh_access_token()
             if not refresh_result["success"]:
-                return {
-                    "success": False,
-                    "data": {},
-                    "error": "Token expired and refresh failed. Re-authenticate.",
-                }
+                # refresh-token API SEBI-disabled hai -> headless AUTO-LOGIN
+                if await self.try_auto_login():
+                    logger.info("Token expired -> AUTO-LOGIN se naya token")
+                else:
+                    return {
+                        "success": False,
+                        "data": {},
+                        "error": "Token expired, refresh/auto-login dono fail - Brokers me Connect karo.",
+                    }
 
         url = f"{self.BASE_URL}{path}"
         # Fyers v3 auth header: {app_id}:{access_token}
@@ -230,8 +273,14 @@ class FyersV3:
 
                 if resp.status_code == 401:
                     logger.warning("Fyers token expired or invalid")
+                    _old_tok = self.access_token
                     refresh_result = await self.refresh_access_token()
-                    if refresh_result["success"]:
+                    if not refresh_result["success"]:
+                        # SEBI-blocked refresh -> headless AUTO-LOGIN
+                        await self.try_auto_login()
+                    # Sirf tab retry jab token BADLA ho (refresh/auto-login
+                    # safal) - warna dead token se 401 infinite-loop hota.
+                    if self.access_token and self.access_token != _old_tok:
                         # Fyers v3 header must stay "<app_id>:<access_token>"
                         headers["Authorization"] = (
                             f"{self.app_id}:{self.access_token}"
@@ -241,7 +290,8 @@ class FyersV3:
                     return {
                         "success": False,
                         "data": body,
-                        "error": "Token expired. Re-authenticate.",
+                        "error": ("Token expired. Auto-login fail - "
+                                  "Brokers me Connect (OAuth) karo."),
                     }
 
                 if not _resp_ok(resp.status_code, body):

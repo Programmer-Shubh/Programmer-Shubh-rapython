@@ -92,7 +92,7 @@ async def egress_test():
 
 
 BROKER_DEFAULTS = {
-    "fyers": {"name": "Fyers", "icon": "bi-currency-exchange", "color": "text-danger", "fields": ["app_id", "secret", "redirect_uri", "access_token", "refresh_token", "pin"], "desc": "App ID + Secret - OAuth login (Historical OHLC + LIVE orders)"},
+    "fyers": {"name": "Fyers", "icon": "bi-currency-exchange", "color": "text-danger", "fields": ["app_id", "secret", "redirect_uri", "access_token", "refresh_token", "pin", "fy_id", "totp_secret"], "desc": "App ID + Secret + TOTP secret - daily token AUTO-login (Historical OHLC + LIVE orders)"},
     "bigul": {"name": "Bigul", "icon": "bi-bullseye", "color": "text-warning", "fields": ["client_id", "password", "api_key", "totp_secret"], "desc": "Mobile se login — OTP auto-fetch, token auto-connect"},
 }
 
@@ -106,7 +106,7 @@ BROKER_INTERNAL = {
 BROKER_ORDER = ("fyers", "bigul", "angel", "shoonya")
 
 BROKER_FIELD_LABELS = {
-    "fyers": {"app_id": "App ID (MyAPI dashboard se, format XXXXXXXXX-100)", "secret": "Secret Key", "redirect_uri": "Redirect URI (Wahan sirf ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye)", "access_token": "Access Token (auto-fill ka rahega)", "refresh_token": "Refresh Token (auto-fill ka rahega)", "pin": "Fyers Trading PIN (4-digit, token auto-refresh ke liye)"},
+    "fyers": {"app_id": "App ID (MyAPI dashboard se, format XXXXXXXXX-100)", "secret": "Secret Key", "redirect_uri": "Redirect URI (Wahan sirf ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye)", "access_token": "Access Token (auto-fill ka rahega)", "refresh_token": "Refresh Token (auto-fill ka rahega)", "pin": "Fyers Trading PIN (4-digit, auto-login ke liye)", "fy_id": "Fyers Client ID (jaise ABCD1234 - daily auto-login ke liye)", "totp_secret": "TOTP 2FA Secret (Fyers profile > 2FA TOTP se - daily auto-login ke liye)"},
     "bigul": {"client_id": "Client ID", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
 }
 
@@ -360,6 +360,8 @@ def _env_config(broker: str) -> dict:
         "redirect_uri": ["redirect_url", "callback_url"],
         "secret": ["secret_id", "secret_key", "app_secret"],
         "app_id": ["appid", "client_id"],
+        "fy_id": ["fyers_id", "user_id", "clientid"],
+        "totp_secret": ["totp", "totp_key", "authsecret"],
     }
     try:
         fields = (BROKER_DEFAULTS.get(broker, {}) or {}).get("fields", []) or []
@@ -407,7 +409,7 @@ def _normalize_broker_cfg(broker: str, cfg: dict) -> dict:
 # Fields where a Render env value is AUTHORITATIVE over the DB copy (creds).
 # Tokens stay DB-first (the browser OAuth writes them there).
 _ENV_PRIORITY_FIELDS = {
-    "fyers": {"app_id", "secret", "redirect_uri", "pin"},
+    "fyers": {"app_id", "secret", "redirect_uri", "pin", "fy_id", "totp_secret"},
 }
 
 
@@ -466,7 +468,9 @@ def _save_config(broker: str, config: dict):
 
 
 def _fyers_client(config: dict):
-    """Build a FyersV3 client from saved/env config (app id normalized)."""
+    """Build a FyersV3 client from saved/env config (app id normalized).
+    fy_id + totp_secret pass hote hain daily headless AUTO-LOGIN ke liye
+    (refresh-token API SEBI-blocked hai)."""
     from core.services.broker_fyers import FyersV3
     cfg = _normalize_broker_cfg("fyers", dict(config or {}))
     return FyersV3(
@@ -476,6 +480,8 @@ def _fyers_client(config: dict):
         access_token=cfg.get("access_token", ""),
         refresh_token=cfg.get("refresh_token", ""),
         pin=cfg.get("pin", ""),
+        fy_id=cfg.get("fy_id", ""),
+        totp_secret=cfg.get("totp_secret", ""),
     )
 
 
@@ -922,21 +928,26 @@ async def refresh_tokens():
                 results[key] = {"success": True, "message": "Token refreshed"}
             elif result.get("sebi_disabled") or _is_sebi_refresh_error(result.get("error")):
                 # Fyers ne refresh-token API band ki hai (SEBI guideline) -
-                # ye user se nahi, Fyers se aata hai. CURRENT token abhi bhi
-                # valid ho sakta hai: live-verify karke ASLI status batao.
-                _sub = ""
+                # ab seedhe HEADLESS AUTO-LOGIN (TOTP+PIN) try karo.
                 try:
-                    _val = await fy.validate()
-                    _sub = " - Aur current token LIVE valid hai, trading chalu rahegi" if _val.get("success") else ""
-                    _sub += f" (validity: {str(_val.get('detail') or 'unknown')[:40]})" if _val.get("success") else \
-                        " - Current token bhi invalid hai: Brokers tab me 'Connect' (OAuth login) karo"
-                except Exception:
-                    _sub = " - Brokers tab me 'Connect' (OAuth login) karke naya token le sakte ho"
-                results[key] = {"success": False,
-                                "error": (f"Fyers refresh-token API Fyers ne khud disable ki hai "
-                                          f"(SEBI guideline){_sub}. Token roz expire hota hai - roz "
-                                          f"naaya token Connect se aana zaroori hai."),
-                                "token_valid": bool(_sub and "valid hai" in _sub.replace("LIVE", ""))}
+
+                    from core.services.fyers_auto_login import auto_login as _al
+                    _alr = await _al(config)
+                    if _alr.get("success") and _alr.get("access_token"):
+                        config["access_token"] = _alr["access_token"]
+                        if _alr.get("refresh_token"):
+                            config["refresh_token"] = _alr["refresh_token"]
+                        _save_config("fyers", config)
+                        results[key] = {"success": True,
+                                        "message": "AUTO-LOGIN ok (TOTP+PIN) — daily naya token, login ki zaroorat nahi"}
+                    else:
+                        results[key] = {"success": False,
+                                        "error": (f"Refresh SEBI-blocked + AUTO-LOGIN fail: "
+                                                  f"{str(_alr.get('error') or '')[:180]}. "
+                                                  f"fy_id/totp_secret/pin Fyers card me bharo.")}
+                except Exception as _ex:
+                    results[key] = {"success": False,
+                                    "error": f"Refresh SEBI-blocked, auto-login crash: {str(_ex)[:120]}"}
             else:
                 results[key] = {"success": False, "error": result["error"]}
         elif key == "angel":
@@ -1569,17 +1580,26 @@ async def place_live_order(req: LiveOrderRequest):
         broker_ref = ""
         if broker == "fyers":
             cfg = _get_config("fyers")
-            from core.services.broker_fyers import FyersV3
-            fy = FyersV3(app_id=cfg.get("app_id", ""), secret_key=cfg.get("secret", ""),
-                         redirect_uri=cfg.get("redirect_uri", ""),
-                         access_token=cfg.get("access_token", ""),
-                         refresh_token=cfg.get("refresh_token", ""))
+            # Client with fy_id/totp_secret: token expire ho to _request
+            # khud headless AUTO-LOGIN kar lega (refresh API SEBI-blocked).
+            fy = _fyers_client(cfg)
             res = await fy.place_order(preview["symbol"], txn, broker_qty, order_type="MARKET")
             if not res.get("success"):
                 return {"error": f"Fyers rejected order: {res.get('error') or res.get('data')}",
                         "preview": preview, "broker_response": res.get("data", {})}
             order_id = str((res.get("data") or {}).get("order_id", ""))
             broker_ref = preview["symbol"]
+            # Auto-login ya refresh mid-flight hua ho -> naya token SAVE
+            # (warna agli call me wapas purana dead token use hoga).
+            try:
+                if fy.refreshed and fy.access_token:
+                    cfg["access_token"] = fy.access_token
+                    if fy.refresh_token:
+                        cfg["refresh_token"] = fy.refresh_token
+                    _save_config("fyers", cfg)
+                    fy.refreshed = False
+            except Exception:
+                pass
             # Fill verify: real average price (or a clear rejection). FAILED
             # order par fake position NAHI likhenge.
             _fill_px = None

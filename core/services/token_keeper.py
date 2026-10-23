@@ -28,7 +28,19 @@ def _db_cfg(name):
         row = Database.get_instance().fetch_one(
             "SELECT setting_value FROM settings WHERE setting_key=?", [f"broker_{name}"])
         cfg = _js.loads(row["setting_value"]) if row and row.get("setting_value") else {}
-        return cfg if isinstance(cfg, dict) else {}
+        base = cfg if isinstance(cfg, dict) else {}
+        # MERGE env config (Render env vars) - fy_id/totp_secret/pin jaise
+        # auto-login creds aksar env-only hote hain. Env jeet-ta hai creds me.
+        try:
+            from routes.broker import _get_config
+            env_merged = _get_config(name)
+            if isinstance(env_merged, dict):
+                for k, v in env_merged.items():
+                    if v:
+                        base[k] = v
+        except Exception:
+            pass
+        return base
     except Exception:
         return {}
 
@@ -126,6 +138,23 @@ def _sebi_blocked(msg) -> bool:
             or "regulation" in m)
 
 
+def _fyers_auto_login(cfg):
+    """HEADLESS daily login (TOTP+PIN) — refresh-token API SEBI-blocked hai,
+    to ye hi reliable rasta hai. Returns (ok, new_token, detail)."""
+    try:
+        import asyncio as _aio
+        from core.services.fyers_auto_login import auto_login, missing_creds
+        _miss = missing_creds(cfg)
+        if _miss:
+            return False, "", f"auto-login ke liye bache hue fields bharo: {', '.join(_miss)}"
+        r = _aio.run(auto_login(cfg))
+        if r.get("success") and r.get("access_token"):
+            return True, r["access_token"], "auto-login ok"
+        return False, "", str(r.get("error") or "auto-login failed")[:150]
+    except Exception as e:
+        return False, "", str(e)[:150]
+
+
 def sync_once():
     """One keep-alive pass over every linked broker.
 
@@ -149,25 +178,24 @@ def sync_once():
                         cfg["access_token"] = new_tok
                         _save_cfg("fyers", cfg)
                         res["fyers"] = "token refreshed (auto)"
-                else:
-                    if _sebi_blocked(det2) or _sebi_blocked(detail):
-                        # Fyers ne refresh-token API khud band kiya (SEBI
-                        # guideline) - hamara bug nahi. Token expired hone
-                        # par hi OAuth login chahiye; isko spam na karo.
-                        res["fyers"] = "refresh blocked (Fyers SEBI notice) - token valid rehte tak trading chalu; expire hone par Connect se login"
                     else:
-                        res["fyers"] = f"needs login ({det2 or detail})"
-            elif cfg.get("refresh_token"):
-                ok2, new_tok, det2 = _fyers_refresh(cfg)
-                if ok2:
+                        # refresh fail/SEBI-blocked -> DIRECT AUTO-LOGIN
+                        ok3, new_tok, det3 = _fyers_auto_login(cfg)
+                        if ok3:
+                            cfg["access_token"] = new_tok
+                            _save_cfg("fyers", cfg)
+                            res["fyers"] = "token AUTO-LOGIN (TOTP+PIN) - daily no-login"
+                        else:
+                            res["fyers"] = f"auto-login fail ({det3 or det2 or detail})"
+            else:
+                # token hi nahi (deploy ne DB saaf ki / refresh nahi hai):
+                ok3, new_tok, det3 = _fyers_auto_login(cfg)
+                if ok3:
                     cfg["access_token"] = new_tok
                     _save_cfg("fyers", cfg)
-                    res["fyers"] = "token refreshed (auto)"
+                    res["fyers"] = "token AUTO-LOGIN (TOTP+PIN) - daily no-login"
                 else:
-                    res["fyers"] = ("refresh blocked (Fyers SEBI notice)"
-                                    if _sebi_blocked(det2) else f"needs login ({det2})")
-            else:
-                res["fyers"] = "not configured"
+                    res["fyers"] = f"auto-login fail ({det3})"
     except Exception as e:
         res["fyers"] = f"error: {str(e)[:100]}"
     # ---- Bigul ----
