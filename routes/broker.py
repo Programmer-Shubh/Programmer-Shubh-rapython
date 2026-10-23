@@ -906,6 +906,36 @@ def _is_sebi_refresh_error(msg) -> bool:
             or "regulation" in m)
 
 
+@router.post("/fyers-selftest")
+async def fyers_selftest():
+    """Diagnosis: auto-login ke liye kya-kya creds hain/kami + LIVE ek
+    auto-login attempt (safal ho to naya token DB me save). Yahan exact
+    error dikhega - TOTP galat/PIN galat/network - guess nahi karna."""
+    cfg = _get_config("fyers") or {}
+    from core.services.fyers_auto_login import missing_creds, auto_login
+    out = {
+        "missing_creds": missing_creds(cfg),
+        "has_field": {k: bool(str(cfg.get(k) or "").strip())
+                      for k in ("app_id", "secret", "redirect_uri", "pin",
+                                "fy_id", "totp_secret", "access_token", "refresh_token")},
+        "masked": {"app_id": str(cfg.get("app_id") or "")[:8],
+                   "fy_id": str(cfg.get("fy_id") or ""),
+                   "totp_len": len(str(cfg.get("totp_secret") or "").strip()),
+                   "pin_len": len(str(cfg.get("pin") or "").strip())},
+    }
+    if not out["missing_creds"]:
+        r = await auto_login(cfg)
+        out["autologin"] = {"success": bool(r.get("success")),
+                            "error": str(r.get("error") or "")[:300]}
+        if r.get("success") and r.get("access_token"):
+            cfg["access_token"] = r["access_token"]
+            if r.get("refresh_token"):
+                cfg["refresh_token"] = r["refresh_token"]
+            _save_config("fyers", cfg)
+            out["token_saved_to_db"] = True
+    return out
+
+
 @router.post("/refresh-tokens")
 async def refresh_tokens():
     results = {}
