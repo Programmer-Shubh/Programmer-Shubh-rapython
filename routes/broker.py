@@ -360,7 +360,7 @@ def _env_config(broker: str) -> dict:
         "redirect_uri": ["redirect_url", "callback_url"],
         "secret": ["secret_id", "secret_key", "app_secret"],
         "app_id": ["appid", "client_id"],
-        "fy_id": ["fyers_id", "user_id", "clientid"],
+        "fy_id": ["fyers_id", "user_id", "client_id", "clientid"],
         "totp_secret": ["totp", "totp_key", "authsecret"],
     }
     try:
