@@ -16,6 +16,18 @@ import time
 
 _LAST = {"ts": 0, "result": {}}
 _LOCK = threading.Lock()
+# Fyers vagator login-OTP endpoint par STRICT rate-limit hai (429). Risk:
+# har 30-min cycle me naya attempt rate-limit-window ko aur tight karta
+# hai. 429 ke baad AUTO-LOGIN ke liye ye cool-window.
+_AUTO_COOLDOWN_S = 47 * 60
+_AUTO_LAST_FAIL = {"ts": 0, "blocked": False}
+
+
+def _auto_cooldown_left():
+    """429/some failure ke baad kitna wait logic bacha hai."""
+    if not _AUTO_LAST_FAIL.get("blocked"):
+        return 0
+    return max(0, _AUTO_COOLDOWN_S - (time.time() - _AUTO_LAST_FAIL.get("ts", 0)))
 
 # Token is refreshed when it expires within this window (seconds).
 _REFRESH_MARGIN = 45 * 60
@@ -139,8 +151,13 @@ def _sebi_blocked(msg) -> bool:
 
 
 def _fyers_auto_login(cfg):
-    """HEADLESS daily login (TOTP+PIN) — refresh-token API SEBI-blocked hai,
-    to ye hi reliable rasta hai. Returns (ok, new_token, detail)."""
+    """HEADLESS daily login (TOTP+PIN) - refresh-token API SEBI-blocked hai,
+    to ye hi reliable rasta hai. Returns (ok, new_token, detail).
+    429 rate-limit par cooldown chalu hota hai - bekaar baar-baar attempt
+    Fyers ka limiter aur tight kar deta hai."""
+    _left = _auto_cooldown_left()
+    if _left > 0:
+        return False, "", f"auto-login cooldown ({int(_left / 60)} min bache - Fyers 429 rate-limit)"
     try:
         import asyncio as _aio
         from core.services.fyers_auto_login import auto_login, missing_creds
@@ -149,9 +166,14 @@ def _fyers_auto_login(cfg):
             return False, "", f"auto-login ke liye bache hue fields bharo: {', '.join(_miss)}"
         r = _aio.run(auto_login(cfg))
         if r.get("success") and r.get("access_token"):
+            _AUTO_LAST_FAIL["blocked"] = False
             return True, r["access_token"], "auto-login ok"
+        _AUTO_LAST_FAIL["ts"] = time.time()
+        _AUTO_LAST_FAIL["blocked"] = True
         return False, "", str(r.get("error") or "auto-login failed")[:150]
     except Exception as e:
+        _AUTO_LAST_FAIL["ts"] = time.time()
+        _AUTO_LAST_FAIL["blocked"] = True
         return False, "", str(e)[:150]
 
 
