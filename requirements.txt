@@ -15,9 +15,13 @@ pyotp>=2.9.0
 nsefin>=0.1.5
 nsepython==2.97
 openchart>=0.0.5
-vectorbt>=0.26.0
+# vectorbt REMOVED (Vercel Lambda 500MB bundle limit): numba+llvmlite+scipy+plotly
+# ka poora tree install hota tha (~400MB). Sab import sites lazy+guarded hain
+# (backtest_engine.run_vectorbt try/except, vectorbt_runner HAS_VECTORBT flag)
+# - na ho to backend fail-open ho jata hai. Chahiye ho to locally pip install.
 backtesting>=0.3.3
 psycopg2-binary>=2.9.9
 yfinance>=0.2.40
-matplotlib>=3.8.0
+# matplotlib REMOVED: koi direct import nahi (verified grep) - PDF report
+# reportlab se banati hai. Fonts+deps ~100MB bachate hain.
 fyers-apiv3>=2.0.5
