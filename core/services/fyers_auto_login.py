@@ -53,7 +53,11 @@ def _b64(v) -> str:
 
 def _totp_now(secret: str) -> str:
     import pyotp
-    s = str(secret or "").replace(" ", "").upper()
+    s = str(secret or "").replace(" ", "").replace("-", "").upper()
+    # Base32 alphabet A-Z2-7 hai. 33-char copy arten (QR scanner trailing
+    # char jaise trailing 'V') -> len%8==1 invalid - last char drop karo.
+    while len(s) % 8 == 1 and s:
+        s = s[:-1]
     if not s:
         raise ValueError("totp_secret khali")
     return pyotp.TOTP(s).now()
