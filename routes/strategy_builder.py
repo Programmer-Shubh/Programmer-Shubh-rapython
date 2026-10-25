@@ -861,15 +861,18 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
                 {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
             ]
-        # OTM premium floor: Rs20 se saste option strikes auto-drop (engine
+        # OTM premium floor: Rs15 se saste option strikes auto-drop (engine
         # signal + execution dono jagah skip karta hai). Yahan lagana ZAROORI
         # hai (legs normalize/preset-expand ke BAAD) - pehle lagane par NameError
         # aata tha aur floor kabhi lagta hi nahi tha. Sirf option legs par -
         # EQ (equity) me premium concept nahi. Explicit value ho to wahi.
+        # NOTE: ye SIRF BACKTEST ka floor hai (user demand: 20 -> 15).
+        # Order placement ka ₹20 floor (utils.check_min_premium) alag chalta
+        # rahega - live/paper orders par koi farak nahi padega.
         try:
             _has_opt = any(str((l or {}).get("option_type", "")).upper() in ("CE", "PE") for l in (legs or []))
             if _has_opt:
-                advanced_in.setdefault("min_entry_premium", 20)
+                advanced_in.setdefault("min_entry_premium", 15)
         except Exception:
             pass
         # Indicators: if empty, inject defaults - include supertrend so synthetic always yields trades (rsi+ema alone gives 0 on flat synthetic)
