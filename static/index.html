@@ -332,6 +332,11 @@
                     <div id="opp-top5"><p class="text-muted small p-2">Loading...</p></div>
                 </div>
             </div>
+            <div class="card" id="dash-robot-saved-card">
+                <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Strategies</strong><span><button class="btn btn-sm btn-outline-success me-1" onclick="showBrowserCopies()" title="Is browser me padi purani copies dekho (bina F12 ke)">📱 Browser Copy</button><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></span></div>
+                <div class="px-3 pt-2 small text-muted" id="dash-ap-worker">Auto-paper worker: checking...</div>
+                <div class="card-body p-0" id="dash-robot-saved"><p class="text-muted p-3 small">No saved strategies yet — Save Strategy page se banao.</p></div>
+            </div>
             <div class="card">
                 <div class="card-header">Open Positions</div>
                 <div class="card-body p-0"><div id="dash-pos"></div></div>
@@ -562,11 +567,6 @@
                 <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-info-circle"></i> Live Strategy Status</span><button class="btn btn-sm btn-outline-secondary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect Brokers</button></div>
                 <div class="card-body" id="robot-status"><p class="text-muted small">Strategy stopped. Select symbol + order + SL/Target then Start Strategy for paper trading. Market hours: Mon-Fri 9:15-15:30 IST — Paper trades can queue outside hours.</p></div>
             </div>
-            <div class="card mt-3" id="robot-saved-card">
-                <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Strategies</strong><span><button class="btn btn-sm btn-outline-success me-1" onclick="showBrowserCopies()" title="Is browser me padi purani copies dekho (bina F12 ke)">📱 Browser Copy</button><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></span></div>
-                <div class="px-3 pt-2 small text-muted" id="ap-worker">Auto-paper worker: checking...</div>
-                <div class="card-body p-0" id="robot-saved"><p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p></div>
-            </div>
             </div>
         </div>
 
@@ -784,7 +784,7 @@
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     // OTM filter cache-first: memory (15-min) -> localStorage (60-min) -> network.
     // "Loading symbols..." kabhi atakta nahi - pehli baar ke baad turant list.
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
@@ -2160,17 +2160,17 @@ let _lastOpenTrdHTML = null;
             const w=await A('/api/trades/auto-paper-status');
             const wk=w.worker||{};
             const last=(wk.last_daily||{}).placed;
-            const els=['ap-worker','tc-ap-worker'].map(id=>document.getElementById(id)).filter(Boolean);
+            const els=['dash-ap-worker','tc-ap-worker'].map(id=>document.getElementById(id)).filter(Boolean);
             if(!els.length)return;
             const mkt=wk.market_open===false?' (market band hai - subah khud lagenge)':wk.market_open?' (market khula hai)':'';
             els.forEach(el=>{el.innerHTML='Auto-paper worker: '+(wk.server_ist?('server time '+wk.server_ist):'')+(last!=null?(', aakhri check me '+last+' trade lage'):'' )+mkt+' — signal mile to trade apne-aap lagta hai, button dabana zaroori nahi.';});
-        }catch(e){['ap-worker','tc-ap-worker'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='Auto-paper worker: status nahi mila';});}
+        }catch(e){['dash-ap-worker','tc-ap-worker'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='Auto-paper worker: status nahi mila';});}
     }
     async function loadRobotSaved(){
         try{loadApWorker();}catch(e){}
         try{
-            // Dono jagah render karo: Strategy page + Trading Center
-            const boxes=['robot-saved','tc-robot-saved'].map(id=>document.getElementById(id)).filter(Boolean);
+            // Dono jagah render karo: Dashboard + Trading Center
+            const boxes=['dash-robot-saved','tc-robot-saved'].map(id=>document.getElementById(id)).filter(Boolean);
             if(!boxes.length)return;
             const r=await A('/api/strategies/list');
             const robots=(r.strategies||[]).filter(s=> (s.description==='robot') || (s.name||'').includes('_Robot_') || (s.name||'').includes('_Strategy_'));
@@ -2198,7 +2198,7 @@ let _lastOpenTrdHTML = null;
                     try{const ls=await A('/api/lot-size/'+sym);const q=parseInt(ls.lot_size)||0;syms[sym].forEach(id=>{document.querySelectorAll('.sl-qty-hint[data-sid="'+id+'"]').forEach(el=>{el.textContent=q?('qty: 1 lot = '+q):'qty: —';});});}catch(e){}
                 });
             }catch(e){}
-        }catch(e){ ['robot-saved','tc-robot-saved'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>';}); console.error(e); }
+        }catch(e){ ['dash-robot-saved','tc-robot-saved'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>';}); console.error(e); }
     }
     async function stratLots(id, lots){
         lots=Math.max(1,parseInt(lots)||1);
