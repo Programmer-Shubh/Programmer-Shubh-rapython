@@ -618,6 +618,35 @@ def strategy_live_toggle(strat_id: int, req: LiveToggleRequest):
     return {"status": "ok", "id": strat_id, "live_enabled": req.enabled}
 
 
+@router.post("/{strat_id}/paper-toggle")
+def strategy_paper_toggle(strat_id: int, req: LiveToggleRequest):
+    """Per-strategy Paper trading ON/OFF. Auto-paper worker sirf
+    status='active' strategies par trade lagata hai, isliye:
+    ON  -> status='active'  (auto-paper worker chal sakta hai)
+    OFF -> status='paused'  (koi naya auto/paper-trade nahi lagega;
+           open positions chalte rahenge)."""
+    db = Database.get_instance()
+    row = db.fetch_one("SELECT id FROM strategies WHERE id=?", [strat_id])
+    if not row:
+        return {"error": "Strategy not found"}
+    new_status = "active" if req.enabled else "paused"
+    db.execute(
+        "UPDATE strategies SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        [new_status, strat_id])
+    return {"status": "ok", "id": strat_id,
+            "paper_enabled": req.enabled, "strategy_status": new_status}
+
+
+@router.get("/{strat_id}/paper-state")
+def strategy_paper_state(strat_id: int):
+    db = Database.get_instance()
+    row = db.fetch_one("SELECT id, status FROM strategies WHERE id=?", [strat_id])
+    if not row:
+        return {"error": "Strategy not found"}
+    st = str((row or {}).get("status") or "active")
+    return {"id": strat_id, "paper_enabled": st == "active", "status": st}
+
+
 @router.delete("/{strat_id}")
 def delete_strategy(strat_id: int):
     db = Database.get_instance()

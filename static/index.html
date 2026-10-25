@@ -362,6 +362,11 @@
                 <div class="card-header">Saved Strategies <span class="text-muted small" id="strat-count"></span><span class="badge bg-light text-dark ms-1" id="ui-build" title="Is browser par chalta UI build (server /api/version se) - purana dikhe to page hard-refresh (Ctrl+Shift+R) karo" style="font-size:10px;cursor:default"></span></div>
                 <div class="card-body p-0"><div id="strat-cards" class="row" style="padding:12px"></div></div>
             </div>
+            <div class="card" id="tc-robot-saved-card">
+                <div class="card-header d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bookmark-check"></i> Saved Strategies — Paper ON/OFF</strong><button class="btn btn-sm btn-outline-primary" onclick="loadRobotSaved()"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
+                <div class="px-3 small text-muted" id="tc-ap-worker">Auto-paper worker: checking...</div>
+                <div class="card-body p-0" id="tc-robot-saved"><p class="text-muted p-3 small">No saved strategies yet — Save Strategy page se banao.</p></div>
+            </div>
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">Open Trades <span class="badge bg-danger">LIVE</span><span class="badge bg-secondary">PAPER</span></div>
                 <div class="card-body p-0"><div id="open-trd" style="overflow-x:auto; -webkit-overflow-scrolling:touch"></div></div>
@@ -392,7 +397,7 @@
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols + Order</small></div>
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">OTM 1-4 ≥ ₹20 (next week)</span> <span id="r-otm20-note" class="small text-muted"></span> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
+                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">Poori F&O list</span> <span id="r-otm20-note" class="small text-muted"></span> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
                         <input type="hidden" id="r-order" value="CE-BUY"><input type="hidden" id="r-strike" value="ATM"><input type="hidden" id="r-otm" value="1"><input type="hidden" id="r-lots" value="1">
                         <div class="col-md-8 d-flex align-items-center"><small class="text-muted">Order/Strike/Lots — Template se auto (Strategy Templates neeche)</small></div>
                     </div>
@@ -779,50 +784,50 @@
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+        if(id==='dashboard')loadDash();if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     // OTM filter cache-first: memory (15-min) -> localStorage (60-min) -> network.
     // "Loading symbols..." kabhi atakta nahi - pehli baar ke baad turant list.
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
         try{const l=JSON.parse(localStorage.getItem('otmSymsCacheV1')||'null');if(l&&l.ts&&Date.now()-l.ts<60*60*1000&&l.data&&l.data.symbols&&l.data.symbols.length)return l.data;}catch(e){}return null;}
     async function otmFresh(){const c=otmCached();if(c&&c.otm_to===4&&c.dte===7)return c;const d=await A('/api/chain/symbols-otm?min_premium=20&otm_to=4&dte=7');try{window._otmData={ts:Date.now(),data:d};localStorage.setItem('otmSymsCacheV1',JSON.stringify({ts:Date.now(),data:d}));}catch(e){}return d;}
-    async function loadStrategySymbols(){
-        try{
-            const sel=document.getElementById('s-index');
-            // SIRF OTM 1-6 >= ₹20 wale symbols. Fail/empty par FULL LIST KABHI NAHI -
-            // khaali + Retry (user ki demand).
-            let syms=null;
-            try{
-                const f=await otmFresh();
-                if(f && f.symbols && f.symbols.length)syms=f.symbols.slice().sort();
-            }catch(e){syms=null;}
-            if(!syms || !syms.length){
-                if(sel)sel.innerHTML='<option value="">Load nahi hua</option>';
-                const rb=document.getElementById('r-syms');
-                if(rb)rb.innerHTML='<span class="text-danger small">Symbols load nahi hue (OTM filter). <button class="btn btn-sm btn-outline-primary ms-1" onclick="loadStrategySymbols()">Retry</button></span>';
-                try{document.getElementById('r-otm20-note').textContent='';}catch(e){}
-                return;
-            }
-            if(!sel) return;
+    // FULL F&O list — INSTANT (bina load). 'A' se 'Z' tak sab symbols dikhte
+    // hain (ADANIENT, AXISBANK, APOLLOHOSP, ASIANPAINT...). DB ke naye
+    // additions background me merge hote hain — dropdown kabhi khali nahi.
+    const _FNO_MASTER=['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY','SENSEX','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL','TITAN','BAJAJ-AUTO','TRENT','BEL','DMART','INDIGO','CONCOR','LTF','ABB','AMBER','ALKEM','ASIANPAINT','BAJAJHLDNG','BOSCHLTD','CDSL','CUMMINSIND','DIXON','FORCEMOT','GVT&D','HAL','KEI','LTM','OFSS','PAGEIND','PERSISTENT','POLYCAB','POWERINDIA','RADICO','SIEMENS','SOLARINDS','TORNTPHARM','TVSMOTOR','TATAPOWER','TATACONSUM','COLPAL','DABUR','MARICO','MUTHOOTFIN','SRF','PIDILITIND','CROMPTON','VOLTAS','ASHOKLEY','KAYNES','KPITTECH','MPHASIS','COFORGE'];
+    function _fillStrategySyms(syms){
+        const sel=document.getElementById('s-index');
+        if(sel){
             const current=sel.value;
-            try{document.getElementById('r-otm20-note').textContent=syms.length+' symbols (OTM 1-4 ≥ ₹20, next week)';}catch(e){}
-            try{window._symCount=syms.length;}catch(e){}
-            sel.innerHTML=syms.map(x=>`<option value="${x}" ${x===current?'selected':''}>${x}</option>`).join('');
-            // Same full chain list as tap-checkboxes (keep current ticks)
-            const rbox=document.getElementById('r-syms');
-            if(rbox){
-                const cur=[...rbox.querySelectorAll('input:checked')].map(o=>o.value).filter(x=>syms.includes(x));
-                let keep=cur.length?cur:[syms[0]];
-                try{const saved=JSON.parse(localStorage.getItem('rSyms')||'[]');if(saved.length)keep=saved.filter(x=>syms.includes(x));if(!keep.length)keep=[syms[0]];}catch(e){}
-                rbox.innerHTML=syms.map(x=>`<label><input type="checkbox" value="${x}" ${keep.includes(x)?'checked':''}> ${x}</label>`).join('');
-                rbox.onchange=()=>{try{const v=[...rbox.querySelectorAll('input:checked')].map(o=>o.value);if(v.length>25){[...rbox.querySelectorAll('input:checked')].slice(25).forEach(el=>el.checked=false);}rSymsRefresh();updateRunSummary();}catch(e){}};
-                rSymsRefresh();
-            }
-            const psel=document.getElementById('py-sym');
-            if(psel){
-                const pcur=psel.value||'NIFTY';
-                psel.innerHTML=syms.map(x=>`<option value="${x}" ${x===pcur?'selected':''}>${x}</option>`).join('');
-            }
-        }catch(e){console.error('Failed to load symbols',e);}
+            sel.innerHTML=syms.map(x=>`<option value="${x}" ${(x===current&&current)||(!current&&x==='NIFTY')?'selected':''}>${x}</option>`).join('');
+            if(!sel.value) sel.value='NIFTY';
+        }
+        try{document.getElementById('r-otm20-note').textContent=syms.length+' symbols (poori F&O list)';}catch(e){}
+        try{window._symCount=syms.length;}catch(e){}
+        // Same symbol checkboxes (keep current ticks)
+        const rbox=document.getElementById('r-syms');
+        if(rbox){
+            const cur=[...rbox.querySelectorAll('input:checked')].map(o=>o.value).filter(x=>syms.includes(x));
+            let keep=cur.length?cur:[syms[0]];
+            try{const saved=JSON.parse(localStorage.getItem('rSyms')||'[]');if(saved.length)keep=saved.filter(x=>syms.includes(x));if(!keep.length)keep=[syms[0]];}catch(e){}
+            rbox.innerHTML=syms.map(x=>`<label><input type="checkbox" value="${x}" ${keep.includes(x)?'checked':''}> ${x}</label>`).join('');
+            rbox.onchange=()=>{try{const v=[...rbox.querySelectorAll('input:checked')].map(o=>o.value);if(v.length>25){[...rbox.querySelectorAll('input:checked')].slice(25).forEach(el=>el.checked=false);}rSymsRefresh();updateRunSummary();}catch(e){}};
+            rSymsRefresh();
+        }
+        const psel=document.getElementById('py-sym');
+        if(psel){
+            const pcur=psel.value||'NIFTY';
+            psel.innerHTML=syms.map(x=>`<option value="${x}" ${x===pcur?'selected':''}>${x}</option>`).join('');
+        }
+    }
+    async function loadStrategySymbols(){
+        // Step 1: INSTANT — static full F&O list, koi API wait nahi
+        try{_fillStrategySyms([...new Set(_FNO_MASTER)].filter(Boolean).sort());}catch(e){}
+        // Step 2: background me DB naye symbols merge (list rahegi dikhti)
+        try{
+            const r=await A('/api/chain/symbols');
+            const dbL=(r.symbols||[]).filter(x=>x&&x.trim());
+            if(dbL.length){_fillStrategySyms([...new Set([..._FNO_MASTER,...dbL])].filter(Boolean).sort());}
+        }catch(e){console.error('DB symbols merge fail (static list dikh raha hai)',e);}
     }
     function stab(t,btn){} // Scanner removed
     let conds=[];let condIdx=0;
@@ -2155,40 +2160,45 @@ let _lastOpenTrdHTML = null;
             const w=await A('/api/trades/auto-paper-status');
             const wk=w.worker||{};
             const last=(wk.last_daily||{}).placed;
-            const el=document.getElementById('ap-worker');
-            if(!el)return;
+            const els=['ap-worker','tc-ap-worker'].map(id=>document.getElementById(id)).filter(Boolean);
+            if(!els.length)return;
             const mkt=wk.market_open===false?' (market band hai - subah khud lagenge)':wk.market_open?' (market khula hai)':'';
-            el.innerHTML='Auto-paper worker: '+(wk.server_ist?('server time '+wk.server_ist):'')+(last!=null?(', aakhri check me '+last+' trade lage'):'' )+mkt+' — signal mile to trade apne-aap lagta hai, button dabana zaroori nahi.';
-        }catch(e){try{document.getElementById('ap-worker').textContent='Auto-paper worker: status nahi mila';}catch(_){}}
+            els.forEach(el=>{el.innerHTML='Auto-paper worker: '+(wk.server_ist?('server time '+wk.server_ist):'')+(last!=null?(', aakhri check me '+last+' trade lage'):'' )+mkt+' — signal mile to trade apne-aap lagta hai, button dabana zaroori nahi.';});
+        }catch(e){['ap-worker','tc-ap-worker'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='Auto-paper worker: status nahi mila';});}
     }
     async function loadRobotSaved(){
         try{loadApWorker();}catch(e){}
         try{
+            // Dono jagah render karo: Strategy page + Trading Center
+            const boxes=['robot-saved','tc-robot-saved'].map(id=>document.getElementById(id)).filter(Boolean);
+            if(!boxes.length)return;
             const r=await A('/api/strategies/list');
             const robots=(r.strategies||[]).filter(s=> (s.description==='robot') || (s.name||'').includes('_Robot_') || (s.name||'').includes('_Strategy_'));
-            if(!robots.length){ document.getElementById('robot-saved').innerHTML='<p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p>'; return; }
-            let h='<table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Symbol</th><th>Order</th><th>Lots</th><th>SL/TP</th><th>Saved BT</th><th>Status</th><th>Live</th><th>Action</th></tr></thead><tbody>';
+            if(!robots.length){ boxes.forEach(b=>b.innerHTML='<p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p>'); return; }
+            let h='<table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Symbol</th><th>Order</th><th>Lots</th><th>SL/TP</th><th>Saved BT</th><th>Status</th><th>Paper</th><th>Live</th><th>Action</th></tr></thead><tbody>';
             robots.forEach(s=>{
                 const legs=_parseJsonField(s.legs,[]); const leg=legs[0]||{}; const ord=(leg.option_type||'')+'-'+(leg.transaction||'');
                 const curLots=Math.max(1,parseInt(leg.lots)||1);
                 const rm=_parseJsonField(s.risk_management,{});
                 const lv=!!s.live_enabled;
+                const pe=(s.status!=null)?(s.status==='active'):true; // paper ON = status active (auto-paper worker isi par chalta hai)
                 const btH=(s.bt&&s.bt.trades!=null)?`<strong>${s.bt.trades}</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span><br><small class="text-muted">${s.bt.win_rate||0}% • ${s.bt.stored_at||'saved'}</small>`:'<small class="text-muted">—</small>';
                 h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td>`+
-`<td><div class="d-flex align-items-center" style="gap:4px"><button class="btn btn-sm btn-outline-secondary px-2" title="Lot ghatayen" onclick="stratLots(${s.id},${curLots-1})">−</button><strong class="mx-1" id="sl-lots-${s.id}">${curLots}</strong><button class="btn btn-sm btn-outline-secondary px-2" title="Lot badhayen" onclick="stratLots(${s.id},${curLots+1})">+</button></div><small class="text-muted" id="sl-qty-${s.id}" style="font-size:10px">qty: …</small></td>`+
+`<td><div class="d-flex align-items-center" style="gap:4px"><button class="btn btn-sm btn-outline-secondary px-2" title="Lot ghatayen" onclick="stratLots(${s.id},${curLots-1})">−</button><strong class="mx-1">${curLots}</strong><button class="btn btn-sm btn-outline-secondary px-2" title="Lot badhayen" onclick="stratLots(${s.id},${curLots+1})">+</button></div><small class="sl-qty-hint text-muted" data-sid="${s.id}" style="font-size:10px">qty: …</small></td>`+
 `<td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td>`+
-`<td><button class="btn btn-sm ${(lv?'btn-success':'btn-outline-secondary')}" id="sl-live-${s.id}" onclick="stratLiveToggle(${s.id},${!lv})">${lv?'ON':'OFF'}</button></td>`+
+`<td><button class="btn btn-sm ${(pe?'btn-success':'btn-outline-secondary')}" title="Paper ON = auto-paper worker isi strategy par trade lagata hai; OFF = naya auto/paper trade band (open positions chalte rahenge)" onclick="stratPaperToggle(${s.id},${!pe})">${pe?'ON':'OFF'}</button></td>`+
+`<td><button class="btn btn-sm ${(lv?'btn-success':'btn-outline-secondary')}" onclick="stratLiveToggle(${s.id},${!lv})">${lv?'ON':'OFF'}</button></td>`+
 `<td style="white-space:nowrap"><button class="btn btn-sm btn-outline-success" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="ptFromStrat(${s.id})">Paper Trade</button> <button class="btn btn-sm btn-outline-danger" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="liveFromRobot(${s.id})">Live Trade</button> <button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id},false,this)">Backtest</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')">History</button> <button class="btn btn-sm btn-outline-info" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
             });
-            h+='</tbody></table>'; document.getElementById('robot-saved').innerHTML=h;
-            // Lots qty hint: lots x official lot-size (symbol wise ek hi fetch)
+            h+='</tbody></table>'; boxes.forEach(b=>b.innerHTML=h);
+            // Lots qty hint: lots x official lot-size (symbol wise ek hi fetch) — class-based, table 2 jagah hai
             try{
                 const syms={}; robots.forEach(s=>{syms[(s.symbol||'').toUpperCase()]=syms[(s.symbol||'').toUpperCase()]||[];syms[s.symbol.toUpperCase()].push(s.id);});
                 Object.keys(syms).forEach(async sym=>{
-                    try{const ls=await A('/api/lot-size/'+sym);const q=parseInt(ls.lot_size)||0;syms[sym].forEach(id=>{const el=document.getElementById('sl-qty-'+id);if(el)el.textContent=q?('qty: 1 lot = '+q):'qty: —';});}catch(e){}
+                    try{const ls=await A('/api/lot-size/'+sym);const q=parseInt(ls.lot_size)||0;syms[sym].forEach(id=>{document.querySelectorAll('.sl-qty-hint[data-sid="'+id+'"]').forEach(el=>{el.textContent=q?('qty: 1 lot = '+q):'qty: —';});});}catch(e){}
                 });
             }catch(e){}
-        }catch(e){ document.getElementById('robot-saved').innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>'; console.error(e); }
+        }catch(e){ ['robot-saved','tc-robot-saved'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>';}); console.error(e); }
     }
     async function stratLots(id, lots){
         lots=Math.max(1,parseInt(lots)||1);
@@ -2202,6 +2212,16 @@ let _lastOpenTrdHTML = null;
     async function stratLiveToggle(id, enabled){
         try{
             const r=await P('/api/strategies/'+id+'/live-toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!!enabled})});
+            if(r.error){alert('Error: '+r.error);return;}
+            try{loadRobotSaved();}catch(e){}
+            try{loadStrats();}catch(e){}
+        }catch(e){alert('Error: '+e.message);}
+    }
+    async function stratPaperToggle(id, enabled){
+        // Paper ON/OFF = strategy status active/paused. OFF par auto-paper
+        // worker is strategy ka naya trade nahi lagayega (open chalte rahenge).
+        try{
+            const r=await P('/api/strategies/'+id+'/paper-toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!!enabled})});
             if(r.error){alert('Error: '+r.error);return;}
             try{loadRobotSaved();}catch(e){}
             try{loadStrats();}catch(e){}
