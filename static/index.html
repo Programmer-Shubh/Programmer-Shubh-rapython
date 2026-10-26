@@ -2724,7 +2724,7 @@ let _lastOpenTrdHTML = null;
     // login_url = official broker login page (new tab).
     const FALLBACK_BROKERS=[
         {key:'fyers',name:'Fyers',icon:'bi-currency-exchange',color:'text-danger',desc:'App ID + Secret — OAuth login (Historical OHLC Pandas Frame drawer + LIVE orders)',fields:['app_id','secret','redirect_uri','access_token','refresh_token','pin'],configured:false,connected:false,disconnected:false,config:{},login_url:'https://myaccount.fyers.in/',token_hint:'Fyers Developer Portal (myapi.fyers.in/dashboard) se app banao. App ID format XXXXXXXXX-100 (sirf XXXXXXXXX daalo to app khud -100 jod dega) + Secret save karo, phir OAuth Login dabao. Redirect URI app settings me EXACTLY: https://ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye. PIN daal do to token 24h ke baad auto-refresh ho jayega.'},
-        {key:'bigul',name:'Bigul',icon:'bi-bullseye',color:'text-warning',desc:'Mobile se login — OTP auto-fetch, token auto-connect',fields:['client_id','password','api_key','totp_secret'],configured:false,connected:false,disconnected:false,config:{},login_url:'https://bigul.co/login',token_hint:'Mobile number se login karo — OTP dalte hi token auto-fetch ho jayega. Ya API token paste karke Auto-connect dabao.'}
+        {key:'bigul',name:'Bigul',icon:'bi-bullseye',color:'text-warning',desc:'Bigul Connect API — TOTP auto-login, token roz auto-generate (valid till 12:30 AM)',fields:['client_id','api_key','api_secret','totp_secret'],configured:false,connected:false,disconnected:false,config:{},login_url:'https://bigul.co/login',token_hint:'Bigul Connect (connect.bigul.co) par app banao: x-api-key + x-api-secret generate karo. Setup me: Client ID + API Key + API Secret + TOTP secret (authenticator app ka base-secret) save karo — login apne-aap hoga (mobile OTP ki zarurat nahi). Token roz subah auto-connect se fresh ban jata hai.'}
     ];
     function bigulOAuth(){ P('/api/broker/bigul-auth-url').then(r=>{ if(r.success&&r.url) window.open(r.url,'_blank'); else alert(r.error||'Bigul auth failed'); }); }
     function brokerLoginUrl(key){
@@ -3396,7 +3396,7 @@ def run(data):
 
     const BROKER_FIELD_LABELS={
     fyers:{app_id:'App ID (XXXXXXXXX-100)',secret:'Secret Key',redirect_uri:'Redirect URI (https://ratrade-iwi2.onrender.com/api/broker/fyers-callback)',access_token:'Access Token (auto)',refresh_token:'Refresh Token (auto)',pin:'Fyers Trading PIN (4-digit, auto-refresh)'},
-    bigul:{client_id:'Client ID',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'},
+    bigul:{client_id:'Client ID',api_key:'API Key (x-api-key)',api_secret:'API Secret (x-api-secret)',password:'Password (optional, purana flow)',totp_secret:'TOTP Secret (authenticator app)'},
     angel:{client_code:'Client Code',password:'Password',api_key:'API Key',totp_secret:'TOTP Secret'}
     };
 

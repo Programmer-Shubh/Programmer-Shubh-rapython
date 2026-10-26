@@ -93,7 +93,7 @@ async def egress_test():
 
 BROKER_DEFAULTS = {
     "fyers": {"name": "Fyers", "icon": "bi-currency-exchange", "color": "text-danger", "fields": ["app_id", "secret", "redirect_uri", "access_token", "refresh_token", "pin", "fy_id", "totp_secret"], "desc": "App ID + Secret + TOTP secret - daily token AUTO-login (Historical OHLC + LIVE orders)"},
-    "bigul": {"name": "Bigul", "icon": "bi-bullseye", "color": "text-warning", "fields": ["client_id", "password", "api_key", "totp_secret"], "desc": "Mobile se login — OTP auto-fetch, token auto-connect"},
+    "bigul": {"name": "Bigul", "icon": "bi-bullseye", "color": "text-warning", "fields": ["client_id", "api_key", "api_secret", "totp_secret"], "desc": "Bigul Connect API — TOTP auto-login, token roz auto-generate (valid till 12:30 AM)"},
 }
 
 # API-only brokers (UI me nahi dikhte) - direct API calls ke liye.
@@ -107,7 +107,7 @@ BROKER_ORDER = ("fyers", "bigul", "angel", "shoonya")
 
 BROKER_FIELD_LABELS = {
     "fyers": {"app_id": "App ID (MyAPI dashboard se, format XXXXXXXXX-100)", "secret": "Secret Key", "redirect_uri": "Redirect URI (Wahan sirf ratrade-iwi2.onrender.com/api/broker/fyers-callback hona chahiye)", "access_token": "Access Token (auto-fill ka rahega)", "refresh_token": "Refresh Token (auto-fill ka rahega)", "pin": "Fyers Trading PIN (4-digit, auto-login ke liye)", "fy_id": "Fyers Client ID (jaise ABCD1234 - daily auto-login ke liye)", "totp_secret": "TOTP 2FA Secret (Fyers profile > 2FA TOTP se - daily auto-login ke liye)"},
-    "bigul": {"client_id": "Client ID", "password": "Password", "api_key": "API Key", "totp_secret": "TOTP Secret"},
+    "bigul": {"client_id": "Client ID", "api_key": "API Key (x-api-key)", "api_secret": "API Secret (x-api-secret)", "totp_secret": "TOTP Secret"},
 }
 
 
@@ -618,6 +618,21 @@ async def auto_connect_brokers():
                 an = AngelLive(api_key=config.get("api_key",""), client_code=config.get("client_id",""),
                                password=config.get("password",""), totp_secret=config.get("totp_secret",""))
                 result = await an.login()
+                # Pehle OFFICIAL Bigul Connect TOTP login try karo (docs flow):
+                # api_key + api_secret + client_id + totp_secret sab hain to naya
+                # automated login hi chalega (token valid till 12:30 AM).
+                if config.get("api_key") and config.get("api_secret") and config.get("client_id") and config.get("totp_secret"):
+                    from core.services.broker_bigul_connect import BigulConnect
+                    bc = BigulConnect(api_key=config.get("api_key",""), api_secret=config.get("api_secret",""),
+                                      client_code=config.get("client_id",""), totp_secret=config.get("totp_secret",""))
+                    result = await bc.login()
+                    if result.get("success"):
+                        config["access_token"] = result.get("token","")
+                        _save_config("bigul", config)
+                        results.append({"broker": key, "status": "connected"})
+                        continue
+                    results.append({"broker": key, "status": "failed", "error": result.get("error","")})
+                    continue
                 if result.get("success"):
                     config["access_token"] = an.jwt
                     _save_config("bigul", config)
@@ -627,26 +642,6 @@ async def auto_connect_brokers():
         except Exception as e:
             results.append({"broker": key, "status": "error", "error": str(e)[:150]})
     return {"success": True, "results": results}
-
-
-@router.get("/fyers-creds-dump")
-def fyers_creds_dump(request: Request):
-    """TEMP local-login helper: Fyers vagator API Render-egress IPs (incl.
-    proxy) par ACCOUNT-level 429 de raha hai - TOTP auto-login sirf USER-ke
-    ghar-ke IP se chal pata hai. Ye endpoint creds SITE me laye hue values
-    deti hai - SIRF tab jab caller correct unlock-key rakhta ho
-    (sha256hex(fyers app secret)). Secret ke bina 403 (creds leak-safe)."""
-    import hashlib
-    import os
-    unlock = (request.headers.get("x-unlock") or "").strip().lower()
-    secret = ""
-    c = _get_config("fyers") or {}
-    secret = str(c.get("secret") or os.environ.get("RATRADE_FYERS_SECRET_ID") or "")
-    if not secret or unlock != hashlib.sha256(secret.encode()).hexdigest():
-        raise HTTPException(status_code=403, detail="unlock-key galat")
-    return {"fy_id": c.get("fy_id", ""), "totp_secret": c.get("totp_secret", ""),
-            "pin": c.get("pin", ""), "app_id": c.get("app_id", ""),
-            "secret": secret, "redirect_uri": c.get("redirect_uri", "")}
 
 
 @router.get("/broker-config")
@@ -915,6 +910,41 @@ async def connect_broker(req: ConnectRequest):
             _save_config("angel", config)
             return {"success": True, "message": "Angel One connected! Real JWT session."}
         return {"success": False, "error": f"Angel login failed: {result.get('error')}. Check api-key/client-code/password/TOTP-secret."}
+
+    if req.broker == "bigul":
+        # REAL Bigul Connect login (official docs, connect.bigul.co):
+        # TOTP auto-generate -> access token (valid till 12:30 AM daily).
+        try:
+            if (config.get("api_key") and config.get("api_secret")
+                    and config.get("client_id") and config.get("totp_secret")):
+                from core.services.broker_bigul_connect import BigulConnect
+                bc = BigulConnect(api_key=config.get("api_key", ""), api_secret=config.get("api_secret", ""),
+                                  client_code=config.get("client_id", ""), totp_secret=config.get("totp_secret", ""))
+                result = await bc.login()
+                if result.get("success"):
+                    config["access_token"] = result.get("token", "")
+                    config.pop("password", None)  # purana pwd field ab required nahi
+                    _save_config("bigul", config)
+                    return {"success": True, "message": "Bigul Connect connected! TOTP auto-login verified."}
+                return {"success": False, "error": f"Bigul login failed: {result.get('error')}"}
+        except Exception as e:
+            return {"success": False, "error": f"Bigul login crashed: {str(e)[:150]}"}
+        # Fallback: Angel-compatible purana flow (api_secret save nahi hua to)
+        try:
+            from core.services.broker_angel_live import AngelLive
+            an = AngelLive(api_key=config.get("api_key", ""), client_code=config.get("client_id", ""),
+                           password=config.get("password", ""), totp_secret=config.get("totp_secret", ""))
+            result = await an.login()
+        except Exception as e:
+            return {"success": False, "error": f"Bigul (legacy) login crashed: {str(e)[:150]}"}
+        if result.get("success"):
+            config["access_token"] = an.jwt
+            _save_config("bigul", config)
+            return {"success": True, "message": "Bigul connected (legacy mode)! Real session token."}
+        return {"success": False,
+                "error": (f"Bigul login failed: {result.get('error')}. "
+                          "Bigul Connect dashboard se API Key + API Secret + Client ID + TOTP secret save karo "
+                          "(new automated flow usi par chalta hai).")}
 
     return {"success": True, "message": f"{req.broker} connected (demo mode)"}
 
