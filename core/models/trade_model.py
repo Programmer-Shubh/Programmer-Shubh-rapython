@@ -687,6 +687,13 @@ class TradeModel:
             gross_pnl = (trade["entry_price"] - exit_price) * qty * lot
         pnl = gross_pnl - trade["total_cost"] - exit_costs["total"]
         pnl_pct = (pnl / (trade["entry_price"] * qty * lot)) * 100 if trade["entry_price"] > 0 else 0
+        # LIVE trade ho to REAL broker EXIT bhejo (reverse MARKET order).
+        # Fire-and-forget: DB close block nahi hota; fail/log live_exit me.
+        try:
+            from core.services.live_exit import send_broker_exit_threaded as _six
+            _six(trade, exit_status)
+        except Exception:
+            pass
         return self.db.execute(
             """UPDATE paper_trades SET exit_price=?, exit_date=?, exit_cost=?, pnl=?, pnl_percent=?,
                exit_status=?, status='closed', updated_at=CURRENT_TIMESTAMP WHERE id=?""",
