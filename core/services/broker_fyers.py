@@ -142,6 +142,19 @@ class FyersV3:
         query = urllib.parse.urlencode(params)
         return f"{self.AUTH_URL}?{query}"
 
+    def _egress_modes(self) -> list:
+        """Transport modes (proxy-first, direct fallback) - Fyers ko
+        WHITELISTED IP dikhane ke liye (order -50 'IP not whitelisted' fix).
+        egress_proxy.py configured nahi hai to sirf direct."""
+        try:
+            from core.services.egress_proxy import httpx_kwargs as _ekw
+            kw = _ekw()
+            if kw:
+                return [("egress-proxy", kw), ("direct", {})]
+        except Exception:
+            pass
+        return [("direct", {})]
+
     async def generate_token(self, auth_code: str) -> dict:
         import urllib.parse as _up
         auth_code = _up.unquote((auth_code or "").strip())
@@ -153,9 +166,12 @@ class FyersV3:
         # Try primary (api-t1) then fallback (api) - Fyers docs mix hosts
         urls = [self.TOKEN_URL, "https://api.fyers.in/api/v3/validate-authcode", "https://api-t1.fyers.in/api/v3/validate-authcode"]
         last_body = {}
-        for url in urls:
+        modes = self._egress_modes()
+        for mode, egress_kw in modes:
+          for url in urls:
             try:
-                async with httpx.AsyncClient(timeout=30) as client:
+                logger.info("Fyers token gen via %s %s", mode, url)
+                async with httpx.AsyncClient(timeout=30, **egress_kw) as client:
                     resp = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
                 try:
                     body = resp.json()
@@ -192,38 +208,50 @@ class FyersV3:
         pin = str(pin or self.pin or "").strip()
         if pin:
             payload["pin"] = pin
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(self.REFRESH_URL, json=payload)
-            body = resp.json()
-            if resp.status_code == 200 and body.get("access_token"):
-                self.access_token = body["access_token"]
-                self.refresh_token = body.get("refresh_token", self.refresh_token)
-                self._token_expiry = time.time() + body.get("expires_in", 86400)
-                self.refreshed = True
-                logger.info("Fyers token refreshed successfully")
-                return {"success": True, "data": body, "error": ""}
-            msg = body.get("message", "")
-            if "pin" in msg.lower():
-                msg += " (Fyers needs your trading PIN for refresh — else login again)"
-            # SEBI/ECN guideline: Fyers ne validate-refresh-token API disable
-            # kar di hai -> ye USER-ka-nahi-FYERS-ka status hai. Trading tab
-            # tak chalti hai jab tak stored access token valid hai; press
-            # Connect/OAuth login karke naya token liya jaa sakta hai.
-            _mlow = str(msg).lower()
-            if ("sebi" in _mlow or "regulation" in _mlow
-                    or "disabled" in _mlow and "refresh" in _mlow):
-                msg = ("Fyers ne refresh-token API band ki hai (SEBI guideline) "
-                       "- ye Fyers ka notice hai, app ka fault nahi. "
-                       "Trading tab tak chalti rahegi jab tak ye token valid hai; "
-                       "token khatam hone par Brokers tab me 'Connect' (OAuth "
-                       "login) karke naya token le lena.")
-                return {"success": False, "data": body,
-                        "error": msg, "sebi_disabled": True}
-            return {"success": False, "data": body, "error": msg or "Token refresh failed — Login with Fyers again"}
-        except httpx.RequestError as exc:
-            logger.error("Fyers token refresh error: %s", exc)
-            return {"success": False, "data": {}, "error": str(exc)}
+        modes = self._egress_modes()
+        last_err = ""
+        for mode, egress_kw in modes:
+            try:
+                logger.info("Fyers token refresh via %s", mode)
+                async with httpx.AsyncClient(timeout=30, **egress_kw) as client:
+                    resp = await client.post(self.REFRESH_URL, json=payload)
+                body = resp.json()
+                if resp.status_code == 200 and body.get("access_token"):
+                    self.access_token = body["access_token"]
+                    self.refresh_token = body.get("refresh_token", self.refresh_token)
+                    self._token_expiry = time.time() + body.get("expires_in", 86400)
+                    self.refreshed = True
+                    logger.info("Fyers token refreshed successfully (via %s)", mode)
+                    return {"success": True, "data": body, "error": ""}
+                msg = body.get("message", "")
+                if "pin" in msg.lower():
+                    msg += " (Fyers needs your trading PIN for refresh — else login again)"
+                # SEBI/ECN guideline: Fyers ne validate-refresh-token API disable
+                # kar di hai -> ye USER-ka-nahi-FYERS-ka status hai. Trading tab
+                # tak chalti hai jab tak stored access token valid hai; press
+                # Connect/OAuth login karke naya token liya jaa sakta hai.
+                _mlow = str(msg).lower()
+                if ("sebi" in _mlow or "regulation" in _mlow
+                        or "disabled" in _mlow and "refresh" in _mlow):
+                    msg = ("Fyers ne refresh-token API band ki hai (SEBI guideline) "
+                           "- ye Fyers ka notice hai, app ka fault nahi. "
+                           "Trading tab tak chalti rahegi jab tak ye token valid hai; "
+                           "token khatam hone par Brokers tab me 'Connect' (OAuth "
+                           "login) karke naya token le lena.")
+                    return {"success": False, "data": body,
+                            "error": msg, "sebi_disabled": True}
+                last_err = msg or "Token refresh failed — Login with Fyers again"
+                # API-side error (401/4xx) transport nahi hai -> direct try
+                # karne se same jawab milega; proxy mode pe hi return.
+                if mode == modes[-1][0]:
+                    return {"success": False, "data": body, "error": last_err}
+                logger.warning("Fyers refresh via %s failed (%s)", mode, last_err)
+            except httpx.RequestError as exc:
+                last_err = str(exc)
+                logger.error("Fyers token refresh error [%s]: %s", mode, exc)
+                if mode == modes[-1][0]:
+                    return {"success": False, "data": {}, "error": last_err}
+        return {"success": False, "data": {}, "error": last_err or "Token refresh failed"}
 
     async def _request(
         self, method: str, path: str, data: dict = None, retries: int = MAX_RETRIES
@@ -253,11 +281,16 @@ class FyersV3:
             "Content-Type": "application/json",
             "version": "3",
         }
+        # Transport: egress proxy FIRST (whitelisted static IP - order -50
+        # 'IP not whitelisted' fix), transport fail par direct fallback.
+        modes = self._egress_modes()
 
         for attempt in range(1, retries + 1):
             try:
-                logger.info("Fyers %s %s attempt=%d/%d", method, path, attempt, retries)
-                async with httpx.AsyncClient(timeout=30) as client:
+                mode, egress_kw = modes[min(attempt - 1, len(modes) - 1)]
+                logger.info("Fyers %s %s attempt=%d/%d via %s",
+                            method, path, attempt, retries, mode)
+                async with httpx.AsyncClient(timeout=30, **egress_kw) as client:
                     if method == "GET":
                         resp = await client.get(url, headers=headers)
                     elif method == "POST":
