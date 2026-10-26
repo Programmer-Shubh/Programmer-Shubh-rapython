@@ -163,6 +163,7 @@
         #open-trd,#closed-trd,#bt-tl,#robot-tl,#opp-table{overflow-x:auto;-webkit-overflow-scrolling:touch}
         #bt-metrics .stat-card-sm .value,#bt-metrics .stat-card-sm .label{color:#111!important}
         #legsTableCard .card-body{overflow-x:auto}
+        #tc-robot-saved,#dash-robot-saved{overflow-x:auto;-webkit-overflow-scrolling:touch}
         html,body{max-width:100%;overflow-x:hidden}
         .sig-box{border-radius:8px;padding:12px}
         .sig-box.bull{background:#f0fff4;border:1px solid #c6f6d5}
@@ -217,7 +218,7 @@
         .quant-card .title{font-size:11px;font-weight:700}
         .quant-card .desc{font-size:10px;color:#6c757d;line-height:1.2}
         .payoff-card{border:1px solid #0d6efd22}
-        @media(max-width:768px){.sig-grid{grid-template-columns:1fr}#fno-top5{grid-template-columns:1fr}.sig-grid table th:last-child,.sig-grid table td:last-child{position:sticky;right:0;background:#fff;box-shadow:-2px 0 4px rgba(0,0,0,.1);z-index:1}.sig-grid table th:last-child{background:#f8f9fa}.row{flex-direction:column}#mkt-cards{flex-direction:row;flex-wrap:wrap}#mkt-cards .col{min-width:calc(25% - 8px);flex:1 1 calc(25% - 8px)}.col{min-width:100%}.wrap{padding:8px}.card-body{padding:8px}th{padding:6px;font-size:11px;white-space:nowrap}td{padding:6px;font-size:12px;white-space:nowrap}.stat-card{padding:8px}.stat-card .value{font-size:18px}.chain-table td{padding:3px 5px;font-size:11px;white-space:nowrap}.chain-table th{padding:4px 5px;font-size:10px;white-space:nowrap}.nav button{padding:10px 10px;font-size:12px}.btn{font-size:11px}.card-header{font-size:13px;padding:10px}.sig-box{padding:8px}.score-badge{font-size:10px}}
+        @media(max-width:768px){.sig-grid{grid-template-columns:1fr}#fno-top5{grid-template-columns:1fr}.sig-grid table th:last-child,.sig-grid table td:last-child{position:sticky;right:0;background:#fff;box-shadow:-2px 0 4px rgba(0,0,0,.1);z-index:1}.sig-grid table th:last-child{background:#f8f9fa}.row{flex-direction:column}#mkt-cards{flex-direction:row;flex-wrap:wrap}#mkt-cards .col{min-width:calc(25% - 8px);flex:1 1 calc(25% - 8px)}.col{min-width:100%}.wrap{padding:8px}.card-body{padding:8px}th{padding:6px;font-size:11px;white-space:nowrap}td{padding:6px;font-size:12px;white-space:nowrap}.stat-card{padding:8px}.stat-card .value{font-size:18px}.chain-table td{padding:3px 5px;font-size:11px;white-space:nowrap}.chain-table th{padding:4px 5px;font-size:10px;white-space:nowrap}.nav button{padding:10px 10px;font-size:12px}.btn{font-size:11px}.card-header{font-size:13px;padding:10px}.sig-box{padding:8px}.score-badge{font-size:10px}#open-trd td:last-child,#closed-trd td:last-child,#tc-robot-saved td:last-child,#dash-robot-saved td:last-child,#opp-table td:last-child{white-space:normal!important}#tc-robot-saved td,#dash-robot-saved td{white-space:normal}#tc-robot-saved .btn,#dash-robot-saved .btn,#open-trd .btn,#closed-trd .btn,#opp-table .btn{margin-bottom:3px}}
         /* Large-text override: +4px across the whole site */
         body{font-size:19px}
         .nav button{font-size:17px}
@@ -1049,7 +1050,7 @@
                 }catch(e){}
                 p.positions.forEach(t=>{
                     // LIVE badge sirf tab jab ASLI broker order (broker_order_id) ho.
-                    const isLive=t.trade_mode==='live'&&!!(t.broker_order_id&&String(t.broker_order_id).trim());
+                    const isLive=(t.trade_mode==='live')||!!(t.broker_order_id&&String(t.broker_order_id).trim());
                     const ep = Number(t.entry_price)||0;
                     const curPrice = Number(t.current_price ?? t.entry_price)||0;
                     let _flash='';
@@ -1179,7 +1180,7 @@ let _lastOpenTrdHTML = null;
                 let h='<table><tr><th>Date</th><th>Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Qty</th><th>Entry</th><th>Current</th><th>Target</th><th>SL</th><th>P&L</th><th>Mode</th><th>Hold</th><th>Action</th></tr>';
                 o.positions.forEach(t=>{
                     // LIVE badge sirf ASLI broker order par (galat live-tag bug fix)
-                    const isLive=t.trade_mode==='live'&&!!(t.broker_order_id&&String(t.broker_order_id).trim());
+                    const isLive=(t.trade_mode==='live')||!!(t.broker_order_id&&String(t.broker_order_id).trim());
                     const cur = (t.current_price!=null? t.current_price : t.entry_price);
                     const pnl = (t.pnl!=null? t.pnl : 0);
                     // Net (exit slippage + costs adjusted) — backtest net se
@@ -2175,7 +2176,7 @@ let _lastOpenTrdHTML = null;
             const r=await A('/api/strategies/list');
             const robots=(r.strategies||[]).filter(s=> (s.description==='robot') || (s.name||'').includes('_Robot_') || (s.name||'').includes('_Strategy_'));
             if(!robots.length){ boxes.forEach(b=>b.innerHTML='<p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p>'); return; }
-            let h='<table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Symbol</th><th>Order</th><th>Lots</th><th>SL/TP</th><th>Saved BT</th><th>Status</th><th>Paper</th><th>Live</th><th>Action</th></tr></thead><tbody>';
+            let h='<table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Symbol</th><th>Order</th><th>Lots</th><th>SL/TP</th><th>Saved BT</th><th>Status</th><th>Mode</th><th>Paper</th><th>Live</th><th>Action</th></tr></thead><tbody>';
             robots.forEach(s=>{
                 const legs=_parseJsonField(s.legs,[]); const leg=legs[0]||{}; const ord=(leg.option_type||'')+'-'+(leg.transaction||'');
                 const curLots=Math.max(1,parseInt(leg.lots)||1);
@@ -2189,9 +2190,15 @@ let _lastOpenTrdHTML = null;
                 if(lv) actH+=`<button class="btn btn-sm btn-outline-danger" title="${(s.expired===true||s.display_status==='expired')?'Expired - trade par next expiry auto-shift':''}" onclick="liveFromRobot(${s.id})">Live Trade</button> `;
                 if(!pe && !lv) actH+=`<span class="small text-muted" title="Paper ya Live ON karo tab trade buttons dikhenge">On karo pehle</span> `;
                 const btH=(s.bt&&s.bt.trades!=null)?`<strong>${s.bt.trades}</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span><br><small class="text-muted">${s.bt.win_rate||0}% • ${s.bt.stored_at||'saved'}</small>`:'<small class="text-muted">—</small>';
+                // Mode col: Paper ON -> green PAPER, Live ON -> red LIVE,
+                // dono ON -> dono badge, dono OFF -> OFF badge
+                let modeH='';
+                if(pe) modeH+='<span class="badge bg-success" title="Paper ON - auto-paper worker isi strategy par trade lagata hai">PAPER</span>';
+                if(lv) modeH+=(pe?' ':'')+'<span class="badge bg-danger" title="Live ON - Live Trade par REAL broker order jayega">LIVE</span>';
+                if(!pe && !lv) modeH='<span class="badge bg-secondary">OFF</span>';
                 h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td>`+
 `<td><div class="d-flex align-items-center" style="gap:4px"><button class="btn btn-sm btn-outline-secondary px-2" title="Lot ghatayen" onclick="stratLots(${s.id},${curLots-1})">−</button><strong class="mx-1">${curLots}</strong><button class="btn btn-sm btn-outline-secondary px-2" title="Lot badhayen" onclick="stratLots(${s.id},${curLots+1})">+</button></div><small class="sl-qty-hint text-muted" data-sid="${s.id}" style="font-size:10px">qty: …</small></td>`+
-`<td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td>`+
+`<td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td><td>${modeH}</td>`+
 `<td><button class="btn btn-sm ${(pe?'btn-success':'btn-outline-secondary')}" title="Paper ON = auto-paper worker isi strategy par trade lagata hai; OFF = naya auto/paper trade band (open positions chalte rahenge)" onclick="stratPaperToggle(${s.id},${!pe})">${pe?'ON':'OFF'}</button></td>`+
 `<td><button class="btn btn-sm ${(lv?'btn-success':'btn-outline-secondary')}" onclick="stratLiveToggle(${s.id},${!lv})">${lv?'ON':'OFF'}</button></td>`+
 `<td style="white-space:nowrap">${actH}<button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id},false,this)">Backtest</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')">History</button> <button class="btn btn-sm btn-outline-info" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
