@@ -555,11 +555,18 @@ def _execute_legs(s, legs, db, tm, today):
 
 
 def _entry_window_ok_for(adv: dict, note_out: list, _now=None):
-    """Backtest entry-time parity: saved strategy ka entry_time (default
-    09:35) window [entry_time, entry_time+15m) me hi auto entry allowed -
-    backtest engine bhi entry SIRF entry_time bar par lagata hai. Worker
-    ke random pass-times (10:12/12:42) par entry = backtest se alag prices
-    + entry_time se door ke fills = paper/backtest results ka big gap.
+    """Paper strategy entry timing (user rule 26-10-2026):
+
+    - [entry_time, entry_time+15m)       = ON-TIME entry (backtest parity,
+      backtest engine entry_time par hi entry lagata hai - ye window pehle
+      wali priority hai, jab tak khali slot hai)
+    - entry_time window miss hone par bhi 15:00 (3 PM) market cutoff tak
+      entry ALLOWED - user demand: "market hours 3 baje tak order lagta
+      hai". Late entries same open/max-day guards + 15:00 entry cutoff se
+      bound hain (place_for_strategy me pehle se guard hai).
+    - entry_time se PEHLE                = wait (abhi entry nahi)
+    - 15:00 ke baad / market band        = skip (entry_open_ist guard bhi)
+
     _now: test hook (IST datetime or ISO string)."""
     try:
         import datetime as _dt
@@ -577,8 +584,17 @@ def _entry_window_ok_for(adv: dict, note_out: list, _now=None):
         _end = _start + _ENTRY_WINDOW_MIN
         if _start <= _mins < _end:
             return True, _et
+        if _mins < _start:
+            if note_out is not None:
+                note_out.append(f"entry_time {_et} se pehle - entry us time par hogi - skipped")
+            return False, _et
+        # Late entry: entry_time window miss, par 15:00 cutoff tak allowed
+        # (market hours rule - user demand 26-10-2026).
+        _cutoff = 15 * 60  # 15:00 IST entry cutoff (3 PM)
+        if _mins < _cutoff:
+            return True, _et
         if note_out is not None:
-            note_out.append(f"entry_time {_et} window (backtest parity) ke bahar - skipped")
+            note_out.append(f"entry_time {_et} window ke baad 15:00 cutoff par entry band hai - skipped")
         return False, _et
     except Exception:
         return True, ""  # fail-open (manual button par koi rok nahi)

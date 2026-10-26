@@ -112,7 +112,9 @@ def test_nse_chain_ltp_exact_expiry_only(monkeypatch):
 
 
 def test_auto_paper_entry_window_gate():
-    """Entry-time parity: window bahar ka auto-entry skip, andar ka allowed.
+    """Entry timing (user rule 26-10-2026): entry_time window me ON-TIME
+    entry, window ke baad 15:00 cutoff tak LATE entry allowed, cutoff ke
+    baad skip, entry_time se pehle wait.
     (conftest suite-wide flag production path ko chalane par fail-open.)"""
     from core.services.auto_paper import _entry_window_ok_for
 
@@ -120,17 +122,29 @@ def test_auto_paper_entry_window_gate():
     adv = {"entry_time": "09:35"}
     ok, used = _entry_window_ok_for(adv, notes, _now="2026-10-22T09:38:00+05:30")
     assert ok is True and used == "09:35"
+    # LATE entry: window miss (12:42) par 15:00 tak allowed
     ok2, _ = _entry_window_ok_for(adv, notes, _now="2026-10-22T12:42:00+05:30")
-    assert ok2 is False
-    assert any("entry_time" in n for n in notes)
-    # default entry_time jab saved na ho
-    ok3, used3 = _entry_window_ok_for({}, [], _now="2026-10-22T09:35:00+05:30")
-    assert ok3 is True and used3 == "09:35"
-    # bogus entry_time -> default 09:35 rule lagta hai (crash nahi)
-    ok4, _ = _entry_window_ok_for({"entry_time": "bogus"}, [], _now="2026-10-22T17:00:00+05:30")
+    assert ok2 is True
+    # 15:00 cutoff ke baad skip (14:59 allow, 15:00+ skip, 17:00 skip)
+    ok3, _ = _entry_window_ok_for(adv, [], _now="2026-10-22T14:59:00+05:30")
+    assert ok3 is True
+    notes_cut = []
+    ok4, _ = _entry_window_ok_for(adv, notes_cut, _now="2026-10-22T17:00:00+05:30")
     assert ok4 is False
-    ok5, _ = _entry_window_ok_for({"entry_time": "bogus"}, [], _now="2026-10-22T09:40:00+05:30")
-    assert ok5 is True
+    assert any("15:00 cutoff" in n for n in notes_cut)
+    # entry_time se PEHLE wait
+    notes_pre = []
+    ok5, _ = _entry_window_ok_for(adv, notes_pre, _now="2026-10-22T09:10:00+05:30")
+    assert ok5 is False
+    assert any("se pehle" in n for n in notes_pre)
+    # default entry_time jab saved na ho
+    ok6, used6 = _entry_window_ok_for({}, [], _now="2026-10-22T09:35:00+05:30")
+    assert ok6 is True and used6 == "09:35"
+    # bogus entry_time -> default 09:35 rule lagta hai (crash nahi)
+    ok7, _ = _entry_window_ok_for({"entry_time": "bogus"}, [], _now="2026-10-22T17:00:00+05:30")
+    assert ok7 is False
+    ok8, _ = _entry_window_ok_for({"entry_time": "bogus"}, [], _now="2026-10-22T09:40:00+05:30")
+    assert ok8 is True
 
 
 def test_snap_inside_all_localised_helpers():
