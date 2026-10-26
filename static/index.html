@@ -588,7 +588,7 @@
                  <div class="col" style="min-width:240px"><div class="card" style="border:2px solid #dc3545"><div class="card-body text-center" style="padding:20px">
                     <div style="margin-bottom:12px"><i class="bi bi-currency-exchange text-danger" style="font-size:36px"></i></div>
                     <h6 class="fw-bold">Fyers <span class="badge bg-danger" style="font-size:10px">MAIN BROKER</span></h6><p class="text-muted small">App ID + Secret — OAuth login, Historical OHLC + LIVE orders</p>
-                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Checking… (auto-connect)</span></div>
+                    <div style="margin-bottom:10px"><span class="badge" style="background:#e2e3e5;color:#41464b">Connecting…</span></div>
                     <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap">
                         <button class="btn btn-sm btn-primary" onclick="showBrokerConfig('fyers')"><i class="bi bi-gear"></i> Setup</button>
                         <button class="btn btn-sm btn-success" onclick="connectSingleBroker('fyers')"><i class="bi bi-box-arrow-in-right"></i> Connect</button>
@@ -2661,6 +2661,29 @@ let _lastOpenTrdHTML = null;
 
     let currentBroker='';
     let brokerData=[];
+    // Broker connection state browser me persist: page refresh/close par bhi
+    // "Connected" turant dikhe (user demand - algo trading ke liye no flicker).
+    // Server baad me confirm/korrect karta rahega.
+    function brokerConnState(b){
+        const hasRealToken = b.config && b.config.access_token && !String(b.config.access_token).startsWith('SIM-') && !String(b.config.access_token).startsWith('ANG-') && String(b.config.access_token).length>10;
+        return { key:b.key, connected:(b.connected===true)||(b.configured&&hasRealToken), isDisc:b.disconnected===true, configured:!!b.configured };
+    }
+    function saveBrokerState(list){
+        try{ localStorage.setItem('ratrade_bstate_v1', JSON.stringify((list||[]).map(brokerConnState))); }catch(e){}
+    }
+    function hydrateBrokerState(){
+        try{
+            const saved=JSON.parse(localStorage.getItem('ratrade_bstate_v1')||'null');
+            if(!saved||!saved.length) return;
+            const map={}; saved.forEach(x=>{map[x.key]=x;});
+            FALLBACK_BROKERS.forEach(fb=>{
+                const s=map[fb.key]; if(!s) return;
+                fb.connected=!!s.connected; fb.disconnected=!!s.isDisc;
+                if(s.connected||s.configured) fb.configured=true;
+            });
+            brokerData=FALLBACK_BROKERS.slice();
+        }catch(e){}
+    }
     // ---- Static IP egress proxy (broker IP pinning) ----
     async function loadEgress(){
         try{
@@ -2754,7 +2777,7 @@ let _lastOpenTrdHTML = null;
             const hasRealToken = b.config && b.config.access_token && !String(b.config.access_token).startsWith('SIM-') && !String(b.config.access_token).startsWith('ANG-') && String(b.config.access_token).length>10;
             const isConnected = (b.connected===true) || (b.configured && hasRealToken);
             const isDisc = b.disconnected===true;
-            const statusH=isConnected?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Connected</span>':(isDisc?'<span class="badge" style="background:#f8d7da;color:#842029"><i class="bi bi-power"></i> Disconnected</span>':(b.configured?'<span class="badge" style="background:#fff3cd;color:#664d03"><i class="bi bi-exclamation-circle"></i> Configured - Hit Connect</span>':(offline?'<span class="badge" style="background:#e2e3e5;color:#41464b"><i class="bi bi-arrow-repeat"></i> Checking… (auto-connect)</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>')));
+            const statusH=isConnected?'<span class="badge badge-active"><i class="bi bi-check-circle"></i> Connected</span>':(isDisc?'<span class="badge" style="background:#f8d7da;color:#842029"><i class="bi bi-power"></i> Disconnected</span>':(b.configured?'<span class="badge" style="background:#fff3cd;color:#664d03"><i class="bi bi-exclamation-circle"></i> Configured - Hit Connect</span>':(offline?'<span class="badge" style="background:#e2e3e5;color:#41464b"><i class="bi bi-arrow-repeat"></i> Connecting…</span>':'<span class="badge" style="background:#e2e3e5;color:#41464b">Not Connected</span>')));
             const mainTag = b.key==='fyers'?' <span class="badge bg-danger" style="font-size:10px">MAIN BROKER</span>':'';
             const border = b.key==='fyers'?'border:2px solid #dc3545;':'';
             h+=`<div class="col" style="min-width:240px"><div class="card" style="${border}"><div class="card-body text-center" style="padding:20px">
@@ -2775,8 +2798,12 @@ let _lastOpenTrdHTML = null;
     async function loadBrokers(){
         const isFirstLoad = !brokerData || brokerData.length===0;
         if(isFirstLoad){
-            brokerData=FALLBACK_BROKERS.slice();
-            renderBrokerCards(brokerData, true);
+            // Pehle cached (last-known) state hydrate karo — refresh/close par
+            // bhi Connected turant dikhe (fake offline gaj-enable nahi jayega)
+            hydrateBrokerState();
+            if(!brokerData.length) brokerData=FALLBACK_BROKERS.slice();
+            const stillUnknown = !brokerData.some(b=>{const c=brokerConnState(b);return c.connected||c.isDisc;});
+            renderBrokerCards(brokerData, stillUnknown);
         }
         try{
             const ctrl=new AbortController();
@@ -2792,6 +2819,8 @@ let _lastOpenTrdHTML = null;
                     // include any extra brokers API may have that fallback doesn't
                     for(const b of r.brokers) if(!FALLBACK_BROKERS.some(f=>f.key===b.key)) brokerData.push(b);
                     renderBrokerCards(brokerData, false);
+                    // Last-known state save — agla refresh/page-load isse turant dikhega
+                    saveBrokerState(r.brokers);
                 } else if(!isFirstLoad){
                     renderBrokerCards(brokerData, false);
                 }
