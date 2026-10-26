@@ -446,7 +446,7 @@ def _execute_legs(s, legs, db, tm, today):
 
     LIVE ROUTING (user fix): is strategy ka Live toggle ON ho + khud REAL
     broker session (token) baitha ho to signal legs REAL broker order ki tarah
-    gayengi (place-live ki poori safety-chain: lot-guard, entry cutoff, real
+    gayengi (poori live sanity-chain: lot-guard, entry cutoff, real
     LTP, fill-verify) — pehle ye hamesha sirf PAPER me jaati thi, isliye
     Live-ON strategy kabhi broker me order nahi janti thi. Live fail ho to
     wadi ki purani tarah paper leg lagegi + error note me raas reason."""

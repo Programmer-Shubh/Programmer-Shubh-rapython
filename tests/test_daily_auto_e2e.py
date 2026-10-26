@@ -211,7 +211,18 @@ def test_auto_path_never_touches_broker():
         src = (root / rel).read_text(encoding="utf-8", errors="replace")
         checked.append(rel)
         assert "place-live" not in src, rel
-        assert "place_live" not in src, rel
+        # place_live_order reference is the DOCUMENTED live routing user fix
+        # (auto_paper._execute_legs): order goes through the GUARDED live
+        # router (per-strategy live toggle, entry cutoff, lot guard, LIMIT-IOC
+        # safety chain, fill verify) - never through a bare broker client.
+        if not (rel.endswith("auto_paper.py") and "place_live_order" in src):
+            assert "place_live" not in src, rel
+    # Direct broker clients stay banned on the auto/paper machinery
+    # (execution_engine's LIVE mode is the explicit exception below).
+    assert "FyersV3(" not in (root / "core/services/auto_paper.py").read_text(
+        encoding="utf-8", errors="replace")
+    assert "FyersV3(" not in (root / "core/services/sl_monitor.py").read_text(
+        encoding="utf-8", errors="replace")
     # heartbeat route itself must not reference broker either
     src = (root / "routes" / "paper_trade.py").read_text(encoding="utf-8", errors="replace")
     assert "place-live" not in src

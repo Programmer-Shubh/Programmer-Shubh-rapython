@@ -91,11 +91,32 @@ def execute(legs: List[Dict], symbol: str, mode: str = "PAPER", sl: float = 1500
             qty = int(leg.get("lots", 1)) * lot
             expiry = leg.get("expiry") or ""
             strike = leg.get("strike") or 0
+            _opt_l = str(leg.get("option_type", "CE")).upper()
+            _txn_l = str(leg.get("transaction", "BUY")).upper()
             from core.services.symbol_resolver import _fyers_symbol
-            fy_sym = _fyers_symbol(symbol, expiry, float(strike or 0), leg.get("option_type", "CE"))
+            fy_sym = _fyers_symbol(symbol, expiry, float(strike or 0), _opt_l)
             import asyncio as _aio
-            res = _aio.run(fy.place_order(fy_sym, str(leg.get("transaction", "BUY")).upper(),
-                                          qty, order_type="MARKET"))
+
+            async def _place_safe():
+                # SAFETY GUARD (live, user fix): safe LIMIT-IOC price mila to
+                # MARKET KABHI nahi. Reference = SHARED contract LTP (wahi
+                # price jo paper trade dikhata hai = dual-mode sync), side-
+                # aware buffer, 0.05-tick rounded. Price na mile to fail-open
+                # MARKET (order entry block behtar nahi). httpx async client
+                # hi request karta hai (latency minimal).
+                _lp = 0.0
+                try:
+                    from routes.broker import _broker_limit_price as _blp
+                    _lp = float(await _blp(symbol, _opt_l, float(strike or 0), expiry, _txn_l) or 0)
+                except Exception:
+                    _lp = 0.0
+                if _lp > 0:
+                    return await fy.place_order(fy_sym, _txn_l, qty, order_type="LIMIT",
+                                                price=max(0.05, round(_lp, 2)),
+                                                validity="IOC")
+                return await fy.place_order(fy_sym, _txn_l, qty, order_type="MARKET")
+
+            res = _aio.run(_place_safe())
             if not res.get("success"):
                 return {"error": f"Fyers rejected order: {res.get('error')}"}
             return {"mode": "LIVE", "broker": "fyers", "symbol": fy_sym,

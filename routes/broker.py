@@ -1331,13 +1331,20 @@ def _round_tick(px: float, tick: float = 0.05) -> float:
         return 0.0
 
 
-async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str, txn: str):
-    """LIMIT price = the SHARED contract LTP (contract_pricer).
+async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str, txn: str,
+                              buffer_mult: float = 1.0):
+    """LIMIT price = the SHARED contract LTP (contract_pricer) + SAFE side
+    buffer (user fix: market-order wild slippage band).
 
     Yahi wahi pricer hai jo paper trade use karta hai (contract_pricer.
-    entry_price) - isliye paper trade aur live trade ek hi price par land
-    karte hain (same broker tick, same slippage model). None = price nahi
-    mila (MARKET fallback)."""
+    entry_price) - isliye paper aur live EK HI reference price par land
+    karte hain. Buffer upar/neeche side ke hisaab se:
+      BUY  = LTP + buffer   (fill hone layak, par outlier spike se door)
+      SELL = LTP - buffer   (under-value fill nahi)
+    buffer = max(3 exchange ticks (0.15), LTP ka 0.5%), cap 2.0;
+    buffer_mult (retry) se double hota hai. Result 0.05 tick pe ROUNDED
+    (exchange tick-size rule). None = price nahi mila (caller fail-open
+    MARKET use karega)."""
     try:
         from core.services.contract_pricer import get_contract_ltp
         ltp = float(get_contract_ltp(symbol, strike, opt, exp_ymd, fresh=True) or 0)
@@ -1363,8 +1370,10 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
             ltp = 0.0
     if ltp <= 0:
         return None
-    # Price EXACT LTP par (0.05 tick me rounded) - koi extra buffer nahi.
-    return _round_tick(ltp)
+    _buf = min(max(0.05 * 3, ltp * 0.005), 2.0) * max(1.0, float(buffer_mult or 1.0))
+    if str(txn or "BUY").upper() == "SELL":
+        return max(0.05, _round_tick(ltp - _buf))
+    return max(0.05, _round_tick(ltp + _buf))
 
 
 def _angel_direct_ltp(symbol: str, strike: float, opt: str, expiry_ymd: str) -> float:
@@ -1596,8 +1605,9 @@ async def place_live_order(req: LiveOrderRequest):
                        "source": _res.get("source", "")}
             broker_qty = lots * _slot
             lot = _slot
-        # Strategy-compatible LIMIT price (Angel/Bigul par LIMIT order taaki
-        # app aur broker ki price na tedhi ho; Fyers MARKET bhejta hai).
+        # Strategy-compatible LIMIT price (saral rule Ab SAB live brokers -
+        # Fyers bhi - LIMIT-IOC buffered price par order bhejte hain; MARKET
+        # sirf price na milne par fail-open fallback hai).
         _limit_px = None
         try:
             _limit_px = await _broker_limit_price(symbol, opt, strike, exp_ymd, txn)
@@ -1605,9 +1615,12 @@ async def place_live_order(req: LiveOrderRequest):
             _limit_px = None
         if _limit_px:
             preview["limit_price"] = _limit_px
-            for _b in ("angel", "bigul"):
-                if preview.get("broker") == _b:
-                    preview["order_type"] = "LIMIT"
+            if preview.get("broker") == "fyers":
+                preview["order_type"] = "LIMIT-IOC"
+            else:
+                for _b in ("angel", "bigul"):
+                    if preview.get("broker") == _b:
+                        preview["order_type"] = "LIMIT"
         # The SHARED LTP (contract_pricer) is the single price source for
         # paper AND live. Recorded here so the UI can compare paper vs live.
         _ltp_price = 0.0
@@ -1658,60 +1671,128 @@ async def place_live_order(req: LiveOrderRequest):
                     "preview": preview}
         order_id = ""
         broker_ref = ""
+        _order_attempts = []
         if broker == "fyers":
             cfg = _get_config("fyers")
             # Client with fy_id/totp_secret: token expire ho to _request
             # khud headless AUTO-LOGIN kar lega (refresh API SEBI-blocked).
             fy = _fyers_client(cfg)
-            res = await fy.place_order(preview["symbol"], txn, broker_qty, order_type="MARKET")
-            if not res.get("success"):
-                return {"error": f"Fyers rejected order: {res.get('error') or res.get('data')}",
-                        "preview": preview, "broker_response": res.get("data", {})}
-            order_id = str((res.get("data") or {}).get("order_id", ""))
-            broker_ref = preview["symbol"]
-            # Auto-login ya refresh mid-flight hua ho -> naya token SAVE
-            # (warna agli call me wapas purana dead token use hoga).
-            try:
-                if fy.refreshed and fy.access_token:
-                    cfg["access_token"] = fy.access_token
-                    if fy.refresh_token:
-                        cfg["refresh_token"] = fy.refresh_token
-                    _save_config("fyers", cfg)
-                    fy.refreshed = False
-            except Exception:
-                pass
-            # Fill verify: real average price (or a clear rejection). FAILED
-            # order par fake position NAHI likhenge.
-            _fill_px = None
-            for _i in range(5):
+
+            async def _fy_fill_verify(oid):
+                """Fill verify: real average price + final status. FAILED
+                order par fake position NAHI likhenge."""
+                _px, _st, _row = None, "", None
+                for _i in range(5):
+                    try:
+                        await asyncio.sleep(1.2)
+                        _ob = await fy.get_order_book()
+                        _rows = ((_ob or {}).get("data") or {}).get("orderBook") or []
+                        for _r0 in (_rows if isinstance(_rows, list) else []):
+                            if not isinstance(_r0, dict):
+                                continue
+                            if str(_r0.get("id") or _r0.get("orderId") or "") != str(oid):
+                                continue
+                            try:
+                                _avg = float(_r0.get("averagePrice") or _r0.get("average_price") or 0)
+                            except Exception:
+                                _avg = 0.0
+                            if _avg > 0:
+                                _px = _round_tick(_avg)
+                            _row = _r0
+                            _st = str(_r0.get("status") or _r0.get("orderStatus") or "").upper()
+                            if _st in ("REJECTED", "FAILED", "CANCELLED", "CANCELED",
+                                       "EXECUTED", "TRADED", "COMPLETE", "COMPLETED", "FILLED"):
+                                break
+                    except Exception:
+                        continue
+                return _px, _st, _row
+
+            async def _fy_persist():
+                # Auto-login ya refresh mid-flight hua ho -> naya token SAVE
+                # (warna agli call me wapas purana dead token use hoga).
                 try:
-                    await asyncio.sleep(1.2)
-                    _ob = await fy.get_order_book()
-                    _rows = ((_ob or {}).get("data") or {}).get("orderBook") or []
-                    for _r0 in (_rows if isinstance(_rows, list) else []):
-                        if not isinstance(_r0, dict):
-                            continue
-                        if str(_r0.get("id") or _r0.get("orderId") or "") != str(order_id):
-                            continue
-                        try:
-                            _avg = float(_r0.get("averagePrice") or _r0.get("average_price") or 0)
-                        except Exception:
-                            _avg = 0.0
-                        if _avg > 0:
-                            _fill_px = _round_tick(_avg)
-                        _st = str(_r0.get("status") or _r0.get("orderStatus") or "").upper()
-                        if _st in ("REJECTED", "FAILED", "CANCELLED", "CANCELED"):
-                            _rsn = str(_r0.get("statusMessage") or _r0.get("message")
-                                       or _r0.get("remarks") or _st)
-                            return {"error": (f"Fyers order FAILED/REJECTED: {_rsn}. "
-                                              f"Open position record NAHI hua (broker verify fail)."),
-                                    "preview": preview, "broker_response": _r0}
-                        if _st in ("EXECUTED", "TRADED", "COMPLETE", "COMPLETED", "FILLED"):
-                            break
+                    if fy.refreshed and fy.access_token:
+                        cfg["access_token"] = fy.access_token
+                        if fy.refresh_token:
+                            cfg["refresh_token"] = fy.refresh_token
+                        _save_config("fyers", cfg)
+                        fy.refreshed = False
                 except Exception:
-                    continue
-            if _fill_px:
-                preview["fill_price"] = _fill_px
+                    pass
+
+            def _fy_is_reject(_st):
+                return str(_st or "").upper() in ("REJECTED", "FAILED")
+
+            _lp0 = float(_limit_px or 0)
+            if _lp0 > 0:
+                # SAFETY GUARD (user rule): safe limit price mila to MARKET
+                # order KABHI nahi. LIMIT-IOC buffered price par -
+                # BUY = LTP + buffer / SELL = LTP - buffer (0.05-tick rounded)
+                # -> latency/OTM-spread spikes par ₹36 vs ₹101 jaisa wild fill
+                # impossible. IOC = resting/partial order ka bhi koi risk nahi.
+                _filled = False
+                _unfilled_note = ""
+                for _mult in (1.0, 2.0):
+                    _px_i = await _broker_limit_price(symbol, opt, strike, exp_ymd, txn,
+                                                      buffer_mult=_mult)
+                    if not _px_i or float(_px_i) <= 0:
+                        _unfilled_note = "safe limit price fresh nahi mila"
+                        # Quotes chale gaye -> neeche MARKET fail-open
+                        _filled = None
+                        break
+                    res = await fy.place_order(preview["symbol"], txn, broker_qty,
+                                               order_type="LIMIT",
+                                               price=max(0.05, _round_tick(_px_i)),
+                                               validity="IOC")
+                    if not res.get("success"):
+                        return {"error": f"Fyers rejected order: {res.get('error') or res.get('data')}",
+                                "preview": preview, "broker_response": res.get("data", {})}
+                    order_id = str((res.get("data") or {}).get("order_id", ""))
+                    broker_ref = preview["symbol"]
+                    _order_attempts.append({"order_id": order_id, "limit_price": _round_tick(_px_i),
+                                            "buffer_mult": _mult, "validity": "IOC"})
+                    await _fy_persist()
+                    _fill_px, _st, _row = await _fy_fill_verify(order_id)
+                    if _fy_is_reject(_st):
+                        _rsn = str((_row or {}).get("statusMessage") or (_row or {}).get("message")
+                                   or (_row or {}).get("remarks") or _st)
+                        return {"error": (f"Fyers order FAILED/REJECTED: {_rsn}. "
+                                          f"Open position record NAHI hua (broker verify fail)."),
+                                "preview": preview, "broker_response": _row or {}}
+                    if _fill_px:
+                        _filled = True
+                        break
+                    _unfilled_note = f"IOC fill nahi hua @ {_round_tick(_px_i)}"
+                if _filled is not True and _lp0 > 0:
+                    if _filled is False:
+                        return {"error": ("Fyers order safe price par fill NAHI hua "
+                                          f"({_unfilled_note}) - wild-outlier MARKET fill se "
+                                          "bachne ke liye rok diya; position record nahi hua. "
+                                          "Retry (worker next pass) ya dry-run se price dekho."),
+                                "preview": preview, "attempts": _order_attempts}
+                    _lp0 = 0  # fail-open: neeche MARKET
+                if _fill_px and _filled:
+                    preview["fill_price"] = _fill_px
+            if _lp0 <= 0:
+                # LTP/model dono fail (na mili) -> fail-open purana MARKET:
+                # order entry ko block karna worse hai. Marked in attempts.
+                res = await fy.place_order(preview["symbol"], txn, broker_qty, order_type="MARKET")
+                if not res.get("success"):
+                    return {"error": f"Fyers rejected order: {res.get('error') or res.get('data')}",
+                            "preview": preview, "broker_response": res.get("data", {})}
+                order_id = str((res.get("data") or {}).get("order_id", ""))
+                broker_ref = preview["symbol"]
+                _order_attempts.append({"order_id": order_id, "order_type": "MARKET"})
+                await _fy_persist()
+                _fill_px, _st, _row = await _fy_fill_verify(order_id)
+                if _fy_is_reject(_st):
+                    _rsn = str((_row or {}).get("statusMessage") or (_row or {}).get("message")
+                               or (_row or {}).get("remarks") or _st)
+                    return {"error": (f"Fyers order FAILED/REJECTED: {_rsn}. "
+                                      f"Open position record NAHI hua (broker verify fail)."),
+                            "preview": preview, "broker_response": _row or {}}
+                if _fill_px:
+                    preview["fill_price"] = _fill_px
         elif broker in ("angel", "bigul"):
             _ac = _get_config(broker) or {}
             from core.services.broker_angel_live import AngelLive
@@ -1826,12 +1907,42 @@ async def place_live_order(req: LiveOrderRequest):
             "trade_mode": "live", "broker_order_id": order_id,
             "strategy_id": req.strategy_id,
         })
+        # Mirror: strategy me Paper ON bhi hai to ek PAPER COPY bhi dalo
+        # (user rule: dono ON to ek hi signal par DONO orders dikhen/lagen)
+        _paper_tid = 0
+        try:
+            if req.strategy_id:
+                from core.models.database import Database as _DBm
+                _srow = _DBm.get_instance().fetch_one("SELECT status FROM strategies WHERE id=?", [req.strategy_id])
+                if _srow and str(_srow.get("status") or "active") == "active":
+                    _paper_tid = tm.insert_trade({
+                        "symbol": symbol, "option_type": opt, "strike_price": strike,
+                        "expiry_date": exp_ymd, "transaction_type": txn,
+                        "quantity": lots, "lot_size": lot, "entry_price": adj,
+                        "stop_loss": float(req.stop_loss or 0), "target": float(req.take_profit or 0),
+                        "total_cost": costs["total"],
+                        "entry_date": _dt.datetime.now().strftime("%Y-%m-%d"),
+                        "trade_mode": "paper", "broker_order_id": "",
+                        "strategy_id": req.strategy_id,
+                    })
+        except Exception:
+            pass
         _lresp = {"success": True, "trade_id": tid, "broker_order_id": order_id,
                 "broker": broker, "broker_symbol": broker_ref, "quantity": broker_qty,
                 "entry_price": round(adj, 2), "mode": "live",
                 "ltp": float(preview.get("ltp") or 0) or None,
                 "price_source": _price_source,
-                "expiry": exp_ymd, "strike": strike, "option_type": opt}
+                "expiry": exp_ymd, "strike": strike, "option_type": opt,
+                "order_type": (preview.get("order_type") or ""),
+                "limit_price": float(preview.get("limit_price") or 0) or None}
+        # Dual-mode sync (user rule: Paper + Live dono ON = ek hi signal, EK HI
+        # reference price): paper mirror ki ID bhi wapas bhejo UI comparison
+        # ke liye - mirror entry price = live adj (same number).
+        if _paper_tid:
+            _lresp["paper_trade_id"] = _paper_tid
+            _lresp["synced_with_paper"] = True
+        if _order_attempts:
+            _lresp["order_attempts"] = _order_attempts
         # Paper-vs-live price check: same strategy + same symbol + same option
         # type ka latest PAPER entry - UI isko side-by-side dikhata hai.
         try:

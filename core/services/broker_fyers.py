@@ -375,6 +375,7 @@ class FyersV3:
         order_type: str = "MARKET",
         price: float = 0,
         exchange: str = "NSE",
+        validity: str = "DAY",
     ) -> dict:
         """REAL order to Fyers v3. STRICT spec (user-confirmed):
         - type: 1 = LIMIT, 2 = MARKET, 3 = SL, 4 = SL-M (pehle INVERTED tha -
@@ -409,7 +410,7 @@ class FyersV3:
             "productType": "INTRADAY",
             "limitPrice": _px if _ot == "LIMIT" else 0,
             "stopPrice": 0,
-            "validity": "DAY",
+            "validity": str(validity or "DAY").upper(),
             "disclosedQty": 0,
             "offlineOrder": False,
         }
