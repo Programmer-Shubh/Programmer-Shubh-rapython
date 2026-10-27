@@ -39,6 +39,15 @@ def _ist_today():
 # Weekly expiry WEEKDAY rule (NSE 2025+ spec): NSE weeklies = Tuesday
 # (weekday 1); BSE (SENSEX/BANKEX) = Thursday (weekday 3). Same rule as
 # routes/broker._resolve_expiry - paper, live aur backtest sab ekahi rule.
+def _is_index(symbol: str = "") -> bool:
+    try:
+        from core.services.symbol_resolver import is_index_symbol
+        return bool(is_index_symbol(symbol))
+    except Exception:
+        return str(symbol or "").upper().replace(" ", "") in (
+            "NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX")
+
+
 def _weekly_weekday(symbol: str = "") -> int:
     return 3 if str(symbol or "").upper().replace(" ", "") in ("SENSEX", "BANKEX") else 1
 
@@ -108,14 +117,25 @@ def _snap_future_expiry(symbol: str, ymd: str) -> str:
 
 
 def resolve_weekly_expiry(symbol: str = "") -> str:
-    """Next weekly expiry YYYY-MM-DD shared by scanner suggestion AND order
+    """Next expiry YYYY-MM-DD shared by scanner suggestion AND order
     entry (pehle dono alag-alag expiry/DTE par price karte the - suggestion
     DTE=7 par >=20 dikhata, order real DTE=2 par <20 nikalta -> floor error).
     Priority: the CONNECTED BROKER's live expiry list (exactly the date a
     live order will be routed to - paper & live same contract), else the NSE
     map, else the REAL weekday rule (Tue NSE / Thu BSE). Phantom
     'today+7' fallback hata diya - 10-29 jaisi fake expiry par paper
-    entries model-price par lagti thi aur backtest se door bhaagti thi."""
+    entries model-price par lagti thi aur backtest se door bhaagti thi.
+
+    STOCK options: koi weekly expiry nahi - sirf monthly (last Tuesday).
+    Yahi shared date paper, chain aur live order teeno use karte hain."""
+    try:
+        from core.services.symbol_resolver import stock_monthly_expiry, is_index_symbol
+        if not is_index_symbol(symbol):
+            _se = stock_monthly_expiry(symbol)
+            if _se:
+                return _se[:10]
+    except Exception:
+        pass
     try:
         from core.services.symbol_resolver import _nearest_on_or_after
         _exps = _fyers_expiry_list()
@@ -158,6 +178,13 @@ def resolve_expiry_hint(symbol: str = "", hint: str = "") -> str:
             import datetime as _dt
             _d = _dt.datetime.strptime(h[:10], "%Y-%m-%d").date()
             if _d >= _dt.datetime.strptime(_ist_today(), "%Y-%m-%d").date():
+                # STOCK: koi bhi date -> us month ka REAL monthly expiry
+                # (weekly weekday snap stock par invalid contract banata tha).
+                if not _is_index(symbol):
+                    from core.services.symbol_resolver import stock_monthly_expiry
+                    _se = stock_monthly_expiry(symbol, _d.strftime("%Y-%m-%d"))
+                    if _se:
+                        return _se[:10]
                 # Explicit date ka snap guard: date jo is symbol ki REAL
                 # exchange expiry weekday par na ho (10-29 Thursday NIFTY ho
                 # hi nahi sakta) -> nearest real weekly par le jao. Warna
@@ -168,6 +195,14 @@ def resolve_expiry_hint(symbol: str = "", hint: str = "") -> str:
     except Exception:
         pass
     if h.lower().startswith("month"):
+        if not _is_index(symbol):
+            try:
+                from core.services.symbol_resolver import stock_monthly_expiry
+                _se = stock_monthly_expiry(symbol)
+                if _se:
+                    return _se[:10]
+            except Exception:
+                pass
         try:
             import calendar as _cal
             import datetime as _dt

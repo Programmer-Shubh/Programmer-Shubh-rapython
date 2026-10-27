@@ -1343,32 +1343,29 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
       SELL = LTP - buffer   (under-value fill nahi)
     buffer = max(3 exchange ticks (0.15), LTP ka 0.5%), cap 2.0;
     buffer_mult (retry) se double hota hai. Result 0.05 tick pe ROUNDED
-    (exchange tick-size rule). None = price nahi mila (caller fail-open
-    MARKET use karega)."""
+    (exchange tick-size rule).
+
+    STRICT: sirf LIVE quote source (broker-quote / nse-chain / cache) par
+    LIMIT banta hai. Model/DB-close fallback price par LIMIT kabhi nahi -
+    None return (caller MARKET fail-open karta hai). Wajah: stock option
+    par quote fail hone se LIMIT Rs 1.65 (model floor Rs 1.5 + buffer) ban
+    raha tha jabki asli premium Rs 40+ tha -> broker reject / galat fill."""
+    ltp = 0.0
+    src = ""
     try:
-        from core.services.contract_pricer import get_contract_ltp
-        ltp = float(get_contract_ltp(symbol, strike, opt, exp_ymd, fresh=True) or 0)
+        from core.services.contract_pricer import get_contract_ltps
+        _srcs = {}
+        _res = get_contract_ltps(symbol, [(strike, opt)], exp_ymd,
+                                 fresh=True, sources=_srcs)
+        for _v in _res.values():
+            ltp = float(_v or 0)
+            break
+        for _v in _srcs.values():
+            src = str(_v or "")
+            break
     except Exception:
-        ltp = 0.0
-    if ltp <= 0:
-        from core.models.trade_model import TradeModel
-        from core.services.live_market_data import LiveMarketData
-        from utils.helpers import model_premium as _mp
-        premium = None
-        try:
-            premium = TradeModel().get_option_premium(symbol, opt, strike, exp_ymd)
-        except Exception:
-            premium = None
-        if not premium or float(premium) <= 0:
-            spot = LiveMarketData().get_spot_price(symbol)
-            if not spot or spot <= 0:
-                return None
-            premium = _mp(spot, strike, 7, opt, symbol=symbol)
-        try:
-            ltp = float(premium)
-        except Exception:
-            ltp = 0.0
-    if ltp <= 0:
+        ltp, src = 0.0, ""
+    if ltp <= 0 or src not in ("broker-quote", "nse-chain", "cache"):
         return None
     _buf = min(max(0.05 * 3, ltp * 0.005), 2.0) * max(1.0, float(buffer_mult or 1.0))
     if str(txn or "BUY").upper() == "SELL":
@@ -1683,6 +1680,13 @@ async def place_live_order(req: LiveOrderRequest):
             _ltp_source = "limit-price"
         preview["ltp"] = _round_tick(_ltp_price) if _ltp_price > 0 else 0
         preview["price_source"] = _ltp_source
+        if not _limit_px and _ltp_source in ("model", "db-close", "none"):
+            # Safety (user bug 27-10): model/DB price par LIMIT nahi bhejte -
+            # stock option par Rs 1.65 LIMIT vs asli Rs 40 premium jaisa
+            # mismatch broker reject deta hai. MARKET fail-open.
+            preview["price_note"] = (f"Live quote nahi mila (source: {_ltp_source}) - "
+                                     "safe LIMIT price available nahi, isliye MARKET "
+                                     "order fail-open jayega. Chain se price check karo.")
         if req.dry_run:
             try:
                 _req_exp = str(exp_hint or "")[:10]

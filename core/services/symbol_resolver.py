@@ -31,6 +31,53 @@ FYERS_UNDERLYING = {
 }
 
 
+def is_index_symbol(symbol: str) -> bool:
+    """Index underlyings (weekly expiries) vs stock underlyings (monthly only)."""
+    return str(symbol or "").upper().replace(" ", "") in WEEKLY_IDX
+
+
+def stock_monthly_expiry(symbol: str, hint: str = "") -> str:
+    """Nearest REAL stock-option expiry date (NSE stocks: MONTHLY only).
+
+    Stock options ka koi weekly expiry hota hi nahi. Pehle stock par NIFTY ki
+    weekly list lag jati thi (e.g. 2026-11-03) -> symbol `DIVISLAB26N03...`
+    (invalid, exchange par exist nahi) -> broker quote empty -> paper/live
+    dono MODEL price par (paper Rs 45 vs live Rs 1.5) -> wahi
+    "paper 40 vs live 1.35" gap. Ab dono side ek hi REAL monthly expiry.
+
+    Rule (NSE): month ka last Tuesday; agar wo date nikal gayi to next month.
+    Stock symbol me sirf MONTH aata hai (DIVISLAB26OCT9700CE), isliye
+    month-level correctness hi order routing ke liye decisive hai."""
+    today = _today_ist()
+    explicit = False
+    try:
+        base = _dt.datetime.strptime(str(hint or "")[:10], "%Y-%m-%d").date()
+        explicit = True
+    except Exception:
+        base = today
+    import calendar as _cal
+
+    def _last_tue(y: int, m: int):
+        d = _dt.date(y, m, _cal.monthrange(y, m)[1])
+        while d.weekday() != 1:          # 1 = Tuesday (NSE F&O expiry day)
+            d -= _dt.timedelta(days=1)
+        return d
+
+    d = _last_tue(base.year, base.month)
+    if explicit:
+        # Explicit date same month ka ho to us month ka real expiry; warna
+        # (purani/ghayr-month date) aaj ke baad ka nearest monthly.
+        if d < today:
+            d = _last_tue(*_next_month(today.year, today.month))
+    elif d < today:
+        d = _last_tue(*_next_month(today.year, today.month))
+    return d.strftime("%Y-%m-%d")
+
+
+def _next_month(y: int, m: int):
+    return (y + 1, 1) if m == 12 else (y, m + 1)
+
+
 def is_explicit_date(hint: str) -> bool:
     try:
         _dt.datetime.strptime(str(hint or "")[:10], "%Y-%m-%d")
@@ -130,14 +177,23 @@ async def _fyers_expiries(fy) -> list:
 
 
 def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str) -> str:
-    """Fyers format (verified): monthly YYMMM, weekly YYMdd (M=1-9/O/N/D)."""
+    """Fyers format (verified): monthly YYMMM, weekly YYMdd (M=1-9/O/N/D).
+
+    STOCK options par sirf monthly hota hai (weekly stock contract exist hi
+    nahi karta) - isliye stock ke liye hamesha YYMMM. Warna 2026-11-03
+    (NIFTY weekly) jaisi date se `DIVISLAB26N03...` banta tha jo exchange par
+    nahi hota -> quote fail -> model price."""
     import calendar as _cal
     d = _dt.datetime.strptime(expiry_ymd[:10], "%Y-%m-%d").date()
+    yy = d.strftime("%y")
+    mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+           "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][d.month - 1]
+    if not is_index_symbol(symbol):
+        return f"NSE:{symbol.upper()}{yy}{mon}{int(float(strike))}{option_type.upper()}"
     wd = 3 if symbol.upper() == "SENSEX" else 1
     last = _dt.date(d.year, d.month, _cal.monthrange(d.year, d.month)[1])
     while last.weekday() != wd:
         last -= _dt.timedelta(days=1)
-    yy = d.strftime("%y")
     if d == last:
         mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
                "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][d.month - 1]
@@ -174,6 +230,15 @@ async def resolve_contract(broker: str, creds: dict, underlying: str,
                 live_exps = await _fyers_expiries(fy)
             except Exception:
                 live_exps = []
+        # STOCK options: NIFTY ki weekly expiry list kabhi use nahi karte
+        # (stocks me weekly expiry hoti hi nahi). Shared monthly resolver.
+        if not is_index_symbol(underlying):
+            use_exp = stock_monthly_expiry(underlying, expiry_hint)
+            return {"ok": True,
+                    "refs": {"symbol": _fyers_symbol(underlying, use_exp, strike, opt)},
+                    "expiry_used": use_exp,
+                    "source": "fyers-stock-monthly",
+                    "available_expiries": live_exps}
         use_exp = guess
         src = "fyers-constructed"
         if live_exps:
