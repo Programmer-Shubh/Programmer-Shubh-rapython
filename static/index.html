@@ -403,7 +403,7 @@
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols + Order</small></div>
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">Poori F&O list</span> <span id="r-otm20-note" class="small text-muted"></span> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
+                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">Poori F&O list</span> <span id="r-otm20-note" class="small text-muted"></span> <label class="ms-1" style="font-size:12px" title="Sirf wo symbols dikhe jinka OTM-4 strike premium ₹15+ hai (model estimate)"><input type="checkbox" id="r-otm15-check" onchange="otm15Toggle()"> OTM-4 &gt; ₹15</label> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
                         <input type="hidden" id="r-order" value="CE-BUY"><input type="hidden" id="r-strike" value="ATM"><input type="hidden" id="r-otm" value="1"><input type="hidden" id="r-lots" value="1">
                         <div class="col-md-8 d-flex align-items-center"><small class="text-muted">Order/Strike/Lots — Template se auto (Strategy Templates neeche)</small></div>
                     </div>
@@ -813,6 +813,7 @@
             rbox.innerHTML=syms.map(x=>`<label><input type="checkbox" value="${x}" ${keep.includes(x)?'checked':''}> ${x}</label>`).join('');
             rbox.onchange=()=>{try{const v=[...rbox.querySelectorAll('input:checked')].map(o=>o.value);if(v.length>25){[...rbox.querySelectorAll('input:checked')].slice(25).forEach(el=>el.checked=false);}rSymsRefresh();updateRunSummary();}catch(e){}};
             rSymsRefresh();
+            try{otm15Apply();}catch(e){}
         }
         const psel=document.getElementById('py-sym');
         if(psel){
@@ -821,6 +822,7 @@
         }
     }
     async function loadStrategySymbols(){
+        try{const c=document.getElementById('r-otm15-check');if(c){c.checked=localStorage.getItem('rOtm15')==='1';if(c.checked)otm15Toggle();}}catch(e){}
         // Step 1: INSTANT — static full F&O list, koi API wait nahi
         try{_fillStrategySyms([...new Set(_FNO_MASTER)].filter(Boolean).sort());}catch(e){}
         // Step 2: background me DB naye symbols merge (list rahegi dikhti)
@@ -829,6 +831,29 @@
             const dbL=(r.symbols||[]).filter(x=>x&&x.trim());
             if(dbL.length){_fillStrategySyms([...new Set([..._FNO_MASTER,...dbL])].filter(Boolean).sort());}
         }catch(e){console.error('DB symbols merge fail (static list dikh raha hai)',e);}
+    }
+    // ---- OTM-4 > ₹15 symbol filter (user rule 27-10-2026) ----
+    function otm15On(){try{const c=document.getElementById('r-otm15-check');const v=c?c.checked:false;try{localStorage.setItem('rOtm15',v?'1':'0');}catch(e){}return v;}catch(e){return false;}}
+    async function otm15Toggle(){
+        const v=otm15On();
+        if(v&&(!window._otm4ok||!window._otm4ok._ts||Date.now()-window._otm4ok._ts>10*60*1000)){
+            try{document.getElementById('r-otm20-note').textContent='OTM-4 premium list load ho rahi...';}catch(e){}
+            const r=await A('/api/backtest/otm4-symbols');
+            window._otm4ok={set:new Set(r.symbols||[]),count:r.count||0,ts:Date.now(),err:r.error||''};
+        }
+        otm15Apply();
+    }
+    function otm15Apply(){
+        try{
+            const box=document.getElementById('r-syms');if(!box)return;
+            const note=document.getElementById('r-otm20-note');
+            if(!otm15On()){box.querySelectorAll('label').forEach(l=>l.style.display='');if(note)note.textContent=(window._symCount||'')+' symbols (poori F&O list)';return;}
+            const ok=window?._otm4ok?window._otm4ok.set:null;
+            if(!ok){if(note)note.textContent='OTM-4 list load nahi hui - dobara toggle karo';return;}
+            let vis=0;
+            box.querySelectorAll('label').forEach(l=>{const v=l.querySelector('input')?.value;const keep=l.querySelector('input:checked');const show=ok.has(v)||keep;l.style.display=show?'':'none';if(show)vis++;});
+            if(note)note.textContent='OTM-4 > ₹15: '+vis+'/'+(window._symCount||0)+' symbols dikh rahe (baki hidden)';
+        }catch(e){}
     }
     function stab(t,btn){} // Scanner removed
     let conds=[];let condIdx=0;

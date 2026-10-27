@@ -277,7 +277,10 @@ def is_optionable(symbol: str) -> bool:
 # Minimum option premium (₹) for backtest entries AND live/paper orders.
 # ₹1-2 lottery tickets (far-OTM) are blocked everywhere: SELL me unlimited
 # risk for pennies, BUY me predictable decay. EQ (equity) legs exempt.
-MIN_ORDER_PREMIUM = 20.0
+# User rule 27-10-2026: "₹15 se jyada wale" - floor 20 se 15 kiya taki valid
+# strikes (BANKNIFTY Nov monthly CE ₹15.85) live/paper par block na hon.
+# Far-OTM junk ab OTM-20% cap se block hota hai (auto_paper + option_chain).
+MIN_ORDER_PREMIUM = 15.0
 
 
 def check_min_premium(premium, option_type: str = "CE") -> str | None:

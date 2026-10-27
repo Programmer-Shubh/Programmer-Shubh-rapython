@@ -153,6 +153,98 @@ def _load_db_history(symbol: str, start_date: str, end_date: str) -> List[Dict]:
 router = APIRouter()
 
 
+# ---- OTM-4 premium filter (user rule 27-10-2026: "otm 4 tak rs 15 se
+# jayada wale stock hi dikhaye") ----
+# Har F&O symbol ka ATM+4-steps CE premium SHARED MODEL (per-symbol IV,
+# network-free - Fyers 429 storm se bachne ke liye) se compute hota hai.
+# Premium <= 15 wale symbols strategy list se hat jate hain. 10-min cache.
+_otm4_cache = {"ts": 0.0, "data": {}}
+
+
+def _next_monthly_expiry_dte(symbol: str, today) -> float:
+    """Days to next expiry: NIFTY/SENSEX/BANKEX weekly next-Tue approx,
+    stocks monthly (last-Tue rule, symbol_resolver) ke hisaab se DTE.
+    Network-free (sirf calendar math)."""
+    try:
+        s = str(symbol or "").upper()
+        if s in ("NIFTY", "SENSEX", "BANKEX"):
+            wd = today.weekday()  # Mon=0 .. Sun=6
+            return float(7 if wd == 0 else (6 - wd) if wd in (1, 2, 3) else 5)
+        from core.services.symbol_resolver import stock_monthly_expiry as _sme
+        exp_s = _sme(s)
+        exp = _dt.datetime.strptime(str(exp_s)[:10], "%Y-%m-%d").date()
+        dte = (exp - today).days
+        return float(max(1, dte))
+    except Exception:
+        return 30.0
+
+
+@router.get("/otm4-symbols")
+def otm4_symbols():
+    """:{"symbols":[...],"details":{sym:{spot,strike,premium}...}}
+    Sirf wo F&O symbols jinka ATM+4-step CE premium > ₹15 (model, network-free)."""
+    import datetime as _dt
+    import time as _t
+    now = _t.time()
+    if _otm4_cache["data"] and now - _otm4_cache["ts"] < 600:
+        return _otm4_cache["data"]
+    try:
+        from utils.helpers import FNO_STOCKS, OPTION_INDICES, get_strike_step, model_premium
+        from core.models.database import Database
+        db = Database.get_instance()
+        today = _dt.date.today()
+        syms = sorted(set(list(FNO_STOCKS) + list(OPTION_INDICES)))
+        ok, details = [], {}
+        # Batch: latest close per symbol in one query group (network-free)
+        closes = {}
+        try:
+            rows = db.fetch_all(
+                "SELECT symbol, close_price, MAX(trade_date) FROM bhavcopy_data "
+                "WHERE option_type IS NULL GROUP BY symbol") or []
+            for r in rows:
+                try:
+                    cp = float(r.get("close_price") or 0)
+                    if cp > 0:
+                        closes[str(r.get("symbol") or "").upper()] = cp
+                except Exception:
+                    continue
+        except Exception:
+            closes = {}
+        for s in syms:
+            spot = closes.get(s) or 0.0
+            if spot <= 40:
+                continue  # close data nahi / spot junk - list se bahar
+            try:
+                alive = False
+                from utils.helpers import is_optionable as _iso
+                alive = bool(_iso(s))
+            except Exception:
+                alive = True
+            if not alive:
+                continue
+            try:
+                step = float(get_strike_step(s) or 50)
+            except Exception:
+                step = 50.0
+            atm = round(spot / step) * step
+            strike = atm + 4 * step  # OTM-4 (CE side)
+            dte = _next_monthly_expiry_dte(s, today)
+            prem = float(model_premium(spot, strike, dte, "CE", s) or 0)
+            details[s] = {"spot": round(spot, 2), "strike": strike,
+                          "premium": round(prem, 2), "dte": int(dte)}
+            if prem > 15.0:
+                ok.append(s)
+        ok.sort()
+        _out = {"symbols": ok, "count": len(ok), "details": details,
+                "min_premium": 15.0, "otm_steps": 4}
+    except Exception as e:
+        _out = {"symbols": [], "count": 0, "details": {}, "error": str(e)[:120]}
+    _otm4_cache["ts"] = now
+    _otm4_cache["data"] = _out
+    return _out
+
+
+
 class BacktestRequest(BaseModel):
     symbol: str = "NIFTY"
     symbols: list = []
