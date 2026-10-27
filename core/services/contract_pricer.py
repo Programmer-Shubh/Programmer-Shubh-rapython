@@ -475,6 +475,33 @@ def _fyers_quotes_raw(symbols_csv: str, app_id: str = "", token: str = ""):
     return {}
 
 
+def _fy_quote_rows(body):
+    """Fyers quote response ko normalise karo -> {symbol: node}.
+
+    Fyers v3 ACTUAL shape: {"d": [{"n": "NSE:X", "v": {...}, "s": "ok"}]}.
+    Purana/alt shape: {"data": {"NSE:X": {...}}}. Dono support - pehle sirf
+    `data` padha jata tha, isliye har stock-option quote "empty" aata tha
+    aur pricer model floor (Rs 1.5) par chala jata tha."""
+    out = {}
+    if not isinstance(body, dict):
+        return out
+    data = body.get("data")
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if isinstance(v, dict):
+                out[str(k)] = v
+    rows = body.get("d")
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = row.get("n") or row.get("symbol") or row.get("name")
+            node = row.get("v") or row.get("values") or row.get("data")
+            if name and isinstance(node, dict):
+                out[str(name)] = node
+    return out
+
+
 def _fyers_quote_ltp(symbol, expiry_ymd, contracts):
     """{(strike, OPT): ltp} from Fyers /quotes for the EXACT contract symbols
     (works for stock options too, where no index chain exists)."""
@@ -498,16 +525,14 @@ def _fyers_quote_ltp(symbol, expiry_ymd, contracts):
         for _i in range(0, len(keys), 20):          # chunked (URL length safe)
             chunk = keys[_i:_i + 20]
             body = _fyers_quotes_raw(",".join(chunk), app_id, token)
-            data = body.get("data") or {}
-            if not isinstance(data, dict):
+            quotes = _fy_quote_rows(body)
+            if not quotes:
                 continue
             for fs, key in syms.items():
-                if fs not in data:
-                    continue
-                node = data.get(fs)
+                node = quotes.get(fs) or quotes.get(fs.replace("NSE:", "")) or {}
                 if not isinstance(node, dict):
                     continue
-                for f in ("last_price", "lastPrice", "ltp", "LTP"):
+                for f in ("lp", "last_price", "lastPrice", "ltp", "LTP"):
                     try:
                         v = float(node.get(f, 0) or 0)
                     except Exception:

@@ -272,19 +272,15 @@ def fetch_cloud_spot(symbol: str) -> dict:
     # live orders go to (so paper/live strike + premium align).
     if not spot:
         try:
-            from core.services.contract_pricer import _fyers_auth, _fyers_get, _fyers_underlying
+            from core.services.contract_pricer import _fyers_auth, _fyers_underlying
             _app_id, _tok = _fyers_auth()
             _under = _fyers_underlying(symbol)
             if _app_id and _tok and _under:
-                _body = {}
-                for _p in (f"/data/quotes?symbols={_under}",
-                           f"/api/v3/quotes?symbols={_under}"):
-                    _body = _fyers_get(_p, _app_id, _tok, timeout=6)
-                    if _body:
-                        break
-                _node = (_body.get("data") or {}).get(_under) or {}
+                from core.services.contract_pricer import _fyers_quotes_raw, _fy_quote_rows
+                _body = _fyers_quotes_raw(_under, _app_id, _tok)
+                _node = _fy_quote_rows(_body).get(_under) or {}
                 if isinstance(_node, dict):
-                    for _f in ("last_price", "lastPrice", "ltp"):
+                    for _f in ("lp", "last_price", "lastPrice", "ltp"):
                         try:
                             _px = float(_node.get(_f, 0) or 0)
                         except Exception:

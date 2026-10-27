@@ -109,6 +109,25 @@ def test_index_resolve_contract_unchanged(monkeypatch):
     assert res["refs"]["symbol"] == "NSE:NIFTY26N0322750CE", res
 
 
+def test_fy_quote_rows_both_shapes():
+    from core.services.contract_pricer import _fy_quote_rows
+    v3 = {"s": "ok", "d": [{"n": "NSE:X", "v": {"lp": 1.35}, "s": "ok"}]}
+    old = {"data": {"NSE:X": {"last_price": 2.0}}}
+    assert _fy_quote_rows(v3)["NSE:X"]["lp"] == 1.35
+    assert _fy_quote_rows(old)["NSE:X"]["last_price"] == 2.0
+
+
+def test_fyers_quote_ltp_parses_v3_d_list(monkeypatch):
+    """Fyers v3 asli shape {"d": [{"n": sym, "v": {"lp": ...}}]} - pehle
+    sirf {"data": {...}} padha jata tha, isliye har stock quote khali aata tha."""
+    monkeypatch.setattr(CP, "_fyers_auth", lambda: ("app", "tok"))
+    monkeypatch.setattr(CP, "_fyers_quotes_raw", lambda syms, a="", t="": {
+        "s": "ok", "d": [{"n": "NSE:DIVISLAB26OCT9700CE",
+                          "v": {"lp": 1.35, "bid": 1.4, "ask": 2.5}, "s": "ok"}]})
+    out = CP._fyers_quote_ltp("DIVISLAB", "2026-10-27", [(9700, "CE")])
+    assert out == {(9700.0, "CE"): 1.35}, out
+
+
 def test_live_limit_refuses_model_price(monkeypatch):
     """Model/DB-close price par live LIMIT NAHI banna chahiye (Rs 1.65 fiasco)."""
     from routes.broker import _broker_limit_price
