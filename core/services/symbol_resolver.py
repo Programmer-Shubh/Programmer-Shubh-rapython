@@ -86,9 +86,14 @@ def stock_monthly_expiry(symbol: str, hint: str = "") -> str:
     if explicit:
         # Explicit date same month ka ho to us month ka real expiry; warna
         # (purani/ghayr-month date) aaj ke baad ka nearest monthly.
-        if d < today:
+        if d <= today:
             d = _last_tue(*_next_month(today.year, today.month))
-    elif d < today:
+    elif d <= today:
+        # EXPIRY DAY par bhi next month: Fyers/NSE aaj-expiry STOCK options
+        # ko physically-settled contract ke roop me BLOCK karte hain
+        # ("Current month physically settled contracts are blocked"), isliye
+        # expiry ke din stock ka tradable contract NEXT month hi hota hai.
+        # Paper + live dono same resolver use karte hain -> parity intact.
         d = _last_tue(*_next_month(today.year, today.month))
     return d.strftime("%Y-%m-%d")
 
