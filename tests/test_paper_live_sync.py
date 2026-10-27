@@ -7,9 +7,11 @@ Fix coverage:
 1. place-live ka PAPER MIRROR ab KABHI silent fail nahi - note wapas aata
    hai (paper_mirror_note), aur DB me mirror row sach me insert hota hai
    (entry_price bilkul live `adj` ke barabar - same reference price).
-2. Manual Paper button (both ON) signal-skip par bhi paper copy lagata hai
-   (guards: no open position / max-day / 3PM cutoff fail-closed).
-3. Paper button (force ya both-ON sync) KABHI real broker order nahi
+2. Order SIRF SIGNAL par: paper button signal-gated hi rehta hai (both ON
+   ho to bhi signal skip par koi blind paper copy NAHI lagti - user rule).
+   Signal fire hone par auto-flow me sync hota hai place-live ke paper
+   mirror se (dono orders, same reference price).
+3. Paper button (force ya kisi bhi mode par) KABHI real broker order nahi
    jata - _execute_legs(force_paper=True) live routing ignore karta hai.
 Backtest engine inna kuch bhi nahi chheda gaya.
 """
@@ -135,8 +137,10 @@ def test_paper_button_force_never_fires_broker(monkeypatch):
                    [S._strat_live_key(sid)])
 
 
-def test_both_on_paper_signal_skip_still_places(monkeypatch):
-    """Dono ON + signal gate skip -> paper copy TURANT lagti hai (sync)."""
+def test_both_on_signal_skip_never_blind_places(monkeypatch):
+    """Dono ON + signal skip -> KOI blind copy NAHI (na paper, na live).
+    Order sirf signal par lagta hai; sync auto-flow me place-live ka paper
+    mirror karta hai (signal fire hone par), manual force khud dabao tabhi."""
     from core.models.database import Database
     import core.services.auto_paper as ap
     import core.services.sl_monitor as slm
@@ -151,68 +155,19 @@ def test_both_on_paper_signal_skip_still_places(monkeypatch):
         # signal gate ne entry deny ki - sirf skip note
         return {"placed": [], "notes": [f"N: aaj koi signal nahi - skipped"]}
 
-    seen = {}
+    called = {"n": 0}
 
-    def fake_exec(s, legs, db_, tm_, tday, force_paper=False):
-        seen["force_paper"] = force_paper
-        seen["legs"] = legs
-        return [{"trade_id": 88, "entry": 101.0}], []
+    def fake_exec(*a, **k):
+        called["n"] += 1
+        return [], []
 
     monkeypatch.setattr(ap, "place_for_strategy", fake_gated)
     monkeypatch.setattr(ap, "_execute_legs", fake_exec)
     try:
         out = S.strategy_paper_trade(sid, body={})
-        assert out.get("placed"), out
-        assert out.get("forced_by"), out
-        assert seen.get("force_paper") is True
-        assert seen["legs"][0]["option_type"] == "CE"
-    finally:
-        db.execute("DELETE FROM paper_trades WHERE strategy_id=?", [sid])
-        db.execute("DELETE FROM strategies WHERE id=?", [sid])
-        db.execute("DELETE FROM settings WHERE setting_key=?",
-                   [S._strat_live_key(sid)])
-
-
-def test_both_on_guards_never_double_trade(monkeypatch):
-    """Open position / max-day par both-ON sync force NAHI karna chahiye
-    (double trade protection fail-closed)."""
-    from core.models.database import Database
-    import core.services.auto_paper as ap
-    import core.services.sl_monitor as slm
-    import datetime as _dt
-    db = Database.get_instance()
-    name = f"t-bothon-guard-{os.urandom(4).hex()}"
-    sid = _mk_strategy(db, name)
-    db.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value)"
-               " VALUES (?, '1')", [S._strat_live_key(sid)])
-    today = (_dt.datetime.utcnow() +
-             _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d")
-    monkeypatch.setattr(slm, "entry_open_ist", lambda: True)
-
-    def fake_gated(gate_sid, signal_check):
-        return {"placed": [], "notes": [f"N: aaj koi signal nahi - skipped"]}
-
-    monkeypatch.setattr(ap, "place_for_strategy", fake_gated)
-    try:
-        # (1) open position -> force nahi
-        db.execute(
-            "INSERT INTO paper_trades (symbol, option_type, strike_price,"
-            " transaction_type, quantity, lot_size, entry_price, entry_date,"
-            " status, strategy_id) VALUES ('NIFTY','CE',25000,'BUY',1,75,"
-            " 100.0,?,'open',?)", [today, sid])
-        out = S.strategy_paper_trade(sid, body={})
         assert out.get("placed") == [], out
-        db.execute("DELETE FROM paper_trades WHERE strategy_id=?", [sid])
-        # (2) max-day reach -> force nahi
-        for _ in range(5):
-            db.execute(
-                "INSERT INTO paper_trades (symbol, option_type, strike_price,"
-                " transaction_type, quantity, lot_size, entry_price, entry_date,"
-                " exit_price, pnl, status, strategy_id) VALUES "
-                "('NIFTY','CE',25000,'BUY',1,75,100.0,?,90.0,-750.0,'closed',?)",
-                [today, sid])
-        out2 = S.strategy_paper_trade(sid, body={})
-        assert out2.get("placed") == [], out2
+        assert not out.get("forced_by"), out
+        assert called["n"] == 0, called
     finally:
         db.execute("DELETE FROM paper_trades WHERE strategy_id=?", [sid])
         db.execute("DELETE FROM strategies WHERE id=?", [sid])

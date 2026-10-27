@@ -1958,7 +1958,7 @@ let _lastOpenTrdHTML = null;
         const bt=r.saved_bt||{};const btH=(bt.trades!=null)?('\nSaved BT: '+bt.trades+' trades • '+F(bt.net_pnl||0)+' • Win '+(bt.win_rate||0)+'%'):'';
         if(r.placed&&r.placed.length){
             const lines=r.placed.map(p=>'Trade #'+p.trade_id+' @ Rs'+p.entry+(p.rolled_to?(' (expiry '+p.rolled_to+')'):'')+(p.strike_snapped?(' [strike '+p.strike_snapped.from+'→'+p.strike_snapped.to+']'):''));
-            alert('Backtest signal ('+(r.gate==='intraday'?'live intraday':'daily')+') par paper trade lag gaya!\n'+lines.join('\n')+btH+(r.forced_by?('\n\n('+r.forced_by+')'):'')+'\n\nOpen Positions me dikhega.');
+            alert('Backtest signal ('+(r.gate==='intraday'?'live intraday':'daily')+') par paper trade lag gaya!\n'+lines.join('\n')+btH+'\n\nOpen Positions me dikhega.');
         }else{
             const why=(r.notes||[]).join('; ')||'aaj koi signal nahi';
             if(!force&&confirm('Backtest ke anusar aaj entry nahi banti:\n'+why+btH+'\n\nPhir bhi FORCE paper trade lagau? (signal ignore hoga)')){ptFromStrat(id,true);return;}
