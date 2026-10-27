@@ -21,7 +21,30 @@ Rules:
 import datetime as _dt
 
 
-WEEKLY_IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX"}
+WEEKLY_IDX = {"NIFTY", "SENSEX", "BANKEX"}
+
+# Monthlies-only indices (User data 27-10-2026, Fyers NSE_FO master ke
+# hisaab se). BANKNIFTY/FINNIFTY ke WEEKLY contracts exist hi nahi karte ab
+# (NSE ne weeklies NIFTY tak se limited kar diye) - BANKNIFTY26N03... jaisa
+# symbol "Please provide a valid symbol" likh kar quote khali deta hai aur
+# paper MODEL price par (BANKNIFTY 54700 CE Rs 281->172 fake P&L).
+MONTHLY_IDX = {"BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNSXT50",
+               "NIFTYNXT50", "NIFTYNEXT50"}
+
+
+def is_index_symbol(symbol: str) -> bool:
+    """Index underlyings (weekly expiries) vs stock underlyings (monthly only)."""
+    return str(symbol or "").upper().replace(" ", "") in WEEKLY_IDX
+
+
+def has_weekly_options(symbol: str) -> bool:
+    """Sirf yahan ke symbols ke weekly options hain (stocks + monthlies-only
+    indices ke liye FALSE). NIFTY (NSE) + SENSEX/BANKEX (BSE)."""
+    return is_index_symbol(symbol)
+
+
+def _next_month(y: int, m: int):
+    return (y + 1, 1) if m == 12 else (y, m + 1)
 
 FYERS_UNDERLYING = {
     "NIFTY": "NSE:NIFTY50-INDEX",
@@ -31,15 +54,11 @@ FYERS_UNDERLYING = {
 }
 
 
-def is_index_symbol(symbol: str) -> bool:
-    """Index underlyings (weekly expiries) vs stock underlyings (monthly only)."""
-    return str(symbol or "").upper().replace(" ", "") in WEEKLY_IDX
-
-
 def stock_monthly_expiry(symbol: str, hint: str = "") -> str:
     """Nearest REAL stock-option expiry date (NSE stocks: MONTHLY only).
 
-    Stock options ka koi weekly expiry hota hi nahi. Pehle stock par NIFTY ki
+    Stock options + monthlies-only indices (BANKNIFTY/FINNIFTY) ka koi
+    weekly expiry hota hi nahi. Pehle in par NIFTY ki
     weekly list lag jati thi (e.g. 2026-11-03) -> symbol `DIVISLAB26N03...`
     (invalid, exchange par exist nahi) -> broker quote empty -> paper/live
     dono MODEL price par (paper Rs 45 vs live Rs 1.5) -> wahi
@@ -72,10 +91,6 @@ def stock_monthly_expiry(symbol: str, hint: str = "") -> str:
     elif d < today:
         d = _last_tue(*_next_month(today.year, today.month))
     return d.strftime("%Y-%m-%d")
-
-
-def _next_month(y: int, m: int):
-    return (y + 1, 1) if m == 12 else (y, m + 1)
 
 
 def is_explicit_date(hint: str) -> bool:
@@ -179,16 +194,17 @@ async def _fyers_expiries(fy) -> list:
 def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str) -> str:
     """Fyers format (verified): monthly YYMMM, weekly YYMdd (M=1-9/O/N/D).
 
-    STOCK options par sirf monthly hota hai (weekly stock contract exist hi
-    nahi karta) - isliye stock ke liye hamesha YYMMM. Warna 2026-11-03
-    (NIFTY weekly) jaisi date se `DIVISLAB26N03...` banta tha jo exchange par
-    nahi hota -> quote fail -> model price."""
+    STOCK options + monthlies-only indices par sirf monthly hota hai (weekly
+    stock/BANKNIFTY contract exist hi nahi karta) - isliye hamesha YYMMM.
+    Warna 2026-11-03 (NIFTY weekly) jaisi date se `BANKNIFTY26N03...` /
+    `DIVISLAB26N03...` banta tha jo exchange par nahi hota -> quote
+    "Please provide a valid symbol" -> model price."""
     import calendar as _cal
     d = _dt.datetime.strptime(expiry_ymd[:10], "%Y-%m-%d").date()
     yy = d.strftime("%y")
     mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
            "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][d.month - 1]
-    if not is_index_symbol(symbol):
+    if not has_weekly_options(symbol):
         return f"NSE:{symbol.upper()}{yy}{mon}{int(float(strike))}{option_type.upper()}"
     wd = 3 if symbol.upper() == "SENSEX" else 1
     last = _dt.date(d.year, d.month, _cal.monthrange(d.year, d.month)[1])
@@ -230,9 +246,10 @@ async def resolve_contract(broker: str, creds: dict, underlying: str,
                 live_exps = await _fyers_expiries(fy)
             except Exception:
                 live_exps = []
-        # STOCK options: NIFTY ki weekly expiry list kabhi use nahi karte
-        # (stocks me weekly expiry hoti hi nahi). Shared monthly resolver.
-        if not is_index_symbol(underlying):
+        # STOCK + MONTHLY-INDEX: NIFTY ki weekly expiry list kabhi nahi
+        # (stocks/BANKNIFTY/FINNIFTY me weekly expiry hoti hi nahi).
+        # Shared monthly resolver.
+        if not has_weekly_options(underlying):
             use_exp = stock_monthly_expiry(underlying, expiry_hint)
             return {"ok": True,
                     "refs": {"symbol": _fyers_symbol(underlying, use_exp, strike, opt)},

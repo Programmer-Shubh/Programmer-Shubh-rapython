@@ -169,6 +169,43 @@ def test_top_of_book_caps_junk_quotes(monkeypatch):
     assert "ask" not in tb, tb
 
 
+def test_banknifty_is_monthly_only(monkeypatch):
+    """Fyers master (27-10-2026): BANKNIFTY ke WEEKLY contracts exist hi nahi
+    karte (sirf monthly). BANKNIFTY26N03... -> 'Please provide a valid
+    symbol' -> paper MODEL price (open #218 ka fake current price)."""
+    from core.services.symbol_resolver import has_weekly_options
+    assert not has_weekly_options("BANKNIFTY")
+    assert has_weekly_options("NIFTY")
+    assert has_weekly_options("SENSEX")
+    # 2026-11-03 (NIFTY weekly date) par bhi BANKNIFTY symbol monthly
+    s = _fyers_symbol("BANKNIFTY", "2026-11-03", 54700, "CE")
+    assert s == "NSE:BANKNIFTY26NOV54700CE", s
+    # 'weekly' hint bhi monthly expiry dega
+    monkeypatch.setattr(CP, "_fyers_expiry_list", lambda: ["2026-11-03"])
+    got = CP.resolve_expiry_hint("BANKNIFTY", "weekly")
+    d = datetime.datetime.strptime(got, "%Y-%m-%d").date()
+    assert d == _last_tuesday(d.year, d.month), got        # Nov 24 (rule)
+
+
+def test_pricer_heals_phantom_expiry_in_existing_rows(monkeypatch):
+    """Purana open position (BANKNIFTY exp=2026-11-03) ab bhi real monthly
+    (26NOV) par price ho - get_contract_lts normalize karta hai."""
+    seen = {}
+
+    def _fake_chain(symbol, ymd, contracts, **kw):
+        seen["expiry"] = ymd
+        return {(54700.0, "CE"): 253.0}
+
+    from core.services.contract_pricer import _fyers_chain_ltp as _orig
+    monkeypatch.setattr(CP, "_fyers_chain_ltp", _fake_chain)
+    monkeypatch.setattr(CP, "_nse_map", lambda s: ("", {}))
+    monkeypatch.setattr(CP, "_fyers_expiry_list", lambda: [])
+    res = CP.get_contract_ltps("BANKNIFTY", [(54700, "CE")], "2026-11-03",
+                               fresh=True, sources={})
+    assert seen["expiry"] == "2026-11-24" or seen["expiry"] == "2026-11-23", seen
+    assert res == {(54700.0, "CE"): 253.0}, res
+
+
 def test_live_limit_refuses_model_price(monkeypatch):
     """Model/DB-close price par live LIMIT NAHI banna chahiye (Rs 1.65 fiasco)."""
     from routes.broker import _broker_limit_price

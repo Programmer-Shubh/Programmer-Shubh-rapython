@@ -40,12 +40,14 @@ def _ist_today():
 # (weekday 1); BSE (SENSEX/BANKEX) = Thursday (weekday 3). Same rule as
 # routes/broker._resolve_expiry - paper, live aur backtest sab ekahi rule.
 def _is_index(symbol: str = "") -> bool:
+    """Kya is symbol ke weekly (index-style) contracts hain.
+    NIFTY/SENSEX/BANKEX par hi weeklies; BANKNIFTY/FINNIFTY/stocks MONTHLY."""
     try:
-        from core.services.symbol_resolver import is_index_symbol
-        return bool(is_index_symbol(symbol))
+        from core.services.symbol_resolver import has_weekly_options
+        return bool(has_weekly_options(symbol))
     except Exception:
         return str(symbol or "").upper().replace(" ", "") in (
-            "NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX")
+            "NIFTY", "SENSEX", "BANKEX")
 
 
 def _weekly_weekday(symbol: str = "") -> int:
@@ -129,8 +131,8 @@ def resolve_weekly_expiry(symbol: str = "") -> str:
     STOCK options: koi weekly expiry nahi - sirf monthly (last Tuesday).
     Yahi shared date paper, chain aur live order teeno use karte hain."""
     try:
-        from core.services.symbol_resolver import stock_monthly_expiry, is_index_symbol
-        if not is_index_symbol(symbol):
+        from core.services.symbol_resolver import stock_monthly_expiry, has_weekly_options
+        if not has_weekly_options(symbol):
             _se = stock_monthly_expiry(symbol)
             if _se:
                 return _se[:10]
@@ -793,6 +795,17 @@ def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False, sources=Non
     sources: optional dict - filled with the tier that produced each price
     ('broker-quote' | 'nse-chain' | 'db-close' | 'model' | 'cache')."""
     sym = (symbol or "").upper()
+    # HEAL (27-10-2026): stock/BANKNIFTY (non-weekly) par purane records me
+    # phantom weekly dates thi (BANKNIFTY 2026-11-03 - contract exist hi nahi
+    # karta, quote khali). Us month ke REAL monthly expiry par map hote hai
+    # (26NOV symbol) -> OPEN paper positions ke current price bhi aaj se
+    # real broker quote se.
+    try:
+        from core.services.symbol_resolver import stock_monthly_expiry, has_weekly_options
+        if not has_weekly_options(sym):
+            expiry_ymd = stock_monthly_expiry(sym, expiry_ymd) or expiry_ymd
+    except Exception:
+        pass
     norm = []
     for s, o in (contracts or []):
         try:
