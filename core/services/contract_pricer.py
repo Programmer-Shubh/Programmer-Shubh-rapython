@@ -504,6 +504,65 @@ def _fy_quote_rows(body):
     return out
 
 
+_TOPBOOK_CACHE = {}
+_TOPBOOK_TTL = 5.0
+
+
+def top_of_book(symbol, strike, option_type, expiry_ymd):
+    """Fyers top-of-book: {"ltp": x, "bid": b, "ask": a} ya {} (best-effort).
+
+    Live order ka DEPTH-BASED cross price (BUY=best ask, SELL=best bid) isi
+    se banta hai - plan Step-3. 5s cache: IOC retry loop same quote use
+    kare, fyers API par 429 na aaye."""
+    try:
+        from core.services.symbol_resolver import _fyers_symbol as _fsym
+        fs = _fsym(symbol, expiry_ymd, float(strike),
+                   "CE" if str(option_type or "CE").upper().startswith("C") else "PE")
+    except Exception:
+        return {}
+    if not fs:
+        return {}
+    hit = _TOPBOOK_CACHE.get(fs)
+    now = time.time()
+    if hit and now - hit[0] < _TOPBOOK_TTL:
+        return hit[1]
+    out = {}
+    try:
+        app_id, token = _fyers_auth()
+        if app_id and token:
+            body = _fyers_quotes_raw(fs, app_id, token)
+            node = _fy_quote_rows(body).get(fs) or {}
+            if isinstance(node, dict):
+                for f in ("lp", "last_price", "lastPrice", "ltp"):
+                    try:
+                        v = float(node.get(f, 0) or 0)
+                    except Exception:
+                        v = 0
+                    if v > 0:
+                        out["ltp"] = v
+                        break
+                for f in ("bid", "bid_price", "bidPrice"):
+                    try:
+                        v = float(node.get(f, 0) or 0)
+                    except Exception:
+                        v = 0
+                    if v > 0 and out.get("ltp") and v <= out["ltp"] * 3.0 + 0.5:
+                        out["bid"] = v
+                        break
+                for f in ("ask", "ask_price", "askPrice"):
+                    try:
+                        v = float(node.get(f, 0) or 0)
+                    except Exception:
+                        v = 0
+                    if v > 0 and out.get("ltp") and v <= out["ltp"] * 3.0 + 0.5:
+                        out["ask"] = v
+                        break
+    except Exception:
+        return {}
+    _TOPBOOK_CACHE[fs] = (now, out)
+    return out
+
+
 def _fyers_quote_ltp(symbol, expiry_ymd, contracts):
     """{(strike, OPT): ltp} from Fyers /quotes for the EXACT contract symbols
     (works for stock options too, where no index chain exists)."""

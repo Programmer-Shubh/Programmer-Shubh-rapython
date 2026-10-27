@@ -1360,7 +1360,7 @@ def _round_tick(px: float, tick: float = 0.05) -> float:
 
 
 async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str, txn: str,
-                              buffer_mult: float = 1.0):
+                              buffer_mult: float = 1.0, cross: bool = False):
     """LIMIT price = the SHARED contract LTP (contract_pricer) + SAFE side
     buffer (user fix: market-order wild slippage band).
 
@@ -1372,6 +1372,14 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
     buffer = max(3 exchange ticks (0.15), LTP ka 0.5%), cap 2.0;
     buffer_mult (retry) se double hota hai. Result 0.05 tick pe ROUNDED
     (exchange tick-size rule).
+
+    cross=True (IOC retry ka LAST attempt): top-of-book CROSS price -
+      BUY  = best ASK   (turant fill; market-order jaisa par price-bound)
+      SELL = best BID
+    (Plan Step-3 ka ulta mapping - SELL=ask - galat tha: wahan order rest
+    hota, kabhi fill nahi hota. Wide-spread cheap stock options (bid 1.4 /
+    ask 2.5) mein sirf cross par hi fill milta hai.) Junk ask/bid (LTP ka
+    3x + 0.5) par cross ki jagah buffered price hi jaata hai.
 
     STRICT: sirf LIVE quote source (broker-quote / nse-chain / cache) par
     LIMIT banta hai. Model/DB-close fallback price par LIMIT kabhi nahi -
@@ -1395,6 +1403,21 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
         ltp, src = 0.0, ""
     if ltp <= 0 or src not in ("broker-quote", "nse-chain", "cache"):
         return None
+    if cross:
+        try:
+            from core.services.contract_pricer import top_of_book
+            _tb = top_of_book(symbol, strike, opt, exp_ymd)
+        except Exception:
+            _tb = {}
+        if str(txn or "BUY").upper() == "SELL":
+            _bid = float(_tb.get("bid") or 0)
+            if _bid > 0:
+                return max(0.05, _round_tick(_bid))
+        else:
+            _ask = float(_tb.get("ask") or 0)
+            if _ask > 0:
+                return max(0.05, _round_tick(_ask))
+        # depth nahi mili (rate-limit) -> buffered price par girna
     _buf = min(max(0.05 * 3, ltp * 0.005), 2.0) * max(1.0, float(buffer_mult or 1.0))
     if str(txn or "BUY").upper() == "SELL":
         return max(0.05, _round_tick(ltp - _buf))
@@ -1814,9 +1837,16 @@ async def place_live_order(req: LiveOrderRequest):
                 # impossible. IOC = resting/partial order ka bhi koi risk nahi.
                 _filled = False
                 _unfilled_note = ""
-                for _mult in (1.0, 2.0):
+                # Retry ladder: LTP+1x buffer -> LTP+2x buffer -> CROSS at
+                # touch (BUY=ask / SELL=bid). Cheap stock options ka spread
+                # bahut wide hota hai (DIVISLAB 9700 CE: bid 1.4 / ask 2.5,
+                # LTP 1.0) - buffered limit wahan kabhi fill nahi hoti, isliye
+                # aakhri attempt touch cross karta hai (market-order jaisa
+                # fill, par LIMIT se price-bound). Plan Step-3 ki taraf se
+                # sahi implementation.
+                for _mult, _cross in ((1.0, False), (2.0, False), (0.0, True)):
                     _px_i = await _broker_limit_price(symbol, opt, strike, exp_ymd, txn,
-                                                      buffer_mult=_mult)
+                                                      buffer_mult=_mult, cross=_cross)
                     if not _px_i or float(_px_i) <= 0:
                         _unfilled_note = "safe limit price fresh nahi mila"
                         # Quotes chale gaye -> neeche MARKET fail-open
@@ -1832,7 +1862,9 @@ async def place_live_order(req: LiveOrderRequest):
                     order_id = str((res.get("data") or {}).get("order_id", ""))
                     broker_ref = preview["symbol"]
                     _order_attempts.append({"order_id": order_id, "limit_price": _round_tick(_px_i),
-                                            "buffer_mult": _mult, "validity": "IOC"})
+                                            "attempt": f"{'cross-touch' if _cross else 'buffer'}x{_mult or 1}",
+                                            "buffer_mult": _mult or 1, "cross": _cross,
+                                            "validity": "IOC"})
                     await _fy_persist()
                     _fill_px, _st, _row = await _fy_fill_verify(order_id)
                     if _fy_is_reject(_st):

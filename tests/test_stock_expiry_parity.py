@@ -128,6 +128,47 @@ def test_fyers_quote_ltp_parses_v3_d_list(monkeypatch):
     assert out == {(9700.0, "CE"): 1.35}, out
 
 
+def test_live_limit_crosses_touch_on_ask_bid(monkeypatch):
+    """IOC last attempt (cross=True): BUY=best ask / SELL=best bid. Plan
+    Step-3 ka ulta mapping (SELL=ask) galat tha - wahan kabhi fill nahi hota."""
+    from routes.broker import _broker_limit_price
+
+    def _quote(symbol, contracts, expiry_ymd="", fresh=False, sources=None):
+        if sources is not None:
+            for k in contracts:
+                sources[(float(k[0]), str(k[1]).upper())] = "broker-quote"
+        return {(float(contracts[0][0]), "CE"): 1.0}
+
+    def _tb(symbol, strike, option_type, expiry_ymd):
+        return {"ltp": 1.0, "bid": 1.4, "ask": 2.5}
+
+    monkeypatch.setattr(CP, "get_contract_ltps", _quote)
+    monkeypatch.setattr(CP, "top_of_book", _tb)
+    buy = asyncio.run(_broker_limit_price("DIVISLAB", "CE", 9700, "2026-10-27", "BUY",
+                                          cross=True))
+    sell = asyncio.run(_broker_limit_price("DIVISLAB", "CE", 9700, "2026-10-27", "SELL",
+                                           cross=True))
+    assert buy == 2.5, buy
+    assert sell == 1.4, sell
+    # depth na mile to buffered price par girna (1x buffer)
+    monkeypatch.setattr(CP, "top_of_book", lambda *a, **k: {})
+    assert asyncio.run(_broker_limit_price("DIVISLAB", "CE", 9700, "2026-10-27", "BUY",
+                                           cross=True)) == 1.15
+
+
+def test_top_of_book_caps_junk_quotes(monkeypatch):
+    """Fyers ka junk ask/bid (LTP ka 3x + 0.5 se upar) cross price nahi
+    ban sakta - warna illiquid strip par tabahi bhar dega."""
+    monkeypatch.setattr(CP, "_fyers_auth", lambda: ("app", "tok"))
+    monkeypatch.setattr(CP, "_fyers_quotes_raw", lambda s, a="", t="": {
+        "s": "ok", "d": [{"n": "NSE:DIVISLAB26OCT9700CE",
+                          "v": {"lp": 1.0, "bid": 1.4, "ask": 10.0}, "s": "ok"}]})
+    CP._TOPBOOK_CACHE.clear()
+    tb = CP.top_of_book("DIVISLAB", 9700, "CE", "2026-10-27")
+    assert tb.get("bid") == 1.4, tb
+    assert "ask" not in tb, tb
+
+
 def test_live_limit_refuses_model_price(monkeypatch):
     """Model/DB-close price par live LIMIT NAHI banna chahiye (Rs 1.65 fiasco)."""
     from routes.broker import _broker_limit_price
