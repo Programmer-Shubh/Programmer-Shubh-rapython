@@ -822,7 +822,8 @@
         }
     }
     async function loadStrategySymbols(){
-        try{const c=document.getElementById('r-otm15-check');if(c){c.checked=localStorage.getItem('rOtm15')==='1';if(c.checked)otm15Toggle();}}catch(e){}
+        // OTM-4 > ₹15 filter DEFAULT ON (user rule 27-10-2026)
+        try{const c=document.getElementById('r-otm15-check');if(c){c.checked=localStorage.getItem('rOtm15')!=='0';if(c.checked)otm15Toggle();}}catch(e){}
         // Step 1: INSTANT — static full F&O list, koi API wait nahi
         try{_fillStrategySyms([...new Set(_FNO_MASTER)].filter(Boolean).sort());}catch(e){}
         // Step 2: background me DB naye symbols merge (list rahegi dikhti)
@@ -833,7 +834,9 @@
         }catch(e){console.error('DB symbols merge fail (static list dikh raha hai)',e);}
     }
     // ---- OTM-4 > ₹15 symbol filter (user rule 27-10-2026) ----
-    function otm15On(){try{const c=document.getElementById('r-otm15-check');const v=c?c.checked:false;try{localStorage.setItem('rOtm15',v?'1':'0');}catch(e){}return v;}catch(e){return false;}}
+    // Default ON (user: "sahi ka tik default laga rahe") - localStorage me
+    // explicit '0' hone par hi off.
+    function otm15On(){try{const c=document.getElementById('r-otm15-check');const stored=localStorage.getItem('rOtm15');const v=c?c.checked:(stored!=='0');try{if(c)localStorage.setItem('rOtm15',v?'1':'0');}catch(e){}return v;}catch(e){return true;}}
     async function otm15Toggle(){
         const v=otm15On();
         if(v&&(!window._otm4ok||!window._otm4ok._ts||Date.now()-window._otm4ok._ts>10*60*1000)){
