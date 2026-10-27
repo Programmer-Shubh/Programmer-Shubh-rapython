@@ -1384,7 +1384,7 @@ async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str
         from core.services.contract_pricer import get_contract_ltps
         _srcs = {}
         _res = get_contract_ltps(symbol, [(strike, opt)], exp_ymd,
-                                 fresh=True, sources=_srcs)
+                                 fresh=False, sources=_srcs)
         for _v in _res.values():
             ltp = float(_v or 0)
             break
@@ -1676,6 +1676,21 @@ async def place_live_order(req: LiveOrderRequest):
                        "source": _res.get("source", "")}
             broker_qty = lots * _slot
             lot = _slot
+        # ------------------------------------------------ SHARED LTP FIRST
+        # The SHARED LTP (contract_pricer) is the single price source for
+        # paper AND live. Pehle yahi nikalte hain (ek hi broker quote call),
+        # phir isi number se safe LIMIT banate hain - warna LTP aur limit
+        # do alag quote calls se aate the aur 429 par limit model price par
+        # chala jata tha.
+        _ltp_price = 0.0
+        _ltp_source = "none"
+        try:
+            from core.services.contract_pricer import price_source_detail
+            _det = price_source_detail(symbol, strike, opt, exp_ymd)
+            _ltp_price = float(_det.get("ltp") or 0)
+            _ltp_source = str(_det.get("source") or "none")
+        except Exception:
+            pass
         # Strategy-compatible LIMIT price (saral rule Ab SAB live brokers -
         # Fyers bhi - LIMIT-IOC buffered price par order bhejte hain; MARKET
         # sirf price na milne par fail-open fallback hai).
@@ -1692,17 +1707,6 @@ async def place_live_order(req: LiveOrderRequest):
                 for _b in ("angel", "bigul"):
                     if preview.get("broker") == _b:
                         preview["order_type"] = "LIMIT"
-        # The SHARED LTP (contract_pricer) is the single price source for
-        # paper AND live. Recorded here so the UI can compare paper vs live.
-        _ltp_price = 0.0
-        _ltp_source = "none"
-        try:
-            from core.services.contract_pricer import price_source_detail
-            _det = price_source_detail(symbol, strike, opt, exp_ymd)
-            _ltp_price = float(_det.get("ltp") or 0)
-            _ltp_source = str(_det.get("source") or "none")
-        except Exception:
-            pass
         if _ltp_price <= 0 and _limit_px:
             _ltp_price = float(_limit_px)
             _ltp_source = "limit-price"

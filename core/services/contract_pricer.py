@@ -378,9 +378,11 @@ def _fyers_get(path: str, app_id: str, token: str, timeout: int = 8):
         import requests
         url = f"https://api-t1.fyers.in{path}"
         r = requests.get(url, headers=_fyers_headers(app_id, token), timeout=timeout)
-        if getattr(r, "status_code", 0) == 429:
+        for _w in (0.4, 0.9):
+            if getattr(r, "status_code", 0) != 429:
+                break
             try:
-                time.sleep(0.35)
+                time.sleep(_w)
             except Exception:
                 pass
             r = requests.get(url, headers=_fyers_headers(app_id, token), timeout=timeout)
