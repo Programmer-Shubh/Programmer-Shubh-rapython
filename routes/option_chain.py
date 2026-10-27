@@ -299,6 +299,16 @@ def get_live_chain(symbol: str, expiry: str = ""):
             expiry_use = (_dt.datetime.strptime(_today, "%Y-%m-%d") + _dt.timedelta(days=7)).strftime("%Y-%m-%d")
         except Exception:
             expiry_use = ""
+    # STOCK options: koi weekly expiry nahi - chain bhi WAHI real monthly
+    # expiry dikhaye jo live order route karta hai (warna chain Nov-3 ka
+    # model/next contract dikhata tha aur entry Oct monthly par lagti thi).
+    try:
+        from core.services.symbol_resolver import is_index_symbol as _is_idx
+        if expiry_use and not _is_idx(sym):
+            from core.services.contract_pricer import resolve_expiry_hint as _reh_c
+            expiry_use = _reh_c(sym, req_expiry or expiry_use) or expiry_use
+    except Exception:
+        pass
     # Fresh DB strikes only for the priced expiry (never another expiry's)
     if expiry_use:
         try:
