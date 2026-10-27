@@ -301,6 +301,31 @@ def live_status():
             "note": "Fyers is the main broker (priority #1). Dry-run first to verify symbol/token."}
 
 
+@router.get("/quote-debug")
+def quote_debug(symbols: str = "NSE:DIVISLAB26OCT9700CE,NSE:NIFTY26O0322750CE"):
+    """Read-only diag: Fyers /quotes ka RAW jawab (koi secret nahi).
+
+    Stock option par paper/live price model-par kyun ja raha hai - yahi
+    dekhne ke liye. usage:
+    /api/broker/quote-debug?symbols=NSE:DIVISLAB26OCT9700CE
+    """
+    try:
+        import requests as _rq
+        from core.services.contract_pricer import _fyers_auth, _fyers_headers
+        app_id, token = _fyers_auth()
+        if not app_id or not token:
+            return {"error": "Fyers not connected (app_id/access_token missing)"}
+        url = "https://api-t1.fyers.in/api/v3/quotes?symbols=" + str(symbols)
+        r = _rq.get(url, headers=_fyers_headers(app_id, token), timeout=12)
+        try:
+            body = r.json()
+        except Exception:
+            body = str(r.text or "")[:600]
+        return {"status": r.status_code, "symbols": symbols, "body": body}
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 @router.post("/disconnect")
 def disconnect_broker(req: ConnectRequest):
     """Broker ka session tod do: stored creds delete + disconnect flag ON
