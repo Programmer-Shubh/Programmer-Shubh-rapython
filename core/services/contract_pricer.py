@@ -585,9 +585,18 @@ def _fyers_quote_ltp(symbol, expiry_ymd, contracts):
         if not syms:
             return res
         keys = list(syms.keys())
-        for _i in range(0, len(keys), 20):          # chunked (URL length safe)
-            chunk = keys[_i:_i + 20]
-            body = _fyers_quotes_raw(",".join(chunk), app_id, token)
+        for _i in range(0, len(keys), 10):          # chunked (URL length safe)
+            chunk = keys[_i:_i + 10]
+            body = {}
+            for _try in range(2):                   # 429 par ek retry + gap
+                body = _fyers_quotes_raw(",".join(chunk), app_id, token)
+                if _fy_quote_rows(body):
+                    break
+                try:
+                    import time as _t2
+                    _t2.sleep(0.6)
+                except Exception:
+                    pass
             quotes = _fy_quote_rows(body)
             if not quotes:
                 continue
@@ -603,6 +612,11 @@ def _fyers_quote_ltp(symbol, expiry_ymd, contracts):
                     if v > 0:
                         res[key] = v
                         break
+            try:
+                import time as _t3
+                _t3.sleep(0.35)                     # burst protection (Cloudflare 429)
+            except Exception:
+                pass
     except Exception:
         pass
     return res
@@ -893,9 +907,14 @@ def get_contract_ltps(symbol, contracts, expiry_ymd="", fresh=False, sources=Non
                     out[key] = round(float(fb), 2)
                     if sources is not None:
                         sources[key] = fsrc or "model"
-        # Stamp price cache
+        # Stamp price cache. MODEL/floor values kabhi stamp nahi hote (user
+        # rule 27-10: model Rs 1.5 ko 10s tak "live" bana kar chain/positions
+        # me dikhana galat hai) - agli call asli quote dobara try karegi.
         for key, val in out.items():
             if key in missing:
+                _src_k = (sources or {}).get(key, "")
+                if _src_k == "model":
+                    continue
                 pk = f"{sym}_{key[0]}_{key[1]}_{str(expiry_ymd or '')[:10]}"
                 _PRICE_CACHE[pk] = (now, val)
     return out
