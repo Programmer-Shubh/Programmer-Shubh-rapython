@@ -403,7 +403,7 @@
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols + Order</small></div>
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">Poori F&O list</span> <span id="r-otm20-note" class="small text-muted"></span> <label class="ms-1" style="font-size:12px" title="Sirf wo symbols dikhe jinka OTM-4 strike premium ₹15+ hai (model estimate)"><input type="checkbox" id="r-otm15-check" onchange="otm15Toggle()"> OTM-4 &gt; ₹15</label> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
+                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">Poori F&O list</span> <span id="r-otm20-note" class="small text-muted"></span> <label class="ms-1" style="font-size:12px" title="Sirf wo symbols dikhe jinka OTM-4 strike premium ₹15+ hai (model estimate)"><input type="checkbox" id="r-otm15-check" checked onchange="otm15Toggle()"> OTM-4 &gt; ₹15</label> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
                         <input type="hidden" id="r-order" value="CE-BUY"><input type="hidden" id="r-strike" value="ATM"><input type="hidden" id="r-otm" value="1"><input type="hidden" id="r-lots" value="1">
                         <div class="col-md-8 d-flex align-items-center"><small class="text-muted">Order/Strike/Lots — Template se auto (Strategy Templates neeche)</small></div>
                     </div>
@@ -822,8 +822,8 @@
         }
     }
     async function loadStrategySymbols(){
-        // OTM-4 > ₹15 filter DEFAULT ON (user rule 27-10-2026)
-        try{const c=document.getElementById('r-otm15-check');if(c){c.checked=localStorage.getItem('rOtm15')!=='0';if(c.checked)otm15Toggle();}}catch(e){}
+        // OTM-4 > ₹15 filter DEFAULT ON har load par (user rule 27-10-2026)
+        try{const c=document.getElementById('r-otm15-check');if(c){c.checked=true;otm15Toggle();}}catch(e){}
         // Step 1: INSTANT — static full F&O list, koi API wait nahi
         try{_fillStrategySyms([...new Set(_FNO_MASTER)].filter(Boolean).sort());}catch(e){}
         // Step 2: background me DB naye symbols merge (list rahegi dikhti)
@@ -834,9 +834,9 @@
         }catch(e){console.error('DB symbols merge fail (static list dikh raha hai)',e);}
     }
     // ---- OTM-4 > ₹15 symbol filter (user rule 27-10-2026) ----
-    // Default ON (user: "sahi ka tik default laga rahe") - localStorage me
-    // explicit '0' hone par hi off.
-    function otm15On(){try{const c=document.getElementById('r-otm15-check');const stored=localStorage.getItem('rOtm15');const v=c?c.checked:(stored!=='0');try{if(c)localStorage.setItem('rOtm15',v?'1':'0');}catch(e){}return v;}catch(e){return true;}}
+    // DEFAULT ON har page load par (user: "default tik laga hua dikhe").
+    // User session me untick kar sakta hai; reload par phir ON.
+    function otm15On(){try{const c=document.getElementById('r-otm15-check');const v=c?c.checked:true;try{if(c)localStorage.setItem('rOtm15',v?'1':'0');}catch(e){}return v;}catch(e){return true;}}
     async function otm15Toggle(){
         const v=otm15On();
         if(v&&(!window._otm4ok||!window._otm4ok._ts||Date.now()-window._otm4ok._ts>10*60*1000)){
