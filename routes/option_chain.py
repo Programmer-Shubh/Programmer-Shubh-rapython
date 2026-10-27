@@ -306,7 +306,7 @@ def get_live_chain(symbol: str, expiry: str = ""):
         from core.services.symbol_resolver import is_index_symbol as _is_idx
         if expiry_use and not _is_idx(sym):
             from core.services.contract_pricer import resolve_expiry_hint as _reh_c
-            expiry_use = _reh_c(sym, req_expiry or expiry_use) or expiry_use
+            expiry_use = _reh_c(sym, req_expiry or "") or expiry_use
     except Exception:
         pass
     # Fresh DB strikes only for the priced expiry (never another expiry's)
