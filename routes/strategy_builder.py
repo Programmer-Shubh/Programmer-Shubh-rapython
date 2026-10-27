@@ -210,6 +210,22 @@ def otm4_symbols():
                     continue
         except Exception:
             closes = {}
+        # Cloud DB me bhavcopy ho sakta hai khaali ho - LIVE spot fallback
+        # (batch parallel, LiveMarketData apne source-caches use karta hai).
+        _missing = [s for s in syms if closes.get(s, 0) <= 40]
+        if _missing:
+            try:
+                from core.services.live_market_data import LiveMarketData as _LMS
+                _spots = _LMS().get_live_spots_parallel(_missing, max_workers=8) or {}
+                for _sm, _sv in _spots.items():
+                    try:
+                        _sp = float((_sv or {}).get("spot") or 0)
+                        if _sp > 40 and _sm not in closes:
+                            closes[str(_sm).upper()] = _sp
+                    except Exception:
+                        continue
+            except Exception:
+                pass
         for s in syms:
             spot = closes.get(s) or 0.0
             if spot <= 40:
