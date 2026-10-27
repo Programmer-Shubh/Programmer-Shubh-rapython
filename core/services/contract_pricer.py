@@ -300,6 +300,11 @@ def _fyers_headers(app_id, token):
     return {
         "Authorization": f"{app_id}:{token}" if app_id else token,
         "Content-Type": "application/json",
+        # Cloudflare (Fyers data host) default python-requests UA ko 429/block
+        # kar deta hai - browser UA zaroori hai, warna /data/quotes dead.
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+        "Accept": "application/json, text/plain, */*",
         "version": "3",
     }
 
@@ -364,11 +369,21 @@ def _fyers_expiry_list() -> list:
 
 
 def _fyers_get(path: str, app_id: str, token: str, timeout: int = 8):
-    """GET on Fyers v3 host. Returns parsed json dict or {}."""
+    """GET on Fyers v3 host. Returns parsed json dict or {}.
+
+    429 (rate limit / Cloudflare) par ek chhota retry - warna ek hi burst
+    me poora quote tier chhoot jata tha aur order model price par chala
+    jata tha."""
     try:
         import requests
         url = f"https://api-t1.fyers.in{path}"
         r = requests.get(url, headers=_fyers_headers(app_id, token), timeout=timeout)
+        if getattr(r, "status_code", 0) == 429:
+            try:
+                time.sleep(0.35)
+            except Exception:
+                pass
+            r = requests.get(url, headers=_fyers_headers(app_id, token), timeout=timeout)
         if getattr(r, "status_code", 0) != 200:
             return {}
         body = r.json() or {}
