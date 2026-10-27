@@ -331,8 +331,12 @@ def _fyers_expiry_list() -> list:
     app_id, token = _fyers_auth()
     if not app_id or not token:
         return []
-    body = _fyers_get("/api/v3/options-chain?symbol=NSE:NIFTY50-INDEX&strikecount=1",
-                      app_id, token)
+    body = {}
+    for _p in ("/api/v3/options-chain?symbol=NSE:NIFTY50-INDEX&strikecount=1",
+               "/data/options-chain?symbol=NSE:NIFTY50-INDEX&strikecount=1"):
+        body = _fyers_get(_p, app_id, token)
+        if body:
+            break
     if not body:
         return []
     data = body.get("data") or {}
@@ -389,12 +393,15 @@ def _fyers_chain_ltp(symbol, expiry_ymd, contracts):
         if not under:
             return res
         exp = _fyers_expiry_param(expiry_ymd)
-        body = _fyers_get(f"/api/v3/options-chain?symbol={under}&strikecount=100&expiry={exp}",
-                          app_id, token)
-        if not body:
+        body = {}
+        for _p in (f"/api/v3/options-chain?symbol={under}&strikecount=100&expiry={exp}",
+                   f"/data/options-chain?symbol={under}&strikecount=100&expiry={exp}",
+                   f"/api/v3/options-chain?symbol={under}&strikecount=100",
+                   f"/data/options-chain?symbol={under}&strikecount=100"):
             # some deployments answer the chain without an expiry filter
-            body = _fyers_get(f"/api/v3/options-chain?symbol={under}&strikecount=100",
-                              app_id, token)
+            body = _fyers_get(_p, app_id, token)
+            if body:
+                break
         if not body:
             return res
         data = body.get("data") or {}
@@ -431,6 +438,28 @@ def _fyers_chain_ltp(symbol, expiry_ymd, contracts):
     return res
 
 
+_FYERS_QUOTE_BASES = ("/data/quotes?symbols=", "/api/v3/quotes?symbols=",
+                      "/api/v2/quotes?symbols=")
+
+
+def _fyers_quotes_raw(symbols_csv: str, app_id: str = "", token: str = ""):
+    """Fyers quote call with host-path fallback.
+
+    MARKET DATA v3 Fyers par `/data/quotes` par hai; `/api/v3/quotes` 404
+    deta hai. Isi 404 ki wajah se stock options ka koi quote tier kaam nahi
+    kar raha tha -> shared pricer MODEL (floor Rs 1.5) par chala jata tha
+    aur live LIMIT Rs 1.65 banta tha (asli premium Rs 40+)."""
+    if not app_id or not token:
+        app_id, token = _fyers_auth()
+    if not app_id or not token:
+        return {}
+    for _base in _FYERS_QUOTE_BASES:
+        body = _fyers_get(_base + symbols_csv, app_id, token)
+        if body:
+            return body
+    return {}
+
+
 def _fyers_quote_ltp(symbol, expiry_ymd, contracts):
     """{(strike, OPT): ltp} from Fyers /quotes for the EXACT contract symbols
     (works for stock options too, where no index chain exists)."""
@@ -453,7 +482,7 @@ def _fyers_quote_ltp(symbol, expiry_ymd, contracts):
         keys = list(syms.keys())
         for _i in range(0, len(keys), 20):          # chunked (URL length safe)
             chunk = keys[_i:_i + 20]
-            body = _fyers_get("/api/v3/quotes?symbols=" + ",".join(chunk), app_id, token)
+            body = _fyers_quotes_raw(",".join(chunk), app_id, token)
             data = body.get("data") or {}
             if not isinstance(data, dict):
                 continue

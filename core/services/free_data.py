@@ -276,7 +276,12 @@ def fetch_cloud_spot(symbol: str) -> dict:
             _app_id, _tok = _fyers_auth()
             _under = _fyers_underlying(symbol)
             if _app_id and _tok and _under:
-                _body = _fyers_get(f"/api/v3/quotes?symbols={_under}", _app_id, _tok, timeout=6)
+                _body = {}
+                for _p in (f"/data/quotes?symbols={_under}",
+                           f"/api/v3/quotes?symbols={_under}"):
+                    _body = _fyers_get(_p, _app_id, _tok, timeout=6)
+                    if _body:
+                        break
                 _node = (_body.get("data") or {}).get(_under) or {}
                 if isinstance(_node, dict):
                     for _f in ("last_price", "lastPrice", "ltp"):

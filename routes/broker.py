@@ -303,25 +303,28 @@ def live_status():
 
 @router.get("/quote-debug")
 def quote_debug(symbols: str = "NSE:DIVISLAB26OCT9700CE,NSE:NIFTY26O0322750CE"):
-    """Read-only diag: Fyers /quotes ka RAW jawab (koi secret nahi).
-
-    Stock option par paper/live price model-par kyun ja raha hai - yahi
-    dekhne ke liye. usage:
-    /api/broker/quote-debug?symbols=NSE:DIVISLAB26OCT9700CE
-    """
+    """Read-only diag: Fyers /quotes ke saare candidate paths ka jawab
+    (koi secret nahi). Stock option par paper/live price model-par kyun ja
+    raha hai - yahi dekhne ke liye."""
     try:
         import requests as _rq
-        from core.services.contract_pricer import _fyers_auth, _fyers_headers
+        from core.services.contract_pricer import _fyers_auth, _fyers_headers, _FYERS_QUOTE_BASES
         app_id, token = _fyers_auth()
         if not app_id or not token:
             return {"error": "Fyers not connected (app_id/access_token missing)"}
-        url = "https://api-t1.fyers.in/api/v3/quotes?symbols=" + str(symbols)
-        r = _rq.get(url, headers=_fyers_headers(app_id, token), timeout=12)
-        try:
-            body = r.json()
-        except Exception:
-            body = str(r.text or "")[:600]
-        return {"status": r.status_code, "symbols": symbols, "body": body}
+        out = {"symbols": symbols, "attempts": []}
+        for base in _FYERS_QUOTE_BASES:
+            url = "https://api-t1.fyers.in" + base + str(symbols)
+            try:
+                r = _rq.get(url, headers=_fyers_headers(app_id, token), timeout=12)
+                try:
+                    body = r.json()
+                except Exception:
+                    body = str(r.text or "")[:300]
+                out["attempts"].append({"path": base, "status": r.status_code, "body": body})
+            except Exception as e:
+                out["attempts"].append({"path": base, "error": str(e)[:150]})
+        return out
     except Exception as e:
         return {"error": str(e)[:200]}
 
