@@ -338,21 +338,29 @@ def get_live_chain(symbol: str, expiry: str = ""):
         src = "none"
     rows = []
     if all_strikes:
+        _pxsrc = {}
         try:
             from core.services.contract_pricer import get_contract_ltps
             contracts = [(s, "CE") for s in all_strikes] + [(s, "PE") for s in all_strikes]
-            px = get_contract_ltps(sym, contracts, expiry_use)
+            px = get_contract_ltps(sym, contracts, expiry_use, sources=_pxsrc)
         except Exception:
             px = {}
-        # Source label: broker token-quote active when a real token is saved
-        try:
-            from core.services.contract_pricer import _broker_cfg as _bcfg, _real_token as _rtok
-            _fc = _bcfg("fyers")
-            _ac = _bcfg("angel")
-            if _rtok(_fc.get("access_token", "")) or _rtok(_ac.get("access_token", "") or _ac.get("jwt", "")):
-                src = "broker"
-        except Exception:
-            pass
+        # HONEST source label (user rule 27-10-2026): pehle sirf token hone
+        # par "broker" likha jata tha, chahe price model/db fallback se aaya
+        # ho -> user Fyers se compare karke mismatch samajhta tha. Ab asli
+        # tier dikhta hai (broker-quote / nse-chain / db-close / model).
+        _vals = set(_pxsrc.values()) if _pxsrc else set()
+        if _vals:
+            _bk = sum(1 for v in _pxsrc.values() if v == "broker-quote")
+            _md = sum(1 for v in _pxsrc.values() if v == "model")
+            if _bk == len(_pxsrc):
+                src = "broker-quote"
+            elif _md == len(_pxsrc):
+                src = "model"
+            elif _bk and _md:
+                src = f"broker-quote {_bk}/{len(_pxsrc)} (baki model)"
+            else:
+                src = "+".join(sorted(_vals))
         for s in all_strikes:
             ce_ltp = px.get((float(s), "CE"), 0) or 0
             pe_ltp = px.get((float(s), "PE"), 0) or 0
