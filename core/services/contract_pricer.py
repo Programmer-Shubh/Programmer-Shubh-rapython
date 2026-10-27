@@ -895,13 +895,17 @@ def entry_price(symbol, strike, option_type, expiry_ymd, side="BUY",
     return round(float(price), 2), src
 
 
-def price_source_detail(symbol, strike, option_type, expiry_ymd):
+def price_source_detail(symbol, strike, option_type, expiry_ymd, fresh=True):
     """Human-readable origin of the current price (UI diagnostics).
-    source: broker-quote | nse-chain | db-close | model | cache | none"""
+    source: broker-quote | nse-chain | db-close | model | cache | none
+
+    fresh=False = 10s cache pehle (live order preview ke liye: cache bhi real
+    broker quote hi hai, aur rate-limited fresh call fail hone par bhi
+    price aur limit ek hi number par rehte hain)."""
     try:
         _srcs = {}
         _res = get_contract_ltps(symbol, [(strike, option_type)], expiry_ymd,
-                                 fresh=True, sources=_srcs)
+                                 fresh=fresh, sources=_srcs)
         ltp = None
         for _v in _res.values():
             ltp = float(_v)

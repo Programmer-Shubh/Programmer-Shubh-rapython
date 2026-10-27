@@ -1686,7 +1686,7 @@ async def place_live_order(req: LiveOrderRequest):
         _ltp_source = "none"
         try:
             from core.services.contract_pricer import price_source_detail
-            _det = price_source_detail(symbol, strike, opt, exp_ymd)
+            _det = price_source_detail(symbol, strike, opt, exp_ymd, fresh=False)
             _ltp_price = float(_det.get("ltp") or 0)
             _ltp_source = str(_det.get("source") or "none")
         except Exception:
