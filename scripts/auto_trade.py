@@ -59,6 +59,20 @@ def check_stoploss_target(confirm_secs=2):
             continue
         entry = float(trade["entry_price"])
         is_buy = trade["transaction_type"] == "BUY"
+        # BAD-CONTRACT / SPIKE GUARD (bug 27-10-2026): BANKNIFTY 54500 CE
+        # (expiry Aaj) ka price galti se NEXT-month contract ka (Rs 904 vs
+        # entry Rs 43) lag gaya -> SL ne 904 par kaat diya (fake -25,894).
+        # Ab agar price entry se 3x se zyada (SELL) / 1/3 se kam (BUY) ho to
+        # is scan me exit SKIP - agle scan par asli price par SL/TP check
+        # hoga; 3:15 square-off to hamesha chalta hai (position atki nahi).
+        try:
+            _ratio = (float(current) / entry) if entry > 0 else 0.0
+            if (not is_buy and _ratio >= 3.0) or (is_buy and _ratio <= 0.3333):
+                _skip(trade, f"price {float(current):.2f} entry {entry:.2f} se "
+                             f"{_ratio:.2f}x - bad contract/spike, exit skip (agle scan par check)")
+                continue
+        except Exception:
+            pass
         # Shared levels (utils.helpers.sltp_premium_level): backtest se identical.
         # Old inline copy yahan duplicate thi (drift ka khatra) - ab single source.
         from utils.helpers import sltp_premium_level as _lvl
