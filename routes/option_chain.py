@@ -538,6 +538,18 @@ def place_trade(req: TradeRequest):
             return {"error": "Option type must be CE or PE"}
         if req.quantity <= 0:
             return {"error": "Quantity must be > 0"}
+        # OTM cap guard (user rule 27-10-2026 "otm 20 filter"): live spot se
+        # strike >20% door ho to entry REJECTED - far-OTM junk (BOSCHLTD
+        # 47000 CE jab spot ~19K ho) paper jaise fantasy trades band.
+        try:
+            from core.services.live_market_data import LiveMarketData as _LMD
+            _spot2 = _LMD().get_spot_price(req.symbol) or 0
+            if _spot2 > 0:
+                _dpct = abs(float(req.strike) - _spot2) / _spot2 * 100.0
+                if _dpct > 20.0:
+                    return {"error": (f"{str(req.symbol).upper()} {int(float(req.strike))}{req.option_type} spot ₹{_spot2:g} se {_dpct:.1f}% door hai (>20% OTM cap) - SKIP. ATM ke najdeek strike chuno.")}
+        except Exception:
+            pass
         # Strike validation: reject 0, '01', missing, not aligned
         raw_strike = str(req.strike).strip() if req.strike is not None else ""
         if req.strike is None or req.strike <= 0:

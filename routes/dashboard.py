@@ -7,6 +7,26 @@ from utils.helpers import get_lot_size, format_currency, effective_lot_size
 router = APIRouter()
 
 
+def _otm_calc(trade_like: dict, spot_cache: dict):
+    """(spot, otm_pct) - strike live spot se kitne % door (user rule
+    27-10-2026 "otm 20" filter ke liye). spot=0 -> otm=None."""
+    sym = str(trade_like.get("symbol") or "").upper()
+    sp = spot_cache.get(sym)
+    if sp is None:
+        try:
+            from core.services.live_market_data import LiveMarketData
+            sp = LiveMarketData().get_spot_price(sym) or 0
+        except Exception:
+            sp = 0
+        spot_cache[sym] = float(sp or 0)
+    strike = trade_like.get("strike", trade_like.get("strike_price", 0)) or 0
+    try:
+        otm = round(abs(float(strike) - float(sp)) / float(sp) * 100, 1) if sp > 0 else None
+    except Exception:
+        otm = None
+    return float(sp or 0), otm
+
+
 
 # Dashboard uses LiveMarketData + nse_client centrally; no duplicate NSE fetchers here.
 
@@ -148,6 +168,11 @@ def get_portfolio():
         pass
     positions = trade_model.get_open_positions_with_pnl()
     total_pnl = sum(p["unrealized_pnl"] for p in positions)
+    # OTM% (user "otm 20" filter): strike vs live spot (per-symbol cache)
+    _sc = {}
+    for _p in positions:
+        _otm_calc({"symbol": _p["trade"].get("symbol"),
+                   "strike": _p["trade"].get("strike_price")}, _sc)
     return {
         "open_count": len(positions),
         "total_pnl": round(total_pnl, 2),
@@ -175,6 +200,8 @@ def get_portfolio():
                 "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
                 "expiry_date": t["trade"].get("expiry_date", ""),
                 "strategy_id": t["trade"].get("strategy_id", 0) or 0,
+                "spot": _sc.get(str(t["trade"]["symbol"]).upper()),
+                **{"otm_pct": _otm_calc({"symbol": t["trade"].get("symbol"), "strike": t["trade"].get("strike_price")}, _sc)[1]},
             }
             for t in positions
         ],
@@ -193,6 +220,10 @@ def get_trade_history():
         _smap = {}
     _shown = closed[:50]
     _w = sum(1 for t in _shown if float(t.get("pnl") or 0) > 0)
+    # OTM% (user "otm 20" filter)
+    _sc = {}
+    for _t in _shown:
+        _otm_calc({"symbol": _t.get("symbol"), "strike": _t.get("strike_price")}, _sc)
     return {
         "count": len(closed),
         "total_pnl": round(total_pnl, 2),
@@ -222,6 +253,8 @@ def get_trade_history():
                 "qty": t.get("quantity", 1),
                 "strategy_id": int(t.get("strategy_id") or 0),
                 "strategy_name": _smap.get(int(t.get("strategy_id") or 0), ""),
+                "spot": _sc.get(str(t.get("symbol")).upper()),
+                "otm_pct": _otm_calc({"symbol": t.get("symbol"), "strike": t.get("strike_price")}, _sc)[1],
             }
             for t in closed[:50]
         ],

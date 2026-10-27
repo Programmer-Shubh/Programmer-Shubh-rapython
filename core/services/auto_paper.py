@@ -514,6 +514,22 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
                 strike = atm + (dist * step if opt == "CE" else -dist * step)
             elif sel == "itm":
                 strike = atm + (-dist * step if opt == "CE" else dist * step)
+            # ---- OTM cap guard (user rule 27-10-2026: "otm 20 filter") ----
+            # Strike live spot se otm_pct_cap % se DUR ho to leg SKIP - far
+            # OTM junk stock strikes (BOSCHLTD 47000 CE jab spot ~19K hai)
+            # auto fire nahi honge. Cap strategy ke advanced_options me
+            # 'otm_pct_cap' se set ho sakta hai (default 20).
+            try:
+                _cap = float(((s.get("advanced_options") or {}) or {}).get("otm_pct_cap") or 20.0)
+            except Exception:
+                _cap = 20.0
+            try:
+                _dist_pct = abs(float(strike) - float(spot)) / float(spot) * 100.0
+            except Exception:
+                _dist_pct = 0.0
+            if _dist_pct > _cap:
+                notes.append(f"{s.get('name')}: {sym} {int(strike)}{opt} spot-{spot:g} ({_dist_pct:.1f}% OTM > cap {_cap:g}%) - SKIP")
+                continue
             # ---- LIVE leg (Live toggle ON + real broker) ----
             if _live_mode:
                 _done = False
