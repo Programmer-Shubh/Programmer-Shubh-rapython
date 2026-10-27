@@ -86,16 +86,42 @@ def stock_monthly_expiry(symbol: str, hint: str = "") -> str:
     if explicit:
         # Explicit date same month ka ho to us month ka real expiry; warna
         # (purani/ghayr-month date) aaj ke baad ka nearest monthly.
-        if d <= today:
+        if d < today:
             d = _last_tue(*_next_month(today.year, today.month))
-    elif d <= today:
-        # EXPIRY DAY par bhi next month: Fyers/NSE aaj-expiry STOCK options
-        # ko physically-settled contract ke roop me BLOCK karte hain
-        # ("Current month physically settled contracts are blocked"), isliye
-        # expiry ke din stock ka tradable contract NEXT month hi hota hai.
-        # Paper + live dono same resolver use karte hain -> parity intact.
+    elif d < today:
         d = _last_tue(*_next_month(today.year, today.month))
     return d.strftime("%Y-%m-%d")
+
+
+def stock_order_expiry(symbol: str, hint: str = "") -> str:
+    """NEW ORDER ke liye stock expiry: expiry ke din NEXT month.
+
+    Fyers/NSE aaj-expiry STOCK options ko physically-settled contract ke
+    roop me block karte hain ("Current month physically settled contracts
+    are blocked") - isliye expiry ke din tradable stock contract NEXT month
+    hi hota hai. Index (BANKNIFTY/NIFTY) cash-settled hain - un par roll
+    NAHI lagta (wo aaj bhi trade karte hain).
+
+    Positions/pricing ke liye stock_monthly_expiry hi chalta hai (aaj ki
+    real monthly expiry deta hai), taaki expiry-day open position ka
+    price galat contract par na chala jaye."""
+    try:
+        from utils.helpers import OPTION_INDICES
+        if str(symbol or "").upper() in OPTION_INDICES:
+            return stock_monthly_expiry(symbol, hint)
+        e = stock_monthly_expiry(symbol, hint)
+        today = _today_ist()
+        d = _dt.datetime.strptime(str(e)[:10], "%Y-%m-%d").date()
+        if d <= today:
+            import calendar as _cal
+            y, m = _next_month(today.year, today.month)
+            dd = _dt.date(y, m, _cal.monthrange(y, m)[1])
+            while dd.weekday() != 1:      # last Tuesday
+                dd -= _dt.timedelta(days=1)
+            return dd.strftime("%Y-%m-%d")
+        return e
+    except Exception:
+        return stock_monthly_expiry(symbol, hint)
 
 
 def is_explicit_date(hint: str) -> bool:
@@ -255,7 +281,7 @@ async def resolve_contract(broker: str, creds: dict, underlying: str,
         # (stocks/BANKNIFTY/FINNIFTY me weekly expiry hoti hi nahi).
         # Shared monthly resolver.
         if not has_weekly_options(underlying):
-            use_exp = stock_monthly_expiry(underlying, expiry_hint)
+            use_exp = stock_order_expiry(underlying, expiry_hint)
             return {"ok": True,
                     "refs": {"symbol": _fyers_symbol(underlying, use_exp, strike, opt)},
                     "expiry_used": use_exp,
