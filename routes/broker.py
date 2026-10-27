@@ -329,6 +329,41 @@ def quote_debug(symbols: str = "NSE:DIVISLAB26OCT9700CE,NSE:NIFTY26O0322750CE"):
         return {"error": str(e)[:200]}
 
 
+@router.get("/orders")
+async def broker_orders():
+    """Read-only: Fyers order book (aaj ke orders - status, avg fill, time).
+    Website ke entry price/time ko broker se compare karne ke liye."""
+    out = {"broker": "fyers", "orders": []}
+    try:
+        if not _real_token("fyers"):
+            return {"broker": "fyers", "error": "Fyers REAL session nahi hai"}
+        cfg = _get_config("fyers") or {}
+        fy = _fyers_client(cfg)
+        ob = await fy.get_order_book()
+        rows = ((ob or {}).get("data") or {}).get("orderBook") or []
+        clean = []
+        for r in (rows if isinstance(rows, list) else []):
+            if not isinstance(r, dict):
+                continue
+            clean.append({
+                "id": str(r.get("id") or r.get("orderId") or ""),
+                "symbol": r.get("symbol") or "",
+                "side": ("SELL" if int(r.get("side") or 1) == -1 else "BUY"),
+                "qty": r.get("qty"), "filled": r.get("filledQty"),
+                "limit_price": r.get("limitPrice"),
+                "avg_fill": r.get("averagePrice"),
+                "status": r.get("status"),
+                "message": r.get("statusMessage") or r.get("message") or "",
+                "order_time": r.get("orderDateTime") or r.get("orderTime") or "",
+                "product": r.get("productType"), "type": r.get("type"),
+            })
+        out["orders"] = clean
+        out["count"] = len(clean)
+    except Exception as e:
+        out["error"] = str(e)[:200]
+    return out
+
+
 @router.post("/disconnect")
 def disconnect_broker(req: ConnectRequest):
     """Broker ka session tod do: stored creds delete + disconnect flag ON
@@ -1608,24 +1643,34 @@ async def place_live_order(req: LiveOrderRequest):
             strike = align_strike_price(symbol, strike)
         except Exception:
             pass
-        # Hard floor: ₹1-2 lottery tickets (far-OTM) - dry_run aur real dono blocked
+        # Hard floor: Rs 1-2 lottery tickets (far-OTM) - dry_run aur real dono
+        # blocked. Pehle ye sirf MODEL premium se check hota tha (BANKNIFTY
+        # 54700 CE pe model Rs 16.82 < 120 => asli quote bhi nahi dekha gaya)
+        # aur expiry hint bhi raw 'weekly' jata tha. Ab RESOLVED expiry +
+        # REAL quote pehle, model sirf tab jab real quote fail ho.
+        _exp_hint = str(req.expiry or "").strip()[:10]
+        if _exp_hint:
+            try:
+                from core.services.contract_pricer import resolve_expiry_hint as _reh_f
+                exp_ymd_f = _reh_f(symbol, _exp_hint)
+            except Exception:
+                exp_ymd_f = _exp_hint
+        else:
+            exp_ymd_f = ""
         try:
             from utils.helpers import check_min_premium as _cmp3
-            from core.models.trade_model import TradeModel as _TM3
+            from core.services.contract_pricer import get_contract_ltp as _gcl
             _px3 = 0.0
             try:
-                _px3 = float(_TM3().get_option_premium(symbol, opt, strike, req.expiry or "") or 0)
+                _px3 = float(_gcl(symbol, strike, opt, exp_ymd_f, fresh=True) or 0)
             except Exception:
                 _px3 = 0.0
             if _px3 <= 0:
                 try:
-                    from core.services.live_market_data import LiveMarketData as _LM3
-                    from utils.helpers import model_premium as _mp3
-                    _sp3 = _LM3().get_spot_price(symbol) or 0
-                    if _sp3:
-                        _px3 = float(_mp3(_sp3, strike, 7, opt, symbol=symbol) or 0)
+                    from core.models.trade_model import TradeModel as _TM3
+                    _px3 = float(_TM3().get_option_premium(symbol, opt, strike, exp_ymd_f) or 0)
                 except Exception:
-                    pass
+                    _px3 = 0.0
             _merr3 = _cmp3(_px3, opt) if _px3 > 0 else None
             if _merr3:
                 return {"error": _merr3}
