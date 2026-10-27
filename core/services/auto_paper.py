@@ -441,7 +441,7 @@ def _intraday_signal(sid, s, today):
         return None, f"signal-check fail: {e}"[:120]
 
 
-def _execute_legs(s, legs, db, tm, today):
+def _execute_legs(s, legs, db, tm, today, force_paper=False):
     """Shared leg executor: live ATM + place_trade per leg. Returns (placed, notes).
 
     LIVE ROUTING (user fix): is strategy ka Live toggle ON ho + khud REAL
@@ -449,7 +449,13 @@ def _execute_legs(s, legs, db, tm, today):
     gayengi (poori live sanity-chain: lot-guard, entry cutoff, real
     LTP, fill-verify) — pehle ye hamesha sirf PAPER me jaati thi, isliye
     Live-ON strategy kabhi broker me order nahi janti thi. Live fail ho to
-    wadi ki purani tarah paper leg lagegi + error note me raas reason."""
+    wadi ki purani tarah paper leg lagegi + error note me raas reason.
+
+    force_paper=True (sirf routes/strategies.py ka manual Paper button):
+    live detection pura ignore - legs HAMESHA paper me jaati hain. Paper
+    button ka FORCE par koi REAL broker order kabhi nahi jayega (real money
+    sirf Live button / live worker se). Default False = bilkul purana
+    behavior, auto-worker/live-parity bilkul untouched."""
     import json as _js
     from core.services.live_market_data import LiveMarketData
     from utils.helpers import get_strike_step
@@ -486,6 +492,9 @@ def _execute_legs(s, legs, db, tm, today):
             except Exception:
                 _live_mode = False
     except Exception:
+        _live_mode = False
+    if force_paper and _live_mode:
+        # Paper button per kabhi real order nahi - live routing yahan band.
         _live_mode = False
     if _live_mode:
         notes.append(f"{s.get('name')}: LIVE route via {_live_broker}")

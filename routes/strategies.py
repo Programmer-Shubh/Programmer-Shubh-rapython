@@ -599,6 +599,19 @@ def strategy_live_state(strat_id: int):
     return {"id": strat_id, "live_enabled": _strat_live_enabled(db, strat_id)}
 
 
+def _both_modes_on(db, strat_id: int) -> bool:
+    """Paper (status=active) + Live (live-toggle) DONO ON? Trading Center
+    sync-rule (27-10-2026) ke liye: dono ON to manual paper button bhi
+    turant paper copy lagayega (Live button ki tarah), signal-skip par bhi."""
+    try:
+        row = db.fetch_one("SELECT status FROM strategies WHERE id=?", [strat_id])
+        if not row or str(row.get("status") or "").lower() != "active":
+            return False
+        return bool(_strat_live_enabled(db, strat_id))
+    except Exception:
+        return False
+
+
 @router.post("/{strat_id}/live-toggle")
 def strategy_live_toggle(strat_id: int, req: LiveToggleRequest):
     """Per-strategy LIVE trade ON/OFF. OFF par is strategy ka live order
@@ -1328,6 +1341,10 @@ def strategy_paper_trade(strat_id: int, body: dict = {}):
         if _force:
             # Manual override: gate skip, saari non-AUTO legs seedha lagao
             # (strike-step/expiry/rollover backend _execute_legs me sahi).
+            # force_paper=True: Paper button ka FORCE kabhi REAL broker order
+            # nahi jata (real money sirf Live button se) - pehle force par
+            # bhi live routing hoti thi, isliye Paper+Live dono ON hone par
+            # paper button dabaane se broker me order lag jata tha.
             try:
                 _legs = _js.loads(row.get("legs") or "[]")
             except Exception:
@@ -1340,16 +1357,66 @@ def strategy_paper_trade(strat_id: int, body: dict = {}):
             from core.services.auto_paper import _execute_legs as _ex
             from core.models.trade_model import TradeModel as _TM
             from core.services.auto_paper import _ist_today as _today
-            _placed, _notes = _ex(row, _legs, db, _TM(), _today())
+            _placed, _notes = _ex(row, _legs, db, _TM(), _today(), force_paper=True)
             res = {"placed": _placed, "notes": _notes}
         else:
             res = _pl(strat_id, signal_check=_gate) or {}
+            # DONO MODES ON (user rule 27-10-2026: dono ON to DONO orders):
+            # signal gate skip kar de to bhi paper copy turant lagao - pehle
+            # yahi button "aaj koi signal nahi" bolke skip karta tha jabki
+            # Live button blind order lagata tha (asymmetry = user complaint:
+            # "kewal broker me order lagta hai, paper me nahi").
+            # Guards double-guarded (fail-closed): open position / max-day /
+            # 3PM cutoff / draft strategy par force NAHI - double trade na ho.
+            try:
+                _pcount = len(res.get("placed") or [])
+            except Exception:
+                _pcount = 0
+            if not _pcount and _both_modes_on(db, strat_id):
+                try:
+                    from core.services.sl_monitor import entry_open_ist as _eok7
+                    from core.services.auto_paper import _ist_today as _today7
+                    from core.services.auto_paper import _execute_legs as _ex7
+                    from core.models.trade_model import TradeModel as _TM7
+                    _g_open = db.fetch_one(
+                        "SELECT id FROM paper_trades WHERE strategy_id=? AND status='open' LIMIT 1",
+                        [strat_id])
+                    _g_cnt = db.fetch_one(
+                        "SELECT COUNT(*) as c FROM paper_trades WHERE strategy_id=? AND entry_date=?",
+                        [strat_id, _today7()])
+                    try:
+                        _g_rm = _js.loads(row.get("risk_management") or "{}")
+                    except Exception:
+                        _g_rm = {}
+                    _g_max = max(1, int((_g_rm or {}).get("max_trades_per_day") or 3))
+                    _g_ok = ((not _g_open)
+                             and (not _g_cnt or int(_g_cnt.get("c", 0) or 0) < _g_max)
+                             and bool(_eok7()))
+                    if _g_ok:
+                        try:
+                            _g_legs = _js.loads(row.get("legs") or "[]")
+                        except Exception:
+                            _g_legs = []
+                        _g_legs = [l for l in (_g_legs or [])
+                                   if str((l or {}).get("option_type") or "").upper() in ("CE", "PE")]
+                        if _g_legs:
+                            _plc, _ntc = _ex7(row, _g_legs, db, _TM7(), _today7(),
+                                              force_paper=True)
+                            if _plc:
+                                res = {"placed": _plc, "notes": _ntc,
+                                       "forced_by": "paper+live both ON (sync)"}
+                            else:
+                                res.setdefault("notes", []).extend(str(x) for x in _ntc)
+                except Exception as _fe7:
+                    res.setdefault("notes", []).append(f"both-ON paper sync fail: {str(_fe7)[:80]}")
         out = {"strategy_id": strat_id,
                "strategy_name": row.get("name") or "",
                "symbol": row.get("symbol") or "",
                "gate": _gate, "forced": bool(_force),
                "placed": res.get("placed", []),
                "notes": res.get("notes", [])}
+        if res.get("forced_by"):
+            out["forced_by"] = res.get("forced_by")
         try:
             out["saved_bt"] = _bt_summary(row)
         except Exception:

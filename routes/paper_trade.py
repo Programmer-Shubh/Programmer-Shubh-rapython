@@ -62,6 +62,12 @@ def get_open_trades():
     except Exception:
         pass
     positions = trade_model.get_open_positions_with_pnl(auto_exit=False)
+    # Strategy name map (Open Positions me naam dikhane ke liye - 26-10)
+    try:
+        _srows = trade_model.db.fetch_all("SELECT id, name FROM strategies") or []
+        _smap = {int(r.get("id") or 0): str(r.get("name") or "") for r in _srows}
+    except Exception:
+        _smap = {}
     total_pnl = sum(p["unrealized_pnl"] for p in positions)
     # Realistic total (exit slippage + costs net) — backtest net se compare
     # karne ke liye; gross total_pnl backward-compat ke liye rakha hai.
@@ -98,6 +104,7 @@ def get_open_trades():
                 "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
                 "expiry_date": t["trade"].get("expiry_date", ""),
                 "strategy_id": t["trade"].get("strategy_id", 0) or 0,
+                "strategy_name": _smap.get(int(t["trade"].get("strategy_id") or 0), ""),
             }
             for t in positions
         ],

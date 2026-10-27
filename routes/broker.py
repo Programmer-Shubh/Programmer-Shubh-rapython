@@ -1418,6 +1418,52 @@ def _latest_paper_entry(strategy_id: int, symbol: str, opt: str) -> dict:
     except Exception:
         return {}
 
+def _paper_mirror_insert(strategy_id, tm, adj, costs, _dt, lots, lot, symbol,
+                         opt, strike, exp_ymd, txn, sl, tp):
+    """LIVE order ka PAPER mirror (user rule: Paper + Live dono ON to DONO
+    orders). Live insert ke turant baad strategy_id se PAPER trade bhi likhi
+    jati hai - entry_price bilkul live `adj` ke barabar (ek hi reference
+    price par sync). Sirf ACTIVE strategy par mirror chalta hai (paper OFF
+    = status paused), aur KOI bhi failure SILENT nahi: (paper_tid, note)
+    wapas - note place-live response ke paper_mirror_note field me dikhega,
+    jisse user ko turant pata chalta hai paper copy kyun nahi bana (pehle
+    `except: pass` tha - paper gayab + wajah bhi chhup jati thi)."""
+    try:
+        sid = int(strategy_id or 0)
+    except Exception:
+        sid = 0
+    if not sid:
+        return 0, "strategy_id nahi mila - paper mirror skip"
+    try:
+        from core.models.database import Database as _DBm
+        _srow = _DBm.get_instance().fetch_one("SELECT status FROM strategies WHERE id=?", [sid])
+        if not _srow:
+            return 0, f"strategy {sid} DB me nahi mili - paper mirror skip"
+        _status = str(_srow.get("status") or "").lower()
+        if _status and _status != "active":
+            return 0, f"strategy status='{_srow.get('status')}' (Paper Trade OFF?) - paper mirror skip"
+        try:
+            paper_tid = tm.insert_trade({
+                "symbol": symbol, "option_type": opt, "strike_price": strike,
+                "expiry_date": exp_ymd, "transaction_type": txn,
+                "quantity": lots, "lot_size": lot, "entry_price": adj,
+                "stop_loss": float(sl or 0), "target": float(tp or 0),
+                "total_cost": float(costs.get("total", 0) or 0),
+                "entry_date": _dt.datetime.now().strftime("%Y-%m-%d"),
+                "trade_mode": "paper", "broker_order_id": "",
+                "strategy_id": sid,
+            })
+            return int(paper_tid or 0), ""
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return 0, f"paper mirror insert FAIL: {str(e)[:80]}"
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return 0, f"paper mirror check fail: {str(e)[:80]}"
+
+
 @router.post("/place-live")
 async def place_live_order(req: LiveOrderRequest):
     """REAL live order execution (real money). Safety chain:
@@ -1908,25 +1954,14 @@ async def place_live_order(req: LiveOrderRequest):
             "strategy_id": req.strategy_id,
         })
         # Mirror: strategy me Paper ON bhi hai to ek PAPER COPY bhi dalo
-        # (user rule: dono ON to ek hi signal par DONO orders dikhen/lagen)
-        _paper_tid = 0
-        try:
-            if req.strategy_id:
-                from core.models.database import Database as _DBm
-                _srow = _DBm.get_instance().fetch_one("SELECT status FROM strategies WHERE id=?", [req.strategy_id])
-                if _srow and str(_srow.get("status") or "active") == "active":
-                    _paper_tid = tm.insert_trade({
-                        "symbol": symbol, "option_type": opt, "strike_price": strike,
-                        "expiry_date": exp_ymd, "transaction_type": txn,
-                        "quantity": lots, "lot_size": lot, "entry_price": adj,
-                        "stop_loss": float(req.stop_loss or 0), "target": float(req.take_profit or 0),
-                        "total_cost": costs["total"],
-                        "entry_date": _dt.datetime.now().strftime("%Y-%m-%d"),
-                        "trade_mode": "paper", "broker_order_id": "",
-                        "strategy_id": req.strategy_id,
-                    })
-        except Exception:
-            pass
+        # (user rule: dono ON to ek hi signal par DONO orders dikhen/lagen).
+        # Fail SILENT NAHI: note response me jata hai (paper_mirror_note) -
+        # pehle `except: pass` tha, isliye agar mirror fail hota to sirf
+        # live order dikhta tha, paper gayab - aur reason bhi chhup jata tha.
+        _paper_tid, _pm_note = _paper_mirror_insert(
+            req.strategy_id, tm, adj, costs, _dt, lots, lot,
+            symbol, opt, strike, exp_ymd, txn,
+            float(req.stop_loss or 0), float(req.take_profit or 0))
         _lresp = {"success": True, "trade_id": tid, "broker_order_id": order_id,
                 "broker": broker, "broker_symbol": broker_ref, "quantity": broker_qty,
                 "entry_price": round(adj, 2), "mode": "live",
@@ -1941,6 +1976,8 @@ async def place_live_order(req: LiveOrderRequest):
         if _paper_tid:
             _lresp["paper_trade_id"] = _paper_tid
             _lresp["synced_with_paper"] = True
+        if _pm_note:
+            _lresp["paper_mirror_note"] = _pm_note
         if _order_attempts:
             _lresp["order_attempts"] = _order_attempts
         # Paper-vs-live price check: same strategy + same symbol + same option

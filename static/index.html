@@ -1958,7 +1958,7 @@ let _lastOpenTrdHTML = null;
         const bt=r.saved_bt||{};const btH=(bt.trades!=null)?('\nSaved BT: '+bt.trades+' trades • '+F(bt.net_pnl||0)+' • Win '+(bt.win_rate||0)+'%'):'';
         if(r.placed&&r.placed.length){
             const lines=r.placed.map(p=>'Trade #'+p.trade_id+' @ Rs'+p.entry+(p.rolled_to?(' (expiry '+p.rolled_to+')'):'')+(p.strike_snapped?(' [strike '+p.strike_snapped.from+'→'+p.strike_snapped.to+']'):''));
-            alert('Backtest signal ('+(r.gate==='intraday'?'live intraday':'daily')+') par paper trade lag gaya!\n'+lines.join('\n')+btH+'\n\nOpen Positions me dikhega.');
+            alert('Backtest signal ('+(r.gate==='intraday'?'live intraday':'daily')+') par paper trade lag gaya!\n'+lines.join('\n')+btH+(r.forced_by?('\n\n('+r.forced_by+')'):'')+'\n\nOpen Positions me dikhega.');
         }else{
             const why=(r.notes||[]).join('; ')||'aaj koi signal nahi';
             if(!force&&confirm('Backtest ke anusar aaj entry nahi banti:\n'+why+btH+'\n\nPhir bhi FORCE paper trade lagau? (signal ignore hoga)')){ptFromStrat(id,true);return;}
@@ -2478,7 +2478,7 @@ let _lastOpenTrdHTML = null;
                 const base={symbol:s.symbol,option_type:opt,transaction_type:txn,quantity:parseInt(leg.lots)||1,strike:0,expiry:leg.expiry||'weekly',stop_loss:sl,take_profit:tp,trade_type:ttype,strategy_id:id};
                 const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:false})});
                 if(r.error){alert('Live error (leg '+(i+1)+'): '+r.error);break;}
-                sent.push('Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id+' @ Rs'+r.entry_price);
+                sent.push('Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id+' @ Rs'+r.entry_price+(r.paper_trade_id?('| Paper copy Trade #'+r.paper_trade_id+' (sync)'):'')+(r.paper_mirror_note?(' | PAPER MIRROR: '+r.paper_mirror_note):''));
                 rows.push({leg:i+1,sym:s.symbol,opt:opt,strike:(r.strike!=null?r.strike:previews[i].strike),exp:(r.expiry||previews[i].expiry),ltp:(r.ltp!=null?r.ltp:previews[i].ltp),live:r.entry_price,paper:(r.paper_ref?r.paper_ref.entry_price:null),delta:(r.paper_live_delta!=null?r.paper_live_delta:null)});
                 if(r.rolled_to)rolledMsg='Strategy next expiry '+r.rolled_to+' par shift hui';
             }
