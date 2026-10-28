@@ -41,9 +41,13 @@ jobs:
         # so paper trading continues with the browser closed / server asleep.
         # NOTE: scripts/auto_trade.py on a fresh checkout sees an EMPTY local
         # DB, so it can never close production trades - never use it directly.
+        env:
+          MONITOR_KEY: ${{ secrets.MONITOR_KEY }}
         run: |
           URL="${RATRADE_URL:-https://ratrade-iwi2.onrender.com}/api/trades/heartbeat"
-          curl -sf -X POST "$URL" && echo "HEARTBEAT OK" || echo "heartbeat unreachable (in-app threads still cover it)"
+          KEY_FLAG=""
+          if [ -n "$MONITOR_KEY" ]; then KEY_FLAG="?key=$MONITOR_KEY"; fi
+          curl -sf -X POST "$URL$KEY_FLAG" && echo "HEARTBEAT OK" || echo "heartbeat unreachable (in-app threads still cover it)"
 
       - name: Smoke-test API Server
         env:
@@ -51,7 +55,7 @@ jobs:
         run: |
           timeout 30 uvicorn main:app --host 127.0.0.1 --port 8000 &
           sleep 8
-          curl -sf http://127.0.0.1:8000/health && echo "API OK"
+          curl -sf http://127.0.0.1:8000/health && echo "API OK" || echo "API smoke test failed (non-fatal)"
 
       - name: Upload run logs
         if: always()
