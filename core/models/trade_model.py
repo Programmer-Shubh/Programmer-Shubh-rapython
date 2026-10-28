@@ -605,7 +605,7 @@ class TradeModel:
         # Key WITH expiry: same strike, different expiry must not share premium (value-mix bug)
         cache_key = f"{symbol}_{option_type}_{strike}_{expiry or ''}"
         try:
-            from core.services.contract_pricer import get_contract_ltp
+            from core.services.contract_pricer import get_contract_ltp, _fallback_ltp
             # Positions always read FRESH (no 10s cache) so the table ticks live
             live = get_contract_ltp(symbol, strike, option_type, expiry, fresh=True)
             if live and float(live) > 0:
@@ -648,6 +648,16 @@ class TradeModel:
                         self._last_premiums[cache_key] = val
                 else:
                     self._last_premiums[cache_key] = val
+                return val
+            # ---- FALLBACK: live quote fail (Fyers 429 / empty) ----
+            # DB close (today) -> model(current IV, real DTE). Never return
+            # None here - SL monitor skips trade when price is None and
+            # exit never triggers (DIVISLAB 10000 CE exited at 245 instead
+            # of SL ~200 because live quote was missing).
+            fb, fsrc = _fallback_ltp(symbol, strike, option_type, expiry, with_source=True)
+            if fb and float(fb) > 0:
+                val = float(fb)
+                self._last_premiums[cache_key] = val
                 return val
         except Exception:
             pass
