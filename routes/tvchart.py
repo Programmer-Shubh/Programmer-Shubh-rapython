@@ -224,7 +224,25 @@ def chart_data(symbol: str = "NIFTY", start: str = "2026-08-01", end: str = "202
                          if i < len(ef) and ef[i]],
             "ema_slow": [{"time": c["time"], "value": round(es[i], 2)} for i, c in enumerate(candles)
                          if i < len(es) and es[i]],
+            # MACD (12,26,9) - histogram + signal line for buy/sell cross signals
+            "macd": [],
+            "macd_signal": [],
+            "macd_hist": [],
         }
+        try:
+            _macd = ind.calculate_macd(closes, 12, 26, 9) or {}
+            _macd_line = _macd.get("macd", []) or []
+            _macd_sig = _macd.get("signal", []) or []
+            _macd_hist = _macd.get("histogram", []) or []
+            for i, c in enumerate(candles):
+                if i < len(_macd_line) and _macd_line[i] is not None:
+                    series["macd"].append({"time": c["time"], "value": round(float(_macd_line[i]), 2)})
+                if i < len(_macd_sig) and _macd_sig[i] is not None:
+                    series["macd_signal"].append({"time": c["time"], "value": round(float(_macd_sig[i]), 2)})
+                if i < len(_macd_hist) and _macd_hist[i] is not None:
+                    series["macd_hist"].append({"time": c["time"], "value": round(float(_macd_hist[i]), 2)})
+        except Exception:
+            pass
         # ---- Zero-Lag Trend (AlgoAlpha port) on chart timeframe ----
         zerolag = {"zlema_bull": [], "zlema_bear": [], "upper": [], "lower": [],
                    "buy": [], "sell": [], "flip_up": [], "flip_down": [],

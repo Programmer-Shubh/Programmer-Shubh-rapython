@@ -295,7 +295,7 @@ def get_trade_history():
                 "status": t.get("exit_status", "closed"),
                 "qty": t.get("quantity", 1),
                 "strategy_id": int(t.get("strategy_id") or 0),
-                "strategy_name": _smap.get(int(t.get("strategy_id") or 0), ""),
+                "strategy_name": _smap.get(int(t.get("strategy_id") or 0)),  # None when not found -> fallback below
                 "spot": _sc.get(str(t.get("symbol")).upper()),
                 "otm_pct": _otm_calc({"symbol": t.get("symbol"), "strike": t.get("strike_price")}, _sc)[1],
             }
