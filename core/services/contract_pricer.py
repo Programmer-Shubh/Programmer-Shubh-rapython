@@ -132,9 +132,9 @@ def resolve_weekly_expiry(symbol: str = "") -> str:
     Yahi shared date paper, chain aur live order teeno use karte hain.
     Expiry ke DIN stock ka entry NEXT month (physically-settled block)."""
     try:
-        from core.services.symbol_resolver import stock_order_expiry, has_weekly_options
+        from core.services.symbol_resolver import order_expiry, stock_order_expiry, has_weekly_options
         if not has_weekly_options(symbol):
-            _se = stock_order_expiry(symbol)
+            _se = order_expiry(symbol)
             if _se:
                 return _se[:10]
     except Exception:
@@ -184,8 +184,8 @@ def resolve_expiry_hint(symbol: str = "", hint: str = "") -> str:
                 # STOCK: koi bhi date -> us month ka REAL monthly expiry
                 # (weekly weekday snap stock par invalid contract banata tha).
                 if not _is_index(symbol):
-                    from core.services.symbol_resolver import stock_order_expiry
-                    _se = stock_order_expiry(symbol, _d.strftime("%Y-%m-%d"))
+                    from core.services.symbol_resolver import order_expiry
+                    _se = order_expiry(symbol, _d.strftime("%Y-%m-%d"))
                     if _se:
                         return _se[:10]
                 # Explicit date ka snap guard: date jo is symbol ki REAL
@@ -200,8 +200,8 @@ def resolve_expiry_hint(symbol: str = "", hint: str = "") -> str:
     if h.lower().startswith("month"):
         if not _is_index(symbol):
             try:
-                from core.services.symbol_resolver import stock_order_expiry
-                _se = stock_order_expiry(symbol)
+                from core.services.symbol_resolver import order_expiry
+                _se = order_expiry(symbol)
                 if _se:
                     return _se[:10]
             except Exception:

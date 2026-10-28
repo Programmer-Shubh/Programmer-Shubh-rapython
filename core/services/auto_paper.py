@@ -530,6 +530,22 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
             if _dist_pct > _cap:
                 notes.append(f"{s.get('name')}: {sym} {int(strike)}{opt} spot-{spot:g} ({_dist_pct:.1f}% OTM > cap {_cap:g}%) - SKIP")
                 continue
+            # ---- ₹15 min premium guard (live + paper auto trades, user rule 28-10) ----
+            # ₹15 se neeche ka premium (far-OTM junk ₹1/₹0.5/₹2.31/₹5 type) auto
+            # trade me nahi lagega - na live, na paper. Yeh order placement ke
+            # pehle check hai taaki broker tak request hi na jaye.
+            try:
+                from utils.helpers import check_min_premium as _cmp_auto
+                from core.services.contract_pricer import get_contract_ltp as _gcl_auto, resolve_expiry_hint as _reh_auto
+                _exp_auto = _reh_auto(sym, str(leg.get("expiry") or "weekly")) or str(leg.get("expiry") or "weekly")
+                _px_auto = float(_gcl_auto(sym, float(strike or 0), opt, _exp_auto, fresh=True) or 0)
+                if _px_auto > 0:
+                    _merr_auto = _cmp_auto(_px_auto, opt)
+                    if _merr_auto:
+                        notes.append(f"{s.get('name')}: {sym} {int(strike)}{opt} premium ₹{_px_auto:.2f} < ₹15 floor - SKIP")
+                        continue
+            except Exception:
+                pass
             # ---- LIVE leg (Live toggle ON + real broker) ----
             if _live_mode:
                 _done = False

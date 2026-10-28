@@ -93,35 +93,60 @@ def stock_monthly_expiry(symbol: str, hint: str = "") -> str:
     return d.strftime("%Y-%m-%d")
 
 
-def stock_order_expiry(symbol: str, hint: str = "") -> str:
-    """NEW ORDER ke liye stock expiry: expiry ke din NEXT month.
+def order_expiry(symbol: str, hint: str = "") -> str:
+    """NEW ORDER expiry: expiry SE 2 DIN PEHLE (0/1/2 din) next expiry par shift.
 
-    Fyers/NSE aaj-expiry STOCK options ko physically-settled contract ke
-    roop me block karte hain ("Current month physically settled contracts
-    are blocked") - isliye expiry ke din tradable stock contract NEXT month
-    hi hota hai. Index (BANKNIFTY/NIFTY) cash-settled hain - un par roll
-    NAHI lagta (wo aaj bhi trade karte hain).
+    Stocks + monthlies-only indices (BANKNIFTY/FINNIFTY): next month ka
+    last Tuesday. Weekly indices (NIFTY/SENSEX/BANKEX): next weekly expiry.
 
-    Positions/pricing ke liye stock_monthly_expiry hi chalta hai (aaj ki
-    real monthly expiry deta hai), taaki expiry-day open position ka
-    price galat contract par na chala jaye."""
+    Yeh SIRF naye orders ke liye (place_trade / resolve_contract /
+    auto-paper legs). Open-position PRICING ke liye stock_monthly_expiry
+    (real expiry, bina roll) use hota hai taaki current price asli contract
+    par rahe (healing garb nahi banati)."""
+    sym = str(symbol or "").upper()
+    weekly = has_weekly_options(sym)
+
+    if weekly:
+        natural = snap_hint_to_expiry(sym, hint or "weekly")
+    else:
+        natural = stock_monthly_expiry(sym, hint)
+
+    if not natural:
+        return stock_monthly_expiry(sym, hint)
+
     try:
-        from utils.helpers import OPTION_INDICES
-        if str(symbol or "").upper() in OPTION_INDICES:
-            return stock_monthly_expiry(symbol, hint)
-        e = stock_monthly_expiry(symbol, hint)
-        today = _today_ist()
-        d = _dt.datetime.strptime(str(e)[:10], "%Y-%m-%d").date()
-        if d <= today:
+        exp = _dt.datetime.strptime(str(natural)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return natural
+
+    days = (exp - _today_ist()).days
+    if days <= 2:
+        if weekly:
+            # Next weekly after exp (Tue NSE / Thu SENSEX-BANKEX)
             import calendar as _cal
-            y, m = _next_month(today.year, today.month)
+            wd = 3 if sym == "SENSEX" else 1
+            d = exp + _dt.timedelta(days=1)
+            while d.weekday() != wd:
+                d += _dt.timedelta(days=1)
+            return d.strftime("%Y-%m-%d")
+        else:
+            # Next monthly: last Tuesday of next calendar month
+            import calendar as _cal
+            y, m = exp.year, exp.month
+            if m == 12:
+                y, m = y + 1, 1
+            else:
+                m += 1
             dd = _dt.date(y, m, _cal.monthrange(y, m)[1])
-            while dd.weekday() != 1:      # last Tuesday
+            while dd.weekday() != 1:
                 dd -= _dt.timedelta(days=1)
             return dd.strftime("%Y-%m-%d")
-        return e
-    except Exception:
-        return stock_monthly_expiry(symbol, hint)
+    return natural
+
+
+def stock_order_expiry(symbol: str, hint: str = "") -> str:
+    """Backward-compat wrapper: order_expiry (2-day roll, all symbols)."""
+    return order_expiry(symbol, hint)
 
 
 def is_explicit_date(hint: str) -> bool:
@@ -287,7 +312,7 @@ async def resolve_contract(broker: str, creds: dict, underlying: str,
                     "expiry_used": use_exp,
                     "source": "fyers-stock-monthly",
                     "available_expiries": live_exps}
-        use_exp = guess
+        use_exp = order_expiry(underlying, expiry_hint or "weekly")
         src = "fyers-constructed"
         if live_exps:
             if explicit and guess in live_exps:
