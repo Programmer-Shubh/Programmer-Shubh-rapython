@@ -128,9 +128,10 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
         return {"closed": [], "skipped": f"error: {e}"[:150]}
 
 
-def start_background(interval_s=30):
+def start_background(interval_s=10):
     """Daemon thread: SL/TP scan every `interval_s` in market hours.
-    First scan runs immediately on boot (no blind window after deploys)."""
+    First scan runs immediately on boot (no blind window after deploys).
+    User rule 28-10: har 10 second mein SL/TP check."""
     def _scan():
         try:
             from core.services.auto_paper import _beat
