@@ -339,6 +339,26 @@ def update_sltp(req: UpdateSLTPRequest):
     return {"status": "updated", "trade_id": req.trade_id}
 
 
+@router.post("/check-sltp")
+def check_sltp_now():
+    """Force an immediate SL/TP check on all open paper/live trades.
+    Frontend can call this when user visits Trades/Dashboard page so
+    breached SL/TP trades exit immediately (Render free-tier background
+    thread may sleep between visits)."""
+    try:
+        from scripts.auto_trade import check_stoploss_target
+        res = check_stoploss_target(confirm_secs=2) or {}
+        return {
+            "status": "checked",
+            "closed": res.get("closed", []),
+            "skipped": res.get("skipped", []),
+            "closed_count": len(res.get("closed", [])),
+            "skipped_count": len(res.get("skipped", [])),
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)[:200]}
+
+
 @router.delete("/{trade_id}")
 def delete_trade(trade_id: int):
     trade_model = TradeModel()

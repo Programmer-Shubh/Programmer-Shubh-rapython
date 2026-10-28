@@ -1211,6 +1211,7 @@
     }
 let _lastOpenTrdHTML = null;
     async function loadTrades(){
+        try{await A('/api/trades/check-sltp',{method:'POST'});}catch(e){}
         try{const o=await A('/api/trades/open');const st=await A('/api/dashboard/stats');
             document.getElementById('trd-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Open Trades</div><div class="value text-primary">${st.open_count}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Closed Trades</div><div class="value">${st.closed_count}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Total P&L</div><div class="value ${C(st.total_pnl)}">${F(st.total_pnl)}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Win Rate</div><div class="value">${st.win_rate}%</div></div></div>`;
             if(o.positions&&o.positions.length){
