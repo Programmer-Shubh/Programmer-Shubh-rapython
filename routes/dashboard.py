@@ -229,7 +229,7 @@ def get_trade_history():
     _strat_summary = {}
     for _t in _shown:
         _sid = int(_t.get("strategy_id") or 0)
-        _sname = _t.get("strategy_name") or (f"Strategy #{_sid}" if _sid else "No Strategy")
+        _sname = _smap.get(_sid) or (f"Strategy #{_sid}" if _sid else "No Strategy")
         _pnl = float(_t.get("pnl") or 0)
         _ed = str(_t.get("entry_date") or "")[:10] or "Unknown"
         if _sid not in _strat_summary:
