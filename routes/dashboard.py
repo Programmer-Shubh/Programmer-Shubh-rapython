@@ -224,6 +224,48 @@ def get_trade_history():
     _sc = {}
     for _t in _shown:
         _otm_calc({"symbol": _t.get("symbol"), "strike": _t.get("strike_price")}, _sc)
+
+    # ---- Strategy-wise summary: date-wise profit/loss count per strategy ----
+    _strat_summary = {}
+    for _t in _shown:
+        _sid = int(_t.get("strategy_id") or 0)
+        _sname = _t.get("strategy_name") or (f"Strategy #{_sid}" if _sid else "No Strategy")
+        _pnl = float(_t.get("pnl") or 0)
+        _ed = str(_t.get("entry_date") or "")[:10] or "Unknown"
+        if _sid not in _strat_summary:
+            _strat_summary[_sid] = {
+                "strategy_id": _sid,
+                "strategy_name": _sname,
+                "total_trades": 0,
+                "winning_trades": 0,
+                "losing_trades": 0,
+                "total_pnl": 0.0,
+                "dates": {},
+            }
+        _s = _strat_summary[_sid]
+        _s["total_trades"] += 1
+        _s["total_pnl"] += _pnl
+        if _pnl > 0:
+            _s["winning_trades"] += 1
+        else:
+            _s["losing_trades"] += 1
+        if _ed not in _s["dates"]:
+            _s["dates"][_ed] = {"trades": 0, "winning": 0, "losing": 0, "pnl": 0.0}
+        _d = _s["dates"][_ed]
+        _d["trades"] += 1
+        _d["pnl"] += _pnl
+        if _pnl > 0:
+            _d["winning"] += 1
+        else:
+            _d["losing"] += 1
+    for _s in _strat_summary.values():
+        _s["total_pnl"] = round(_s["total_pnl"], 2)
+        _s["win_rate"] = round(_s["winning_trades"] / _s["total_trades"] * 100, 1) if _s["total_trades"] else 0
+        for _d in _s["dates"].values():
+            _d["pnl"] = round(_d["pnl"], 2)
+            _d["win_rate"] = round(_d["winning"] / _d["trades"] * 100, 1) if _d["trades"] else 0
+    _strat_summary = sorted(_strat_summary.values(), key=lambda x: x["total_pnl"], reverse=True)
+
     return {
         "count": len(closed),
         "total_pnl": round(total_pnl, 2),
@@ -231,6 +273,7 @@ def get_trade_history():
         "winning_trades": _w,
         "losing_trades": len(_shown) - _w,
         "win_rate": round(_w / len(_shown) * 100, 1) if _shown else 0,
+        "strategy_summary": _strat_summary,
         "trades": [
             {
                 "id": t["id"],
