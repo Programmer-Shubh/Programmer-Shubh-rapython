@@ -145,6 +145,20 @@ def resolve_weekly_expiry(symbol: str = "") -> str:
         if _exps:
             _snap = _nearest_on_or_after(_exps)
             if _snap:
+                # 2-DAY ROLL for weekly indices: agar snapped expiry
+                # 2 din ke andar hai (ya nikal gayi hai) to NEXT weekly lelo.
+                # NIFTY/SENSEX/BANKEX ke liye "expiry se 2 din pehle next week"
+                # — far-OTM ₹1/₹0.5 junk se bachne ke liye.
+                import datetime as _dt2
+                _today_s = _ist_today()
+                _td = _dt2.datetime.strptime(_today_s, "%Y-%m-%d").date()
+                _sd = _dt2.datetime.strptime(str(_snap)[:10], "%Y-%m-%d").date()
+                if (_sd - _td).days <= 2:
+                    _later = [e for e in _exps
+                              if _dt2.datetime.strptime(str(e)[:10], "%Y-%m-%d").date() > _sd]
+                    if _later:
+                        _snap = min(_later,
+                                    key=lambda e: _dt2.datetime.strptime(str(e)[:10], "%Y-%m-%d").date())
                 return _snap[:10]
     except Exception:
         pass
