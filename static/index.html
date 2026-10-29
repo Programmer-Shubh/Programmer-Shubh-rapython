@@ -1717,6 +1717,7 @@ let _lastOpenTrdHTML = null;
             {const pp=rOrder.split('-');legs.push({option_type:pp[0],position:pp[1],strike_type:legStrike,lots, transaction: pp[1].toLowerCase(), strike_selection: legStrike.toLowerCase(),otm_distance:rOtm});}
         }
         const body={
+            id: window._editingStratId||0,
             name:(document.getElementById('s-name').value||'').trim()||(idx+'_'+stratType),
             symbol:idx,
             strategy_type:stratType,
@@ -1738,7 +1739,7 @@ let _lastOpenTrdHTML = null;
             // Edit+Save par last_backtest chhua nahi jata - purana result DB me rahta hai.
         };
         const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        if(r.id){alert('Strategy saved! ID: '+r.id);loadStrats();}else{alert('Error saving strategy');}
+        if(r.id){alert('Strategy saved! ID: '+r.id);window._editingStratId=null;loadStrats();}else{alert('Error saving strategy');}
     }
     let stratLegs=[];
     let _payoffSpot=24500;
@@ -2046,7 +2047,7 @@ let _lastOpenTrdHTML = null;
         const w=document.createElement('div');w.innerHTML=h;document.body.appendChild(w.firstChild);
     }catch(e){alert('Error: '+e.message);}}
     async function atFromStrat(id,status){const newStatus=status==='active'?'paused':'active';if(newStatus==='paused'&&!confirm('Paper OFF? Is strategy ka paper trading ruk jayega (live alag se chalta rahega, open position chalta rahega).'))return;try{const s=await A('/api/strategies/'+id);if(s&&!s.error){const keep={id:s.id,name:s.name,symbol:s.symbol,start_date:s.start_date,end_date:s.end_date,timeframe:s.timeframe,description:s.description,indicators:s.indicators,entry_conditions:s.entry_conditions,exit_conditions:s.exit_conditions,legs:s.legs,advanced_options:s.advanced_options,risk_management:s.risk_management,status:newStatus};await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(keep)});}else{await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:newStatus})});}}catch(e){}loadStrats();loadTrades();}
-    async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}go('strategy',document.querySelectorAll('.nav button')[3]);setTimeout(()=>{try{_loadStratToForm(s);try{document.getElementById('r-name').value=s.name||'';}catch(e){}}catch(e){alert('Error: '+e.message);}},300);}catch(e){alert('Error');}}
+    async function editStrat(id){try{const s=await A('/api/strategies/'+id);if(s.error){alert(s.error);return;}window._editingStratId=parseInt(id);go('strategy',document.querySelectorAll('.nav button')[3]);setTimeout(()=>{try{_loadStratToForm(s);try{document.getElementById('r-name').value=s.name||'';}catch(e){}}catch(e){alert('Error: '+e.message);}},300);}catch(e){alert('Error');}}
     async function delStrat(id){if(!confirm('Delete this strategy?'))return;try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadStrats();}catch(e){alert('Error: '+e.message);}}
 
 
@@ -2205,8 +2206,8 @@ let _lastOpenTrdHTML = null;
             robotCollectIndicators().forEach(iv=>{ if(iv&&iv.id) _seen[iv.id]=iv; });
             Object.keys(_seen).forEach(k=>_saveInds.push(_seen[k]));
         }catch(e){ try{ _saveInds.push(...robotCollectIndicators()); }catch(_){} }
-        const body={name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:sl, daily_take_profit:tp, max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5, signal_lookback_days:Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0))}};
-        try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ let _m='Strategy "'+finalName+'" saved! ID: '+r.id; try{const _at=r.auto_trades||[]; if(_at.length)_m+='\nPaper trade lag gaya: Trade #'+_at[0].trade_id+' @ Rs'+_at[0].entry+' (Open Positions me dikhega)';}catch(e){} alert(_m); document.getElementById('r-name').value=''; loadRobotSaved(); try{if(typeof loadStrats==='function')loadStrats();}catch(e){} } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
+        const body={id: window._editingStratId||0, name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:sl, daily_take_profit:tp, max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5, signal_lookback_days:Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0))}};
+        try{ const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.id){ let _m='Strategy "'+finalName+'" saved! ID: '+r.id; window._editingStratId=null; try{const _at=r.auto_trades||[]; if(_at.length)_m+='\nPaper trade lag gaya: Trade #'+_at[0].trade_id+' @ Rs'+_at[0].entry+' (Open Positions me dikhega)';}catch(e){} alert(_m); document.getElementById('r-name').value=''; loadRobotSaved(); try{if(typeof loadStrats==='function')loadStrats();}catch(e){} } else { alert('Error: '+JSON.stringify(r)); } }catch(e){alert('Error: '+e.message);}
     }
      function _parseJsonField(v, fallback){ if(!v) return fallback; if(typeof v==='string'){ try{return JSON.parse(v);}catch(e){return fallback;} } return v; }
       async function loadApWorker(){
