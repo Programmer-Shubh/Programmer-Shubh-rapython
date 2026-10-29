@@ -1,0 +1,7 @@
+<anvil-form container="FlowPanel" prop:role="rt-table-row">
+  <anvil-component type="Label" name="symbol_label" bind:text="self.item['symbol']" prop:role="rt-cell-symbol"></anvil-component>
+  <anvil-component type="Label" name="type_label" bind:text="self.item['option_type']" prop:role="rt-cell"></anvil-component>
+  <anvil-component type="Label" name="strike_label" bind:text="self.item['strike']" prop:role="rt-cell"></anvil-component>
+  <anvil-component type="Label" name="side_label" bind:text="self.item['transaction_type']" prop:role="rt-cell"></anvil-component>
+  <anvil-component type="Label" name="pnl_label" bind:text="self.item['pnl']" prop:role="rt-cell rt-pnl"></anvil-component>
+</anvil-form>
