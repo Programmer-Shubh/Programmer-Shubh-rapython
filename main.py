@@ -1,0 +1,353 @@
+import os
+import asyncio
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from core.models.database import Database
+
+os.environ.setdefault("DB_PATH", os.path.join(os.path.dirname(__file__), "data", "ratrade.db"))
+
+
+async def _start_background_refresh():
+    from core.services.data_refresher import run_refresh_loop
+    asyncio.get_running_loop().create_task(run_refresh_loop())
+    try:
+        import os as _os
+        if _os.environ.get("SELF_URL") or _os.environ.get("RENDER_EXTERNAL_URL"):
+            from routes.keepalive import self_ping_loop
+            asyncio.get_running_loop().create_task(self_ping_loop())
+    except Exception:
+        pass
+
+
+async def _fno_sync_loop():
+    """Official F&O bhavcopy auto-download + old-data purge.
+    Bandwidth saver: once daily, 7-day window (was: every 6h x 30d).
+    Best-effort (never crashes app)."""
+    import asyncio as _aio
+    await _aio.sleep(600)  # 10 min: let cold-start settle (avoid OOM/timeout 502s)
+    while True:
+        try:
+            from core.services import nsefin_bhav as _fb
+            await _aio.to_thread(_fb.backfill_fno, 7, 2)
+            # Stale 'carried prev_close' option rows hatao (non-traded
+            # contract ka pichla close = aaj ka price nahi hota) - warna
+            # backtest premium expiry-level constant rehta hai (garbage P&L).
+            try:
+                await _aio.to_thread(_fb.purge_stale_option_rows)
+            except Exception:
+                pass
+            await _aio.to_thread(_fb.purge_old_data, 12)
+        except Exception:
+            pass
+        await _aio.sleep(24 * 3600)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # CRITICAL lifespan rule: code AFTER yield runs ONLY at SHUTDOWN.
+    # (An earlier revision started all background threads after yield, so
+    # NONE of them ever ran in production - workers looked configured but
+    # were dead.) Everything below is scheduled BEFORE yield: instant for
+    # /health, then runs on the loop/threads.
+    try:
+        asyncio.get_running_loop().create_task(_startup_background())
+    except: pass
+    yield
+    # Shutdown: nothing special (daemon threads exit with the process).
+
+
+async def _startup_background():
+    """Fire-and-forget boot of every background system (never blocks health)."""
+    # Data-fix (permanent): bina ASLI broker order wale 'live' tags ko wapas
+    # paper karo - iske bina Live toggle OFF strategy ke open trades bhi
+    # LIVE dikh rahe the (NIFTY/BOSCHLTD tag bug).
+    try:
+        def _fix_live_tags():
+            try:
+                from core.models.database import Database as _dbs
+                _dbs.get_instance().execute(
+                    "UPDATE paper_trades SET trade_mode='paper' "
+                    "WHERE trade_mode='live' AND (broker_order_id IS NULL "
+                    "OR TRIM(broker_order_id)='')", [])
+            except Exception:
+                pass
+        import threading as _th0
+        _th0.Thread(target=_fix_live_tags, daemon=True).start()
+    except Exception:
+        pass
+    try:
+        await _start_background_refresh()
+    except: pass
+    try:
+        asyncio.get_running_loop().create_task(_fno_sync_loop())
+    except: pass
+    try:
+        # In-process SL/TP monitor: auto-exit breached paper/live trades
+        # against the REAL db (the GitHub cron only sees an empty checkout).
+        def _sl_mon():
+            try:
+                from core.services.sl_monitor import start_background
+                # 10s poll: tez intraday move me SL/TP jaldi kate, overshoot kam. Scan cheap + idempotent hai.
+                start_background(10)
+            except: pass
+        import threading as _th2
+        _th2.Thread(target=_sl_mon, daemon=True).start()
+    except: pass
+    try:
+        # Auto paper-trading: ACTIVE saved strategies place today's paper
+        # trades by themselves (the missing executor - backtest never did).
+        def _ap_loop():
+            try:
+                from core.services.auto_paper import start_background as _ap
+                _ap(1800)
+            except: pass
+        import threading as _th4
+        _th4.Thread(target=_ap_loop, daemon=True).start()
+    except: pass
+    try:
+        # Broker token keeper: Fyers token auto-refresh (refresh_token + PIN)
+        # every 30 min - token 24h expire hone se pehle hi renew ho jata hai.
+        def _tk_loop():
+            try:
+                from core.services.token_keeper import start_background as _tk
+                _tk(30 * 60)
+            except: pass
+        import threading as _th5
+        _th5.Thread(target=_tk_loop, daemon=True).start()
+    except: pass
+    try:
+        # Live signal worker: ACTIVE strategies evaluated on fresh 15m
+        # candles every 5 min in market hours (ADX/ST/BB live loop).
+        def _live_sig_loop():
+            try:
+                from core.services.auto_paper import start_live_background as _lsb
+                _lsb(900)
+            except: pass
+        import threading as _th6
+        _th6.Thread(target=_live_sig_loop, daemon=True).start()
+    except: pass
+    try:
+        # Opportunities cache warmup: cold scans exceed the UI timeout.
+        def _opp_warm():
+            import time as _t
+            _t.sleep(90)
+            try:
+                # Heavy imports (pandas/numpy ~20s first time) background
+                # me pehle se load - taaki pehla backtest tez chale.
+                import numpy  # noqa
+            except Exception:
+                pass
+            try:
+                import pandas  # noqa
+            except Exception:
+                pass
+            try:
+                from routes.scanner import warm_opp_cache_once
+                warm_opp_cache_once()
+            except: pass
+        import threading as _th7
+        _th7.Thread(target=_opp_warm, daemon=True).start()
+    except: pass
+    try:
+        # Strategy self-healing: expired ACTIVE strategies roll to next
+        # weekly expiry by themselves (hourly) - no button press needed.
+        def _roll_loop():
+            import time as _t
+            _t.sleep(120)
+            while True:
+                try:
+                    from routes.strategies import auto_rollover_expired
+                    auto_rollover_expired()
+                except: pass
+                try:
+                    _t.sleep(3600)
+                except: break
+        import threading as _th3
+        _th3.Thread(target=_roll_loop, daemon=True).start()
+    except: pass
+    try:
+        # Lot master warm + open-position lot backfill (dynamic official lots).
+        # Pehle broker master warm karo, phir KHULI positions ke saare symbols
+        # (16-symbol fixed list nahi) correct lot par lao - PnL/Qty khud sahi.
+        def _lot_backfill():
+            try:
+                # Broker master warm (background thread me blocking OK, ~1/download per deploy)
+                try:
+                    from core.services.lot_master import warm_lot_cache
+                    warm_lot_cache()
+                except Exception:
+                    pass
+                from utils.helpers import get_lot_size
+                _db = Database.get_instance()
+                try:
+                    _rows = _db.fetch_all(
+                        "SELECT DISTINCT symbol FROM paper_trades WHERE status='open'")
+                    _syms = [str(r.get("symbol") or "").upper()
+                             for r in (_rows or []) if r.get("symbol")]
+                except Exception:
+                    _syms = []
+                for _s in ["NIFTY", "BANKNIFTY", "FINNIFTY"]:
+                    if _s not in _syms:
+                        _syms.append(_s)
+                for sym in _syms:
+                    try:
+                        correct = int(get_lot_size(sym) or 0)
+                        if correct > 0:
+                            _db.execute(
+                                "UPDATE paper_trades SET lot_size=? WHERE symbol=? AND status='open' AND lot_size!=?",
+                                [correct, sym, correct])
+                    except: pass
+            except: pass
+        import threading as _th
+        _th.Thread(target=_lot_backfill, daemon=True).start()
+    except: pass
+    try:
+        print("[lifespan] background systems scheduled", flush=True)
+    except: pass
+
+
+app = FastAPI(title="RaTrade API", version="1.0.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# Bandwidth diet: gzip JSON >1KB (~70% smaller chain/backtest payloads)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Cache static assets 1h + instant preloader (fixes browser open me bahut samay lag raha)
+@app.middleware("http")
+async def add_cache_header(request, call_next):
+    response = await call_next(request)
+    try:
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=3600, immutable"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+        elif request.url.path == "/":
+            # App shell (index.html+JS): deploy ke baad purana page kabhi na
+            # chipke - hard refresh ki zaroorat khatm. Static assets cached.
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+    except:
+        pass
+    return response
+
+db = Database.get_instance()
+db.init_schema()
+
+from routes import dashboard, option_chain, paper_trade, strategy_builder, scanner, broker, webhook, websocket, email_alerts, strategies, custom_code, keepalive, tvchart
+
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
+app.include_router(option_chain.router, prefix="/api/chain", tags=["Option Chain"])
+app.include_router(paper_trade.router, prefix="/api/trades", tags=["Paper Trade"])
+app.include_router(strategy_builder.router, prefix="/api/backtest", tags=["Strategy Builder"])
+app.include_router(scanner.router, prefix="/api/scanner", tags=["Scanner"])
+app.include_router(broker.router, prefix="/api/broker", tags=["Brokers"])
+app.include_router(webhook.router, prefix="/api/webhook", tags=["Webhook"])
+app.include_router(websocket.router, prefix="/api/ws", tags=["Live WebSocket"])
+app.include_router(email_alerts.router, prefix="/api/email-alerts", tags=["Email Alerts"])
+app.include_router(strategies.router, prefix="/api/strategies", tags=["Strategies"])
+app.include_router(custom_code.router, prefix="/api/custom-code", tags=["Custom Code"])
+app.include_router(keepalive.router, prefix="/api/keepalive", tags=["Keep-Alive"])
+app.include_router(tvchart.router, prefix="/api/tvchart", tags=["TV Chart"])
+
+
+@app.get("/")
+def root():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "index.html"))
+
+
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+
+
+@app.get("/health")
+async def health():
+    # Async instant - never block event loop, never touch DB for Render 5s timeout
+    return {"status": "healthy", "timestamp": __import__("time").time()}
+
+
+@app.head("/health")
+async def health_head():
+    # UptimeRobot free plan sends HEAD (not GET) - 405 hota tha, ab 200
+    from fastapi import Response as _Resp
+    return _Resp(status_code=200)
+
+
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+
+@app.get("/api/version")
+def version():
+    # Proves EXACTLY which commit is live (ends "purana deploy" confusion
+    # forever). Render auto-sets RENDER_GIT_COMMIT on every deploy.
+    import os as _os
+    _sha = _os.environ.get("RENDER_GIT_COMMIT") or "local-dev"
+    return {
+        "commit": _sha[:12],
+        "service": _os.environ.get("RENDER_SERVICE_NAME", ""),
+        "branch": _os.environ.get("RENDER_GIT_BRANCH", ""),
+    }
+
+
+@app.get("/api/db-status")
+def db_status():
+    # Password-free diagnostics: which backend is active, is Supabase
+    # configured, and the last Postgres error (if any).
+    try:
+        return Database.get_instance().backend_status()
+    except Exception as e:
+        return {"backend": "unknown", "error": str(e)[:200]}
+
+
+@app.get("/api/lot-size/{symbol}")
+def lot_size(symbol: str):
+    from utils.helpers import get_lot_size, lot_source
+    return {"symbol": symbol.upper(), "lot_size": get_lot_size(symbol),
+            "source": lot_source(symbol)}
+
+@app.get("/ready")
+async def ready():
+    # Light readiness check with DB ping but bounded 1s
+    try:
+        import asyncio as _aio
+        await _aio.wait_for(_aio.to_thread(lambda: Database.get_instance().fetch_one("SELECT 1 as ok")), timeout=1.0)
+        return {"status": "ready"}
+    except Exception:
+        return {"status": "ready - degraded"}
+
+
+# ---- OAuth redirect catch-all (LAST route: kab kuch na pakde tab) ----
+# Fyers login OAuth callback user ke Fyers-app settings ka redirect URI follow
+# karta hai - galat path (e.g. /api/v1/auth/fyers/callback) par bina is route
+# ke {"detail":"Not Found"} dikhta tha aur auth_code kho jata tha. Catch-all
+# fyers*callback* + auth_code/s=ok query -> asli callback handler.
+from fastapi import Request as _Req
+
+
+@app.get("/{path:path}")
+async def _oauth_redirect_catchall(path: str, request: _Req):
+    try:
+        _p = str(path or "").lower()
+        if ("fyers" in _p and ("callback" in _p or "redirect" in _p or "auth" in _p)):
+            _qp = dict(request.query_params)
+            if _qp.get("auth_code") or _qp.get("s", "").lower() in ("ok", "success") or _qp.get("code"):
+                return await broker.fyers_callback(request)
+    except Exception:
+        pass
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"detail": "Not Found"}, status_code=404)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

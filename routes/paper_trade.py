@@ -1,0 +1,628 @@
+from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import List, Optional, Dict
+from core.models.trade_model import TradeModel
+from core.services.transaction_costs import TransactionCosts
+from core.services.historical_replay import HistoricalReplayEngine
+from core.services.backtest_engine import BacktestEngine
+from utils.helpers import get_lot_size, format_currency, effective_lot_size
+
+router = APIRouter()
+
+
+class PlaceTradeRequest(BaseModel):
+    symbol: str
+    option_type: str
+    strike: float
+    transaction_type: str
+    quantity: int = 1
+    entry_price: float
+    stop_loss: float = 1500.0
+    take_profit: float = 3000.0
+    date: str = ""
+    trade_type: str = "intraday"
+    strategy_id: int = 0
+
+
+class CloseTradeRequest(BaseModel):
+    trade_id: int
+    exit_price: float
+    date: str
+
+
+class UpdateSLTPRequest(BaseModel):
+    trade_id: int
+    stop_loss: Optional[float] = None
+    target: Optional[float] = None
+
+
+class TradeModeRequest(BaseModel):
+    trade_id: int
+    trade_mode: str
+
+
+@router.get("/open")
+def get_open_trades():
+    trade_model = TradeModel()
+    # Auto-exits before listing: overnight gap SL/TP, expiry square-off,
+    # 30-day max hold, strategy exit_time EOD exit, then 15:20 intraday-only
+    # square-off (positional carries)
+    try:
+        trade_model.check_overnight_gap()
+        trade_model.close_max_hold_trades()
+        trade_model.close_expired_trades()
+        trade_model.close_strategy_exit_time_trades()
+        trade_model.close_intraday_trades()
+    except Exception:
+        pass
+    try:
+        # SL/TP auto-exit (throttled 20s) before listing
+        from core.services.sl_monitor import run_once as _sl_once
+        _sl_once()
+    except Exception:
+        pass
+    positions = trade_model.get_open_positions_with_pnl(auto_exit=False)
+    # Strategy name map (Open Positions me naam dikhane ke liye - 26-10)
+    try:
+        _srows = trade_model.db.fetch_all("SELECT id, name FROM strategies") or []
+        _smap = {int(r.get("id") or 0): str(r.get("name") or "") for r in _srows}
+    except Exception:
+        _smap = {}
+    total_pnl = sum(p["unrealized_pnl"] for p in positions)
+    # Realistic total (exit slippage + costs net) — backtest net se compare
+    # karne ke liye; gross total_pnl backward-compat ke liye rakha hai.
+    try:
+        total_net = round(sum(float(p.get("unrealized_net", p["unrealized_pnl"])) for p in positions), 2)
+    except Exception:
+        total_net = round(total_pnl, 2)
+    return {
+        "count": len(positions),
+        "total_pnl": round(total_pnl, 2),
+        "total_pnl_formatted": format_currency(total_pnl),
+        "total_net": total_net,
+        "total_net_formatted": format_currency(total_net),
+        "positions": [
+            {
+                "id": t["trade"]["id"],
+                "symbol": t["trade"]["symbol"],
+                "option_type": t["trade"]["option_type"],
+                "strike": t["trade"]["strike_price"],
+                "transaction_type": t["trade"]["transaction_type"],
+                "quantity": t["trade"]["quantity"],
+                "lot_size": effective_lot_size(t["trade"]["symbol"], t["trade"].get("lot_size")),
+                "entry_price": t["trade"]["entry_price"],
+                "current_price": t["current_price"],
+                "pnl": t["unrealized_pnl"],
+                "pnl_net": t.get("unrealized_net", t["unrealized_pnl"]),
+                "est_exit_costs": t.get("est_exit_costs", 0),
+                "sl": t["trade"]["stop_loss"],
+                "tp": t["trade"]["target"],
+                "trade_mode": t["trade"].get("trade_mode", "paper"),
+                "broker_order_id": t["trade"].get("broker_order_id", ""),
+                "trade_type": t["trade"].get("trade_type", "intraday"),
+                "entry_date": t["trade"].get("entry_date", ""),
+                "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
+                "expiry_date": t["trade"].get("expiry_date", ""),
+                "strategy_id": t["trade"].get("strategy_id", 0) or 0,
+                "strategy_name": _smap.get(int(t["trade"].get("strategy_id") or 0), ""),
+            }
+            for t in positions
+        ],
+    }
+
+
+@router.post("/monitor")
+def run_monitor(key: str = ""):
+    """External trigger for SL/TP auto-exit (cron backup). Idempotent: only
+    closes genuinely breached open trades. Optional MONITOR_KEY guard."""
+    try:
+        import os as _os
+        _need = _os.environ.get("MONITOR_KEY", "")
+        if _need and key != _need:
+            return {"error": "forbidden"}
+        from core.services.sl_monitor import run_once as _sl_once
+        _out = {"success": True, **_sl_once(min_interval=0, market_hours=True)}
+        # Gayab-trade diagnosis: aaj ke delete-log ki tail (kisne-kya hataya).
+        try:
+            import os as _os2, json as _js2, datetime as _dt2
+            _day = (_dt2.datetime.utcnow() + _dt2.timedelta(hours=5, minutes=30)).strftime("%Y%m%d")
+            _lp = os.path.join(os.path.dirname(__file__), "..", "data", "logs",
+                               f"trade_deletes_{_day}.jsonl")
+            _tail = []
+            try:
+                with open(os.path.abspath(_lp), "r", encoding="utf-8") as _f:
+                    _lines = _f.read().strip().split("\n")
+                for _ln in _lines[-10:]:
+                    try:
+                        _tail.append(_js2.loads(_ln))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            _out["recent_deletes"] = _tail
+        except Exception:
+            _out["recent_deletes"] = []
+        return _out
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+@router.post("/heartbeat")
+def heartbeat(key: str = ""):
+    """One wake-up call that does EVERYTHING (browser band ho tab bhi):
+    SL/TP exits + auto-paper entries + strategy rollover. Idempotent and
+    safe to call often - GitHub cron hits this every 15 min in market hours.
+    This is what keeps paper trading alive while nobody watches."""
+    try:
+        import os as _os
+        _need = _os.environ.get("MONITOR_KEY", "")
+        if _need and key != _need:
+            return {"error": "forbidden"}
+        out = {"success": True}
+        try:
+            from core.services.sl_monitor import run_once as _sl_once
+            out["exits"] = _sl_once(min_interval=0, market_hours=True)
+        except Exception as e:
+            out["exits"] = {"error": str(e)[:120]}
+        try:
+            from core.services.auto_paper import run_once as _ap_once
+            out["entries"] = _ap_once(min_interval=0, market_hours=True)
+        except Exception as e:
+            out["entries"] = {"error": str(e)[:120]}
+        try:
+            from routes.strategies import auto_rollover_expired
+            out["rolled"] = auto_rollover_expired()
+        except Exception as e:
+            out["rolled"] = f"error: {e}"[:120]
+        return out
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+@router.get("/auto-paper-status")
+def auto_paper_status(run: int = 0):
+    """Dry-run diagnosis: why each strategy did/didn't paper-trade. No orders.
+    ?run=1 forces one worker pass now (same idempotent 1/day rules)."""
+    try:
+        from core.services.auto_paper import dry_run_status, run_once, worker_state
+        out = {"success": True, **dry_run_status()}
+        try:
+            out["worker"] = worker_state()
+        except Exception:
+            pass
+        if run:
+            try:
+                out["forced_run"] = run_once(min_interval=0)
+            except Exception as e:
+                out["forced_run"] = {"error": str(e)[:150]}
+            try:
+                out.update({k: v for k, v in dry_run_status().items() if k == "strategies"})
+            except Exception:
+                pass
+        return out
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
+@router.post("/place")
+def place_trade(req: PlaceTradeRequest):
+    try:
+        # Market-hours gate (chain place-trade jaisa): band market me entry nahi.
+        from core.services.sl_monitor import market_open_ist as _mkt
+        if not bool(_mkt()):
+            return {"error": "Market band hai - paper trade sirf market hours me lagega (Mon-Fri 9:15-15:30 IST)."}
+    except Exception:
+        pass
+    try:
+        # 3:00 PM entry cutoff (user rule): iske baad KOI nayi entry nahi.
+        from core.services.sl_monitor import entry_open_ist as _eok
+        from core.services.sl_monitor import entry_block_reason as _ebr
+        if not bool(_eok()):
+            return {"error": _ebr()}
+    except Exception:
+        pass
+    # Mandatory Risk Management: SL/Target required (especially for option selling)
+    if req.stop_loss is None or req.take_profit is None:
+        return {"error": "Stop-Loss and Target are mandatory - cannot be blank"}
+    if req.stop_loss <= 0 or req.take_profit <= 0:
+        return {"error": "Stop-Loss and Target must be > 0 (mandatory for risk management, especially for SELL)"}
+    # Official-lot gate (fail-closed): unverified lot par order BLOCK.
+    try:
+        from utils.helpers import lot_guard_error as _lge2
+        _lot_err2 = _lge2(req.symbol)
+        if _lot_err2:
+            return {"error": _lot_err2}
+    except Exception:
+        pass
+    # Global strike alignment (before validation)
+    try:
+        from utils.helpers import align_strike_price
+        req.strike = align_strike_price(req.symbol, req.strike)
+    except Exception:
+        pass
+    # Data Validation: strike, quantity, symbol checks
+    trade_model = TradeModel()
+    v_err = trade_model.validate_trade_data({"symbol": req.symbol, "option_type": req.option_type, "strike_price": req.strike, "quantity": req.quantity, "entry_price": req.entry_price})
+    if v_err:
+        return {"error": v_err}
+    # Prevent faulty strike '01' etc already handled, also reject strike 0
+    if req.entry_price <= 0 or req.strike <= 0:
+        return {"error": "Enter valid strike (>0) and premium (>0) - Strike 0 invalid, use ATM"}
+    # Premium sanity: option premium should not be ~spot price (EICHERMOT bug ₹3128) - must be <20% of spot
+    try:
+        from core.services.live_market_data import LiveMarketData as _LMD2
+        _sp = _LMD2().get_spot_price(req.symbol) if ' _spot' not in dir() else _spot
+        if _sp and _sp>0 and req.entry_price > _sp*0.25:
+            # allow deep ITM CE where premium ~ spot-strike, but cap at spot*0.25 or intrinsic+500
+            intrinsic = max(0, _sp - req.strike) if req.option_type=="CE" else max(0, req.strike - _sp)
+            if req.entry_price > intrinsic + 600:
+                return {"error": f"Premium ₹{req.entry_price} too high vs spot ₹{_sp:.0f} (likely spot sent as premium). Correct premium ~₹{intrinsic+80:.0f}. Use option LTP, not spot."}
+    except Exception: pass
+    # Live requote guard (fantasy-entry block): typed premium live LTP se
+    # 25% se zyada alag ho to reject - paper fill achievable hona chahiye
+    # (typed 5 vs LTP 105 jaisa phantom PnL block). Live na mile to allow.
+    try:
+        _live = trade_model.get_option_premium(req.symbol, req.option_type, req.strike, "")
+        if _live and float(_live) > 0 and req.entry_price > 0:
+            _dev = abs(float(req.entry_price) - float(_live)) / float(_live)
+            if _dev > 0.25:
+                return {"error": f"Premium ₹{req.entry_price} live LTP ₹{float(_live):.2f} se {_dev*100:.0f}% alag hai (25% limit) - LTP ke paas price dalo ya chain se order karo"}
+    except Exception:
+        pass
+    # (Purana dead ATM-distance guard block HATAYA - `if False` kabhi chalta
+    # nahi tha, sirf bhavcopy DB roundtrips kharch karta tha.)
+    # Deduplication: if identical open position exists, block duplicate
+    existing = trade_model.db.fetch_one("SELECT id FROM paper_trades WHERE symbol=? AND strike_price=? AND option_type=? AND transaction_type=? AND status='open' LIMIT 1", [req.symbol, req.strike, req.option_type, req.transaction_type])
+    if existing:
+        return {"error": f"Duplicate open position exists for {req.symbol} {req.strike} {req.option_type} {req.transaction_type} (ID {existing['id']}) - close or delete existing first"}
+    adj_premium = TransactionCosts.apply_fill_slippage(req.entry_price, req.transaction_type, is_live=True)
+    # Hard floor: ₹1-2 lottery tickets kabhi place nahi hote
+    try:
+        from utils.helpers import check_min_premium as _cmp2
+        _merr2 = _cmp2(adj_premium, req.option_type)
+        if _merr2:
+            return {"error": _merr2}
+    except Exception:
+        pass
+    lot_size = get_lot_size(req.symbol)
+    costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
+    trade_model = TradeModel()
+    try:
+        tid = trade_model.insert_trade({
+            "symbol": req.symbol,
+            "option_type": req.option_type,
+            "strike_price": req.strike,
+            "transaction_type": req.transaction_type,
+            "quantity": req.quantity,
+            "lot_size": lot_size,
+            "entry_price": adj_premium,
+            "stop_loss": req.stop_loss,
+            "target": req.take_profit,
+            "total_cost": costs["total"],
+            "entry_date": req.date,
+            "trade_type": req.trade_type,
+            "strategy_id": req.strategy_id,
+        }, atomic_dedup=True)
+    except ValueError as _de:
+        return {"error": str(_de)[:200]}
+    return {"trade_id": tid, "entry_price": round(adj_premium, 2), "costs": costs}
+
+
+@router.post("/close")
+def close_trade(req: CloseTradeRequest):
+    trade_model = TradeModel()
+    _row = trade_model.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [req.trade_id])
+    if not _row:
+        return {"error": f"Trade {req.trade_id} nahi mila"}
+    # Live requote guard (fantasy-exit block): typed exit live LTP se 50%
+    # se zyada alag ho to reject (typed 200 vs LTP 100 = phantom +6500).
+    # Live na mile to allow (can't verify). Band 50% hai taaki tez market
+    # me legit close na ruke.
+    try:
+        _live = trade_model.get_option_premium(
+            _row.get("symbol"), _row.get("option_type"),
+            _row.get("strike_price"), _row.get("expiry_date"))
+        if _live and float(_live) > 0 and req.exit_price > 0:
+            _dev = abs(float(req.exit_price) - float(_live)) / float(_live)
+            if _dev > 0.50:
+                return {"error": f"Exit ₹{req.exit_price} live LTP ₹{float(_live):.2f} se {_dev*100:.0f}% alag hai (50% limit) - LTP ke paas price dalo"}
+    except Exception:
+        pass
+    trade_model.close_trade(req.trade_id, req.exit_price, req.date)
+    return {"status": "closed", "trade_id": req.trade_id}
+
+
+@router.post("/update-sltp")
+def update_sltp(req: UpdateSLTPRequest):
+    trade_model = TradeModel()
+    trade_model.update_management(req.trade_id, req.stop_loss, req.target, "OFF")
+    return {"status": "updated", "trade_id": req.trade_id}
+
+
+@router.post("/check-sltp")
+def check_sltp_now():
+    """Force an immediate SL/TP check on all open paper/live trades.
+    Frontend can call this when user visits Trades/Dashboard page so
+    breached SL/TP trades exit immediately (Render free-tier background
+    thread may sleep between visits)."""
+    try:
+        from scripts.auto_trade import check_stoploss_target
+        res = check_stoploss_target(confirm_secs=2) or {}
+        return {
+            "status": "checked",
+            "closed": res.get("closed", []),
+            "skipped": res.get("skipped", []),
+            "closed_count": len(res.get("closed", [])),
+            "skipped_count": len(res.get("skipped", [])),
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)[:200]}
+
+
+@router.delete("/{trade_id}")
+def delete_trade(trade_id: int):
+    trade_model = TradeModel()
+    trade_model.delete_trade(trade_id)
+    return {"status": "deleted", "trade_id": trade_id}
+
+
+@router.post("/mode")
+def set_trade_mode(req: TradeModeRequest):
+    """Manual paper/live flip. LIVE tag par strict guard: ye tag SIRF us
+    trade ko milega jisme bina RL ASLI broker order (broker_order_id) hai -
+    warna bina order ke trade 'LIVE' dikhate the (NIFTY/BOSCHLTD wala galat
+    task). Paper flip hamescha allowed."""
+    trade_model = TradeModel()
+    if str(req.trade_mode or "").lower() == "live":
+        row = trade_model.db.fetch_one(
+            "SELECT broker_order_id FROM paper_trades WHERE id=?",
+            [int(req.trade_id or 0)])
+        if not row:
+            return {"error": f"Trade #{req.trade_id} not found"}
+        _bid = str(row.get("broker_order_id") or "").strip()
+        if not _bid:
+            return {"error": "Is trade me ASLI broker order nahi hai (broker_order_id khali) - LIVE tag sirf real broker fills ke liye hai. Trade PAPER hi rahegi."}
+    n = trade_model.set_trade_mode(req.trade_id, req.trade_mode)
+    if n == -1:
+        return {"error": "Mode must be paper or live"}
+    if n == 0:
+        return {"error": f"Trade #{req.trade_id} not found"}
+    return {"status": "mode_updated", "trade_id": req.trade_id, "trade_mode": req.trade_mode}
+
+
+@router.post("/deduplicate")
+def deduplicate_trades():
+    trade_model = TradeModel()
+    dup_count = trade_model.deduplicate_open_trades()
+    # Clean faulty strikes: 0, 01, <100 etc and missing values
+    faulty = trade_model.db.fetch_all("SELECT id, symbol, strike_price FROM paper_trades WHERE status='open' AND (strike_price <= 100 OR strike_price IS NULL OR strike_price = '' OR symbol IS NULL OR symbol='' OR option_type IS NULL OR option_type='')")
+    faulty_ids = [r["id"] for r in faulty]
+    for fid in faulty_ids:
+        try:
+            _row = trade_model.db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [fid])
+            if _row:
+                from utils.helpers import log_trade_delete as _ltd
+                _ltd(dict(_row), "deduplicate-faulty")
+        except Exception:
+            pass
+        trade_model.db.execute("DELETE FROM paper_trades WHERE id=?", [fid])
+    # Clean specific user reported duplicates: ensure clean accurate format
+    # Return summary
+    return {"status": "cleaned", "duplicates_removed": dup_count, "faulty_removed": len(faulty_ids), "faulty_ids": faulty_ids}
+
+
+@router.get("/clean-preview")
+def clean_preview():
+    trade_model = TradeModel()
+    open_trades = trade_model.get_open_trades()
+    # Group by key to find duplicates
+    groups = {}
+    for t in open_trades:
+        k = f"{t['symbol']}_{t['strike_price']}_{t['option_type']}_{t['transaction_type']}"
+        groups.setdefault(k, []).append(t)
+    dups = {k: v for k, v in groups.items() if len(v) > 1}
+    faulty = [t for t in open_trades if not t["symbol"] or not t["option_type"] or t["strike_price"] is None or float(t["strike_price"] or 0) <= 100]
+    return {"duplicates": dups, "faulty": faulty, "total_open": len(open_trades)}
+
+
+@router.get("/history")
+def get_history():
+    trade_model = TradeModel()
+    closed = trade_model.get_closed_trades()
+    total_pnl = sum(t["pnl"] for t in closed)
+    # Strategy linkage (paper-vs-backtest compare ke liye): id -> name map.
+    try:
+        _srows = trade_model.db.fetch_all("SELECT id, name FROM strategies") or []
+        _smap = {int(r.get("id") or 0): str(r.get("name") or "") for r in _srows}
+    except Exception:
+        _smap = {}
+    # Table-consistent win rate (same >0 net rule as dashboard stats, computed
+    # over the RETURNED table rows so metric == table by construction).
+    _shown = closed[:30]
+    _w = sum(1 for t in _shown if float(t.get("pnl") or 0) > 0)
+    return {
+        "count": len(closed),
+        "total_pnl": round(total_pnl, 2),
+        "total_pnl_formatted": format_currency(total_pnl),
+        "winning_trades": _w,
+        "losing_trades": len(_shown) - _w,
+        "win_rate": round(_w / len(_shown) * 100, 1) if _shown else 0,
+        "trades": [
+            {
+                "id": t["id"],
+                "date": t["entry_date"],
+                "entry_date": t["entry_date"],
+                "entry_time": TradeModel.ist_hhmm(t.get("created_at", "")),
+                "exit_date": t.get("exit_date", ""),
+                "exit_time": TradeModel.ist_hhmm(t.get("updated_at", "")),
+                "symbol": t["symbol"],
+                "option_type": t["option_type"],
+                "strike": t["strike_price"],
+                "entry": t["entry_price"],
+                "exit": t.get("exit_price", 0),
+                "pnl": t["pnl"],
+                "pnl_formatted": format_currency(t["pnl"]),
+                "entry_cost": t.get("total_cost", 0),
+                "exit_cost": t.get("exit_cost", 0),
+                "lot_size": t.get("lot_size", 50),
+                "quantity": t.get("quantity", 1),
+                "total_qty": t.get("quantity", 1) * (t.get("lot_size", 50) or 50),
+                "transaction_type": t.get("transaction_type",""),
+                "expiry_date": t.get("expiry_date", ""),
+                "exit_status": t.get("exit_status", ""),
+                "strategy_id": int(t.get("strategy_id") or 0),
+                "strategy_name": _smap.get(int(t.get("strategy_id") or 0), ""),
+                "calc": f"({t.get('exit_price',0):.2f}-{t['entry_price']:.2f})×{t.get('lot_size',50)}" if t.get("transaction_type")=="BUY" else f"({t['entry_price']:.2f}-{t.get('exit_price',0):.2f})×{t.get('lot_size',50)}",
+                "analysis": f"{t.get('transaction_type','')} {t['option_type']} {'profit' if ((t.get('exit_price',0)-t['entry_price'])>0 if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0))>0) else 'loss'}: ₹{t['entry_price']:.2f}→₹{t.get('exit_price',0):.2f} × Lot {t.get('lot_size',50)} = Gross ₹{((t.get('exit_price',0)-t['entry_price']) if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0)))*t.get('quantity',1)*t.get('lot_size',50):,.2f} - Costs = Net {format_currency(t['pnl'])}",
+            }
+            for t in closed[:30]
+        ],
+    }
+
+
+@router.post("/clean-history")
+def clean_history():
+    trade_model = TradeModel()
+    result = trade_model.clean_and_fix_history()
+    return result
+
+
+@router.get("/risk-analysis")
+def risk_analysis():
+    trade_model = TradeModel()
+    return trade_model.get_risk_analysis()
+
+
+@router.get("/nifty-fix")
+def nifty_fix():
+    trade_model = TradeModel()
+    # Trigger NIFTY incomplete fix via clean
+    result = trade_model.clean_and_fix_history()
+    return {"nifty": "fixed" if any("NIFTY" in i for i in result.get("issues", [])) else "ok", "details": result}
+
+
+class HistoricalReplayRequest(BaseModel):
+    symbol: str = "NIFTY"
+    start_date: str = "2026-08-01"
+    end_date: str = "2026-08-20"
+    indicators: List[Dict] = []
+    entry_conditions: List[Dict] = []
+    exit_conditions: List[Dict] = []
+    legs: List[Dict] = []
+    advanced: Dict = {}
+    risk: Dict = {}
+
+
+@router.post("/historical-replay")
+def run_historical_replay(req: HistoricalReplayRequest):
+    """Run paper trade on historical data with EXACT backtest logic.
+    This ensures paper trade results match backtest results exactly."""
+    try:
+        engine = HistoricalReplayEngine()
+        engine.configure(
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+        )
+        result = engine.run_replay()
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/backtest-compare")
+def backtest_compare(req: HistoricalReplayRequest):
+    """Run both backtest and historical replay, return both for comparison.
+    Both consume the SAME replay-loaded bars (single data path) so any
+    nonzero diff is a real logic divergence, not a data artifact."""
+    try:
+        # One shared history load (replay loader = DB spot history)
+        _loader = HistoricalReplayEngine()
+        _loader.configure(
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+        )
+        historical = list(_loader.historical_data)
+        # Run backtest on those exact bars
+        bt_engine = BacktestEngine(is_live=False)
+        try:
+            bt_engine._skip_db = True
+        except Exception:
+            pass
+        bt_result = bt_engine.run(
+            historical=historical,
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+            is_live=False,
+        )
+
+        # Run historical replay (same bars, independent loop).
+        # Model-only pricing on BOTH sides: DB LTP presence varies by path,
+        # so premiums are pinned to the model to compare pure LOGIC
+        # (signals/exits/math), not data-source luck.
+        replay_engine = HistoricalReplayEngine()
+        replay_engine.configure(
+            symbol=req.symbol,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            ind_list=req.indicators,
+            entry_conditions=req.entry_conditions,
+            exit_conditions=req.exit_conditions,
+            legs=req.legs,
+            advanced_options=req.advanced,
+            risk_management=req.risk,
+        )
+        try:
+            replay_engine.bt_engine._skip_db = True
+        except Exception:
+            pass
+        replay_result = replay_engine.run_replay()
+        
+        # Compare
+        bt_metrics = bt_result.get("metrics", {})
+        replay_metrics = replay_result.get("metrics", {})
+        
+        comparison = {
+            "backtest": bt_metrics,
+            "historical_replay": replay_metrics,
+            "match": {
+                "total_return_pct": round(bt_metrics.get("total_return_pct", 0) - replay_metrics.get("total_return_pct", 0), 4),
+                "total_trades": bt_metrics.get("total_trades", 0) - replay_metrics.get("total_trades", 0),
+                "win_rate": round(bt_metrics.get("win_rate", 0) - replay_metrics.get("win_rate", 0), 4),
+                "max_drawdown": round(bt_metrics.get("max_drawdown", 0) - replay_metrics.get("max_drawdown", 0), 4),
+                "sharpe_ratio": round(bt_metrics.get("sharpe_ratio", 0) - replay_metrics.get("sharpe_ratio", 0), 4),
+            },
+            "exact_match": (
+                abs(bt_metrics.get("total_return_pct", 0) - replay_metrics.get("total_return_pct", 0)) < 0.01 and
+                bt_metrics.get("total_trades", 0) == replay_metrics.get("total_trades", 0) and
+                abs(bt_metrics.get("win_rate", 0) - replay_metrics.get("win_rate", 0)) < 0.01
+            )
+        }
+        
+        return comparison
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}

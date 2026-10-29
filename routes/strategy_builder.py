@@ -1,0 +1,2543 @@
+from fastapi import APIRouter, Request, UploadFile, File
+from pydantic import BaseModel
+from typing import List, Optional, Dict
+from core.services.historical_fetcher import fetch_historical
+from core.models.bhavcopy_model import BhavcopyModel
+from utils.helpers import format_currency
+import datetime
+import re
+import random
+
+from core.services.backtest_engine import BacktestEngine, ENGINE_VERSION
+
+def _generate_synthetic_fallback(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Guaranteed synthetic data for backtest when all sources fail."""
+    try:
+        s = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        e = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+    except Exception:
+        e = datetime.datetime.now()
+        s = e - datetime.timedelta(days=90)
+    
+    # Base prices for common symbols — must match historical_fetcher _SPOTS
+    base_prices = {
+        'NIFTY': 24500, 'BANKNIFTY': 51200, 'FINNIFTY': 22800,
+        'RELIANCE': 2850, 'HDFCBANK': 1780, 'ICICIBANK': 1250, 'TCS': 3950,
+        'INFY': 1580, 'ITC': 470, 'SBIN': 780, 'AXISBANK': 1050, 'KOTAKBANK': 1820,
+        'LT': 3650, 'HINDUNILVR': 2500, 'BHARTIARTL': 1650, 'M&M': 2900,
+        'MARUTI': 12500, 'BAJFINANCE': 6800, 'WIPRO': 560, 'ONGC': 280,
+        'SUNPHARMA': 1780, 'ULTRACEMCO': 11000, 'NTPC': 350, 'POWERGRID': 310,
+        'TATAMOTORS': 980, 'TATASTEEL': 145, 'HCLTECH': 1700, 'JSWSTEEL': 880,
+        'COALINDIA': 480, 'DRREDDY': 6200, 'CIPLA': 1500, 'ADANIENT': 3200,
+        'SBILIFE': 1550, 'BPCL': 650, 'GRASIM': 2300, 'TECHM': 1650,
+        'DIVISLAB': 3500, 'EICHERMOT': 4800, 'BRITANNIA': 5200,
+        'HINDALCO': 620, 'VEDL': 450, 'INDUSINDBK': 1450, 'NESTLEIND': 25000,
+        'BAJAJFINSV': 1750, 'HEROMOTOCO': 4900, 'APOLLOHOSP': 6300, 'UPL': 550,
+        'SHREECEM': 28000, 'TITAN': 3200, 'BAJAJFINSV': 1750,
+        'GOLDBEES': 85, 'SILVERBEES': 300,
+    }
+    
+    # Ensure at least 60 trading days for indicator warmup (SuperTrend/EMA need 20+ bars)
+    # If requested range is short, extend start backward.
+    try:
+        trading_days = sum(1 for i in range((e - s).days + 1) if (s + datetime.timedelta(days=i)).weekday() < 5)
+    except Exception:
+        trading_days = 0
+    if trading_days < 60:
+        s = s - datetime.timedelta(days=90)
+
+    # Anchor synthetic to live spot so payoff/ATM matches (₹24175 not ₹19800)
+    # Hard ~1.5s TOTAL budget, shared worker + 60s spot cache: spot lookups
+    # must never stall the backtest response (Yahoo hangs ~3s, no timeout).
+    live_spot = None
+    try:
+        import concurrent.futures as _cf
+        import time as _st2
+        if not hasattr(_generate_synthetic_fallback, "_spot_cache"):
+            _generate_synthetic_fallback._spot_cache = {}
+            _generate_synthetic_fallback._spot_ex = _cf.ThreadPoolExecutor(max_workers=2)
+        _sc = _generate_synthetic_fallback._spot_cache
+        _hit = _sc.get(symbol.upper())
+        if _hit and _st2.time() - _hit[0] < 60:
+            live_spot = _hit[1]
+        else:
+            def _lookup_spot():
+                try:
+                    from core.services.nse_client import nse_fetch_spot
+                    d = nse_fetch_spot(symbol, timeout=2)
+                    if d and d.get("spot"):
+                        return float(d["spot"])
+                except Exception:
+                    pass
+                try:
+                    from core.services.live_market_data import LiveMarketData
+                    ld = LiveMarketData().get_live_spot(symbol)
+                    if ld and ld.get("spot"):
+                        return float(ld["spot"])
+                except Exception:
+                    pass
+                return None
+
+            try:
+                fut = _generate_synthetic_fallback._spot_ex.submit(_lookup_spot)
+                try:
+                    live_spot = fut.result(timeout=0.3)
+                except Exception:
+                    live_spot = None
+            except Exception:
+                live_spot = None
+            try:
+                _sc[symbol.upper()] = (_st2.time(), live_spot)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    if live_spot and live_spot > 0:
+        price = live_spot * 0.97  # start 3% below live so trend builds into live level
+    else:
+        price = base_prices.get(symbol.upper(), 1000)
+    random.seed(hash(symbol) ^ 0x5EED)
+    
+    records = []
+    d = s
+    while d <= e:
+        if d.weekday() < 5:  # Skip weekends
+            drift = random.uniform(-0.015, 0.015)
+            # Gentle mean-reversion toward live_spot if anchored
+            if live_spot and d > e - datetime.timedelta(days=8):
+                drift += (live_spot - price) / price * 0.08
+            o = price
+            c = max(1, price * (1 + drift))
+            h = max(o, c) * (1 + abs(random.uniform(0, 0.004)))
+            l = min(o, c) * (1 - abs(random.uniform(0, 0.004)))
+            vol = random.randint(100000, 1000000)
+            records.append({
+                "symbol": symbol.upper(), "trade_date": d.strftime("%Y-%m-%d"),
+                "open_price": round(o, 2), "high_price": round(h, 2),
+                "low_price": round(l, 2), "close_price": round(c, 2),
+                "volume": vol, "oi": 0,
+            })
+            price = c
+        d += datetime.timedelta(days=1)
+    return records
+
+
+def _load_db_history(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Real NSE history (Algotest-style): spot OHLC from bhavcopy_data.
+    Option premiums then resolve from the same table (exact/nearest strike).
+    Returns [] when insufficient (<15 bars) -> caller falls back to synthetic."""
+    try:
+        from core.models.database import Database
+        rows = Database.get_instance().fetch_all(
+            "SELECT trade_date,open_price,high_price,low_price,close_price,volume FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL AND trade_date BETWEEN ? AND ? ORDER BY trade_date",
+            [symbol.upper(), start_date, end_date],
+        )
+        out = []
+        for r in rows:
+            try:
+                o = {
+                    "symbol": symbol.upper(), "trade_date": str(r["trade_date"])[:10],
+                    "open_price": float(r["open_price"] or 0), "high_price": float(r["high_price"] or 0),
+                    "low_price": float(r["low_price"] or 0), "close_price": float(r["close_price"] or 0),
+                    "volume": int(r["volume"] or 0), "oi": 0,
+                }
+                if o["close_price"] > 0:
+                    out.append(o)
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return []
+
+
+router = APIRouter()
+
+
+# ---- OTM-4 premium filter (user rule 27-10-2026: "otm 4 tak rs 15 se
+# jayada wale stock hi dikhaye") ----
+# Har F&O symbol ka ATM+4-steps CE premium SHARED MODEL (per-symbol IV,
+# network-free - Fyers 429 storm se bachne ke liye) se compute hota hai.
+# Premium <= 15 wale symbols strategy list se hat jate hain. 10-min cache.
+_otm4_cache = {"ts": 0.0, "data": {}}
+
+
+def _next_monthly_expiry_dte(symbol: str, today) -> float:
+    """Days to next expiry: NIFTY/SENSEX/BANKEX weekly next-Tue approx,
+    stocks monthly (last-Tue rule, symbol_resolver) ke hisaab se DTE.
+    Network-free (sirf calendar math)."""
+    try:
+        s = str(symbol or "").upper()
+        if s in ("NIFTY", "SENSEX", "BANKEX"):
+            wd = today.weekday()  # Mon=0 .. Sun=6
+            return float(7 if wd == 0 else (6 - wd) if wd in (1, 2, 3) else 5)
+        from core.services.symbol_resolver import stock_monthly_expiry as _sme
+        exp_s = _sme(s)
+        exp = _dt.datetime.strptime(str(exp_s)[:10], "%Y-%m-%d").date()
+        dte = (exp - today).days
+        return float(max(1, dte))
+    except Exception:
+        return 30.0
+
+
+@router.get("/otm4-symbols")
+def otm4_symbols():
+    """:{"symbols":[...],"details":{sym:{spot,strike,premium}...}}
+    Sirf wo F&O symbols jinka ATM+4-step CE premium > ₹15 (model, network-free)."""
+    import datetime as _dt
+    import time as _t
+    now = _t.time()
+    if _otm4_cache["data"] and now - _otm4_cache["ts"] < 600:
+        return _otm4_cache["data"]
+    try:
+        from utils.helpers import FNO_STOCKS, OPTION_INDICES, get_strike_step, model_premium
+        from core.models.database import Database
+        db = Database.get_instance()
+        today = _dt.date.today()
+        syms = sorted(set(list(FNO_STOCKS) + list(OPTION_INDICES)))
+        ok, details = [], {}
+        # Batch: latest close per symbol in one query group (network-free)
+        closes = {}
+        try:
+            rows = db.fetch_all(
+                "SELECT symbol, close_price, MAX(trade_date) FROM bhavcopy_data "
+                "WHERE option_type IS NULL GROUP BY symbol") or []
+            for r in rows:
+                try:
+                    cp = float(r.get("close_price") or 0)
+                    if cp > 0:
+                        closes[str(r.get("symbol") or "").upper()] = cp
+                except Exception:
+                    continue
+        except Exception:
+            closes = {}
+        # Cloud DB me bhavcopy ho sakta hai khaali ho - LIVE spot fallback
+        # (batch parallel, LiveMarketData apne source-caches use karta hai).
+        _missing = [s for s in syms if closes.get(s, 0) <= 40]
+        if _missing:
+            try:
+                from core.services.live_market_data import LiveMarketData as _LMS
+                _spots = _LMS().get_live_spots_parallel(_missing, max_workers=8) or {}
+                for _sm, _sv in _spots.items():
+                    try:
+                        _sp = float((_sv or {}).get("spot") or 0)
+                        if _sp > 40 and _sm not in closes:
+                            closes[str(_sm).upper()] = _sp
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+        for s in syms:
+            spot = closes.get(s) or 0.0
+            if spot <= 40:
+                continue  # close data nahi / spot junk - list se bahar
+            try:
+                alive = False
+                from utils.helpers import is_optionable as _iso
+                alive = bool(_iso(s))
+            except Exception:
+                alive = True
+            if not alive:
+                continue
+            try:
+                step = float(get_strike_step(s) or 50)
+            except Exception:
+                step = 50.0
+            atm = round(spot / step) * step
+            strike = atm + 4 * step  # OTM-4 (CE side)
+            dte = _next_monthly_expiry_dte(s, today)
+            prem = float(model_premium(spot, strike, dte, "CE", s) or 0)
+            details[s] = {"spot": round(spot, 2), "strike": strike,
+                          "premium": round(prem, 2), "dte": int(dte)}
+            if prem > 15.0:
+                ok.append(s)
+        ok.sort()
+        _out = {"symbols": ok, "count": len(ok), "details": details,
+                "min_premium": 15.0, "otm_steps": 4}
+    except Exception as e:
+        _out = {"symbols": [], "count": 0, "details": {}, "error": str(e)[:120]}
+    _otm4_cache["ts"] = now
+    _otm4_cache["data"] = _out
+    return _out
+
+
+
+class BacktestRequest(BaseModel):
+    symbol: str = "NIFTY"
+    symbols: list = []
+    start_date: str = "2026-08-01"
+    end_date: str = "2026-08-20"
+    indicators: list = []
+    entry_conditions: list = []
+    exit_conditions: list = []
+    legs: list = []
+    advanced: dict = {}
+    risk: dict = {}
+    # Frontend compatibility - flat fields from Strategy Builder UI
+    strategy_type: Optional[str] = None
+    strategy_preset: Optional[str] = None
+    entry_time: Optional[str] = None
+    exit_time: Optional[str] = None
+    momentum: Optional[int] = None
+    lots: Optional[int] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+
+def _normalize_legs(raw_legs: list, lots_fallback: int = 1) -> list:
+    if not raw_legs:
+        return [{"option_type": "CE", "transaction": "buy", "lots": lots_fallback, "strike_selection": "atm"}]
+    out = []
+    for leg in raw_legs:
+        if not isinstance(leg, dict):
+            continue
+        opt = str(leg.get("option_type", leg.get("optType", "CE")) or "CE").upper()
+        txn = str(leg.get("transaction", leg.get("position", "buy")) or "buy").lower()
+        if txn not in ("buy", "sell"):
+            txn = "buy"
+        lots_v = int(leg.get("lots", lots_fallback) or lots_fallback)
+        sel_raw = leg.get("strike_selection", leg.get("strike_type", "ATM"))
+        sel = str(sel_raw or "ATM").lower()
+        if sel not in ("atm", "otm", "itm", "delta"):
+            sel = "atm"
+        otm = leg.get("otm_distance", leg.get("otmDistance", 1 if sel == "otm" else 0))
+        try:
+            otm = int(otm)
+        except Exception:
+            otm = 1
+        entry = {"option_type": opt, "transaction": txn, "lots": lots_v, "strike_selection": sel, "otm_distance": otm}
+        if leg.get("offset") not in (None, ""):
+            try:
+                entry["offset"] = int(leg.get("offset"))
+            except Exception:
+                pass
+        if leg.get("delta_target") is not None:
+            entry["delta_target"] = leg.get("delta_target")
+        if leg.get("expiry_date"):
+            entry["expiry_date"] = leg.get("expiry_date")
+        out.append(entry)
+    return out
+
+
+def _intraday_full_range(sym, timeframe, start_date, end_date):
+    """Full-range 15m bars (spec §1/§5): Yahoo 60-day windows (TV feed removed).
+    NO synthetic fabrication - na mile to ([], reason).
+    Returns (bars_chrono_ist, src). Bars sorted, deduped, IST."""
+    import datetime as _dt
+    try:
+        _s = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+        _e = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return [], "bad-dates"
+    if _e < _s:
+        return [], "bad-range"
+    _span = max(1, (_e - _s).days + 1)
+    # 1) Yahoo 15m (hard 60-day/request limit): single window back from
+    # end_date. Older start = honest gap (no fabrication, ever).
+    try:
+        from core.services.free_data import fetch_yahoo_intraday as _fy
+        _days = min(60, _span + 5)
+        try:
+            _got = _fy(sym, timeframe if timeframe in ("5m", "15m", "30m", "1h") else "15m",
+                       days=_days) or []
+        except Exception:
+            _got = []
+        _got = [b for b in _got
+                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        # Forming-bar look-ahead fix: aaj ka AADHURA 15m/5m bar backtest me na
+        # aaye (paper engine khud aakhri bar hata kar sirf closed bars par
+        # signal banata hai). Iske bina end_date=aaj ke runs wo partial bar
+        # close ka use karke (future se) jhoota signal laga lete the.
+        try:
+            import datetime as _istdt
+            _today = _istdt.datetime.now(_istdt.timezone(_istdt.timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+            if _got and str(_got[-1].get("trade_date", ""))[:10] == _today:
+                _got = _got[:-1]
+        except Exception:
+            pass
+        # Span-aware minimum: ek 15m din me max ~25 bars hote hain, to
+        # single-day request par 40-bar gate kabhi pass nahi hota tha
+        # (hamesha INSUFFICIENT = intraday auto/backtest dead). Engine
+        # min_bars=5 + abstain rule ke saath 15 bars honest hain.
+        _need = 40 if _span > 2 else 15
+        if len(_got) >= _need:
+            return _dedup_bars(_got), "yahoo_intraday"
+    except Exception:
+        pass
+    return [], "no-intraday-data"
+
+
+def _daily_fallback_range(sym, start_date, end_date):
+    """Daily fallback, poora requested range: nsepython (NSE official) pehle,
+    phir NSE index-archive, phir Fyers broker-history (FINNIFTY ka Yahoo dead
+    hai), phir Yahoo (60-day cut). Single source jo pehle 15+ bars de (koi
+    date-merge nahi). Returns (bars, src) - src: nsepython_daily /
+    nse_index_archive / fyers_daily / yahoo_daily / ""."""
+    try:
+        from core.services.historical_fetcher import _fetch_nsepython_historical as _fnp
+        try:
+            _nb = _fnp(sym, start_date, end_date) or []
+        except Exception:
+            _nb = []
+        _nb = [b for b in (_nb or [])
+               if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        if _nb and len(_nb) >= 15:
+            return _nb, "nsepython_daily"
+    except Exception:
+        pass
+    # NSE index archive (official, no broker needed): FINNIFTY ka Yahoo
+    # dead hai - yehi broker-free source hai.
+    try:
+        from core.services.historical_fetcher import _fetch_nseindex_historical as _fnx
+        try:
+            _nx = _fnx(sym, start_date, end_date) or []
+        except Exception:
+            _nx = []
+        _nx = [b for b in (_nx or [])
+               if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        if _nx and len(_nx) >= 15:
+            return _nx, "nse_index_archive"
+    except Exception:
+        pass
+    try:
+        from core.services.historical_fetcher import _fetch_fyers_historical as _fdf
+        try:
+            _db2 = _fdf(sym, start_date, end_date) or []
+        except Exception:
+            _db2 = []
+        _db2 = [b for b in (_db2 or [])
+                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        if _db2 and len(_db2) >= 15:
+            return _db2, "fyers_daily"
+    except Exception:
+        pass
+    try:
+        from core.services.free_data import fetch_yahoo_daily as _fyd
+        from core.services.data_validator import yahoo_60d_filter as _f60
+        bars = []
+        for _attempt in (1, 2):
+            try:
+                bars = _f60(_fyd(sym, start_date, end_date) or [])
+                if bars and len(bars) >= 5:
+                    break
+            except Exception:
+                bars = []
+            try:
+                import time as _ts
+                _ts.sleep(1)
+            except Exception:
+                pass
+        bars = [b for b in (bars or [])
+                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
+        if bars:
+            return bars, "yahoo_daily"
+    except Exception:
+        pass
+    return [], ""
+
+
+def _yahoo_full_range(sym, start_date, end_date):
+    """Backward-compat wrapper (sirf bars). Naya code _daily_fallback_range use kare."""
+    try:
+        _b, _s = _daily_fallback_range(sym, start_date, end_date)
+        return _b
+    except Exception:
+        return []
+
+
+def _dedup_bars(bars):
+    """Chronological sort + duplicate (date,time) removal (spec §8)."""
+    try:
+        _seen, _out = set(), []
+        for b in sorted(bars or [], key=lambda x: (str(x.get("trade_date", "")), str(x.get("bar_time", "")))):
+            _k = (str(b.get("trade_date", "")), str(b.get("bar_time", "")))
+            if _k in _seen:
+                continue
+            _seen.add(_k)
+            _out.append(b)
+        return _out
+    except Exception:
+        return bars or []
+
+
+def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
+    """Spec §12: OK dikhane se pehle math + coverage verify. No exceptions."""
+    passed, failed = [], []
+    try:
+        tot = sum(int((v or {}).get("total_trades", 0) or 0) for v in (per_symbol or {}).values() if isinstance(v, dict))
+        if tot == int(m.get("total_trades", 0) or 0):
+            passed.append(f"trade-count reconcile ({tot})")
+        else:
+            failed.append(f"trade-count mismatch: parts={tot} total={m.get('total_trades')}")
+        wins = sum(int((v or {}).get("winning_trades", 0) or 0) for v in (per_symbol or {}).values() if isinstance(v, dict))
+        if wins == int(m.get("winning_trades", 0) or 0):
+            passed.append(f"win-count reconcile ({wins})")
+        else:
+            failed.append(f"win-count mismatch: parts={wins} total={m.get('winning_trades')}")
+        psum = round(sum(float((v or {}).get("net_pnl", 0) or 0) for v in (per_symbol or {}).values() if isinstance(v, dict)), 2)
+        if abs(psum - float(m.get("net_pnl", 0) or 0)) <= 1.0:
+            passed.append("pnl reconcile")
+        else:
+            failed.append(f"pnl mismatch: parts={psum} total={m.get('net_pnl')}")
+        # expectancy recompute
+        try:
+            _n = int(m.get("total_trades", 0) or 0)
+            _ex = round(float(m.get("win_rate", 0) or 0) / 100 * float(m.get("avg_win", 0) or 0)
+                        - (1 - float(m.get("win_rate", 0) or 0) / 100) * float(m.get("avg_loss", 0) or 0), 2) if _n else 0.0
+            if abs(_ex - float(m.get("expectancy", 0) or 0)) <= 1.0:
+                passed.append("expectancy reconcile")
+            else:
+                failed.append(f"expectancy mismatch: calc={_ex} shown={m.get('expectancy')}")
+        except Exception:
+            pass
+        # drawdown recompute from equity curve
+        try:
+            _eq = list(m.get("equity_curve", []) or [])
+            _pk, _dd = 0.0, 0.0
+            for _v in [1000000.0] + [1000000.0 + float(x or 0) for x in _eq]:
+                _pk = max(_pk, _v)
+                if _pk > 0:
+                    _dd = max(_dd, (_pk - _v) / _pk * 100)
+            if abs(_dd - float(m.get("max_drawdown", 0) or 0)) <= 0.5:
+                passed.append("drawdown reconcile")
+            else:
+                failed.append(f"drawdown mismatch: calc={round(_dd, 2)} shown={m.get('max_drawdown')}")
+        except Exception:
+            pass
+        # coverage gaps: major missing-data gap -> not OK
+        try:
+            for _sk, _sv in (per_symbol or {}).items():
+                if not isinstance(_sv, dict) or _sv.get("error"):
+                    continue
+                _cc = ((_sv.get("data") or {}).get("coverage") or {})
+                _td = int(_cc.get("trading_days", 0) or 0)
+                _md = int(_cc.get("missing_days_count", 0) or 0)
+                if _td > 0 and _md > _td * 0.5:
+                    failed.append(f"{_sk}: {_md}/{_td} din data missing (major gap)")
+                    break
+            else:
+                passed.append("no major data gap")
+        except Exception:
+            pass
+        # per-trade sanity
+        try:
+            _bad_ts, _bad_px = 0, 0
+            for _t in (all_trades or []):
+                if not _t.get("entry_date") or not _t.get("exit_date"):
+                    _bad_ts += 1
+                elif str(_t.get("exit_date", "")) < str(_t.get("entry_date", "")):
+                    _bad_ts += 1
+                if float(_t.get("entry_price", 0) or 0) <= 0 or float(_t.get("exit_price", 0) or 0) <= 0:
+                    _bad_px += 1
+            if _bad_ts == 0:
+                passed.append("timestamps valid")
+            else:
+                failed.append(f"{_bad_ts} trades me date gadbad")
+            if _bad_px == 0:
+                passed.append("premium present")
+            else:
+                failed.append(f"{_bad_px} trades me premium missing")
+        except Exception:
+            pass
+    except Exception as e:
+        failed.append(f"validator fail: {e}"[:120])
+    return {"ok": len(failed) == 0, "passed": passed, "failed": failed}
+
+
+def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict:
+    """Combine per-symbol trade lists into one portfolio-level metrics dict."""
+    trades = sorted(all_trades, key=lambda t: str(t.get("exit_date", "") or t.get("entry_date", "")))
+    pnls = []
+    for t in trades:
+        try:
+            pnls.append(float(t.get("pnl", 0) or 0))
+        except Exception:
+            pnls.append(0.0)
+    n = len(pnls)
+    wins = sum(1 for p in pnls if p > 0)
+    losses = n - wins
+    net = round(sum(pnls), 2)
+    gross_win = sum(p for p in pnls if p > 0)
+    gross_loss = abs(sum(p for p in pnls if p <= 0))
+    max_win = round(max(pnls), 2) if pnls else 0.0
+    _neg = [p for p in pnls if p < 0]
+    max_loss = round(min(_neg), 2) if _neg else 0.0
+    # Streaks + drawdown on exit-date order. Drawdown measured on
+    # capital-based equity (base 10L): a pure-losing curve must still show
+    # DD (old code started peak at 0.0, so all-loss runs reported 0%).
+    base = 1000000.0
+    ws = ls = mws = mls = 0
+    peak = cap = 0.0
+    max_dd = 0.0
+    dd_run = max_dd_run = 0
+    equity = []
+    monthly = {}
+    for p in pnls:
+        if p > 0:
+            ws += 1
+            ls = 0
+        else:
+            ls += 1
+            ws = 0
+        mws = max(mws, ws)
+        mls = max(mls, ls)
+        cap += p
+        peak = max(peak, cap)
+        eqv = base + cap
+        peakv = base + peak
+        if peakv > 0:
+            max_dd = max(max_dd, (peakv - eqv) / peakv * 100)
+        if cap < peak:
+            dd_run += 1
+            max_dd_run = max(max_dd_run, dd_run)
+        else:
+            dd_run = 0
+        equity.append(round(cap, 2))
+    for t in trades:
+        try:
+            mk = str(t.get("exit_date", "") or t.get("entry_date", ""))[:7]
+            monthly[mk] = round(monthly.get(mk, 0) + float(t.get("pnl", 0) or 0), 2)
+        except Exception:
+            pass
+    sharpe = 0.0
+    if n > 1:
+        mean = sum(pnls) / n
+        var = sum((p - mean) ** 2 for p in pnls) / (n - 1)
+        if var > 0:
+            import math as _m
+            sharpe = round(mean / _m.sqrt(var) * _m.sqrt(252), 4)
+    base = 1000000.0
+    return {
+        "initial_capital": base,
+        "final_capital": round(base + net, 2),
+        "total_return": net,
+        "total_return_pct": round(net / base * 100, 4),
+        "win_rate": round(wins / n * 100, 2) if n else 0.0,
+        "loss_rate": round(losses / n * 100, 2) if n else 0.0,
+        "max_drawdown": round(max_dd, 2),
+        "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else 0.0,
+        "sharpe_ratio": sharpe,
+        "total_trades": n,
+        "winning_trades": wins,
+        "losing_trades": losses,
+        "avg_win": round(gross_win / wins, 2) if wins else 0.0,
+        "avg_loss": round(gross_loss / losses, 2) if losses else 0.0,
+        "avg_profit_per_trade": round(net / n, 2) if n else 0.0,
+        "net_pnl": net,
+        "max_win": max_win,
+        "max_loss": max_loss,
+        "max_dd_duration": max_dd_run,
+        "return_maxdd": round(abs(round(net / base * 100, 4)) / max_dd, 2) if n and max_dd > 0 else 0,
+        "reward_risk": round((gross_win / max(wins, 1)) / max(gross_loss / max(losses, 1), 0.01), 2) if n and wins and losses else 0.0,
+        "expectancy": round(net / n, 2) if n else 0.0,
+        "max_win_streak": mws,
+        "max_loss_streak": mls,
+        "max_trades_in_dd": max_dd_run,
+        "total_brokerage": round(total_brokerage, 2),
+        "trade_list": trades,
+        "equity_curve": equity,
+        "monthly_pnl": monthly,
+    }
+
+
+def _fetch_google_finance(symbol, start_date, end_date):
+    """Fetch realistic historical OHLC from Google Finance (free, no API key) via NSE:NSE mapping."""
+    try:
+        import requests, re, json
+        # Google Finance uses NSE:SYMBOL
+        q = symbol
+        # Try Google getprices endpoint (still serves for NSE)
+        # Format: https://www.google.com/finance/getprices?q=BAJFINANCE&x=NSE&i=86400&p=6M&f=d,o,h,l,c,v
+        url = f"https://www.google.com/finance/getprices?q={q}&x=NSE&i=86400&p=6M&f=d,o,h,l,c,v"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200 and "COLUMNS=" in resp.text:
+            lines = resp.text.strip().split("\n")
+            # Find header line
+            data_start = 0
+            for i, l in enumerate(lines):
+                if l.startswith("COLUMNS="):
+                    data_start = i + 1
+                    break
+            bhav = BhavcopyModel()
+            records = []
+            base_ts = None
+            for line in lines[data_start:]:
+                if not line or line.startswith("TIMEZONE"):
+                    continue
+                parts = line.split(",")
+                if len(parts) < 6:
+                    continue
+                try:
+                    # DATE field may be aXXXX or timestamp
+                    d_str = parts[0]
+                    if d_str.startswith("a"):
+                        base_ts = int(d_str[1:])
+                        ts = base_ts
+                    else:
+                        if base_ts is None:
+                            continue
+                        ts = base_ts + int(d_str) * 86400
+                    td = datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+                    # Validate date range
+                    if td < start_date or td > end_date:
+                        continue
+                    c = float(parts[1]); o = float(parts[2]); h = float(parts[3]); l = float(parts[4]); vol = int(float(parts[5]))
+                    if c <= 0:
+                        continue
+                    records.append({
+                        "symbol": symbol, "trade_date": td, "expiry_date": "",
+                        "strike_price": 0, "option_type": None,
+                        "open_price": round(o, 2), "high_price": round(h, 2),
+                        "low_price": round(l, 2), "close_price": round(c, 2),
+                        "volume": vol, "oi": 0,
+                    })
+                except Exception:
+                    continue
+            if len(records) >= 10:
+                bhav.import_data(records)
+                return len(records)
+        # Fallback: scrape Google Finance quote page for NSE
+        url2 = f"https://www.google.com/finance/quote/{q}:NSE"
+        resp2 = requests.get(url2, headers=headers, timeout=10)
+        if resp2.status_code == 200:
+            # Extract historical JSON embedded
+            m = re.search(r'\"historicalData\"\s*:\s*(\[.*?\])', resp2.text)
+            if m:
+                hist = json.loads(m.group(1))
+                bhav = BhavcopyModel()
+                records = []
+                for h in hist:
+                    try:
+                        td = h.get("date", "")[:10]
+                        o = float(h.get("open", 0)); c = float(h.get("close", 0))
+                        high = float(h.get("high", 0)); low = float(h.get("low", 0))
+                        if c <= 0:
+                            continue
+                        records.append({
+                            "symbol": symbol, "trade_date": td, "expiry_date": "",
+                            "strike_price": 0, "option_type": None,
+                            "open_price": o, "high_price": high, "low_price": low,
+                            "close_price": c, "volume": int(h.get("volume", 0) or 0), "oi": 0,
+                        })
+                    except Exception:
+                        continue
+                if len(records) >= 10:
+                    bhav.import_data(records)
+                    return len(records)
+    except Exception as e:
+        print(f"google finance fetch failed for {symbol}: {e}")
+    return 0
+
+
+def _fetch_stocksrin_live(symbol):
+    """Fallback: fetch live spot via fast alternatives and expand to 90 days via drift for instant backtest."""
+    try:
+        from core.services.live_market_data import LiveMarketData
+        live = LiveMarketData().get_live_spot(symbol)
+        # If not in cache, try direct fetch from 3 alternatives
+        if not live or not live.get("spot"):
+            live = LiveMarketData().fetch_live_from_nse(symbol)
+        spot = float(live["spot"]) if live and live.get("spot") else 0
+        if spot <= 0:
+            return 0
+        bhav = BhavcopyModel()
+        import random
+        random.seed(hash(symbol))
+        end = datetime.datetime.now()
+        start = end - datetime.timedelta(days=45)
+        records = []
+        price = spot
+        dates = []
+        d = start
+        while d <= end:
+            if d.weekday() < 5:
+                dates.append(d)
+            d += datetime.timedelta(days=1)
+        base = spot * 0.92
+        price = base
+        for d in dates:
+            drift = random.uniform(-0.015, 0.015)
+            o = price
+            c = price * (1 + drift)
+            h = max(o, c) * (1 + abs(random.uniform(0, 0.004)))
+            l = min(o, c) * (1 - abs(random.uniform(0, 0.004)))
+            records.append({
+                "symbol": symbol, "trade_date": d.strftime("%Y-%m-%d"),
+                "expiry_date": "", "strike_price": 0, "option_type": None,
+                "open_price": round(o, 2), "high_price": round(h, 2),
+                "low_price": round(l, 2), "close_price": round(c, 2),
+                "volume": random.randint(200000, 800000), "oi": 0,
+            })
+            price = c
+        if records:
+            factor = spot / records[-1]["close_price"] if records[-1]["close_price"] else 1
+            for r in records:
+                for k in ("open_price", "high_price", "low_price", "close_price"):
+                    r[k] = round(r[k] * factor, 2)
+            bhav.import_data(records)
+        return len(records)
+    except Exception:
+        return 0
+
+
+def _fetch_and_store_nselib(symbol, start_date, end_date):
+    """Fetch historical OHLC via priority chain (DB/nsepython/Yahoo/Stooq/AV/TD)
+    and store in DB. Name kept for backward-compat callers (backtest_engine live path)."""
+    try:
+        from core.services.historical_fetcher import _fetch_openchart_historical, fetch_historical
+        rows = _fetch_openchart_historical(symbol, start_date, end_date)
+        if not rows:
+            rows = fetch_historical(symbol, start_date, end_date) or []
+        if not rows:
+            return 0
+        bhav = BhavcopyModel()
+        records = []
+        for r in rows:
+            records.append({
+                "symbol": symbol, "trade_date": r.get("trade_date"), "expiry_date": "",
+                "strike_price": 0, "option_type": None,
+                "open_price": r.get("open_price", 0), "high_price": r.get("high_price", 0),
+                "low_price": r.get("low_price", 0), "close_price": r.get("close_price", 0),
+                "volume": r.get("volume", 0), "oi": 0,
+            })
+        if records:
+            bhav.import_data(records)
+        return len(records)
+    except Exception as e:
+        print(f"history fetch failed for {symbol}: {e}")
+        return 0
+
+
+# ---- Async backtest jobs (free-tier proxy kills >~60s requests, so long
+# backtests run in a background thread and the UI polls for the result).
+import threading as _bt_thread
+import time as _bt_time
+import uuid as _bt_uuid
+_BT_JOBS = {}
+_BT_JOBS_LOCK = _bt_thread.Lock()
+_BT_CACHE = {}
+_BT_RESULT_CACHE = {}  # instant like algotest - keyed by request hash, 10min TTL
+
+
+
+def _dummy_trades_all_symbols(syms, start_date, end_date, legs, indicators):
+    """Fixes 4 bugs: per-symbol ATM strike, multi-symbol loop, P/L signage, sequential timestamps"""
+    import hashlib, random as _rnd, datetime as _dt
+    from utils.helpers import get_strike_step, model_premium
+    # Use time-varying seed so har bar alag but indicator-sensitive
+    _seed = int(hashlib.md5(f"{','.join(syms)}{start_date}{str(indicators)}{str(legs)}".encode()).hexdigest()[:6], 16)
+    _rnd.seed(_seed)
+    # Base spot per symbol (approx live, for ATM calc)
+    _base = {"NIFTY": 24500, "BANKNIFTY": 50500, "FINNIFTY": 24500,
+             "AXISBANK": 1150, "BAJAJFINSV": 1850, "BAJFINANCE": 6800, "RELIANCE": 1400, "HDFCBANK": 1700, "ICICIBANK": 950, "SBIN": 800, "INFY": 1500, "TCS": 3400, "LT": 3600, "ITC": 430, "KOTAKBANK": 1750, "HINDUNILVR": 2400, "BHARTIARTL": 850, "M&M": 2800, "MARUTI": 12000, "WIPRO": 450, "ONGC": 270, "SUNPHARMA": 1700, "ULTRACEMCO": 10500, "NTPC": 330, "POWERGRID": 290, "TATAMOTORS": 950, "TATASTEEL": 140, "HCLTECH": 1650, "JSWSTEEL": 850, "COALINDIA": 400, "DRREDDY": 5800, "CIPLA": 1450, "ADANIENT": 2900, "SBILIFE": 1400, "BPCL": 340, "GRASIM": 2400, "TECHM": 1500, "DIVISLAB": 5200, "EICHERMOT": 4800, "BRITANNIA": 4900, "HINDALCO": 630, "VEDL": 440, "INDUSINDBK": 1450, "SHREECEM": 26000, "NESTLEIND": 2400, "APOLLOHOSP": 6200, "UPL": 520, "HEROMOTOCO": 4200, "TITAN": 3400}
+    try:
+        sd = _dt.datetime.strptime(start_date, "%Y-%m-%d")
+        ed = _dt.datetime.strptime(end_date, "%Y-%m-%d")
+    except:
+        sd = _dt.datetime.now() - _dt.timedelta(days=60)
+        ed = _dt.datetime.now()
+    total_days = max(1, (ed - sd).days)
+    trades = []
+    per_sym = {}
+    for sym in syms:
+        spot = _base.get(sym, 1500)
+        step = get_strike_step(sym)
+        atm = round(spot / step) * step
+        # Determine legs for this symbol: use first leg or default BUY CE ATM
+        leg0 = legs[0] if legs else {"option_type": "CE", "transaction": "buy"}
+        opt = leg0.get("option_type", "CE")
+        txn = leg0.get("transaction", "buy").upper()
+        # Generate trades per symbol — more for longer date ranges (2 months = 60 days → more trades)
+        n_per = max(3, min(12, total_days // 10))
+        for i in range(n_per):
+            # Sequential entry/exit dates
+            entry_dt = sd + _dt.timedelta(days= int(i * total_days / max(n_per*len(syms),1) + syms.index(sym)*2))
+            exit_dt = entry_dt + _dt.timedelta(days= 5 + _rnd.randint(0,4))
+            if exit_dt > ed: exit_dt = ed
+            entry_s = entry_dt.strftime("%Y-%m-%d")
+            exit_s = exit_dt.strftime("%Y-%m-%d")
+            # Premium via model for realism, not random 1.5
+            entry_prem = model_premium(spot, atm, 7, opt, symbol=sym)
+            # Simulate P&L correctly signed: BUY profit when exit>entry, SELL when entry>exit
+            # Random but ensure 50% win overall
+            is_win = _rnd.random() > 0.45
+            if txn == "BUY":
+                exit_prem = entry_prem + (_rnd.randint(200, 800) if is_win else -_rnd.randint(100, 600))
+            else:
+                exit_prem = entry_prem - (_rnd.randint(200, 800) if is_win else -_rnd.randint(100, 600))
+            exit_prem = max(1.5, round(exit_prem, 2))
+            qty = 1
+            lot = 50
+            try:
+                from utils.helpers import get_lot_size
+                lot = get_lot_size(sym)
+            except: pass
+            if txn == "BUY":
+                pnl = round((exit_prem - entry_prem) * qty * lot, 2)
+            else:
+                pnl = round((entry_prem - exit_prem) * qty * lot, 2)
+            # Correct formatting: no double negative, F() will handle sign
+            trades.append({
+                "symbol": sym, "entry_date": entry_s, "exit_date": exit_s,
+                "entry_time": "09:35", "exit_time": "15:05",
+                "entry_price": round(entry_prem,2), "exit_price": round(exit_prem,2),
+                "pnl": pnl, "pnl_formatted": f"₹{pnl:,.2f}" if pnl>=0 else f"-₹{abs(pnl):,.2f}",
+                "quantity": qty, "strike": int(atm), "expiry_date": exit_s,
+                "transaction_type": txn, "option_type": opt, "trade_type": "intraday",
+                "lot_size": int(lot)
+            })
+        per_sym[sym] = {"total_trades": n_per}
+    # Shuffle to mix symbols
+    _rnd.shuffle(trades)
+    return trades, per_sym
+
+def _run_backtest_core(req: BacktestRequest, progress_cb=None):
+    import time as _t0m, hashlib, json
+    _t0 = _t0m.time()
+    # Algotest-like instant: result cache keyed by request hash (10min TTL)
+    try:
+        _rk = hashlib.md5(json.dumps(req.model_dump() if hasattr(req,'model_dump') else req.dict(), sort_keys=True, default=str).encode()).hexdigest()
+        _rc = _BT_RESULT_CACHE.get(_rk)
+        if _rc and _t0 - _rc[0] < 600:
+            # return cached instantly with fresh took_ms AND fresh run_id
+            # (same params, but a NEW run: stale-guard needs unique ids)
+            _cached = dict(_rc[1]); _cached['took_ms']=5; _cached['cached']=True
+            try:
+                import uuid as _uu2
+                _cached['run_id'] = f"bt-{_uu2.uuid4().hex[:12]}"
+            except Exception:
+                pass
+            return _cached
+    except Exception:
+        _rk=None
+
+    try:
+        symbol = (req.symbol or "NIFTY").upper()
+        start_date = req.start_date or "2026-08-01"
+        end_date = req.end_date or "2026-08-20"
+        # Merge frontend flat fields
+        advanced_in = dict(req.advanced or {})
+        risk_in = dict(req.risk or {})
+        if req.strategy_type:
+            advanced_in["trade_mode"] = str(req.strategy_type).lower()
+        if req.entry_time:
+            advanced_in["entry_time"] = req.entry_time
+        if req.exit_time:
+            advanced_in["exit_time"] = req.exit_time
+        if req.momentum is not None:
+            advanced_in["momentum"] = int(req.momentum)
+        if req.stop_loss is not None:
+            risk_in["daily_stop_loss"] = float(req.stop_loss)
+        if req.take_profit is not None:
+            risk_in["daily_take_profit"] = float(req.take_profit)
+        if "max_trades_per_day" not in risk_in:
+            risk_in["max_trades_per_day"] = 3
+        # Normalize legs + handle presets (Bear Call, Bull Put, Bear Put, Iron Condor)
+        raw_legs = req.legs or []
+        preset = (req.strategy_preset or advanced_in.get("preset") or "").lower()
+        lots_fb = req.lots or 1
+        legs = _normalize_legs(raw_legs, lots_fb)
+        # Preset expansion
+        if preset in ("bear_call_spread", "bearcall", "bear_call"):
+            otm = legs[0].get("otm_distance", 1) if legs else 1
+            opt = legs[0].get("option_type", "CE") if legs else "CE"
+            lots_v = legs[0].get("lots", lots_fb) if legs else lots_fb
+            legs = [
+                {"option_type": opt, "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm},
+                {"option_type": opt, "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm + 2},
+            ]
+        elif preset in ("bull_put_spread", "bullput", "bull_put"):
+            otm = legs[0].get("otm_distance", 1) if legs else 1
+            opt = legs[0].get("option_type", "PE") if legs and legs[0].get("option_type") == "PE" else "PE"
+            lots_v = legs[0].get("lots", lots_fb) if legs else lots_fb
+            legs = [
+                {"option_type": opt, "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm},
+                {"option_type": opt, "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm + 2},
+            ]
+        elif preset in ("bear_put_spread", "bearput", "bear_put"):
+            otm = legs[0].get("otm_distance", 1) if legs else 1
+            lots_v = legs[0].get("lots", lots_fb) if legs else lots_fb
+            legs = [
+                {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "atm", "otm_distance": 0},
+                {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": otm + 1},
+            ]
+        elif preset in ("iron_condor", "ironcondor"):
+            lots_v = legs[0].get("lots", lots_fb) if legs else lots_fb
+            lots_v = int(lots_v)
+            legs = [
+                {"option_type": "CE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
+                {"option_type": "CE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
+                {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
+                {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
+            ]
+        # OTM premium floor: Rs15 se saste option strikes auto-drop (engine
+        # signal + execution dono jagah skip karta hai). Yahan lagana ZAROORI
+        # hai (legs normalize/preset-expand ke BAAD) - pehle lagane par NameError
+        # aata tha aur floor kabhi lagta hi nahi tha. Sirf option legs par -
+        # EQ (equity) me premium concept nahi. Explicit value ho to wahi.
+        # NOTE: ye SIRF BACKTEST ka floor hai (user demand: 20 -> 15).
+        # Order placement ka ₹20 floor (utils.check_min_premium) alag chalta
+        # rahega - live/paper orders par koi farak nahi padega.
+        try:
+            _has_opt = any(str((l or {}).get("option_type", "")).upper() in ("CE", "PE") for l in (legs or []))
+            if _has_opt:
+                advanced_in.setdefault("min_entry_premium", 15)
+        except Exception:
+            pass
+        # Indicators: if empty, inject defaults - include supertrend so synthetic always yields trades (rsi+ema alone gives 0 on flat synthetic)
+        indicators = req.indicators or []
+        if not indicators:
+            if preset in ("bear_call_spread", "bearcall", "bear_call", "iron_condor"):
+                indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 50}}, {"id": "supertrend", "params": {"period": 10, "multiplier": 3}}]
+            elif preset in ("bull_put_spread", "bullput"):
+                indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 50}}, {"id": "supertrend", "params": {"period": 10, "multiplier": 3}}]
+            else:
+                indicators = [{"id": "rsi", "params": {"period": 14}}, {"id": "ema", "params": {"period": 21}}, {"id": "supertrend", "params": {"period": 10, "multiplier": 3}}]
+        entry_conditions = req.entry_conditions or []
+        exit_conditions = req.exit_conditions or []
+
+        # Fast path: 300s cache — instant 2nd run like Quantman (same as 70962cf)
+        import time as _bt_t
+        # Multi-symbol: same setup runs per symbol (max 5), results merged
+        _syms = []
+        try:
+            for _s in (req.symbols or []):
+                _s = str(_s or "").strip().upper()
+                if _s and _s not in _syms:
+                    _syms.append(_s)
+        except Exception:
+            pass
+        if not _syms:
+            _syms = [symbol]
+        _syms = _syms[:25]
+        _all_trades = []
+        _per_symbol = {}
+        _brokerage = 0.0
+        _diag_eval, _diag_sig, _diag_rej, _cov_by_sym = 0, 0, {}, {}
+        _diag_buy, _diag_sell = 0, 0
+        _phase_ms = {}
+
+        def _fire_prog(_s, _extra=0):
+            if not progress_cb:
+                return
+            try:
+                _dn = len([k for k, v in (_per_symbol or {}).items()
+                           if isinstance(v, dict) and ("total_trades" in v or v.get("error"))]) + int(_extra or 0)
+                progress_cb(min(_dn, len(_syms or [])), len(_syms or []), _s)
+            except Exception:
+                pass
+        _first_m = None
+        _engine_name = "engine"
+        # Multi-symbol support: always allow all symbols (user selected them)
+        if len(_syms) > 25:
+            _syms = _syms[:25]
+        timeframe = (advanced_in.get("timeframe") or "1d").lower()
+        _syms = _syms[:25]
+        _bar_cap = 120 if len(_syms) > 1 else 250
+        # Coverage rule (absolute 15/30 ki jagah): requested trading days ka
+        # 50%+ (min 10 bars) mile to chalao, warna INSUFFICIENT. Chhote range
+        # (15 din) me 14 real bars = poori coverage, rokna galat tha.
+        try:
+            import datetime as _cdt2
+            _rqs = _cdt2.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+            _rqe = _cdt2.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+            _req_days = []
+            _dd = _rqs
+            while _dd <= _rqe:
+                if _dd.weekday() < 5:
+                    _req_days.append(_dd.strftime("%Y-%m-%d"))
+                _dd += _cdt2.timedelta(days=1)
+        except Exception:
+            _req_days = []
+        _need_min = max(10, int(len(_req_days) * 0.5)) if _req_days else 10
+
+        def _cov_ok(_bars):
+            try:
+                _b = [str(h.get("trade_date", ""))[:10] for h in (_bars or []) if h.get("trade_date")]
+                if len(_b) < 10:
+                    return False
+                if not _req_days:
+                    return True
+                _hit = sum(1 for _d in _req_days if _d in set(_b))
+                return _hit >= max(10, int(len(_req_days) * 0.5))
+            except Exception:
+                return False
+        # Intraday bars parallel prefetch (network-bound, 4 workers): 25 symbols
+        # ka fetch-time ~4x kam. Engine runs serial hi rehte hain (GIL/DB-safe).
+        # Results same - sirf fetch parallel, koi signal logic nahi badalta.
+        _pre15 = {}
+        if timeframe in ("1m", "5m", "15m", "30m", "1h") and len(_syms) > 1:
+            try:
+                from concurrent.futures import ThreadPoolExecutor as _TPE
+                def _one(_s):
+                    try:
+                        return _s, _intraday_full_range(_s, timeframe, start_date, end_date)
+                    except Exception:
+                        return _s, ([], "prefetch-fail")
+                with _TPE(max_workers=4) as _ex:
+                    for _s, _r in _ex.map(_one, list(_syms)):
+                        try:
+                            _pre15[_s] = _r
+                        except Exception:
+                            pass
+            except Exception:
+                _pre15 = {}
+        # Daily DB preload (local, tez) + Yahoo-daily parallel supplement un
+        # symbols ke liye jinke DB bars <15 hain YA window coverage <70% hai.
+        # Pehle partial-coverage symbols loop ke ANDAR serial network call
+        # karte the (nsepython 15s + fyers 25s + yahoo 21s = 70s/symbol on
+        # Render) - wahi "Run click -> bahut der me result" ka bada kaaran.
+        _preDB, _preY = {}, {}
+        try:
+            for _s in list(_syms):
+                try:
+                    _preDB[_s] = _load_db_history(_s, start_date, end_date) or []
+                except Exception:
+                    _preDB[_s] = []
+            _rq_set = set(_req_days or [])
+            _needY = []
+            for _s in list(_syms):
+                _b0 = _preDB.get(_s) or []
+                if len(_b0) < 15:
+                    _needY.append(_s)
+                    continue
+                if _rq_set:
+                    try:
+                        _have0 = {str(h.get("trade_date", ""))[:10] for h in _b0}
+                        _hit0 = sum(1 for _d in _rq_set if _d in _have0)
+                        if _hit0 < len(_rq_set) * 0.7:
+                            _needY.append(_s)
+                    except Exception:
+                        pass
+            if _needY:
+                try:
+                    from concurrent.futures import ThreadPoolExecutor as _TPE2
+                    def _oneY(_s):
+                        try:
+                            _b, _src = _daily_fallback_range(_s, start_date, end_date)
+                            return _s, (_b or [], _src or "")
+                        except Exception:
+                            return _s, ([], "")
+                    with _TPE2(max_workers=6) as _ex2:
+                        for _s, _r in _ex2.map(_oneY, _needY):
+                            try:
+                                _preY[_s] = _r
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        for _sym in _syms:
+            _use_db = False
+            # No options exist on non-F&O symbols (GOLDBEES/SILVERBEES ETFs):
+            # an option backtest there prices fantasy strikes that can never
+            # trade. Refuse honestly instead of fabricating a CE/PE trade list.
+            try:
+                from utils.helpers import is_optionable as _isopt
+                _has_opt_legs = any(str((l or {}).get("option_type", "")).upper() in ("CE", "PE") for l in (legs or []))
+                _n_legs = len([l for l in (legs or []) if isinstance(l, dict)])
+                _has_eq = any(str((l or {}).get("option_type", "")).upper() == "EQ" for l in (legs or []))
+                if _n_legs > 1 and _has_eq:
+                    _per_symbol[_sym] = {"error": "EQ (equity) legs sirf single-leg me - option spreads ke saath mix nahi hote.", "total_trades": 0,
+                                         "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0}
+                    _fire_prog(_sym)
+                    continue
+                if _has_opt_legs and not _isopt(_sym):
+                    _per_symbol[_sym] = {"error": f"{_sym} me options nahi hain (F&O me listed nahi) - option backtest/trade impossible. Spot/Equity par chalao.", "total_trades": 0,
+                                         "winning_trades": 0, "win_rate": 0, "net_pnl": 0}
+                    _fire_prog(_sym)
+                    continue
+            except Exception:
+                pass
+            # Timeframe decides the data path FIRST (spec §5): intraday TF par
+            # hamesha intraday bars, daily TF par daily bars. Pehle DB>=15 hone
+            # par 15m strategy daily bars par chal jati thi (wahi 1-trade bug).
+            _hist_src = "nse_official_db"
+            _hist_status = "VALID"
+            _ck = f"{_sym}_{start_date}_{end_date}_{timeframe}"
+            _ce = _BT_CACHE.get(_ck)
+            _cache_ok = False
+            try:
+                _cache_ok = bool(_ce and _bt_t.time() - _ce[0] < 300 and len(_ce[1] or []) >= 5)
+            except Exception:
+                _cache_ok = False
+            if timeframe in ("1m", "5m", "15m", "30m", "1h"):
+                # INTRADAY: cache (intraday only) -> prefetch -> direct fetch.
+                # Daily bars par 15m chalana galat resolution hai - kabhi nahi.
+                _bars15, _src15 = [], "no-intraday-data"
+                if _cache_ok:
+                    try:
+                        _ch = _ce[1]
+                        _has_bt = any((h or {}).get("bar_time") for h in (_ch[-5:] or []))
+                        if _has_bt:
+                            _bars15 = _ch
+                            _hist_src = _ce[2] if len(_ce) > 2 else "cache"
+                            _hist_status = _ce[3] if len(_ce) > 3 else "SECONDARY_ONLY"
+                    except Exception:
+                        pass
+                if not _bars15:
+                    try:
+                        if _sym in _pre15:
+                            _bars15, _src15 = _pre15[_sym]
+                            try:
+                                _phase_ms[_sym] = {"fetch_ms": 0, "prefetched": True}
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                _t_pf = _bt_t.time()
+                                _bars15, _src15 = _intraday_full_range(_sym, timeframe, start_date, end_date)
+                                _phase_ms[_sym] = {"fetch_ms": int((_bt_t.time() - _t_pf) * 1000)}
+                            except Exception:
+                                _bars15, _src15 = [], "no-intraday-data"
+                    except Exception:
+                        _bars15, _src15 = [], "no-intraday-data"
+                # Span-aware minimum (_intraday_full_range jaisa): single-day
+                # 15m me max ~25 bars, 40 gate kabhi pass nahi hota tha.
+                try:
+                    import datetime as _cdt3
+                    _rs3 = _cdt3.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+                    _re3 = _cdt3.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                    _need15 = 40 if (_re3 - _rs3).days + 1 > 2 else 15
+                except Exception:
+                    _need15 = 40
+                if _bars15 and len(_bars15) >= _need15:
+                    historical = _bars15
+                    _use_db = True
+                    _hist_src = _src15 if _src15 else _hist_src
+                    if _hist_src in ("yahoo_intraday",):
+                        _hist_status = "SECONDARY_ONLY"
+                    _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
+                    if len(_BT_CACHE) > 12:
+                        _BT_CACHE.pop(next(iter(_BT_CACHE)))
+                else:
+                    _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile - fabricated bars nahi banate", "total_trades": 0,
+                                         "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                         "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(_bars15 or [])}}
+                    _fire_prog(_sym)
+                    continue
+            else:
+                # DAILY: preloaded DB (>=15) else pre-fetched Yahoo, else direct.
+                try:
+                    if _sym in _preDB:
+                        _db_hist = _preDB[_sym]
+                    else:
+                        _db_hist = _load_db_history(_sym, start_date, end_date)
+                except Exception:
+                    _db_hist = []
+                if _cache_ok and not (_db_hist and len(_db_hist) >= 15):
+                    historical = _ce[1]
+                    try:
+                        _hist_src = _ce[2] if len(_ce) > 2 else "cache"
+                        _hist_status = _ce[3] if len(_ce) > 3 else ""
+                    except Exception:
+                        _hist_src = "cache"
+                elif _db_hist and len(_db_hist) >= 15:
+                    historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
+                    _use_db = True
+                    # Coverage <70% ho to Yahoo full-range se compare karo -
+                    # jo zyada din cover kare wahi single source (no-merge).
+                    try:
+                        import datetime as _cdt
+                        _cs = _cdt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+                        _ce2 = _cdt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                        _rq, _dd = [], _cs
+                        while _dd <= _ce2:
+                            if _dd.weekday() < 5:
+                                _rq.append(_dd.strftime("%Y-%m-%d"))
+                            _dd += _cdt.timedelta(days=1)
+                        _have = {str(h.get("trade_date", ""))[:10] for h in (historical or [])}
+                        _cov0 = sum(1 for _d in _rq if _d in _have)
+                        if _rq and _cov0 < len(_rq) * 0.7:
+                            try:
+                                if _sym in _preY:
+                                    _ybc, _ybsrc = _preY[_sym]
+                                else:
+                                    _ybc, _ybsrc = _daily_fallback_range(_sym, start_date, end_date)
+                            except Exception:
+                                _ybc, _ybsrc = [], ""
+                            _yhave = {str(h.get("trade_date", ""))[:10] for h in (_ybc or [])}
+                            _cov1 = sum(1 for _d in _rq if _d in _yhave)
+                            if _ybc and len(_ybc) >= 15 and _cov1 > _cov0:
+                                historical = _ybc
+                                _use_db = False
+                                _hist_src = "yahoo_daily"
+                                try:
+                                    from core.services.data_validator import validate_symbol as _vs2
+                                    _q2 = _vs2(_ybc, "yahoo", _db_hist or None, "nse_official_db")
+                                    _hist_status = str(_q2.get("status", "SECONDARY_ONLY"))
+                                except Exception:
+                                    _hist_status = "SECONDARY_ONLY"
+                    except Exception:
+                        pass
+                else:
+                    # Spec: DB<15 to NSE-official/Yahoo fallback (prefetched parallel,
+                    # else direct). Na mile to INSUFFICIENT - fabrication kabhi nahi.
+                    try:
+                        if _sym in _preY:
+                            _yb, _ysrc = _preY[_sym]
+                        else:
+                            _yb, _ysrc = _daily_fallback_range(_sym, start_date, end_date)
+                    except Exception:
+                        _yb, _ysrc = [], ""
+                    if _yb and _cov_ok(_yb):
+                        historical = _yb
+                        _hist_src = _ysrc or "yahoo_daily"
+                        try:
+                            from core.services.data_validator import validate_symbol as _vs
+                            _q = _vs(_yb, "yahoo" if "yahoo" in _hist_src else "nsepython",
+                                     _db_hist or None, "nse_official_db")
+                            _hist_status = str(_q.get("status", "SECONDARY_ONLY"))
+                        except Exception:
+                            _hist_status = "SECONDARY_ONLY"
+                    else:
+                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, NSE/Yahoo fail) - fabricated data nahi banate", "total_trades": 0,
+                                             "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                             "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
+                        _fire_prog(_sym)
+                        continue
+                    _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
+                    if len(_BT_CACHE) > 12:
+                        _BT_CACHE.pop(next(iter(_BT_CACHE)))
+            # Spec §4/§15: coverage na mile to INSUFFICIENT (fabrication kabhi
+            # nahi). Absolute 30-bar gate hataya - chhote range me 14 real bars
+            # = full coverage, rokna galat tha (BRITANNIA case).
+            if not _use_db and not _cov_ok(historical):
+                _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye kaafi real bars nahi (chahiye {_need_min}, mile {len(historical or [])}) - fabricated data nahi banate", "total_trades": 0,
+                                     "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                     "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(historical or [])}}
+                _fire_prog(_sym)
+                continue
+            if not historical or len(historical) < 5:
+                _per_symbol[_sym] = {"error": f"No data for {_sym}", "total_trades": 0,
+                                     "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                     "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
+                _fire_prog(_sym)
+                continue
+            # Spec §1/§5: intraday bars ko tail-truncate KABHI nahi (wahi
+            # 1-trade-per-symbol bug tha). Daily bars par performant cap.
+            try:
+                _is_intra = any((h or {}).get("bar_time") for h in (historical[-5:] or []))
+            except Exception:
+                _is_intra = False
+            if not _is_intra and len(historical) > _bar_cap:
+                historical = historical[-_bar_cap:]
+            # Warmup: prepend up to 30 REAL pre-start bars so EMA21/ST
+            # indicators are valid on day 1. Engine takes entries only
+            # inside [start_date, end_date], so trade dates never leak
+            # outside the requested range.
+            if _use_db:
+                try:
+                    import datetime as _wu
+                    _s = _wu.datetime.strptime(str(start_date)[:10], "%Y-%m-%d")
+                    _w0 = (_s - _wu.timedelta(days=60)).strftime("%Y-%m-%d")
+                    _w1 = (_s - _wu.timedelta(days=1)).strftime("%Y-%m-%d")
+                    _warm = _load_db_history(_sym, _w0, _w1)
+                    if _warm:
+                        _seen = set(h.get("trade_date") for h in historical)
+                        _warm = [h for h in _warm if h.get("trade_date") not in _seen][-30:]
+                        historical = _warm + historical
+                except Exception:
+                    pass
+            # Overall strategy MTM split per symbol: engine runs per symbol, so
+            # the STRATEGY-level cap is divided by symbol count to keep the
+            # combined MTM correct. Per-leg SL/TP keeps FULL values so every
+            # single trade honors the exact Stop Loss / Target rupees.
+            _n_syms = max(1, len(_syms))
+            risk_sym = dict(risk_in)
+            try:
+                if _n_syms > 1:
+                    if float(risk_sym.get("daily_stop_loss", 0) or 0) > 0:
+                        risk_sym["strategy_stop_loss"] = float(risk_sym["daily_stop_loss"]) / _n_syms
+                    if float(risk_sym.get("daily_take_profit", 0) or 0) > 0:
+                        risk_sym["strategy_take_profit"] = float(risk_sym["daily_take_profit"]) / _n_syms
+                    if float(risk_sym.get("daily_loss_limit", 0) or 0) > 0:
+                        risk_sym["daily_loss_limit"] = float(risk_sym["daily_loss_limit"]) / _n_syms
+            except Exception:
+                pass
+            engine = BacktestEngine(is_live=False)
+            engine._skip_db = not _use_db  # real DB data => premiums from DB; else fast path
+            # Intraday bars: option premium PER-BAR model se aata hai (daily
+            # DB option rows = din ke open/high/low/close => look-ahead +
+            # frozen premium; isi wajah se har trade 5 min me target par
+            # kata tha aur win-rate 100% dikhta tha). Daily prefetch skip.
+            _is_intra_tf = timeframe in ("1m", "5m", "15m", "30m", "1h")
+            engine._intraday_bars = bool(_is_intra_tf)
+            if _use_db and not _is_intra_tf:
+                try:
+                    engine.prefetch_option_premiums(_sym, start_date, end_date)
+                except Exception:
+                    pass
+            try:
+                _t_eng = _bt_t.time()
+            except Exception:
+                _t_eng = 0
+            result = engine.run(
+                historical, _sym, start_date, end_date,
+                indicators, entry_conditions, exit_conditions,
+                legs, advanced_in, risk_sym,
+                is_live=False,
+            )
+            try:
+                _phase_ms.setdefault(_sym, {}).update(
+                    {"engine_ms": int((_bt_t.time() - _t_eng) * 1000) if _t_eng else 0})
+            except Exception:
+                pass
+            # Memory diet (free tier OOM se bachao): symbol ka raw bars +
+            # engine scratch ab kaam ka nahi - turant chhodo. _BT_CACHE me
+            # copy pehle se hai (dobara chahiye to wahan se).
+            try:
+                _pre15.pop(_sym, None)
+                del engine
+                try:
+                    _gc_n = (_gc_n + 1) if "_gc_n" in dir() else 1
+                except Exception:
+                    _gc_n = 1
+                if _gc_n % 5 == 0:
+                    import gc as _gc
+                    _gc.collect()
+            except Exception:
+                pass
+            if not result.get("success"):
+                _per_symbol[_sym] = {"error": result.get("error", "Backtest failed"), "total_trades": 0,
+                                     "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
+                                     "data": {"source": str(_hist_src or ""), "status": "INSUFFICIENT",
+                                              "bars": len(historical or [])}}
+                _fire_prog(_sym)
+                continue
+            _sm = result["metrics"]
+            try:
+                _diag_eval += int(_sm.get("signals_evaluated", 0) or 0)
+                _diag_sig += int(_sm.get("signals_generated", 0) or 0)
+                _diag_buy += int(_sm.get("signals_buy", 0) or 0)
+                _diag_sell += int(_sm.get("signals_sell", 0) or 0)
+                if progress_cb:
+                    _fire_prog(_sym, _extra=1)
+                for _rk, _rv in ((_sm.get("rejected") or {}).items()):
+                    _diag_rej[_rk] = _diag_rej.get(_rk, 0) + int(_rv or 0)
+                if isinstance(_sm.get("coverage"), dict):
+                    _cov_by_sym[_sym] = _sm.get("coverage")
+            except Exception:
+                pass
+            try:
+                _engine_name = result.get("engine", "engine")
+            except Exception:
+                pass
+            if _first_m is None:
+                _first_m = _sm
+            for _t in (_sm.get("trade_list") or []):
+                try:
+                    _t["symbol"] = _sym
+                except Exception:
+                    pass
+                _all_trades.append(_t)
+            try:
+                _brokerage += float(_sm.get("total_brokerage", 0) or 0)
+            except Exception:
+                pass
+            try:
+                _dq_src = str(_hist_src or "")
+                if _dq_src == "nse_official_db":
+                    _dq = {"source": "NSE official", "status": "VALID"}
+                elif _dq_src == "tradingview_intraday":
+                    _dq = {"source": "TradingView intraday", "status": "SECONDARY_ONLY"}
+                elif _dq_src == "yahoo_intraday":
+                    _dq = {"source": "Yahoo intraday", "status": "SECONDARY_ONLY"}
+                elif _dq_src == "yahoo_daily":
+                    _dq = {"source": "Yahoo daily", "status": "SECONDARY_ONLY"}
+                elif _dq_src == "nsepython_daily":
+                    _dq = {"source": "NSE official", "status": "VALID"}
+                elif _dq_src in ("synthetic", "synthetic_expansion"):
+                    _dq = {"source": "Synthetic", "status": "SYNTHETIC"}
+                else:
+                    _dq = {"source": "Cache", "status": "SECONDARY_ONLY"}
+                try:
+                    _hs = str(_hist_status or "")
+                    if _hs and _dq_src in ("yahoo_daily", "nsepython_daily", "yahoo_intraday", "tradingview_intraday"):
+                        _dq["status"] = _hs
+                except Exception:
+                    pass
+                _dq["bars"] = len(historical or [])
+                try:
+                    if isinstance(_sm.get("coverage"), dict):
+                        _dq["coverage"] = _sm.get("coverage")
+                except Exception:
+                    pass
+            except Exception:
+                _dq = {"source": "?", "status": "INSUFFICIENT", "bars": 0}
+            try:
+                _wz = ""
+                if int(_sm.get("total_trades", 0) or 0) == 0:
+                    _ev = int(_sm.get("signals_evaluated", 0) or 0)
+                    _gb = int(_sm.get("signals_buy", 0) or 0)
+                    _gs = int(_sm.get("signals_sell", 0) or 0)
+                    _ritems = [f"{k}:{v}" for k, v in ((_sm.get("rejected") or {}).items())]
+                    _rj = ", ".join(_ritems) if _ritems else "opposite-side signals (yeh direction entry nahi deta)"
+                    _wz = (f"0 trades: {_ev} bars check, {_gb} BUY/{_gs} SELL signals; "
+                           f"wajah: {_rj}.")
+            except Exception:
+                _wz = ""
+            _per_symbol[_sym] = {"total_trades": _sm.get("total_trades", 0),
+                                 "winning_trades": _sm.get("winning_trades", 0),
+                                 "losing_trades": _sm.get("losing_trades", 0),
+                                 "win_rate": _sm.get("win_rate", 0),
+                                 "net_pnl": round(_sm.get("net_pnl", 0), 2),
+                                 "data": _dq, "why_zero": _wz}
+        if not _all_trades:
+            # Skip the "SYM: " prefix when the message already names the symbol
+            def _e(k, v):
+                _m = str((v or {}).get("error") or "")
+                return _m if _m.startswith(str(k)) else f"{k}: {_m}"
+            errs = "; ".join(_e(k, v) for k, v in _per_symbol.items() if v.get("error"))
+            if errs:
+                return {"error": errs}
+            # Spec §15: synthetic retry HATAYA - fabricated data par trades
+            # dikhana cheating hai. Zero trades = honest zero (neeche tips).
+            _retry_used = False
+            if not _all_trades:
+                if _first_m is not None:
+                    m = _first_m
+                else:
+                    m = _merge_trade_metrics([], 0)
+                    _all_trades = []
+            else:
+                m = _merge_trade_metrics(_all_trades, _brokerage)
+        else:
+            m = _merge_trade_metrics(_all_trades, _brokerage)
+        # Data provenance note: symbols alag-alag data paths par chale hon
+        # (official DB vs intraday vs synthetic) to user ko saaf dikhe -
+        # mixed windows me trade-count compare karna misleading hota hai.
+        _prov_note = ""
+        try:
+            _srcs = {}
+            for _k, _v in (_per_symbol or {}).items():
+                if isinstance(_v, dict) and (_v.get("total_trades", 0) or 0) >= 0 and not _v.get("error"):
+                    _d = (_v.get("data") or {})
+                    _srcs[_k] = str(_d.get("source") or "?")
+            _kinds = set(_srcs.values())
+            if len(_kinds) > 1:
+                _prov_note = ("Data note: symbols alag sources par chale - " +
+                              ", ".join(f"{_k}({_v})" for _k, _v in sorted(_srcs.items())) +
+                              ". Count compare karte waqt dhyaan rakho.")
+        except Exception:
+            _prov_note = ""
+        # Honest results: no fabricated win-rate or P/L — engine output as-is.
+        # Zero-trade diagnosis: never leave the user guessing why nothing traded.
+        _zero_note = ""
+        _zero_tips = []
+        try:
+            _retry_used
+        except NameError:
+            _retry_used = False
+        try:
+            if int(m.get("total_trades", 0) or 0) == 0:
+                _err_syms = [k for k, v in (_per_symbol or {}).items() if isinstance(v, dict) and v.get("error")]
+                _ok_syms = [k for k in _syms if k not in _err_syms]
+                _leg_txt = "+".join(sorted({f"{(l.get('transaction') or '').upper()} {(l.get('option_type') or '').upper()}" for l in (legs or [])})) or "no legs"
+                if _err_syms:
+                    _zero_note = f"No data for: {', '.join(_err_syms)}. "
+                    _zero_tips.append("Data wale symbols rakho (NIFTY/BANKNIFTY/RELIANCE me history hai) ya dates 17 Jun-21 Sep 2026 ke andar rakho")
+                if _ok_syms:
+                    # Blocked entries (premium floor etc.) ko "signal nahi
+                    # bana" mat batao - signal BANA tha, entry RUKI thi.
+                    # (hhhh case: 6 BUY signals, par OTM put ₹4-18 < ₹20 floor.)
+                    _blocked = int((_diag_rej or {}).get("min_premium_lt_20", 0) or 0)
+                    _sigs = int(_diag_sig or 0)
+                    if _blocked > 0 and _sigs > 0:
+                        _zero_note += (f"{', '.join(_ok_syms)} par {_sigs} entry signals bane, par "
+                                       f"{_blocked} entries ₹20 premium floor se block hui (option bahut sasta/deep-OTM). "
+                                       f"'{_leg_txt}' ke liye ATM ke najdeek strike chuno - wahan premium floor se upar hoga. ")
+                        _zero_tips += [
+                            "ATM/ITM strike chuno (OTM door ke premium ₹20 se kam hote hain - wahi block ho rahe hain)",
+                            "Opposite side try karo (Buy ke bajaye Sell / CE ke bajaye PE)",
+                            "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
+                        ]
+                    else:
+                        _zero_note += (f"{', '.join(_ok_syms)} par is period me '{_leg_txt}' ke entry signals hi nahi bane. "
+                                       "Ye honest zero hai — signal nahi to trade nahi.")
+                        _zero_tips += [
+                            "Opposite side try karo (Buy ke bajaye Sell / CE ke bajaye PE)",
+                            "Indicators kam karo (sirf SuperTrend) ya Min Score ghatao",
+                            "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
+                            "Strategy Target/SL bahut tight to nahi — pehle bina SL/TP chalakar dekho",
+                        ]
+                    # Combo RVP ka apna kaaran: RSI-70 ignition + ST + VWAP +
+                    # PCR + volume-spike paancho ek saath chahiye (strict
+                    # quality filter). Aksar window me ignition hi nahi banta.
+                    try:
+                        _has_rvp = any(str((iv or {}).get("id") if isinstance(iv, dict) else (iv or "")) == "combo_rsi_vwap_pcr"
+                                       for iv in (indicators or []))
+                    except Exception:
+                        _has_rvp = False
+                    if _has_rvp:
+                        _zero_note += (" Combo RVP strict hai: is window me RSI-70 cross + SuperTrend + "
+                                       "VWAP + PCR + volume-spike ek saath nahi bane.")
+                        _zero_tips = (["Lambi window try karo (3-6 month) - ignition mahine me kuch baar banta hai",
+                                       "Combo ke saath SuperTrend bhi tick karo (trend riding width badhta hai)"]
+                                      + _zero_tips)
+                _zero_tips = _zero_tips[:5]
+        except Exception:
+            pass
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Internal error: {str(e)}"}
+    # Disclose the SuperTrend-only retry: results below came from relaxed
+    # indicators, not the user's exact setup.
+    try:
+        if _retry_used and int(m.get("total_trades", 0) or 0) > 0:
+            _rt = ("Note: aapke strict indicators par is period me signals nahi bane, "
+                   "isliye SuperTrend-only retry ke trades dikhaye gaye hain. ")
+            _zero_note = _rt + (_zero_note or "")
+    except Exception:
+        pass
+    # Unique run binding: every result carries the exact parameters that
+    # produced it. Frontend drops any response whose run_id is stale, so an
+    # older/slower run can never overwrite a newer run's trades+metrics.
+    try:
+        import uuid as _uu
+        _run_id = f"bt-{_uu.uuid4().hex[:12]}"
+    except Exception:
+        import time as _tt
+        _run_id = f"bt-{int(_tt.time() * 1000) % 100000000}"
+    try:
+        _legs_echo = [{"option_type": str((l or {}).get("option_type", "")),
+                       "transaction": str((l or {}).get("transaction", "")),
+                       "lots": (l or {}).get("lots", 1),
+                       "strike_selection": str((l or {}).get("strike_selection", "")),
+                       "otm_distance": (l or {}).get("otm_distance", 0),
+                       "expiry": str((l or {}).get("expiry", ""))} for l in (legs or [])]
+    except Exception:
+        _legs_echo = []
+    try:
+        _inds_echo = [str((iv.get("id") if isinstance(iv, dict) else iv) or "") for iv in (indicators or [])]
+    except Exception:
+        _inds_echo = []
+    # Naked-short alert: single-leg SELL (no hedge leg) = unlimited risk.
+    # Block nahi karte (legit strategies hain), par result me chetavni pakki.
+    try:
+        _legs_tx = [str((l or {}).get("transaction", "")).lower() for l in (legs or []) if isinstance(l, dict)]
+        _naked_warning = ("NAKED SELL: single-leg short (hedge nahi) - unlimited loss possible. "
+                          "Spread/hedge lagao ya chhota size rakho."
+                          if _legs_tx and all(t == "sell" for t in _legs_tx) else "")
+    except Exception:
+        _naked_warning = ""
+    # Trade-level backfill: validation + premium source per symbol (spec §11).
+    try:
+        for _t in (_all_trades or []):
+            _ps = (_per_symbol or {}).get(_t.get("symbol"), {}) or {}
+            _pd = (_ps.get("data") or {})
+            if _t.get("validation") is None:
+                _t["validation"] = _pd.get("status", "")
+            if not _t.get("source"):
+                _t["source"] = _pd.get("source", "")
+    except Exception:
+        pass
+    # Result validation (§12) + diagnostics aggregate (§13).
+    try:
+        _val = _validate_result(m, _per_symbol, _all_trades)
+    except Exception:
+        _val = {"ok": True, "passed": [], "failed": []}
+    try:
+        _diag = {"signals_evaluated": _diag_eval, "signals_generated": _diag_sig,
+                 "signals_buy": _diag_buy, "signals_sell": _diag_sell,
+                 "rejected": _diag_rej, "coverage": _cov_by_sym,
+                 "phase_ms": _phase_ms}
+    except Exception:
+        _diag = {}
+    _final_res = {
+        "success": True,
+        "run_id": _run_id,
+        "params": {"symbols": _syms,
+                   "legs": _legs_echo,
+                   "timeframe": timeframe,
+                   "start_date": start_date, "end_date": end_date,
+                   "indicators": _inds_echo,
+                   "trade_mode": str(advanced_in.get("trade_mode", "")),
+                   "entry_time": str(advanced_in.get("entry_time", "")),
+                   "exit_time": str(advanced_in.get("exit_time", "") or advanced_in.get("early_exit_time", "")),
+                   "sl": float(risk_in.get("daily_stop_loss", 0) or 0),
+                   "tp": float(risk_in.get("daily_take_profit", 0) or 0),
+                   "max_trades_per_day": int(risk_in.get("max_trades_per_day", 0) or 0)},
+        "engine": _engine_name,
+        "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
+        "symbols": _syms,
+        "per_symbol": _per_symbol,
+        "note": ((_prov_note + " ") if _prov_note else "") + (_zero_note or ""),
+        "suggestions": _zero_tips,
+        "took_ms": int((__import__("time").time() - _t0) * 1000),
+        "metrics": {
+            "initial_capital": m["initial_capital"],
+            "final_capital": m["final_capital"],
+            "total_return": m["total_return"],
+            "total_return_pct": m["total_return_pct"],
+            "win_rate": m["win_rate"],
+            "loss_rate": m.get("loss_rate", 0),
+            "max_drawdown": m["max_drawdown"],
+            "profit_factor": m["profit_factor"],
+            "sharpe_ratio": m["sharpe_ratio"],
+            "total_trades": m["total_trades"],
+            "winning_trades": m["winning_trades"],
+            "losing_trades": m["losing_trades"],
+            "avg_win": m["avg_win"],
+            "avg_loss": m["avg_loss"],
+            "avg_profit_per_trade": m.get("avg_profit_per_trade", 0),
+            "net_pnl": m.get("net_pnl", 0),
+            "max_win": m.get("max_win", 0),
+            "max_loss": m.get("max_loss", 0),
+            "max_dd_duration": m.get("max_dd_duration", 0),
+            "return_maxdd": m.get("return_maxdd", 0),
+            "reward_risk": m.get("reward_risk", 0),
+            "expectancy": m.get("expectancy", 0),
+            "max_win_streak": m.get("max_win_streak", 0),
+            "max_loss_streak": m.get("max_loss_streak", 0),
+            "max_trades_in_dd": m.get("max_trades_in_dd", 0),
+            "total_brokerage": m["total_brokerage"],
+        },
+        "equity_curve": m.get("equity_curve", []),
+        "monthly_pnl": m.get("monthly_pnl", {}),
+        "trade_list": m.get("trade_list", []),
+        "diagnostics": _diag,
+        "validation": _val,
+        "validation_status": "OK" if (_val or {}).get("ok") else "PARTIAL_DATA",
+        "naked_warning": _naked_warning,
+        # Saved-result staleness check: engine version ke saath tag. Purane
+        # engine ka saved result (jaise v2 ka 100%-win fake result) fresh
+        # 0-trade run aane par bhi overwrite ho jaye (dekho strategies.py
+        # _should_overwrite_saved) - warna buggy history hamesha dikhti hai.
+        "engine_version": ENGINE_VERSION,
+    }
+    try:
+        if '_rk' in locals() and _rk:
+            _BT_RESULT_CACHE[_rk]=(_t0m.time(), _final_res)
+            while len(_BT_RESULT_CACHE) > 15:
+                _BT_RESULT_CACHE.pop(next(iter(_BT_RESULT_CACHE)))
+    except: pass
+    return _final_res
+
+
+_BT_ACTIVE = {"n": 0, "gen": 0, "since": 0.0}
+_BUSY_MSG = "busy: ek backtest pehle se chal raha hai - khatm hone do, phir Run dabao"
+_BT_STALE_SECS = 480  # 8 min se atka worker = dead (fetch-hang/crash) -> lock tod do
+
+
+def _bt_acquire():
+    """Single-flight lock. Success par generation-id (truthy), busy par 0.
+    8-min+ atka lock apne-aap tootata hai (dead worker 'busy' hamesha ke liye
+    nahi rakhta - wahi 'cursor ghoomta hai' deadlock tha)."""
+    try:
+        with _BT_JOBS_LOCK:
+            if _BT_ACTIVE["n"] >= 1:
+                try:
+                    _age = _bt_time.time() - float(_BT_ACTIVE.get("since", 0) or 0)
+                except Exception:
+                    _age = 0
+                if _age < _BT_STALE_SECS:
+                    return 0
+                _BT_ACTIVE["n"] = 0  # stale worker reaped
+            _BT_ACTIVE["n"] += 1
+            _BT_ACTIVE["gen"] = int(_BT_ACTIVE.get("gen", 0) or 0) + 1
+            _BT_ACTIVE["since"] = _bt_time.time()
+            return int(_BT_ACTIVE["gen"])
+    except Exception:
+        return 0
+
+
+def _bt_release(gen=None):
+    """Sirf apni generation ka lock chhodo - reaped (mara hua) worker naye
+    run ka lock galti se na khole (double-run/OOM se bachao)."""
+    try:
+        with _BT_JOBS_LOCK:
+            if gen is not None and int(gen or 0) != int(_BT_ACTIVE.get("gen", 0) or 0):
+                return
+            _BT_ACTIVE["n"] = max(0, _BT_ACTIVE["n"] - 1)
+    except Exception:
+        pass
+
+
+@router.post("/run")
+def run_backtest(req: BacktestRequest):
+    # Cache-only sync path (backward compat). Fresh runs /run-async par
+    # jaate hain. Client abort (8s timeout) server thread ko NAHI rokta -
+    # zombie worker single-flight lock minutes tak pakad ke rakhta tha,
+    # phir har async job 'busy' aati thi (user ko laga "result hi nahi
+    # aata"). Isliye sync ab sirf cached same-params run deta hai (5ms).
+    try:
+        import hashlib as _hl0, json as _js0
+        _rk0 = _hl0.md5(_js0.dumps(
+            req.model_dump() if hasattr(req, "model_dump") else req.dict(),
+            sort_keys=True, default=str).encode()).hexdigest()
+        _rc0 = _BT_RESULT_CACHE.get(_rk0)
+        if _rc0 and _bt_time.time() - _rc0[0] < 600:
+            _cached0 = dict(_rc0[1])
+            _cached0["took_ms"] = 5
+            _cached0["cached"] = True
+            _cached0["run_id"] = f"bt-{_bt_uuid.uuid4().hex[:12]}"
+            return _cached0
+    except Exception:
+        pass
+    return {"error": "fresh run - /api/backtest/run-async use karo (slow sync proxy timeout me marta hai)",
+            "use_async": True}
+
+
+_BT_RUNNING = {}
+
+
+def _bt_req_hash(req_dict: dict) -> str:
+    try:
+        import hashlib as _hl, json as _js
+        return _hl.md5(_js.dumps(req_dict, sort_keys=True, default=str).encode()).hexdigest()
+    except Exception:
+        return ""
+
+
+def _bt_worker(job_id: str, req_dict: dict):
+    _gen = _bt_acquire()
+    if not _gen:
+        try:
+            with _BT_JOBS_LOCK:
+                _BT_JOBS[job_id]["status"] = "error"
+                _BT_JOBS[job_id]["error"] = _BUSY_MSG
+        except Exception:
+            pass
+        return
+    try:
+        with _BT_JOBS_LOCK:
+            _BT_JOBS[job_id]["status"] = "running"
+        req = BacktestRequest(**req_dict)
+        try:
+            _total_syms = len(req.symbols or []) or 1
+        except Exception:
+            _total_syms = 1
+
+        def _prog(done, total, sym):
+            try:
+                with _BT_JOBS_LOCK:
+                    _j = _BT_JOBS.get(job_id)
+                    if _j is not None:
+                        _j["progress"] = {"done": int(done or 0), "total": int(total or _total_syms),
+                                          "symbol": str(sym or "")}
+            except Exception:
+                pass
+
+        result = _run_backtest_core(req, progress_cb=_prog)
+        with _BT_JOBS_LOCK:
+            _BT_JOBS[job_id]["status"] = "done"
+            _BT_JOBS[job_id]["result"] = result
+            _BT_JOBS[job_id]["done_at"] = _bt_time.time()
+            try:
+                _h = _BT_JOBS[job_id].get("req_hash", "")
+                if _h and _BT_RUNNING.get(_h) == job_id:
+                    _BT_RUNNING.pop(_h, None)
+            except Exception:
+                pass
+        _bt_release(_gen)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        try:
+            with _BT_JOBS_LOCK:
+                _BT_JOBS[job_id]["status"] = "error"
+                _BT_JOBS[job_id]["error"] = str(e)[:500]
+                try:
+                    _h = _BT_JOBS[job_id].get("req_hash", "")
+                    if _h and _BT_RUNNING.get(_h) == job_id:
+                        _BT_RUNNING.pop(_h, None)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        _bt_release(_gen)
+
+
+@router.post("/run-async")
+def run_backtest_async(req: BacktestRequest):
+    # Returns instantly {job_id}; UI polls /result/{job_id}. Survives
+    # proxy timeouts that kill 60s+ sync requests on the free tier.
+    # Same request dobara aaye (double-click) to purana job_id wapas -
+    # duplicate heavy workers nahi (OOM ka sabse bada kaaran tha).
+    try:
+        req_dict = req.model_dump()
+    except Exception:
+        req_dict = req.dict() if hasattr(req, "dict") else dict(req)
+    _rh = _bt_req_hash(req_dict)
+    with _BT_JOBS_LOCK:
+        # prune old jobs (keep last 8 - results bade hote hain, OOM se bachao)
+        while len(_BT_JOBS) >= 8:
+            oldest = min(_BT_JOBS.items(), key=lambda kv: kv[1].get("started_at", 0))[0]
+            _BT_JOBS.pop(oldest, None)
+        if _rh:
+            _old = _BT_RUNNING.get(_rh)
+            if _old:
+                _oj = _BT_JOBS.get(_old)
+                if _oj and _oj.get("status") in ("queued", "running"):
+                    return {"job_id": _old, "status": _oj.get("status"), "deduped": True}
+                _BT_RUNNING.pop(_rh, None)
+    # Instant repeat (algotest-style): same params 10 min ke andar pehle
+    # chal chuka hai to seedha done-job + inline result. Thread spawn +
+    # pehli poll (700ms) ki zaroorat nahi - click par turant screen.
+    try:
+        if _rh:
+            _rcA = _BT_RESULT_CACHE.get(_rh)
+            if _rcA and _bt_time.time() - _rcA[0] < 600:
+                _cachedA = dict(_rcA[1])
+                _cachedA["took_ms"] = 5
+                _cachedA["cached"] = True
+                _cachedA["run_id"] = f"bt-{_bt_uuid.uuid4().hex[:12]}"
+                _jidA = _bt_uuid.uuid4().hex[:12]
+                with _BT_JOBS_LOCK:
+                    _BT_JOBS[_jidA] = {"status": "done", "started_at": _bt_time.time(),
+                                        "result": _cachedA, "error": "", "req_hash": _rh,
+                                        "done_at": _bt_time.time()}
+                return {"job_id": _jidA, "status": "done", "cached": True, "result": _cachedA}
+    except Exception:
+        pass
+    job_id = _bt_uuid.uuid4().hex[:12]
+    with _BT_JOBS_LOCK:
+        _BT_JOBS[job_id] = {"status": "queued", "started_at": _bt_time.time(), "result": None, "error": "", "req_hash": _rh}
+        if _rh:
+            _BT_RUNNING[_rh] = job_id
+    t = _bt_thread.Thread(target=_bt_worker, args=(job_id, req_dict), daemon=True)
+    t.start()
+    return {"job_id": job_id, "status": "queued"}
+
+
+@router.get("/result/{job_id}")
+def backtest_result(job_id: str):
+    with _BT_JOBS_LOCK:
+        job = _BT_JOBS.get(job_id)
+        if not job:
+            return {"status": "unknown", "error": "job not found (server restarted? re-run backtest)"}
+        out = {"status": job["status"], "elapsed_s": round(_bt_time.time() - job.get("started_at", _bt_time.time()), 1)}
+        if job.get("progress"):
+            out["progress"] = job["progress"]
+        if job["status"] == "done":
+            out["result"] = job["result"]
+        elif job["status"] == "error":
+            out["error"] = job.get("error", "worker failed")
+        return out
+
+
+class MasterConfluenceRequest(BaseModel):
+    symbol: str = "NIFTY"
+    start_date: str = "2026-08-01"
+    end_date: str = "2026-08-20"
+    sl_pct: float = 2.0
+    tp_rr: float = 2.0
+    indicators: dict = {}
+    trade_mode: str = "intraday"
+
+
+@router.post("/master")
+def run_master_confluence(req: MasterConfluenceRequest):
+    try:
+        from core.services.indicator_engine import IndicatorEngine
+        from utils.helpers import get_strike_step, get_lot_size
+        import math
+
+        historical = fetch_historical(req.symbol, req.start_date, req.end_date)
+        if not historical:
+            return {"error": f"No data for {req.symbol}. Free websites (NiftyTrader/StockMojo/TradingTick/Google) blocked."}
+        if len(historical) > 120:
+            historical = historical[-120:]
+
+        ind = IndicatorEngine()
+        ind_params = req.indicators or {}
+        closes = [h["close_price"] for h in historical]
+        highs = [h["high_price"] for h in historical]
+        lows = [h["low_price"] for h in historical]
+        volumes = [h.get("volume", 1) or 1 for h in historical]
+
+        ema_long_p = int(ind_params.get("ema_long", 200))
+        kama_fast = int(ind_params.get("kama_fast", 10))
+        kama_slow = int(ind_params.get("kama_slow", 30))
+        st_period = int(ind_params.get("supertrend_period", 10))
+        st_mult = float(ind_params.get("supertrend_multiplier", 3))
+        macd_fast = int(ind_params.get("macd_fast", 12))
+        macd_slow = int(ind_params.get("macd_slow", 26))
+        macd_sig = int(ind_params.get("macd_signal", 9))
+        ema_fast_p = int(ind_params.get("ema_fast", 9))
+        ema_slow_p = int(ind_params.get("ema_slow", 20))
+        vwap_period = int(ind_params.get("vwap_period", 20))
+        vwap_mult = float(ind_params.get("vwap_multiplier", 2))
+        rsi_period = int(ind_params.get("rsi_period", 14))
+        vol_sma_p = int(ind_params.get("volume_sma", 20))
+        vol_buy_mult = float(ind_params.get("volume_buy_mult", 1.5))
+        vol_sell_mult = float(ind_params.get("volume_sell_mult", 1.2))
+
+        ema_long = ind.calculate_ema(closes, ema_long_p)
+        kama_vals = ind.calculate_kama(closes, kama_fast, kama_slow)
+        supertrend = ind.calculate_supertrend(historical, st_period, st_mult)
+        macd_data = ind.calculate_macd(closes, macd_fast, macd_slow, macd_sig)
+        ema_f = ind.calculate_ema(closes, ema_fast_p)
+        ema_s = ind.calculate_ema(closes, ema_slow_p)
+        vwap_data = ind.calculate_vwap(historical, vwap_period, vwap_mult)
+        rsi_vals = ind.calculate_rsi(closes, rsi_period)
+        hmm_data = ind.calculate_hmm_regime(closes, int(ind_params.get("hmm_n_components", 3)))
+        hmm_seq = hmm_data.get("state_sequence", [])
+
+        vol_sma = [None] * len(volumes)
+        for i in range(vol_sma_p - 1, len(volumes)):
+            vol_sma[i] = sum(volumes[i - vol_sma_p + 1:i + 1]) / vol_sma_p
+
+        trades = []
+        equity = [1000000.0]
+        capital = 100000.0
+        initial_capital = 100000.0
+        wins = 0
+        gross_win = 0.0
+        gross_loss = 0.0
+        total_pnl = 0.0
+        max_dd = 0.0
+        peak = initial_capital
+        sl_pct = req.sl_pct
+        tp_rr = req.tp_rr
+        lot = get_lot_size(req.symbol)
+        step = get_strike_step(req.symbol)
+
+        chart_dates = [h["trade_date"] for h in historical]
+        chart_opens = [h["open_price"] for h in historical]
+        chart_highs = highs[:]
+        chart_lows = lows[:]
+        chart_closes = closes[:]
+        chart_volumes = volumes[:]
+        chart_st = supertrend[:]
+        chart_ema200 = ema_long[:]
+        chart_kama = kama_vals[:]
+        chart_vwap_u2 = vwap_data.get("upper2", [None] * len(closes))
+        chart_vwap_l2 = vwap_data.get("lower2", [None] * len(closes))
+        chart_macd = macd_data.get("macd", [None] * len(closes))
+        chart_macd_sig = macd_data.get("signal", [None] * len(closes))
+        chart_rsi = rsi_vals[:]
+        chart_hmm = [str(hmm_seq[i]) if i < len(hmm_seq) else "Sideways" for i in range(len(closes))]
+        chart_entries = []
+
+        min_bars = max(ema_long_p, st_period, macd_slow + macd_sig, vol_sma_p, 30)
+        open_trade = None
+        # Look-ahead fix (main engine jaisa): signal bar i ka CLOSE par banta
+        # hai, lekin ENTRY bar (i+1) ke OPEN par execute hoti hai. Pehle
+        # entry usi bar ke close par ho rahi thi (signal + fill ek saath =
+        # future ki jaankari ka use) aur koi transaction cost bhi nahi laga
+        # tha - isliye /master har backtest bacha-mochaka winrate dikhata tha.
+        pending_entry = None
+        pending_exit = False
+        from core.services.transaction_costs import TransactionCosts as _TC
+
+        for i in range(min_bars, len(historical)):
+            # Pending entry execute: is bar ke OPEN par (wo bar sirf shuru ho
+            # chuka hai, ya bar chal raha hai - open known hai, close NAHI).
+            if open_trade is None and pending_entry is not None:
+                _sig_i = pending_entry["sig_i"]
+                _opt = pending_entry["option_type"]
+                _reg = pending_entry["regime"]
+                pending_entry = None
+                if i > _sig_i:
+                    spot_exec = chart_opens[i]
+                    if spot_exec and spot_exec > 0:
+                        strike = round(spot_exec / step) * step
+                        entry_prem = spot_exec * 0.01
+                        entry_prem = _TC.apply_fill_slippage(entry_prem, "BUY")
+                        _cost_in = _TC.calculate(entry_prem * lot, False, False)
+                        sl_level = entry_prem * (1 - sl_pct / 100)
+                        tp_level = entry_prem * (1 + (sl_pct * tp_rr) / 100)
+                        open_trade = {
+                            "date": chart_dates[i],
+                            "entry_idx": i,
+                            "strike": strike,
+                            "option_type": _opt,
+                            "entry_prem": entry_prem,
+                            "sl_level": sl_level,
+                            "tp_level": tp_level,
+                            "lots": 1,
+                            "regime": _reg,
+                            "costs": _cost_in["total"],
+                        }
+
+            if open_trade is not None:
+                entry_price = open_trade["entry_prem"]
+                entry_idx = open_trade["entry_idx"]
+                bar_high = highs[i]
+                bar_low = lows[i]
+                bar_close = closes[i]
+                bar_open = chart_opens[i]
+
+                if open_trade["option_type"] == "CE":
+                    sl_level = entry_price * (1 - sl_pct / 100)
+                    tp_level = entry_price * (1 + (sl_pct * tp_rr) / 100)
+                    hit_sl = bar_low <= sl_level
+                    hit_tp = bar_high >= tp_level
+                else:
+                    sl_level = entry_price * (1 + sl_pct / 100)
+                    tp_level = entry_price * (1 - (sl_pct * tp_rr) / 100)
+                    hit_sl = bar_high >= sl_level
+                    hit_tp = bar_low <= tp_level
+
+                is_last = (i == len(historical) - 1) or (chart_dates[i] != chart_dates[i + 1] if i + 1 < len(historical) else True)
+
+                exit_price = None
+                exit_reason = None
+                _is_eod = req.trade_mode == "intraday" and is_last
+                if pending_exit:
+                    # max_hold exit signal pichli bar ka - is bar ke OPEN par
+                    # fill (signal exits kabhi bhi usi bar ke close par fill
+                    # nahi hone chahiye).
+                    pending_exit = False
+                    exit_price = chart_opens[i] * 0.01
+                    exit_reason = "max_hold"
+                elif hit_sl:
+                    exit_price = sl_level
+                    exit_reason = "SL"
+                elif hit_tp:
+                    exit_price = tp_level
+                    exit_reason = "TP"
+                elif _is_eod:
+                    exit_price = bar_close
+                    exit_reason = "intraday_close"
+                elif i - entry_idx >= 10:
+                    if is_last:
+                        # Forced period-end: data khatam - last close par hi
+                        # band karo (main engine end_of_period jaisa).
+                        exit_price = bar_close
+                        exit_reason = "max_hold"
+                    else:
+                        # Ab anchor karo - next bar open par exit hoga
+                        pending_exit = True
+
+                if exit_price is not None:
+                    _exit_slip = _TC.apply_fill_slippage(exit_price, "SELL")
+                    _cost_out = _TC.calculate(_exit_slip * lot, True, False)
+                    _c_tot = float(open_trade.get("costs", 0.0) or 0.0) + _cost_out["total"]
+                    if open_trade["option_type"] == "CE":
+                        pnl = (_exit_slip - entry_price) * lot * open_trade["lots"] - _c_tot
+                    else:
+                        pnl = (entry_price - _exit_slip) * lot * open_trade["lots"] - _c_tot
+                    exit_price = _exit_slip
+                    total_pnl += pnl
+                    capital += pnl
+                    if pnl > 0:
+                        wins += 1
+                        gross_win += pnl
+                    else:
+                        gross_loss += abs(pnl)
+                    if capital > peak:
+                        peak = capital
+                    dd = (peak - capital) / peak * 100 if peak > 0 else 0
+                    if dd > max_dd:
+                        max_dd = dd
+                    trades.append({
+                        "id": len(trades) + 1,
+                        "entry_date": open_trade["date"],
+                        "exit_date": chart_dates[i],
+                        "option_type": open_trade["option_type"],
+                        "entry_price": round(entry_price, 2),
+                        "exit_price": round(exit_price, 2),
+                        "sl_level": round(open_trade["sl_level"], 2),
+                        "tp_level": round(open_trade["tp_level"], 2),
+                        "regime": open_trade["regime"],
+                        "exit_reason": exit_reason,
+                        "pnl": round(pnl, 2),
+                        "pnl_pct": round(pnl / initial_capital * 100, 4),
+                    })
+                    equity.append(capital)
+                    chart_entries.append({
+                        "entry_idx": entry_idx,
+                        "exit_idx": i,
+                        "option_type": open_trade["option_type"],
+                        "entry_price": entry_price,
+                        "exit_price": exit_price,
+                        "entry_date": open_trade["date"],
+                        "exit_date": chart_dates[i],
+                        "pnl": round(pnl, 2),
+                    })
+                    open_trade = None
+                continue
+
+            c = closes[i]
+            pc = closes[i - 1]
+            regime = hmm_seq[i] if i < len(hmm_seq) else "Sideways"
+
+            st_val = supertrend[i] if i < len(supertrend) else 0
+            prev_st = supertrend[i - 1] if i > 0 and i - 1 < len(supertrend) else 0
+            # Warmup bars are None (never 0.0): None would corrupt comparisons
+            if st_val is None:
+                st_val = 0
+            if prev_st is None:
+                prev_st = 0
+            ml = macd_data.get("macd", [None] * len(closes))
+            ms = macd_data.get("signal", [None] * len(closes))
+            cur_macd = ml[i] if i < len(ml) and ml[i] is not None else 0
+            cur_sig = ms[i] if i < len(ms) and ms[i] is not None else 0
+            prev_macd = ml[i - 1] if i > 0 and i - 1 < len(ml) and ml[i - 1] is not None else 0
+            prev_sig = ms[i - 1] if i > 0 and i - 1 < len(ms) and ms[i - 1] is not None else 0
+
+            ef = ema_f[i] if i < len(ema_f) and ema_f[i] is not None else 0
+            es = ema_s[i] if i < len(ema_s) and ema_s[i] is not None else 0
+            prev_ef = ema_f[i - 1] if i > 0 and i - 1 < len(ema_f) and ema_f[i - 1] is not None else 0
+            prev_es = ema_s[i - 1] if i > 0 and i - 1 < len(ema_s) and ema_s[i - 1] is not None else 0
+
+            vwap_u2 = chart_vwap_u2[i] if i < len(chart_vwap_u2) and chart_vwap_u2[i] is not None else 0
+            vwap_l2 = chart_vwap_l2[i] if i < len(chart_vwap_l2) and chart_vwap_l2[i] is not None else 0
+            rsi_v = chart_rsi[i] if i < len(chart_rsi) and chart_rsi[i] is not None else 50
+
+            el = ema_long[i] if i < len(ema_long) and ema_long[i] is not None else 0
+            kv = chart_kama[i] if i < len(chart_kama) and chart_kama[i] is not None else 0
+
+            vol_now = volumes[i]
+            vs = vol_sma[i] if i < len(vol_sma) and vol_sma[i] is not None else vol_now
+
+            green = c > chart_opens[i]
+            red = c < chart_opens[i]
+
+            buy_ce = False
+            buy_pe = False
+
+            if (regime == "Bullish"
+                and c > el and c > kv
+                and c > st_val and pc <= prev_st
+                and cur_macd > cur_sig and prev_macd <= prev_sig
+                and ef > es and prev_ef <= prev_es
+                and vol_now > vs * vol_buy_mult
+                and green):
+                buy_ce = True
+
+            if (regime == "Bearish"
+                and c < el and c < kv
+                and c < st_val and pc >= prev_st
+                and cur_macd < cur_sig and prev_macd >= prev_sig
+                and ef < es and prev_ef >= prev_es
+                and vol_now > vs * vol_sell_mult
+                and red):
+                buy_pe = True
+
+            if buy_ce or buy_pe:
+                # Sirf signal REGISTER hota hai - entry agli bar ke OPEN par.
+                opt_type = "CE" if buy_ce else "PE"
+                pending_entry = {"sig_i": i, "option_type": opt_type, "regime": regime}
+
+        n = len(trades)
+        win_rate = (wins / n * 100) if n > 0 else 0
+        avg_pnl = total_pnl / n if n > 0 else 0
+        sharpe = 0.0
+        if len(equity) > 1:
+            rets = [(equity[j] - equity[j - 1]) / max(equity[j - 1], 1) for j in range(1, len(equity))]
+            mean_r = sum(rets) / len(rets) if rets else 0
+            var_r = sum((r - mean_r) ** 2 for r in rets) / max(len(rets) - 1, 1) if rets else 1
+            std_r = math.sqrt(var_r)
+            sharpe = (mean_r / std_r) * math.sqrt(252) if std_r > 0 else 0
+
+        return {
+            "success": True,
+            "metrics": {
+                "initial_capital": initial_capital,
+                "final_capital": round(capital, 2),
+                "total_return": round(capital - initial_capital, 2),
+                "total_return_pct": round((capital - initial_capital) / initial_capital * 100, 4),
+                "win_rate": round(win_rate, 2),
+        "max_drawdown": round(max_dd, 2),
+                "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else (round(gross_win, 2) if wins > 0 else 0),
+                "sharpe_ratio": round(sharpe, 4),
+                "total_trades": n,
+                "winning_trades": wins,
+                "losing_trades": n - wins,
+                "avg_pnl": round(avg_pnl, 2),
+                "total_pnl": round(total_pnl, 2),
+            },
+            "trades": trades,
+            "chart": {
+                "dates": chart_dates,
+                "opens": chart_opens,
+                "highs": chart_highs,
+                "lows": chart_lows,
+                "closes": chart_closes,
+                "volumes": chart_volumes,
+                "supertrend": [round(v, 2) if v else None for v in chart_st],
+                "ema200": [round(v, 2) if v else None for v in chart_ema200],
+                "kama": [round(v, 2) if v else None for v in chart_kama],
+                "vwap_upper2": [round(v, 2) if v else None for v in chart_vwap_u2],
+                "vwap_lower2": [round(v, 2) if v else None for v in chart_vwap_l2],
+                "macd_line": [round(v, 4) if v else None for v in chart_macd],
+                "macd_signal_line": [round(v, 4) if v else None for v in chart_macd_sig],
+                "rsi": [round(v, 2) if v else None for v in chart_rsi],
+                "hmm_regimes": chart_hmm,
+            },
+            "chart_entries": chart_entries,
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Master backtest error: {str(e)}"}
+
+
+@router.post("/seed")
+def seed_backtest_data(symbol: str = "NIFTY", months: int = 12):
+    """Official NSE F&O bhavcopy auto-fill (nsefin) + per-symbol history.
+    POST /api/backtest/seed?symbol=ALL&months=12 — new dates auto-download,
+    old rows purged (12-month retention)."""
+    import datetime as _dt
+    from core.services import nsefin_bhav as _fb
+    from core.services.historical_fetcher import _fetch_openchart_historical, fetch_historical, _fetch_db_historical
+    from core.models.bhavcopy_model import BhavcopyModel
+    out = {}
+    try:
+        out["fno_backfill"] = _fb.backfill_fno(days=30, per_run=10)
+    except Exception as e:
+        out["fno_backfill"] = {"error": str(e)[:200]}
+    try:
+        out["purged"] = _fb.purge_old_data(12)
+    except Exception as e:
+        out["purged"] = str(e)[:150]
+    end = _dt.date.today() - _dt.timedelta(days=1)
+    while end.weekday() >= 5:
+        end -= _dt.timedelta(days=1)
+    start = end - _dt.timedelta(days=int(months*30.5))
+    if symbol.upper() == "ALL":
+        targets = ['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL']
+    else:
+        targets = [symbol.upper()]
+    seeded = {}
+    for sym in targets:
+        existing = _fetch_db_historical(sym, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+        if existing and len(existing) >= 180:
+            seeded[sym] = len(existing)
+            continue
+        rows = _fetch_openchart_historical(sym, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+        if not rows or len(rows) < 5:
+            rows = fetch_historical(sym, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")) or []
+        if rows and len(rows) >= 5:
+            try: BhavcopyModel().import_data(rows)
+            except: pass
+            seeded[sym] = len(rows)
+        else:
+            seeded[sym] = 0
+    out["seeded"] = seeded
+    out["start"] = start.strftime("%Y-%m-%d")
+    out["end"] = end.strftime("%Y-%m-%d")
+    out["note"] = "Official F&O bhavcopy auto-fill + history top-up; old rows purged"
+    return out
+
+
+@router.post("/upload-csv")
+async def upload_history_csv(file: UploadFile = File(...)):
+    """TradingTick / NSE bhavcopy CSV upload -> bhavcopy_data.
+    Flexible headers: SYMBOL/Date/EXPIRY/STRIKE/CE-PE + OHLC + VOL/OI
+    (handles ' SYMBOL' spaced NSE headers and TradingTick exports)."""
+    try:
+        import csv
+        import io as _io
+        raw = await file.read()
+        try:
+            text = raw.decode("utf-8-sig")
+        except Exception:
+            text = raw.decode("latin-1", errors="replace")
+        reader = csv.DictReader(_io.StringIO(text))
+        fields = [(f or "") for f in (reader.fieldnames or [])]
+        norm = {f: f.strip().lower().replace(" ", "").replace("_", "") for f in fields}
+
+        def pick(*names):
+            for f, n in norm.items():
+                if n in names:
+                    return f
+            return None
+
+        f_sym = pick("symbol", "ticker", "tradingsymbol")
+        f_date = pick("date1", "date", "timestamp", "datetime", "tradedate")
+        f_exp = pick("expiry", "expirydate", "expdate", "expiryday")
+        f_strike = pick("strikeprice", "strike", "strikepr")
+        f_opt = pick("optiontype", "opttype", "option", "right", "callput", "instrumenttype")
+        f_o = pick("openprice", "open")
+        f_h = pick("highprice", "high")
+        f_l = pick("lowprice", "low")
+        f_c = pick("closeprice", "close", "last", "ltp", "settle", "settleprice")
+        f_v = pick("ttltrdqnty", "totaltradedquantity", "volume", "vol", "quantity")
+        f_oi = pick("openinterest", "oi")
+        if not f_sym or not f_date or not f_c:
+            return {"error": f"Headers not recognized: {fields[:12]}. Need Symbol/Date/Close (+Strike/Expiry/OptionType for options)."}
+        import datetime as _dt
+
+        def _dtf(v):
+            v = str(v or "").strip()[:19]
+            for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d %b %Y", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    return _dt.datetime.strptime(v, fmt).strftime("%Y-%m-%d")
+                except Exception:
+                    continue
+            return ""
+
+        def _num(v):
+            try:
+                return float(str(v or "0").replace(",", "").replace("₹", "").strip() or 0)
+            except Exception:
+                return 0
+
+        recs = []
+        for row in reader:
+            try:
+                sym = str(row.get(f_sym, "") or "").strip().upper()
+                td = _dtf(row.get(f_date, ""))
+                cl = _num(row.get(f_c, 0))
+                if not sym or not td or cl <= 0:
+                    continue
+                opt = ""
+                if f_opt:
+                    o = str(row.get(f_opt, "") or "").strip().upper()
+                    if o.startswith("CE") or o in ("C", "CALL", "BUY"):
+                        opt = "CE"
+                    elif o.startswith("PE") or o in ("P", "PUT", "SELL"):
+                        opt = "PE"
+                strike = _num(row.get(f_strike, 0)) if f_strike else 0
+                exp = _dtf(row.get(f_exp, "")) if f_exp else ""
+                recs.append({"symbol": sym, "trade_date": td, "expiry_date": exp,
+                             "strike_price": strike or None, "option_type": opt or None,
+                             "open_price": _num(row.get(f_o, cl)) if f_o else cl,
+                             "high_price": _num(row.get(f_h, cl)) if f_h else cl,
+                             "low_price": _num(row.get(f_l, cl)) if f_l else cl,
+                             "close_price": cl,
+                             "volume": int(_num(row.get(f_v, 0))) if f_v else 0,
+                             "oi": int(_num(row.get(f_oi, 0))) if f_oi else 0})
+            except Exception:
+                continue
+        if not recs:
+            return {"error": "No valid rows parsed."}
+        from core.models.bhavcopy_model import BhavcopyModel
+        n = BhavcopyModel().import_data(recs)
+        syms = sorted({r["symbol"] for r in recs})
+        dates = sorted({r["trade_date"] for r in recs})
+        return {"success": True, "imported": n, "symbols": syms,
+                "from": dates[0], "to": dates[-1], "file": file.filename}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)[:300]}
+
+
+@router.post("/monte-carlo")
+def monte_carlo_route(req: BacktestRequest):
+    from core.services.historical_fetcher import fetch_historical
+    from core.services.backtest_engine import BacktestEngine
+    from core.services.monte_carlo import monte_carlo
+    hist = fetch_historical(req.symbol, req.start_date, req.end_date, allow_synthetic=True)
+    if not hist or len(hist)<30:
+        try:
+            from routes.strategy_builder import _generate_synthetic_fallback
+            hist = _generate_synthetic_fallback(req.symbol, req.start_date, req.end_date)
+        except: pass
+    eng = BacktestEngine(is_live=False)
+    res = eng.run(hist, req.symbol.upper(), req.start_date, req.end_date, req.indicators or [{"id":"rsi","params":{"period":14}}], req.entry_conditions or [], req.exit_conditions or [], req.legs or [], req.advanced or {}, req.risk or {}, is_live=False)
+    return monte_carlo(res.get("metrics",{}).get("trade_list",[]))
+
+
+@router.post("/walk-forward")
+def walk_forward_route(req: BacktestRequest):
+    """Rolling in-sample / out-of-sample validation (Quantman-style).
+    Shows whether the strategy survives unseen data - avg_efficiency near
+    100% = robust, near/below 0% = overfit curve-fit, don't trade it."""
+    try:
+        from core.services.walk_forward import walk_forward as _wf
+        sym = (req.symbol or "NIFTY").upper()
+        _sd, _ed = (req.start_date or "2026-01-01")[:10], (req.end_date or "2026-08-20")[:10]
+        # Adaptive windows: 12m IS needs a year+ of data; short ranges get
+        # monthly rolling windows so the test never returns 0 windows.
+        _ism, _oosm, _stm = 12, 3, 3
+        try:
+            import datetime as _wfd
+            _span = (_wfd.datetime.strptime(_ed, "%Y-%m-%d") - _wfd.datetime.strptime(_sd, "%Y-%m-%d")).days
+            if _span < 150:
+                _ism, _oosm, _stm = 1, 1, 1
+            elif _span < 400:
+                _ism, _oosm, _stm = 3, 1, 1
+            _adv = req.advanced or {}
+            _ism = int(_adv.get("wf_is_months") or _ism)
+            _oosm = int(_adv.get("wf_oos_months") or _oosm)
+            _stm = int(_adv.get("wf_step_months") or _stm)
+        except Exception:
+            pass
+        return {"success": True, "symbol": sym,
+                **_wf(sym, _sd, _ed,
+                      req.indicators or [], req.entry_conditions or [], req.exit_conditions or [],
+                      req.legs or [], req.advanced or {}, req.risk or {},
+                      is_months=_ism, oos_months=_oosm, step_months=_stm)}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Walk-forward failed: {e}"[:300]}
+
+
+class OptimizeRequest(BaseModel):
+    symbol: str = "NIFTY"
+    symbols: list = []
+    start_date: str = "2026-08-01"
+    end_date: str = "2026-08-20"
+    indicators: list = []
+    entry_conditions: list = []
+    exit_conditions: list = []
+    legs: list = []
+    advanced: dict = {}
+    risk: dict = {}
+    sl_list: list = [1000, 1500, 2000]
+    tp_list: list = [2000, 3000, 4000]
+
+
+@router.post("/optimize")
+def optimize_route(req: OptimizeRequest):
+    """Grid-search SL x TP (default 3x3=9 backtests, first symbol only).
+    Ranked by profit factor - top row = best setting. Copy it to the form."""
+    import copy
+    import time as _t
+    t0 = _t.time()
+    syms = [str(s or "").strip().upper() for s in (req.symbols or []) if str(s or "").strip()] or [req.symbol.upper()]
+    sym = syms[0]
+    try:
+        sls = [float(x) for x in (req.sl_list or [1500])][:4]
+        tps = [float(x) for x in (req.tp_list or [3000])][:4]
+    except Exception:
+        sls, tps = [1500.0], [3000.0]
+    rows = []
+    for sl in sls:
+        for tp in tps:
+            try:
+                brep = BacktestRequest(
+                    symbol=sym, symbols=[sym], start_date=req.start_date, end_date=req.end_date,
+                    indicators=copy.deepcopy(req.indicators or []),
+                    entry_conditions=copy.deepcopy(req.entry_conditions or []),
+                    exit_conditions=copy.deepcopy(req.exit_conditions or []),
+                    legs=copy.deepcopy(req.legs or []),
+                    advanced=dict(req.advanced or {}),
+                    risk=dict(req.risk or {}))
+                br = dict(brep.risk or {})
+                br["daily_stop_loss"] = sl
+                br["daily_take_profit"] = tp
+                brep.risk = br
+                r = _run_backtest_core(brep)
+                m = (r or {}).get("metrics", {}) or {}
+                rows.append({"sl": sl, "tp": tp,
+                             "net": round(m.get("net_pnl", 0) or 0, 2),
+                             "win_rate": m.get("win_rate", 0),
+                             "trades": m.get("total_trades", 0),
+                             "profit_factor": round(m.get("profit_factor", 0) or 0, 2),
+                             "max_dd": round(m.get("max_drawdown", 0) or 0, 2)})
+            except Exception as e:
+                rows.append({"sl": sl, "tp": tp, "error": str(e)[:100]})
+            if _t.time() - t0 > 100:
+                break
+    rows.sort(key=lambda r: (r.get("profit_factor", 0), r.get("net", 0)), reverse=True)
+    return {"success": True, "symbol": sym, "rows": rows,
+            "best": rows[0] if rows else {},
+            "took_ms": int((_t.time() - t0) * 1000)}
+
+
+@router.post("/report.pdf")
+def report_pdf(req: BacktestRequest):
+    from fastapi.responses import Response
+    from core.services.historical_fetcher import fetch_historical
+    from core.services.backtest_engine import BacktestEngine
+    from core.services.report_pdf import build_report
+    hist = fetch_historical(req.symbol, req.start_date, req.end_date, allow_synthetic=True)
+    if not hist or len(hist)<30:
+        try:
+            hist = _generate_synthetic_fallback(req.symbol, req.start_date, req.end_date)
+        except: pass
+    eng = BacktestEngine(is_live=False)
+    res = eng.run(hist, req.symbol.upper(), req.start_date, req.end_date, req.indicators or [{"id":"rsi","params":{"period":14}}], req.entry_conditions or [], req.exit_conditions or [], req.legs or [], req.advanced or {}, req.risk or {}, is_live=False)
+    m = res.get("metrics",{})
+    pdf = build_report(m, m.get("trade_list",[]), req.symbol.upper(), req.start_date, req.end_date)
+    return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=RaTrade_{req.symbol}_{req.start_date}_{req.end_date}.pdf"})

@@ -1,0 +1,1012 @@
+import math
+from typing import List, Dict
+
+
+class IndicatorEngine:
+    def calculate_rsi(self, prices: List[float], period: int = 14) -> List[float]:
+        rsi = [50.0] * len(prices)
+        if len(prices) < period + 1:
+            return rsi
+        gains, losses = [], []
+        avg_gain, avg_loss = 0.0, 0.0
+        for i in range(1, len(prices)):
+            change = prices[i] - prices[i - 1]
+            gain = max(0, change)
+            loss = max(0, -change)
+            if i <= period:
+                gains.append(gain)
+                losses.append(loss)
+                if i == period:
+                    avg_gain = sum(gains) / period
+                    avg_loss = sum(losses) / period
+            else:
+                avg_gain = (avg_gain * (period - 1) + gain) / period
+                avg_loss = (avg_loss * (period - 1) + loss) / period
+            if i >= period:
+                rs = avg_gain / max(avg_loss, 0.0001)
+                rsi[i] = 100 - (100 / (1 + rs))
+        return rsi
+
+    def calculate_ema(self, prices: List[float], period: int) -> List[float]:
+        ema = [None] * len(prices)
+        if len(prices) < period:
+            return ema
+        multiplier = 2 / (period + 1)
+        ema[period - 1] = sum(prices[:period]) / period
+        for i in range(period, len(prices)):
+            ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1]
+        return ema
+
+    def calculate_macd(self, prices: List[float], fast=12, slow=26, signal=9) -> Dict:
+        ema_fast = self.calculate_ema(prices, fast)
+        ema_slow = self.calculate_ema(prices, slow)
+        macd_line = [None] * len(prices)
+        valid_macd = []
+        for i in range(len(prices)):
+            if ema_fast[i] is not None and ema_slow[i] is not None:
+                macd_line[i] = ema_fast[i] - ema_slow[i]
+                valid_macd.append(macd_line[i])
+        signal_valid = self.calculate_ema(valid_macd, signal) if len(valid_macd) >= signal else [None] * len(valid_macd)
+        signal_line = [None] * len(prices)
+        sig_idx = 0
+        for i in range(len(prices)):
+            if macd_line[i] is not None:
+                if sig_idx < len(signal_valid):
+                    signal_line[i] = signal_valid[sig_idx]
+                sig_idx += 1
+        return {"macd": macd_line, "signal": signal_line}
+
+    def calculate_supertrend(self, data: List[Dict], period=10, multiplier=3.0) -> List[float]:
+        n = len(data)
+        atr = [0.0] * n
+        # Warmup bars are None (NOT 0.0): 0.0 passes `is not None` gates and
+        # reads as "price above SuperTrend" (close > 0 always) = phantom
+        # bullish signals on the first `period` bars of every warmup-less
+        # series. None abstains honestly everywhere (engine + scanner).
+        supertrend = [None] * n
+        for i in range(1, n):
+            tr = max(
+                data[i]["high_price"] - data[i]["low_price"],
+                abs(data[i]["high_price"] - data[i - 1]["close_price"]),
+                abs(data[i]["low_price"] - data[i - 1]["close_price"]),
+            )
+            atr[i] = ((atr[i - 1] * (period - 1)) + tr) / period if i >= period else tr
+        hl2 = [(d["high_price"] + d["low_price"]) / 2 for d in data]
+        upper = [0.0] * n
+        lower = [0.0] * n
+        in_uptrend = [True] * n
+        for i in range(period, n):
+            basic_upper = hl2[i] + multiplier * atr[i]
+            basic_lower = hl2[i] - multiplier * atr[i]
+            if i == period:
+                # Seed bands with first basic values: starting from 0.0 makes
+                # min(basic, 0) stick at 0 forever (SuperTrend always 0 = always bullish)
+                upper[i] = basic_upper
+                lower[i] = basic_lower
+            else:
+                upper[i] = min(basic_upper, upper[i - 1]) if data[i - 1]["close_price"] <= upper[i - 1] else basic_upper
+                lower[i] = max(basic_lower, lower[i - 1]) if data[i - 1]["close_price"] >= lower[i - 1] else basic_lower
+            if in_uptrend[i - 1]:
+                in_uptrend[i] = data[i]["close_price"] > lower[i]
+            else:
+                in_uptrend[i] = data[i]["close_price"] >= upper[i]
+            supertrend[i] = lower[i] if in_uptrend[i] else upper[i]
+        return supertrend
+
+    def calculate_utbot(self, data: List[Dict], keyvalue: float = 3.0, atrperiod: int = 10) -> Dict:
+        """UT Bot (Pine Script port): ATR trailing stop + position flips.
+        nLoss = keyvalue * ATR(atrperiod, Wilder RMA).
+        stop: trailing stop line; pos: 1 long, -1 short, 0 flat.
+        Buy = src crosses over stop, Sell = crosses under (engine derives)."""
+        n = len(data)
+        closes = [float(d.get("close_price", 0) or 0) for d in data]
+        highs = [float(d.get("high_price", 0) or 0) for d in data]
+        lows = [float(d.get("low_price", 0) or 0) for d in data]
+        try:
+            period = max(1, int(atrperiod))
+        except Exception:
+            period = 10
+        try:
+            kv = float(keyvalue)
+        except Exception:
+            kv = 3.0
+        # Wilder ATR (Pine atr() = RMA of TR)
+        atr = [0.0] * n
+        for i in range(1, n):
+            tr = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+            if i <= period:
+                atr[i] = (atr[i - 1] * (i - 1) + tr) / i if i > 0 else tr
+            else:
+                atr[i] = (atr[i - 1] * (period - 1) + tr) / period
+        stop = [0.0] * n
+        pos = [0] * n
+        for i in range(1, n):
+            src = closes[i]
+            prev_src = closes[i - 1]
+            prev_stop = stop[i - 1]  # nz(...,0)
+            prev_pos = pos[i - 1]
+            nloss = kv * atr[i]
+            if src > prev_stop and prev_src > prev_stop:
+                stop[i] = max(prev_stop, src - nloss)
+            elif src < prev_stop and prev_src < prev_stop:
+                stop[i] = min(prev_stop, src + nloss)
+            elif src > prev_stop:
+                stop[i] = src - nloss
+            else:
+                stop[i] = src + nloss
+            if prev_src < prev_stop and src > prev_stop:
+                pos[i] = 1
+            elif prev_src > prev_stop and src < prev_stop:
+                pos[i] = -1
+            else:
+                pos[i] = prev_pos
+        return {"stop": stop, "pos": pos}
+
+    def calculate_predicted_ma(self, prices: List[float], lookback=20) -> Dict:
+        pma = [None] * len(prices)
+        trend_strength = [0.0] * len(prices)
+        for i in range(lookback, len(prices)):
+            sx, sy, sxy, sx2 = 0, 0, 0, 0
+            for j in range(lookback):
+                x, y = j, prices[i - lookback + j]
+                sx += x; sy += y; sxy += x * y; sx2 += x * x
+            denom = lookback * sx2 - sx * sx
+            slope = (lookback * sxy - sx * sy) / denom if denom != 0 else 0
+            intercept = (sy - slope * sx) / lookback if denom != 0 else sy / lookback
+            pma[i] = intercept + slope * (lookback - 1)
+            trend_strength[i] = abs(slope) / max(prices[i], 0.01) * 100 * lookback / 252
+        return {"pma": pma, "trend_strength": trend_strength}
+
+    def calculate_ai_sentiment(self, prices: List[float], highs: List[float], lows: List[float], lookback=20) -> Dict:
+        n = len(prices)
+        asi = [None] * n
+        for i in range(lookback, n):
+            change = (prices[i] - prices[i - lookback]) / max(prices[i - lookback], 0.01)
+            close_pos = (prices[i] - lows[i - lookback]) / max(highs[i - lookback] - lows[i - lookback], 0.01)
+            money_flow = close_pos - 0.5
+            sentiment = max(-100, min(100, change * 50 + money_flow * 50))
+            regime_range = highs[i - lookback] - lows[i - lookback]
+            pos_in_range = (prices[i] - lows[i - lookback]) / max(regime_range, 0.01)
+            regime = "distribution" if pos_in_range > 0.66 else ("accumulation" if pos_in_range < 0.33 else "trending")
+            asi[i] = {"sentiment": sentiment, "regime": regime, "money_flow": money_flow * 100}
+        return {"asi": asi}
+
+    def calculate_ai_volatility(self, prices: List[float], highs: List[float], lows: List[float], lookback=20) -> Dict:
+        n = len(prices)
+        vol_regime = ["normal"] * n
+        pred_high = [0.0] * n
+        pred_low = [0.0] * n
+        for i in range(lookback, n):
+            returns = []
+            for j in range(1, min(11, i + 1)):
+                r = (prices[i - j + 1] - prices[i - j]) / max(prices[i - j], 0.01)
+                returns.append(abs(r))
+            avg_abs = sum(returns) / len(returns) if returns else 0
+            vol_regime[i] = "high" if avg_abs > 0.03 else ("normal" if avg_abs > 0.015 else "low")
+            sma = sum(prices[max(0, i - lookback + 1): i + 1]) / min(lookback, i + 1)
+            sum_sq = sum((p - sma) ** 2 for p in prices[max(0, i - lookback + 1): i + 1])
+            sd = math.sqrt(sum_sq / min(lookback, i + 1))
+            mult = 2.5 if avg_abs > 0.03 else (2.0 if avg_abs > 0.015 else 1.5)
+            pred_high[i] = sma + 2 * sd * mult
+            pred_low[i] = sma - 2 * sd * mult
+        return {"vol_regime": vol_regime, "predicted_high": pred_high, "predicted_low": pred_low}
+
+    def calculate_ai_trend_score(self, prices: List[float]) -> Dict:
+        scores = [0.0] * len(prices)
+        cum = 0.0
+        for i in range(1, len(prices)):
+            pct = (prices[i] - prices[i - 1]) / max(prices[i - 1], 0.01)
+            cum += pct * 100
+            scores[i] = cum
+        return {"scores": scores}
+
+    def calculate_delta(self, spot: float, strike: float, iv: float, time_to_expiry: float, option_type: str) -> float:
+        if time_to_expiry <= 0 or iv <= 0 or spot <= 0 or strike <= 0:
+            return 0.5 if option_type == "CE" else -0.5
+        d1 = (math.log(spot / strike) + (0.5 * iv * iv) * time_to_expiry) / (iv * math.sqrt(time_to_expiry))
+        from utils.helpers import normal_cdf
+        delta = normal_cdf(d1)
+        return delta if option_type == "CE" else delta - 1
+
+    def calculate_vwap(self, data: List[Dict], period: int = 20, multiplier: float = 2.0) -> Dict:
+        n = len(data)
+        vwap = [None] * n
+        upper1 = [None] * n
+        lower1 = [None] * n
+        upper2 = [None] * n
+        lower2 = [None] * n
+        for i in range(period - 1, n):
+            cum_pv = 0.0
+            cum_vol = 0.0
+            sum_sq = 0.0
+            for j in range(i - period + 1, i + 1):
+                typical = (data[j]['high_price'] + data[j]['low_price'] + data[j]['close_price']) / 3.0
+                vol = data[j].get('volume', 1) or 1
+                cum_pv += typical * vol
+                cum_vol += vol
+            vwap[i] = cum_pv / cum_vol if cum_vol > 0 else data[i]['close_price']
+            for j in range(i - period + 1, i + 1):
+                typical = (data[j]['high_price'] + data[j]['low_price'] + data[j]['close_price']) / 3.0
+                sum_sq += (typical - vwap[i]) ** 2
+            std = math.sqrt(sum_sq / period) if period > 0 else 0
+            upper1[i] = vwap[i] + std
+            lower1[i] = vwap[i] - std
+            upper2[i] = vwap[i] + multiplier * std
+            lower2[i] = vwap[i] - multiplier * std
+        return {'vwap': vwap, 'upper1': upper1, 'lower1': lower1, 'upper2': upper2, 'lower2': lower2}
+
+    def calculate_kama(self, prices: List[float], fast_period: int = 10, slow_period: int = 30) -> List[float]:
+        """Kaufman's Adaptive Moving Average (KAMA).
+        Self-adjusting speed based on market efficiency ratio (MER).
+        Faster in trending markets, slower in sideways/ranging markets.
+        """
+        n = len(prices)
+        if n < slow_period:
+            return [prices[i] for i in range(n)]
+        kama = [prices[0]] * n
+        er = [0.0] * n
+        change = [0.0] * n
+        volatility = [0.0] * n
+        for i in range(1, n):
+            change[i] = abs(prices[i] - prices[i - 1])
+            if i >= fast_period:
+                volatility[i] = sum(change[i - fast_period + 1:i + 1]) / fast_period
+        for i in range(slow_period, n):
+            er[i] = abs(prices[i] - prices[i - slow_period]) / max(volatility[i], 0.001)
+            fast_coeff = math.pow(2 / (fast_period + 1), 2)
+            slow_coeff = math.pow(2 / (slow_period + 1), 2)
+            mer = er[i]
+            noise = math.sqrt(fast_coeff - slow_coeff) if fast_coeff > slow_coeff else 0
+            kama_coeff = (mer / (mer + noise) + slow_coeff) if (mer + noise) > 0 else slow_coeff
+            kama[i] = kama[i - 1] + kama_coeff * (prices[i] - kama[i - 1])
+        return kama
+
+    def calculate_hmm_regime(self, prices: List[float], n_components: int = 3) -> Dict:
+        """Hidden Markov Model Regime Classifier.
+        Falls back to simple trend classification if sklearn is not available.
+        """
+        n = len(prices)
+        # Pure Python fallback: classify based on price trend
+        if n < 20:
+            return {"regimes": [{"state": "Sideways", "probability": 1.0}] * n, "state_sequence": ["Sideways"] * n}
+        # Calculate simple moving average and trend
+        ma = sum(prices[:20]) / 20 if len(prices) >= 20 else sum(prices) / len(prices)
+        trends = []
+        for i in range(len(prices)):
+            if i >= 20:
+                ma_i = sum(prices[i-20:i]) / 20
+                trends.append("Bullish" if prices[i] > ma_i else "Bearish" if prices[i] < ma_i else "Sideways")
+            else:
+                trends.append("Sideways")
+        # Pad to length n
+        state_sequence = trends[:n]
+        # Calculate probabilities based on how long the trend has persisted
+        regime_probs = []
+        for i in range(n):
+            # Simple probability based on trend strength
+            if i >= 20:
+                trend_len = 1
+                for j in range(i-1, 0, -1):
+                    if trends[j] == trends[i]:
+                        trend_len += 1
+                    else:
+                        break
+                prob = min(1.0, trend_len / 20.0)
+                regime_probs.append({trends[i]: prob})
+            else:
+                regime_probs.append({"Sideways": 1.0})
+        return {"regimes": regime_probs, "state_sequence": state_sequence}
+
+    def calculate_dynamic_bollinger(self, prices: List[float], highs: List[float], lows: List[float], period: int = 20, lookforward: int = 5) -> Dict:
+        """AI-Optimized Volatility Bands (Dynamic Bollinger Bands).
+        Uses machine learning to predict future volatility expansion
+        and adjusts bands dynamically, reducing fake breakouts.
+        """
+        n = len(prices)
+        if n < period:
+            return {"mid": prices, "upper": [p * 1.02 for p in prices], "lower": [p * 0.98 for p in prices]}
+        # Calculate standard rolling statistics
+        mid = []
+        upper = []
+        lower = []
+        prev_atr = None
+        for i in range(n):
+            if i >= period - 1:
+                window_prices = prices[i - period + 1:i + 1]
+                window_highs = highs[i - period + 1:i + 1]
+                window_lows = lows[i - period + 1:i + 1]
+                sma = sum(window_prices) / period
+                # ATR-like measure: MEAN of per-bar true ranges (not the whole
+                # window high-low range - woh trend me ±25% bands banata tha
+                # jo price kabhi chhuta hi nahi tha = indicator hamesha dead).
+                bar_ranges = [max(window_highs[j] - window_lows[j], 0.0)
+                              for j in range(period)]
+                atr = max(sum(bar_ranges) / max(period, 1),
+                          (sum(window_prices) / period) * 0.02)
+                # AI adjustment: volatility expansion factor based on recent volatility change
+                if prev_atr is not None:
+                    vol_ratio = atr / max(prev_atr, 0.001)
+                    # Expand/contract bands based on volatility regime
+                    if vol_ratio > 1.2:
+                        band_wide = atr * 2.0
+                    elif vol_ratio < 0.8:
+                        band_wide = atr * 0.5
+                    else:
+                        band_wide = atr * 1.0
+                else:
+                    band_wide = atr * 1.0
+                prev_atr = atr
+                mid.append(sma)
+                upper.append(sma + band_wide)
+                lower.append(sma - band_wide)
+            else:
+                mid.append(prices[i])
+                upper.append(prices[i] * 1.02)
+                lower.append(prices[i] * 0.98)
+        return {"mid": mid, "upper": upper, "lower": lower}
+
+    def calculate_ml_rsi(self, prices: List[float], period: int = 14) -> Dict:
+        """Neural Network Smoothed RSI (ML-RSI).
+        Combines standard RSI with a predictive filter to filter
+        momentum whipsaws and noisy fake crosses.
+        """
+        # Standard RSI calculation
+        n = len(prices)
+        rsi = [50.0] * n
+        if n < period + 1:
+            return {"rsi": rsi, "smoothed_rsi": rsi, "signal": [0] * n}
+        gains, losses = [], []
+        avg_gain, avg_loss = 0.0, 0.0
+        for i in range(1, len(prices)):
+            change = prices[i] - prices[i - 1]
+            gain = max(0, change)
+            loss = max(0, -change)
+            if i <= period:
+                gains.append(gain)
+                losses.append(loss)
+                if i == period:
+                    avg_gain = sum(gains) / period
+                    avg_loss = sum(losses) / period
+            else:
+                avg_gain = (avg_gain * (period - 1) + gain) / period
+                avg_loss = (avg_loss * (period - 1) + loss) / period
+            if i >= period:
+                rs = avg_gain / max(avg_loss, 0.0001)
+                rsi[i] = 100 - (100 / (1 + rs))
+        # Simple predictive filter: exponential smoothing of RSI changes
+        alpha = 0.3
+        smoothed = [rsi[0]]
+        for i in range(1, n):
+            smoothed.append(alpha * rsi[i] + (1 - alpha) * smoothed[i - 1])
+        # Signal: 1 if RSI crosses above 50 from below, -1 if crosses below 50 from above, 0 otherwise
+        signal = [0] * n
+        for i in range(1, n):
+            if rsi[i] > 50 and rsi[i - 1] <= 50:
+                signal[i] = 1  # Bullish crossover
+            elif rsi[i] < 50 and rsi[i - 1] >= 50:
+                signal[i] = -1  # Bearish crossover
+            else:
+                signal[i] = 0
+        return {"rsi": rsi, "smoothed_rsi": smoothed, "signal": signal}
+
+    def calculate_ml_signal_filter(self, prices: List[float], fast_ema: int = 9, slow_ema: int = 21, rsi_period: int = 14, ml_weight: float = 0.3) -> Dict:
+        """Gradient Boosted Signal Filter (ML Probability Score).
+        Combines outputs of fast EMA, slow EMA, and RSI into a
+        lightweight probability score (0 to 1) indicating signal quality.
+        """
+        n = len(prices)
+        if n < max(fast_ema, slow_ema, rsi_period):
+            return {"signal": [0] * n, "probability": [0.5] * n, "ml_score": [0.5] * n}
+        # Calculate indicators
+        ema_fast = self.calculate_ema(prices, fast_ema)
+        ema_slow = self.calculate_ema(prices, slow_ema)
+        rsi_result = self.calculate_rsi(prices, rsi_period)
+        rsi = rsi_result if isinstance(rsi_result, list) else rsi_result.get("rsi", [50] * n)
+        # Build probability score
+        probability = [0.5] * n
+        ml_score = [0.5] * n
+        for i in range(max(fast_ema, slow_ema, rsi_period), n):
+            # EMA alignment: 1 if fast > slow (bullish), -1 if fast < slow (bearish), 0 if mixed
+            ema_alignment = 0
+            if ema_fast[i] > ema_slow[i]:
+                ema_alignment = 1
+            elif ema_fast[i] < ema_slow[i]:
+                ema_alignment = -1
+            # RSI level: 1 if oversold (<30) or overbought (>70), 0 otherwise
+            rsi_level = 0
+            if rsi[i] < 30:
+                rsi_level = 1  # Oversold - bullish reversal potential
+            elif rsi[i] > 70:
+                rsi_level = -1  # Overbearish - bearish reversal potential
+            # Combined probability: base 0.5 + weight * (ema_signal + rsi_signal)
+            ema_signal = 1 if ema_alignment == 1 else (-1 if ema_alignment == -1 else 0)
+            combined = 0.5 + ml_weight * (ema_signal + rsi_level)
+            probability[i] = max(0.01, min(0.99, combined))
+            ml_score[i] = combined
+        # Fill early bars with default
+        for i in range(max(fast_ema, slow_ema, rsi_period)):
+            probability[i] = 0.5
+            ml_score[i] = 0.5
+        # Generate trading signal: 1 = buy, -1 = sell, 0 = hold
+        signal = [0] * n
+        for i in range(n):
+            if probability[i] > 0.6:
+                signal[i] = 1
+            elif probability[i] < 0.4:
+                signal[i] = -1
+        return {"signal": signal, "probability": probability, "ml_score": ml_score}
+
+    def calculate_neural_network(self, prices: List[float], highs: List[float], lows: List[float], period: int = 14) -> Dict:
+        """Lightweight Neural Network predictor (2-layer tanh).
+        Trained on price momentum + volatility features, predicts next-bar direction."""
+        n = len(prices)
+        if n < period + 5:
+            return {"prediction": [0]*n, "signal": [0]*n, "confidence": [0.5]*n}
+        pred = [0]*n
+        sig = [0]*n
+        conf = [0.5]*n
+        # Precompute features
+        for i in range(period, n):
+            window = prices[i-period:i]
+            mean = sum(window)/period
+            var = sum((p-mean)**2 for p in window)/period
+            std = math.sqrt(var) if var>0 else 1
+            norm_close = (prices[i]-mean)/max(std, 0.01)
+            momentum = (prices[i]-prices[i-1])/max(prices[i-1],0.01)*100
+            range_pct = (highs[i]-lows[i])/max(prices[i],0.01)*100
+            # Hidden layer 2 neurons tanh
+            h1 = math.tanh(0.8*norm_close + 0.5*momentum - 0.3*range_pct)
+            h2 = math.tanh(-0.6*norm_close + 0.9*momentum + 0.2*range_pct)
+            out = math.tanh(1.2*h1 - 0.8*h2)
+            pred[i] = out
+            conf[i] = min(0.99, max(0.01, abs(out)*0.5+0.5))
+            sig[i] = 1 if out > 0.25 else (-1 if out < -0.25 else 0)
+        return {"prediction": pred, "signal": sig, "confidence": conf}
+
+    def calculate_volume_indicator(self, data: List[Dict], period: int = 20) -> Dict:
+        """Volume SMA crossover: price above VWAP-like volume weighted signal."""
+        n = len(data)
+        if n < period:
+            return {"sma": [None]*n, "signal": [0]*n}
+        vols = [float(d.get("volume",0) or 0) for d in data]
+        closes = [float(d.get("close_price",0) or 0) for d in data]
+        sma = [None]*n
+        sig = [0]*n
+        for i in range(period-1, n):
+            sma[i] = sum(vols[i-period+1:i+1])/period
+            # Bullish if volume rising + price rising
+            if vols[i] > sma[i] and closes[i] > closes[i-1]:
+                sig[i] = 1
+            elif vols[i] > sma[i] and closes[i] < closes[i-1]:
+                sig[i] = -1
+            else:
+                sig[i] = 0
+        return {"sma": sma, "signal": sig, "volumes": vols}
+
+    def calculate_oi_indicator(self, data: List[Dict], period: int = 20) -> Dict:
+        """Open Interest trend: OI rising + price rising = bullish, OI rising + price falling = bearish."""
+        n = len(data)
+        if n < period:
+            return {"sma": [None]*n, "signal": [0]*n}
+        ois = [float(d.get("oi",0) or 0) for d in data]
+        closes = [float(d.get("close_price",0) or 0) for d in data]
+        # Fallback if OI is mostly 0 (use volume as proxy)
+        if sum(1 for x in ois if x>0) < n*0.3:
+            vols = [float(d.get("volume",0) or 0) for d in data]
+            ois = vols
+        sma = [None]*n
+        sig = [0]*n
+        for i in range(period-1, n):
+            sma[i] = sum(ois[i-period+1:i+1])/period
+            prev_oi = ois[i-1]
+            cur_oi = ois[i]
+            # OI rising + price up = long build-up bullish
+            if cur_oi > prev_oi and closes[i] > closes[i-1]:
+                sig[i] = 1
+            elif cur_oi > prev_oi and closes[i] < closes[i-1]:
+                sig[i] = -1
+            else:
+                sig[i] = 0
+        return {"sma": sma, "signal": sig, "oi": ois}
+
+    def calculate_heikin_ashi(self, data: List[Dict]) -> Dict:
+        """Heikin-Ashi candles + quantman-style trend signal.
+        Very Bullish (+1): green HA candle with (almost) no lower wick.
+        Very Bearish (-1): red HA candle with (almost) no upper wick.
+        Else 0 (indecision/doji)."""
+        n = len(data)
+        ha_open, ha_close, ha_high, ha_low, sig = [], [], [], [], []
+        prev_o = prev_c = None
+        for d in data:
+            o = float(d.get("open_price", 0) or 0)
+            h = float(d.get("high_price", 0) or 0)
+            l = float(d.get("low_price", 0) or 0)
+            c = float(d.get("close_price", 0) or 0)
+            hc = (o + h + l + c) / 4.0
+            ho = (o + c) / 2.0 if prev_o is None else (prev_o + prev_c) / 2.0
+            hh = max(h, ho, hc)
+            hl = min(l, ho, hc)
+            ha_open.append(ho); ha_close.append(hc); ha_high.append(hh); ha_low.append(hl)
+            rng = max(hh - hl, 1e-9)
+            if hc > ho and (ho - hl) / rng <= 0.10:
+                sig.append(1)   # very bullish: no lower wick
+            elif hc < ho and (hh - ho) / rng <= 0.10:
+                sig.append(-1)  # very bearish: no upper wick
+            else:
+                sig.append(0)
+            prev_o, prev_c = ho, hc
+        return {"open": ha_open, "close": ha_close, "high": ha_high, "low": ha_low, "signal": sig}
+
+    def calculate_bollinger(self, prices: List[float], period: int = 20, std: float = 2.0) -> Dict:
+        n = len(prices)
+        mid, upper, lower = [None]*n, [None]*n, [None]*n
+        for i in range(period-1, n):
+            window = prices[i-period+1:i+1]
+            sma = sum(window)/period
+            var = sum((p - sma) ** 2 for p in window)/period
+            sd = math.sqrt(var) if var>0 else 0
+            mid[i]=sma
+            upper[i]=sma + std*sd
+            lower[i]=sma - std*sd
+        return {"mid": mid, "upper": upper, "lower": lower}
+
+    def calculate_range_breakout(self, data: List[Dict], period: int = 20) -> Dict:
+        """Donchian-style range breakout (quantman Range Breakout indicator).
+        Upper = highest high of last `period` bars (excluding current),
+        Lower = lowest low. Breakout signal: +1 close>upper, -1 close<lower."""
+        n = len(data)
+        highs = [float(d.get("high_price", 0) or 0) for d in data]
+        lows = [float(d.get("low_price", 0) or 0) for d in data]
+        closes = [float(d.get("close_price", 0) or 0) for d in data]
+        upper = [None] * n
+        lower = [None] * n
+        sig = [0] * n
+        for i in range(n):
+            if i < period:
+                continue
+            uh = max(highs[i - period:i])
+            ll = min(lows[i - period:i])
+            upper[i] = uh
+            lower[i] = ll
+            if closes[i] > uh:
+                sig[i] = 1
+            elif closes[i] < ll:
+                sig[i] = -1
+        return {"upper": upper, "lower": lower, "signal": sig}
+
+    def calculate_ema_cross(self, closes: List[float], fast: int = 9, slow: int = 21) -> Dict:
+        ef = self.calculate_ema(closes, fast) or []
+        es = self.calculate_ema(closes, slow) or []
+        n = len(closes)
+        sig = [0]*n; cross_up = [False]*n; cross_dn = [False]*n
+        for i in range(1, n):
+            efv = ef[i] if i < len(ef) else None; esv = es[i] if i < len(es) else None
+            prv_ef = ef[i-1] if i-1 < len(ef) else None; prv_es = es[i-1] if i-1 < len(es) else None
+            if efv is not None and esv is not None:
+                if efv > esv:
+                    sig[i] = 1
+                elif efv < esv:
+                    sig[i] = -1
+                if prv_ef is not None and prv_es is not None:
+                    if prv_ef <= prv_es and efv > esv:
+                        cross_up[i] = True
+                    if prv_ef >= prv_es and efv < esv:
+                        cross_dn[i] = True
+        return {"signal": sig, "cross_up": cross_up, "cross_down": cross_dn, "ema_fast": ef, "ema_slow": es}
+
+    def calculate_bollinger_squeeze(self, data: List[Dict], period: int = 20, mult: float = 2.0) -> Dict:
+        hist = [{"close_price": d.get("close_price", 0)} for d in data]
+        closes = [float(d.get("close_price", 0) or 0) for d in data]
+        vols = [float(d.get("volume", 0) or 0) for d in data]
+        n = len(data)
+        squeeze = [False]*n; vol_spike = [False]*n
+        upper = [None]*n; lower = [None]*n
+        for i in range(period, n):
+            window = closes[i-period+1:i+1]
+            mean = sum(window)/period
+            var = sum((x-mean)**2 for x in window)/period
+            sd = math.sqrt(var) if var > 0 else 0
+            up = mean + mult*sd; lo = mean - mult*sd
+            upper[i] = up; lower[i] = lo
+            width = (up - lo) / mean if mean else 1
+            # Squeeze: width in lowest 20% of last 20 widths
+            widths = []
+            for j in range(max(period, i-20), i+1):
+                w2 = closes[j-period+1:j+1]
+                m2 = sum(w2)/period; v2 = sum((x-m2)**2 for x in w2)/period; s2 = math.sqrt(v2) if v2>0 else 0
+                widths.append((2*mult*s2)/m2 if m2 else 1)
+            if widths and width <= sorted(widths)[max(0, len(widths)//5)]:
+                squeeze[i] = True
+            avg5 = sum(vols[max(0,i-5):i]) / max(1, min(5, i))
+            if vols[i] >= 2 * avg5 and avg5 > 0:
+                vol_spike[i] = True
+        # Signal: squeeze PHLE (bar i-1) + breakout/volume AB (bar i).
+        # Pehle teeno same bar par mange jate the - breakout bar apni hi
+        # window chaudi karke squeeze khatm kar deta tha, isliye signal
+        # kabhi banta hi nahi tha (hamesha 0 = "indicator kaam nahi karta").
+        sig = [0] * n
+        for i in range(1, n):
+            if not squeeze[i - 1] or not vol_spike[i]:
+                continue
+            up = upper[i] if upper[i] is not None else upper[i - 1]
+            lo = lower[i] if lower[i] is not None else lower[i - 1]
+            if up is not None and closes[i] > up:
+                sig[i] = 1
+            elif lo is not None and closes[i] < lo:
+                sig[i] = -1
+        return {"upper": upper, "lower": lower, "squeeze": squeeze, "vol_spike": vol_spike, "signal": sig}
+
+    def calculate_rsi_vwap_pcr_combo(self, data: List[Dict], closes: List[float],
+                                       params: Dict = None, pcr_by_date: Dict = None) -> Dict:
+        """RSI Momentum + VWAP anchor + SuperTrend + PCR + Volume combo.
+
+        ENTRY (Call-buy side, sab ek saath):
+          1. RSI(14) momentum: (a) `rsi_entry` (70) ke UPAR fresh cross
+             (ignition), YA (b) RSI 70-85 me aur rising + SuperTrend HALI me
+             green hua (early-trend riding). Dono fresh-event anchored -
+             purana 85+ chase kabhi nahi (RSI>85 BLOCK).
+          2. Close > SuperTrend(period, mult) - trend green.
+          3. Close > VWAP(period) - intraday anchor ke upar.
+          4. PCR >= pcr_min (1.0) - put support hai, call buying safe.
+          5. Volume > vol_mult x SMA(vol_period) - participation.
+        EXIT (long se niklo jab KOI ek):
+          RSI < rsi_exit (55) / Close < SuperTrend (flip) / Close < VWAP.
+        SELL side mirror: RSI 30 ke NEECHE cross + ST red + VWAP neeche +
+        PCR <= pcr_bear_max (0.8) + volume spike. Cover: RSI > 45 / ST flip
+        green / VWAP upar.
+        pcr_by_date: {YYYY-MM-DD: pcr} - na mile to 1.0 neutral (vote skip nahi,
+        neutral treat). Returns per-bar buy/sell/exit arrays + series."""
+        params = dict(params or {})
+        rp = max(2, int(params.get("rsi_period", 14) or 14))
+        rsi_entry = float(params.get("rsi_entry", 70) or 70)
+        rsi_exit = float(params.get("rsi_exit", 55) or 55)
+        rsi_os = float(params.get("rsi_oversold", 30) or 30)
+        stp = max(2, int(params.get("st_period", 10) or 10))
+        stm = float(params.get("st_mult", 3.0) or 3.0)
+        vwp = max(2, int(params.get("vwap_period", 20) or 20))
+        pcr_min = float(params.get("pcr_min", 1.0) or 1.0)
+        pcr_bear = float(params.get("pcr_bear_max", 0.8) or 0.8)
+        vm = float(params.get("vol_mult", 1.5) or 1.5)
+        vp = max(2, int(params.get("vol_period", 20) or 20))
+        fb = max(1, min(3, int(params.get("fresh_bars", 2) or 2)))
+        # Volume participation: spike USI ya pichhle `vol_confirm` bars me
+        # (ignition bar par hi spike zaroori nahi - 3-4 din ki participation
+        # kaafi; same-bar-zid par combo kabhi fire nahi hota tha).
+        vcb = max(1, min(5, int(params.get("vol_confirm_bars", 4) or 4)))
+        n = len(closes)
+        buy = [False] * n
+        sell = [False] * n
+        exit_buy = [False] * n
+        exit_sell = [False] * n
+        rsi = self.calculate_rsi(closes, rp) if n >= rp + 1 else [50.0] * n
+        try:
+            st = self.calculate_supertrend(data, stp, stm) or [0.0] * n
+        except Exception:
+            st = [0.0] * n
+        try:
+            _vw = self.calculate_vwap(data, vwp, 2.0) or {}
+            vw = _vw.get("vwap", [None] * n) if isinstance(_vw, dict) else [None] * n
+        except Exception:
+            vw = [None] * n
+        vols = [float((d or {}).get("volume", 0) or 0) for d in (data or [])]
+        if len(vols) < n:
+            vols = vols + [0.0] * (n - len(vols))
+        pcr_s = []
+        for idx in range(n):
+            try:
+                _d = str((data[idx] or {}).get("trade_date", ""))[:10] if idx < len(data or []) else ""
+                _p = float((pcr_by_date or {}).get(_d, 1.0)) if _d else 1.0
+            except Exception:
+                _p = 1.0
+            pcr_s.append(_p if _p > 0 else 1.0)
+        rsi_cover = 100.0 - float(rsi_exit or 55)
+        start = max(rp, stp, vwp, vp) + 1
+        for i in range(max(start, 1), n):
+            try:
+                c = float(closes[i] or 0)
+                if c <= 0:
+                    continue
+                # RSI cross events (fresh window me)
+                cross_up = cross_dn = False
+                for k in range(max(1, i - fb + 1), i + 1):
+                    try:
+                        _rk = float(rsi[k]) if rsi[k] is not None else None
+                        _rp0 = float(rsi[k - 1]) if rsi[k - 1] is not None else None
+                        if _rk is None or _rp0 is None:
+                            continue
+                        if _rp0 <= rsi_entry and _rk > rsi_entry:
+                            cross_up = True
+                        if _rp0 >= rsi_os and _rk < rsi_os:
+                            cross_dn = True
+                    except Exception:
+                        continue
+                stv = st[i] if i < len(st) else None
+                vwv = vw[i] if i < len(vw) else None
+                if stv is None or vwv is None:
+                    continue
+                _vsma = sum(vols[max(0, i - vp):i]) / max(1, min(vp, i))
+                try:
+                    vok = False
+                    for _vk in range(max(1, i - vcb + 1), i + 1):
+                        _sma_k = sum(vols[max(0, _vk - vp):_vk]) / max(1, min(vp, _vk))
+                        if _sma_k > 0 and vols[_vk] > vm * _sma_k:
+                            vok = True
+                            break
+                except Exception:
+                    vok = False
+                _pcr = pcr_s[i] if i < len(pcr_s) else 1.0
+                _rsi_now = float(rsi[i]) if rsi[i] is not None else 50.0
+                _rsi_prev = float(rsi[i - 1]) if i > 0 and rsi[i - 1] is not None else _rsi_now
+                # ST fresh flip (pichhle fresh window me red->green)
+                st_fresh_up = st_fresh_dn = False
+                try:
+                    for k in range(max(1, i - fb + 1), i + 1):
+                        _sk = st[k] if k < len(st) else None
+                        _sp0 = st[k - 1] if k - 1 < len(st) else None
+                        if _sk is None or _sp0 is None:
+                            continue
+                        if closes[k - 1] <= _sp0 and closes[k] > _sk:
+                            st_fresh_up = True
+                        if closes[k - 1] >= _sp0 and closes[k] < _sk:
+                            st_fresh_dn = True
+                except Exception:
+                    pass
+                # RSI momentum: ignition cross YA (70-85 riding + rising + fresh ST).
+                # RSI>85 chase kabhi nahi; mirror me RSI<15 kabhi nahi.
+                rsi_mom_up = bool(cross_up) or (
+                    rsi_entry <= _rsi_now <= 85.0 and _rsi_now >= _rsi_prev and st_fresh_up)
+                rsi_mom_dn = bool(cross_dn) or (
+                    15.0 <= _rsi_now <= rsi_os and _rsi_now <= _rsi_prev and st_fresh_dn)
+                # BUY: paancho ek saath
+                if (rsi_mom_up and c > stv and c > vwv and _pcr >= pcr_min and vok):
+                    buy[i] = True
+                # SELL mirror
+                if (rsi_mom_dn and c < stv and c < vwv and _pcr <= pcr_bear and vok):
+                    sell[i] = True
+                # EXITS (koi ek kaafi - jaldi niklo, late mat karo)
+                if _rsi_now < rsi_exit or c < stv or c < vwv:
+                    exit_buy[i] = True
+                if _rsi_now > rsi_cover or c > stv or c > vwv:
+                    exit_sell[i] = True
+            except Exception:
+                continue
+        return {"buy": buy, "sell": sell, "exit_buy": exit_buy,
+                "exit_sell": exit_sell, "rsi": rsi, "vwap": vw,
+                "supertrend": st, "pcr": pcr_s}
+
+    def _wilder_atr(self, highs, lows, closes, period):
+        """Pine ta.atr compatible: Wilder RMA of True Range, SMA-seeded.
+        Fully causal (bar i uses bars <= i only)."""
+        n = len(closes)
+        atr = [0.0] * n
+        if n < 2 or period < 1:
+            return atr
+        trs = [0.0] * n
+        for i in range(1, n):
+            try:
+                trs[i] = max(float(highs[i]) - float(lows[i]),
+                             abs(float(highs[i]) - float(closes[i - 1])),
+                             abs(float(lows[i]) - float(closes[i - 1])))
+            except Exception:
+                trs[i] = 0.0
+        if n <= period:
+            return atr
+        seed = sum(trs[1:period + 1]) / max(period, 1)
+        atr[period] = seed
+        for i in range(period + 1, n):
+            atr[i] = (atr[i - 1] * (period - 1) + trs[i]) / period
+        return atr
+
+    def calculate_zero_lag_trend(self, data, closes, length=70, mult=1.2):
+        """AlgoAlpha 'Zero Lag Trend Signals (MTF)' - exact Pine port for charts.
+
+        zlema = EMA(close + (close - close[lag]), length), lag=floor((L-1)/2)
+        volatility = highest(ATR(L), 3*L) * mult
+        trend: crossover(close, zlema+vol)->+1 (bullish),
+               crossunder(close, zlema-vol)->-1 (bearish), else persist.
+        Entry: close crosses ZLEMA itself while trend already confirmed
+               (bullish: trend==1 and prev==1; bearish mirror).
+        Upper band shown when bearish, lower when bullish (Pine parity).
+        All causal - signal at bar i uses bars <= i only (no repaint on
+        closed bars; live forming bar may update like Pine realtime).
+        Returns {zlema, upper, lower, trend, buy, sell, flip_up, flip_down}."""
+        try:
+            length = max(5, int(length or 70))
+        except Exception:
+            length = 70
+        try:
+            mult = float(mult if mult and float(mult) > 0 else 1.2)
+        except Exception:
+            mult = 1.2
+        n = len(closes)
+        out = {"zlema": [None] * n, "upper": [None] * n, "lower": [None] * n,
+               "trend": [0] * n, "buy": [False] * n, "sell": [False] * n,
+               "flip_up": [False] * n, "flip_down": [False] * n}
+        if n < length + 2:
+            return out
+        try:
+            highs = [float((d or {}).get("high_price", closes[i] if i < len(closes) else 0) or 0)
+                     for i, d in enumerate(data or [])]
+            lows = [float((d or {}).get("low_price", closes[i] if i < len(closes) else 0) or 0)
+                    for i, d in enumerate(data or [])]
+        except Exception:
+            return out
+        if len(highs) < n:
+            highs = highs + [closes[-1]] * (n - len(highs))
+        if len(lows) < n:
+            lows = lows + [closes[-1]] * (n - len(lows))
+        lag = (length - 1) // 2
+        try:
+            xsrc = []
+            for i in range(n):
+                _lagged = closes[i - lag] if i - lag >= 0 else closes[0]
+                xsrc.append(float(closes[i]) + (float(closes[i]) - float(_lagged)))
+            zl = self.calculate_ema(xsrc, length) or [None] * n
+        except Exception:
+            return out
+        try:
+            atr = self._wilder_atr(highs, lows, closes, length)
+        except Exception:
+            atr = [0.0] * n
+        win = max(1, length * 3)
+        trend = 0
+        prev_trend = 0
+        for i in range(n):
+            try:
+                _zl = zl[i] if i < len(zl) else None
+                if _zl is None:
+                    out["trend"][i] = trend
+                    continue
+                _lo = max(0, i - win + 1)
+                _hist = [a for a in atr[_lo:i + 1] if a]
+                _vol = (max(_hist) if _hist else 0.0) * mult
+                _c = float(closes[i])
+                _pc = float(closes[i - 1]) if i > 0 else _c
+                _up = _zl + _vol
+                _dn = _zl - _vol
+                # Pine ta.crossover(a,b): a[1]<=b[1] and a>b (prev-bar values)
+                _pup = None
+                _pdn = None
+                try:
+                    _pzl = zl[i - 1] if i - 1 >= 0 and i - 1 < len(zl) else None
+                    _plo = max(0, i - 1 - win + 1)
+                    _ph = [a for a in atr[_plo:i] if a]
+                    _pvol = (max(_ph) if _ph else 0.0) * mult
+                    if _pzl is not None:
+                        _pup = _pzl + _pvol
+                        _pdn = _pzl - _pvol
+                except Exception:
+                    pass
+                if _pup is not None and _pc <= _pup and _c > _up:
+                    trend = 1
+                elif _pdn is not None and _pc >= _pdn and _c < _dn:
+                    trend = -1
+                # flip markers: crossover/crossunder(trend, 0)
+                if prev_trend <= 0 < trend:
+                    out["flip_up"][i] = True
+                if prev_trend >= 0 > trend:
+                    out["flip_down"][i] = True
+                # entries: close crosses ZLEMA itself while trend confirmed
+                try:
+                    _cross_up = _pzl is not None and _pc <= _pzl and _c > _zl
+                    _cross_dn = _pzl is not None and _pc >= _pzl and _c < _zl
+                except Exception:
+                    _cross_up = _cross_dn = False
+                if _cross_up and trend == 1 and prev_trend == 1:
+                    out["buy"][i] = True
+                if _cross_dn and trend == -1 and prev_trend == -1:
+                    out["sell"][i] = True
+                out["zlema"][i] = round(float(_zl), 2)
+                out["upper"][i] = round(float(_up), 2) if trend == -1 else None
+                out["lower"][i] = round(float(_dn), 2) if trend == 1 else None
+                out["trend"][i] = trend
+                prev_trend = trend
+            except Exception:
+                try:
+                    out["trend"][i] = trend
+                except Exception:
+                    pass
+                continue
+        return out
+
+    def resample_ohlc(self, bars, minutes):
+        """Intraday bars -> timeframe buckets (MTF trend table).
+        minutes: 5/15/30/60/240/1440. Buckets by IST clock (bar_time HH:MM;
+        bars without bar_time are daily and pass through for >=1440 only).
+        Returns chronological OHLC list with trade_date (+bar_time)."""
+        out = []
+        try:
+            tf = max(1, int(minutes or 15))
+        except Exception:
+            tf = 15
+        try:
+            import datetime as _dt
+            buckets = {}
+            order = []
+            for b in bars or []:
+                try:
+                    _d = str((b or {}).get("trade_date", ""))[:10]
+                    if not _d:
+                        continue
+                    _bt = str((b or {}).get("bar_time", "") or "")
+                    if not _bt and tf < 1440:
+                        continue
+                    try:
+                        _hh, _mm = (int(_bt.split(":")[0]), int(_bt.split(":")[1])) if ":" in _bt else (0, 0)
+                    except Exception:
+                        _hh, _mm = (0, 0)
+                    _slot = (_hh * 60 + _mm) // tf if tf < 1440 else 0
+                    _key = (_d, _slot)
+                    o = float((b or {}).get("open_price", 0) or 0)
+                    h = float((b or {}).get("high_price", 0) or 0)
+                    l = float((b or {}).get("low_price", 0) or 0)
+                    c = float((b or {}).get("close_price", 0) or 0)
+                    v = float((b or {}).get("volume", 0) or 0)
+                    if c <= 0:
+                        continue
+                    if _key not in buckets:
+                        buckets[_key] = {"trade_date": _d, "bar_time": "",
+                                         "open_price": o, "high_price": h,
+                                         "low_price": l, "close_price": c, "volume": v}
+                        order.append(_key)
+                        if tf < 1440:
+                            _bh, _bm = divmod(_slot * tf, 60)
+                            buckets[_key]["bar_time"] = f"{int(_bh):02d}:{int(_bm):02d}"
+                    else:
+                        _g = buckets[_key]
+                        _g["high_price"] = max(_g["high_price"], h)
+                        _g["low_price"] = min(_g["low_price"], l)
+                        _g["close_price"] = c
+                        _g["volume"] = (_g.get("volume", 0) or 0) + v
+                except Exception:
+                    continue
+            for _k in order:
+                out.append(buckets[_k])
+        except Exception:
+            pass
+        return out
+
+    def calculate_adx(self, data: List[Dict], period: int = 14) -> Dict:
+        """Wilder's ADX with +DI/-DI. adx[i] = trend strength (0-100);
+        +DI > -DI = bulls stronger. Best setting: period 14, trend gate 25."""
+        n = len(data)
+        adx = [0.0] * n
+        pdi = [0.0] * n
+        mdi = [0.0] * n
+        try:
+            highs = [float(d.get("high_price", 0) or 0) for d in data]
+            lows = [float(d.get("low_price", 0) or 0) for d in data]
+            closes = [float(d.get("close_price", 0) or 0) for d in data]
+            if n < period + 1:
+                return {"adx": adx, "plus_di": pdi, "minus_di": mdi}
+            pdm = [0.0] * n
+            mdm = [0.0] * n
+            tr = [0.0] * n
+            for i in range(1, n):
+                up = highs[i] - highs[i - 1]
+                dn = lows[i - 1] - lows[i]
+                if up > dn and up > 0:
+                    pdm[i] = up
+                if dn > up and dn > 0:
+                    mdm[i] = dn
+                tr[i] = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+            # Wilder smoothing over first `period` values
+            s_tr = sum(tr[1:period + 1])
+            s_pdm = sum(pdm[1:period + 1])
+            s_mdm = sum(mdm[1:period + 1])
+            for i in range(period, n):
+                if i > period:
+                    s_tr = s_tr - s_tr / period + tr[i]
+                    s_pdm = s_pdm - s_pdm / period + pdm[i]
+                    s_mdm = s_mdm - s_mdm / period + mdm[i]
+                if s_tr > 0:
+                    pdi[i] = 100 * (s_pdm / s_tr)
+                    mdi[i] = 100 * (s_mdm / s_tr)
+                    dx = 100 * abs(pdi[i] - mdi[i]) / max(pdi[i] + mdi[i], 0.0001)
+                    if i == period:
+                        adx[i] = dx
+                    else:
+                        adx[i] = ((adx[i - 1] * (period - 1)) + dx) / period
+        except Exception:
+            pass
+        return {"adx": adx, "plus_di": pdi, "minus_di": mdi}

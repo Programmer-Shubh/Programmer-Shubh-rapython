@@ -1,0 +1,657 @@
+import datetime
+import requests
+import re
+import json
+from typing import List, Dict
+# Sources: DB -> nsepython (NSE official) -> Yahoo -> Stooq -> AlphaVantage/
+# TwelveData -> (openchart reference only).
+# NSE kabhi-kabhi bot-block karta hai - nsepython fail ho to chain aage badhta
+# hai (koi crash/timeout nahi).
+
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+def _parse_dates(start_date: str, end_date: str):
+    try:
+        s = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        e = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+        return s, e
+    except Exception:
+        e = datetime.datetime.now()
+        s = e - datetime.timedelta(days=90)
+        return s, e
+
+def _clean_num(v) -> float:
+    """Parse NSE number like '2,613.10' or 2613.10."""
+    if v is None: return 0
+    s = str(v).replace(",", "").replace("\u20b9", "").strip()
+    try: return float(s)
+    except: return 0
+
+def _fetch_truedata_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """TrueData (truedata.in): Authorized NSE/BSE vendor — requires TRUEDATA_USERNAME/PASSWORD or TRUEDATA_API_KEY."""
+    try:
+        import os
+        td_user = os.environ.get("TRUEDATA_USERNAME", "")
+        td_pass = os.environ.get("TRUEDATA_PASSWORD", "")
+        td_key = os.environ.get("TRUEDATA_API_KEY", "")
+        if not td_user and not td_key:
+            return []
+        # TrueData REST: https://api.truedata.in/getHistoricalData?symbol=NIFTY&from=2025-01-01&to=2025-01-10
+        # Falls back to authorized NSE feed if configured
+        headers = {"Accept": "application/json"}
+        if td_key:
+            headers["Authorization"] = f"Bearer {td_key}"
+        base = os.environ.get("TRUEDATA_BASE_URL", "https://api.truedata.in")
+        for ep in [f"{base}/getHistoricalData", f"{base}/api/historical", "https://www.truedata.in/api/historical"]:
+            try:
+                params = {"symbol": symbol, "from": start_date, "to": end_date, "interval": "1d"}
+                if td_user: params.update({"username": td_user, "password": td_pass})
+                r = requests.get(ep, params=params, headers=headers, timeout=8)
+                if r.status_code != 200: continue
+                data = r.json() if "application/json" in r.headers.get("Content-Type","") else None
+                if not data: continue
+                rows = data if isinstance(data, list) else data.get("data") or data.get("historical") or data.get("candles") or []
+                if len(rows) < 5: continue
+                out = []
+                for c in rows:
+                    td = str(c.get("date") or c.get("Date") or c.get("time") or "")[:10]
+                    if td < start_date or td > end_date: continue
+                    cl = _clean_num(c.get("close") or c.get("Close") or 0)
+                    if cl <= 0: continue
+                    out.append({"symbol": symbol, "trade_date": td, "open_price": _clean_num(c.get("open") or cl), "high_price": _clean_num(c.get("high") or cl), "low_price": _clean_num(c.get("low") or cl), "close_price": round(cl,2), "volume": int(_clean_num(c.get("volume") or "0")), "oi": 0})
+                if len(out) >= 5:
+                    return out
+            except:
+                continue
+    except Exception:
+        pass
+    return []
+
+def _fetch_stocksrin_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """StocksRin — option chain + historical data platform."""
+    try:
+        # StocksRin has historical API for F&O data
+        urls = [
+            f"https://stocksrin.com/api/historical/{symbol}?from={start_date}&to={end_date}",
+            f"https://stocksrin.com/api/history/{symbol}?from={start_date}&to={end_date}",
+        ]
+        for url in urls:
+            try:
+                r = requests.get(url, headers=_HEADERS, timeout=6)
+                if r.status_code != 200: continue
+                try:
+                    data = r.json()
+                    rows = data if isinstance(data, list) else data.get("data") or data.get("historical") or data.get("candles") or []
+                    if rows and len(rows) >= 5:
+                        out = []
+                        for c in rows:
+                            td = str(c.get("date") or c.get("Date") or c.get("trade_date") or "")[:10]
+                            if td < start_date or td > end_date: continue
+                            cl = float(c.get("close") or c.get("Close") or c.get("close_price") or 0)
+                            if cl <= 0: continue
+                            out.append({"symbol": symbol, "trade_date": td, "open_price": float(c.get("open") or c.get("Open") or cl), "high_price": float(c.get("high") or c.get("High") or cl), "low_price": float(c.get("low") or c.get("Low") or cl), "close_price": cl, "volume": int(c.get("volume") or 0), "oi": 0})
+                        if len(out) >= 5:
+                            return out
+                except Exception:
+                    pass
+                # Try scraping embedded JSON
+                m = re.search(r'"historical"\s*:\s*(\[.*?\])', r.text)
+                if m:
+                    try:
+                        hist = json.loads(m.group(1))
+                        out = []
+                        for h in hist:
+                            td = str(h.get("date",""))[:10]
+                            if td < start_date or td > end_date: continue
+                            cl = float(h.get("close",0))
+                            if cl <= 0: continue
+                            out.append({"symbol": symbol, "trade_date": td, "open_price": float(h.get("open",cl)), "high_price": float(h.get("high",cl)), "low_price": float(h.get("low",cl)), "close_price": cl, "volume": 0, "oi": 0})
+                        if len(out) >= 5:
+                            return out
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return []
+
+def _fetch_google_finance(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    try:
+        url = f"https://www.google.com/finance/getprices?q={symbol}&x=NSE&i=86400&p=6M&f=d,o,h,l,c,v"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=5)
+        if r.status_code==200 and "COLUMNS=" in r.text:
+            lines=r.text.strip().split("\n")
+            data_start=0
+            for i,l in enumerate(lines):
+                if l.startswith("COLUMNS="):
+                    data_start=i+1
+                    break
+            out=[]
+            base_ts=None
+            for line in lines[data_start:]:
+                if not line or line.startswith("TIMEZONE"): continue
+                parts=line.split(",")
+                if len(parts)<6: continue
+                try:
+                    d_str=parts[0]
+                    if d_str.startswith("a"):
+                        base_ts=int(d_str[1:])
+                        ts=base_ts
+                    else:
+                        if base_ts is None: continue
+                        ts=base_ts+int(d_str)*86400
+                    td=datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+                    if td<start_date or td>end_date: continue
+                    c=float(parts[1]); o=float(parts[2]); h=float(parts[3]); l=float(parts[4]); vol=int(float(parts[5]))
+                    if c<=0: continue
+                    out.append({"symbol":symbol,"trade_date":td,"open_price":round(o,2),"high_price":round(h,2),"low_price":round(l,2),"close_price":round(c,2),"volume":vol,"oi":0})
+                except Exception:
+                    continue
+            if len(out)>=10:
+                return out
+    except Exception:
+        pass
+    return []
+
+def _generate_synthetic_data(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Realistic synthetic OHLCV - instant (<5ms), seed varies daily so same indicator setting != same trade every day."""
+    _SPOTS = {
+        "NIFTY": 24500, "BANKNIFTY": 51200, "FINNIFTY": 22800,
+        "RELIANCE": 2850, "HDFCBANK": 1780, "ICICIBANK": 1250, "TCS": 3950,
+        "INFY": 1580, "ITC": 470, "SBIN": 780, "TATAMOTORS": 980,
+        "BAJFINANCE": 6800, "KOTAKBANK": 1820, "LT": 3650, "AXISBANK": 1150,
+        "WIPRO": 560, "ONGC": 280, "TATASTEEL": 145, "SUNPHARMA": 1780,
+        "ADANIENT": 3200, "HINDUNILVR": 2500, "BHARTIARTL": 1650, "M&M": 2900,
+        "MARUTI": 12500, "NTPC": 350, "POWERGRID": 310, "HCLTECH": 1700,
+        "JSWSTEEL": 880, "COALINDIA": 480, "DRREDDY": 6200, "CIPLA": 1500,
+        "SBILIFE": 1550, "BPCL": 650, "GRASIM": 2300, "TECHM": 1650,
+        "EICHERMOT": 4800, "BRITANNIA": 5200, "HINDALCO": 620, "VEDL": 450,
+        "INDUSINDBK": 1450, "NESTLEIND": 25000, "BAJAJFINSV": 1750, "HEROMOTOCO": 4900,
+        "APOLLOHOSP": 6300, "UPL": 550, "ULTRACEMCO": 11000, "SHREECEM": 28000,
+        "GOLDBEES": 85, "SILVERBEES": 300,
+    }
+    import random, hashlib
+    s = _SPOTS.get(symbol.upper(), 5000)
+    try:
+        sd = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        ed = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+    except Exception:
+        ed = datetime.datetime.now()
+        sd = ed - datetime.timedelta(days=65)
+    # Stable hash + date so pattern rotates daily (fixes same trade repeating) and indicator change matters
+    seed = int(hashlib.md5(f"{symbol.upper()}|{start_date}|{end_date}".encode()).hexdigest()[:8], 16) ^ 0x5EED
+    random.seed(seed)
+    price = s
+    records = []
+    d = sd
+    # Slight trend bias per symbol so win% not always 50-50 and not always losing
+    trend = (seed % 7 - 3) * 0.001  # -0.003 to +0.003 daily drift bias
+    while d <= ed:
+        if d.weekday() < 5:
+            daily_drift = random.uniform(-0.015, 0.015) + trend
+            o = price
+            c = price * (1 + daily_drift)
+            h = max(o, c) * (1 + abs(random.uniform(0, 0.005)))
+            l = min(o, c) * (1 - abs(random.uniform(0, 0.005)))
+            vol = random.randint(80000, 600000)
+            records.append({
+                "symbol": symbol.upper(), "trade_date": d.strftime("%Y-%m-%d"),
+                "open_price": round(o, 2), "high_price": round(h, 2),
+                "low_price": round(l, 2), "close_price": round(c, 2),
+                "volume": vol, "oi": 0,
+            })
+            price = c
+        d += datetime.timedelta(days=1)
+    return records
+
+def _fetch_db_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Instant local cache: bhavcopy_data spot rows (seeded by background refresh). No network."""
+    try:
+        from core.models.database import Database
+        db = Database.get_instance()
+        rows = db.fetch_all(
+            "SELECT trade_date, open_price, high_price, low_price, close_price, volume FROM bhavcopy_data "
+            "WHERE symbol=? AND option_type IS NULL AND trade_date>=? AND trade_date<=? ORDER BY trade_date ASC",
+            [symbol.upper(), start_date, end_date],
+        )
+        if rows and len(rows) >= 5:
+            out = []
+            for r in rows:
+                cl = float(r.get("close_price") or 0)
+                if cl <= 0:
+                    continue
+                out.append({
+                    "symbol": symbol.upper(),
+                    "trade_date": str(r.get("trade_date")),
+                    "open_price": float(r.get("open_price") or cl),
+                    "high_price": float(r.get("high_price") or cl),
+                    "low_price": float(r.get("low_price") or cl),
+                    "close_price": cl,
+                    "volume": int(r.get("volume") or 0),
+                    "oi": 0,
+                })
+            if len(out) >= 5:
+                return out
+    except Exception:
+        pass
+    return []
+
+
+def _fetch_openchart_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """openchart (marketcalls/openchart NSEData): NSE charting API via search +
+    historical. Indices -> IDX segment, stocks -> EQ. May return [] where NSE
+    blocks charting API (reference only)."""
+    try:
+        from openchart import NSEData
+        import datetime as _dt
+        from concurrent.futures import ThreadPoolExecutor
+        _IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX"}
+        seg = "IDX" if symbol.upper() in _IDX else "EQ"
+        try:
+            sd = _dt.datetime.strptime(start_date, "%Y-%m-%d")
+            ed = _dt.datetime.strptime(end_date, "%Y-%m-%d")
+        except Exception:
+            return []
+        api = NSEData()
+
+        def _do():
+            return api.historical(symbol.upper(), segment=seg, start=sd, end=ed, interval="1d")
+
+        df = None
+        try:
+            from concurrent.futures import ThreadPoolExecutor as _TPE2
+            _ex = _TPE2(max_workers=1)
+            try:
+                df = _ex.submit(_do).result(timeout=12)
+            except Exception:
+                df = None
+            finally:
+                # Latke worker ka wait KABHI nahi (with-block hang karta tha)
+                try:
+                    _ex.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
+        except Exception:
+            df = None
+        if df is None or getattr(df, "empty", True):
+            return []
+        out = []
+        for idx, row in df.iterrows():
+            try:
+                td = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10]
+            except Exception:
+                td = str(idx)[:10]
+            if td < start_date or td > end_date:
+                continue
+            cl = float(row.get("close", row.get("Close", 0)) or 0)
+            if cl <= 0:
+                continue
+            out.append({"symbol": symbol.upper(), "trade_date": td,
+                        "open_price": round(float(row.get("open", row.get("Open", cl)) or cl), 2),
+                        "high_price": round(float(row.get("high", row.get("High", cl)) or cl), 2),
+                        "low_price": round(float(row.get("low", row.get("Low", cl)) or cl), 2),
+                        "close_price": round(cl, 2),
+                        "volume": int(row.get("volume", row.get("Volume", 0)) or 0), "oi": 0})
+        out.sort(key=lambda r: r["trade_date"])
+        if len(out) >= 5:
+            return out
+    except Exception:
+        pass
+    return []
+
+def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """nsepython: NSE official equity/index history (PRIMARY when reachable).
+    NSE bot-block kare to [] (chain aage badhta hai). Thread-guarded timeout."""
+    try:
+        from concurrent.futures import ThreadPoolExecutor as _TPE
+        sym = str(symbol or "").upper()
+        try:
+            _s = datetime.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").strftime("%d-%m-%Y")
+            _e = datetime.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").strftime("%d-%m-%Y")
+        except Exception:
+            return []
+
+        def _do():
+            from nsepython import equity_history, index_history
+            _IDX = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX", "INDIAVIX"}
+            try:
+                if sym in _IDX:
+                    return index_history(sym, _s, _e)
+                return equity_history(sym, "EQ", _s, _e)
+            except Exception:
+                return None
+
+        df = None
+        try:
+            _ex = _TPE(max_workers=1)
+            try:
+                df = _ex.submit(_do).result(timeout=15)
+            except Exception:
+                df = None
+            finally:
+                # Latke worker ka wait KABHI nahi (with-block 40s latkaya tha)
+                try:
+                    _ex.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
+        except Exception:
+            return []
+        if df is None or getattr(df, "empty", True):
+            return []
+        out = []
+        for idx, row in df.iterrows():
+            try:
+                try:
+                    td = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10]
+                except Exception:
+                    td = str(row.get("TIMESTAMP", row.get("Date", "")))[:10]
+                # nsepython alternate column names
+                if not td or len(td) < 10:
+                    td = str(row.get("TIMESTAMP", row.get("Date", row.get("date", ""))))[:10]
+                if td < str(start_date)[:10] or td > str(end_date)[:10]:
+                    continue
+                cl = float(row.get("CLOSE", row.get("close", row.get("Close", 0))) or 0)
+                if cl <= 0:
+                    continue
+                o = float(row.get("OPEN", row.get("open", row.get("Open", cl))) or cl)
+                h = float(row.get("HIGH", row.get("high", row.get("High", cl))) or cl)
+                l = float(row.get("LOW", row.get("low", row.get("Low", cl))) or cl)
+                out.append({"symbol": sym, "trade_date": td,
+                            "open_price": round(o, 2), "high_price": round(h, 2),
+                            "low_price": round(l, 2), "close_price": round(cl, 2),
+                            "volume": int(float(row.get("VOLUME", row.get("volume", row.get("Volume", row.get("TOTTRDQTY", 0)))) or 0)),
+                            "oi": 0})
+            except Exception:
+                continue
+        out.sort(key=lambda r: r["trade_date"])
+        return out if len(out) >= 5 else []
+    except Exception:
+        return []
+
+
+def _fetch_fyers_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Fyers API v3 daily candles (connected broker token).
+    FINNIFTY ka Yahoo dead + NSE cloud-blocked hai - yehi official broker
+    source bachta hai. Token na ho to turant [] (koi network nahi, chain aage).
+    Overall 25s cap taaki backtest hang na ho."""
+    try:
+        import datetime as _dt
+        sym = str(symbol or "").upper()
+        from core.services.contract_pricer import _fyers_underlying, _fyers_auth
+        under = _fyers_underlying(sym)
+        if not under:
+            return []
+        app_id, token = _fyers_auth()
+        if not app_id or not token:
+            return []
+        import requests as _rq
+        _payload = {"symbol": under, "resolution": "D", "date_format": 1,
+                    "range_from": str(start_date)[:10], "range_to": str(end_date)[:10],
+                    "cont_flag": "1"}
+        _r = _rq.get("https://api-t1.fyers.in/data/history", params=_payload,
+                     headers={"Authorization": f"{app_id}:{token}",
+                              "Content-Type": "application/json", "version": "3"},
+                     timeout=25)
+        if getattr(_r, "status_code", 0) != 200:
+            return []
+        body = _r.json() or {}
+        candles = body.get("candles") or []
+        out = []
+        for row in candles:
+            try:
+                epoch = int(row[0])
+                o = float(row[1]); h = float(row[2]); l = float(row[3])
+                c = float(row[4]); v = int(float(row[5] or 0))
+                day = _dt.datetime.utcfromtimestamp(epoch).strftime("%Y-%m-%d")
+                if c <= 0:
+                    continue
+                out.append({"symbol": sym, "trade_date": day,
+                            "open_price": round(o or c, 2),
+                            "high_price": round(h or c, 2),
+                            "low_price": round(l or c, 2),
+                            "close_price": round(c, 2),
+                            "volume": v, "oi": 0})
+            except Exception:
+                continue
+        out.sort(key=lambda r: r["trade_date"])
+        return out if len(out) >= 5 else []
+    except Exception:
+        return []
+
+
+_NSE_INDEX_NAMES = {
+    "NIFTY": "Nifty 50",
+    "BANKNIFTY": "Nifty Bank",
+    "FINNIFTY": "Nifty Financial Services",
+    "INDIAVIX": "India VIX",
+}
+
+
+def _fetch_nseindex_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """NSE official index archive (ind_close_all_DDMMYYYY.csv, ~17KB/day).
+    FINNIFTY ka Yahoo dead + NSE-API cloud-blocked hai - yehi broker-free
+    official source bachta hai (kisi broker token ki zaroorat nahi).
+    Parallel fetch (8 workers), overall ~60s cap. Na mile to [] (chain aage)."""
+    try:
+        import datetime as _dt
+        sym = str(symbol or "").upper()
+        _idx = _NSE_INDEX_NAMES.get(sym)
+        if not _idx:
+            return []
+        try:
+            _s = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+            _e = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+        except Exception:
+            return []
+        if _e < _s:
+            return []
+        _days = []
+        _d = _s
+        while _d <= _e and len(_days) < 400:
+            if _d.weekday() < 5:
+                _days.append(_d)
+            _d += _dt.timedelta(days=1)
+        if not _days:
+            return []
+
+        def _one(_day):
+            try:
+                import requests as _rq
+                _url = ("https://archives.nseindia.com/content/indices/ind_close_all_"
+                        + _day.strftime("%d%m%Y") + ".csv")
+                _r = _rq.get(_url, headers={"User-Agent": "Mozilla/5.0"},
+                             timeout=10)
+                if _r is None or getattr(_r, "status_code", 0) != 200:
+                    return None
+                for _ln in (_r.text or "").splitlines()[1:]:
+                    try:
+                        if not _ln.strip():
+                            continue
+                        _p = _ln.split(",")
+                        if len(_p) < 9:
+                            continue
+                        if str(_p[0] or "").strip().upper() != _idx.upper():
+                            continue
+                        _o = float((str(_p[2] or "").strip() or "0") or 0)
+                        _h = float((str(_p[3] or "").strip() or "0") or 0)
+                        _l = float((str(_p[4] or "").strip() or "0") or 0)
+                        _c = float((str(_p[5] or "").strip() or "0") or 0)
+                        if _c <= 0:
+                            return None
+                        try:
+                            _v = int(float((str(_p[8] or "").strip() or "0") or 0))
+                        except Exception:
+                            _v = 0
+                        return {"symbol": sym, "trade_date": _day.strftime("%Y-%m-%d"),
+                                "open_price": round(_o or _c, 2),
+                                "high_price": round(_h or _c, 2),
+                                "low_price": round(_l or _c, 2),
+                                "close_price": round(_c, 2),
+                                "volume": _v, "oi": 0}
+                    except Exception:
+                        continue
+                return None
+            except Exception:
+                return None
+
+        from concurrent.futures import ThreadPoolExecutor as _TPE
+        out = []
+        try:
+            _ex = _TPE(max_workers=8)
+            try:
+                _futs = [_ex.submit(_one, _d) for _d in _days]
+                import time as _tm
+                _dead = _tm.time() + 60
+                for _f in _futs:
+                    try:
+                        _left = max(1.0, _dead - _tm.time())
+                        _b = _f.result(timeout=_left)
+                    except Exception:
+                        _b = None
+                    if _b:
+                        out.append(_b)
+                    if _tm.time() > _dead:
+                        break
+            finally:
+                try:
+                    _ex.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
+        except Exception:
+            return []
+        out.sort(key=lambda r: r["trade_date"])
+        return out if len(out) >= 5 else []
+    except Exception:
+        return []
+
+
+def _fetch_stooq_historical(symbol: str, start_date: str, end_date: str) -> List[Dict]:
+    """Stooq daily CSV in-memory (no file write) - cloud-friendly, free, no key. Replaces Yahoo."""
+    try:
+        import io, csv as _csv
+        import datetime as _dt
+        # NOTE: FINNIFTY (^cnxfin galat/stale levels deta hai) STOOQ MAP SE
+        # HATAYA - galat instrument par backtest se bada nuksaan hota. Ye
+        # symbol Fyers-historical (upar) ya NSE se aata hai, warna honest empty.
+        _STOOQ = {"NIFTY": "^nsei", "BANKNIFTY": "^nsebank", "SENSEX": "^sensex"}
+        ssym = _STOOQ.get(symbol.upper(), f"{symbol.lower()}.in")
+        sd = _dt.datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y%m%d")
+        ed = _dt.datetime.strptime(end_date, "%Y-%m-%d").strftime("%Y%m%d")
+        url = f"https://stooq.com/q/d/l/?s={ssym}&d1={sd}&d2={ed}&i=d"
+        r = requests.get(url, headers=_HEADERS, timeout=8)
+        if r.status_code != 200 or "Date" not in r.text:
+            return []
+        reader = _csv.DictReader(io.StringIO(r.text))
+        out = []
+        for row in reader:
+            try:
+                td = str(row.get("Date", ""))[:10]
+                if td < start_date or td > end_date:
+                    continue
+                o = _clean_num(row.get("Open")); h = _clean_num(row.get("High"))
+                l = _clean_num(row.get("Low")); cl = _clean_num(row.get("Close"))
+                vol = int(_clean_num(row.get("Volume")))
+                if cl <= 0:
+                    continue
+                out.append({"symbol": symbol, "trade_date": td, "open_price": round(o or cl, 2), "high_price": round(h or cl, 2), "low_price": round(l or cl, 2), "close_price": round(cl, 2), "volume": vol, "oi": 0})
+            except Exception:
+                continue
+        if len(out) >= 5:
+            return out
+    except Exception:
+        pass
+    return []
+
+def _last_trading_day():
+    d = datetime.date.today() - datetime.timedelta(days=1)
+    while d.weekday() >= 5: d -= datetime.timedelta(days=1)
+    return d
+
+def fetch_historical(symbol: str, start_date: str, end_date: str, allow_synthetic: bool = False, with_quality: bool = False):
+    """Priority chain (spec): NSE/BSE official (DB/nsepython) -> Yahoo (60-day) ->
+    Stooq -> Alpha Vantage / Twelve Data -> (openchart reference only).
+    NO cross-source date merge/fill: first source with 5+ bars wins as-is.
+    with_quality=True returns (bars, quality-dict)."""
+    allow_synthetic = False
+    symbol = symbol.upper()
+    # Clamp end_date to last completed trading day (avoid today ongoing session)
+    try:
+        ed = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
+        ltd = _last_trading_day()
+        if ed > ltd:
+            end_date = ltd.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    import time as _t
+    from core.services import data_validator as _dv
+
+    def _out(bars, quality):
+        return (bars, quality) if with_quality else bars
+
+    # 1) Official primary: fresh local archive (max bar within 7 days of end).
+    db_data = []
+    try:
+        db_data = _fetch_db_historical(symbol, start_date, end_date) or []
+        if db_data and len(db_data) >= 5:
+            try:
+                _mx = max(str(r.get("trade_date", ""))[:10] for r in db_data)
+                import datetime as _dti
+                _ed = _dti.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                _md = _dti.datetime.strptime(_mx, "%Y-%m-%d").date()
+                if (_ed - _md).days <= 7:
+                    return _out(db_data, {"status": "VALID", "source": "nse_official_db",
+                                          "bars": len(db_data), "note": "NSE/BSE official primary truth"})
+            except Exception:
+                return _out(db_data, {"status": "VALID", "source": "nse_official_db",
+                                      "bars": len(db_data), "note": "NSE/BSE official primary truth"})
+    except Exception:
+        db_data = []
+    # 2) Priority order: nsepython (NSE official) -> Yahoo (60d) -> Stooq ->
+    # Alpha Vantage -> Twelve Data. openchart is reference-only
+    # (never bar suppliers).
+    _deadline = _t.time() + 25
+
+    def _fetch_yahoo_hist(sym, s, e):
+        try:
+            from core.services.free_data import fetch_yahoo_daily
+            return _dv.yahoo_60d_filter(fetch_yahoo_daily(sym, s, e))
+        except Exception:
+            return []
+
+    for _name, _fn in (("nsepython", _fetch_nsepython_historical),
+                       ("nse_index_archive", _fetch_nseindex_historical),
+                       ("fyers", _fetch_fyers_historical),
+                       ("yahoo", _fetch_yahoo_hist),
+                       ("stooq", _fetch_stooq_historical),
+                       ("alphavantage", _dv._fetch_alphavantage_daily),
+                       ("twelvedata", _dv._fetch_twelvedata_daily)):
+        try:
+            if _t.time() > _deadline:
+                break
+            data = _fn(symbol, start_date, end_date)
+            if data and len(data) >= 5:
+                # Validate vs official DB overlap (free, no egress)
+                q = _dv.validate_symbol(data, _name, db_data or None, "nse_official_db")
+                try:
+                    from core.models.bhavcopy_model import BhavcopyModel
+                    BhavcopyModel().import_data(data)
+                except Exception:
+                    pass
+                return _out(data, q)
+        except Exception:
+            continue
+    # 3) Nothing usable: stale DB partial (>=5) or INSUFFICIENT (honest, no fill).
+    if db_data and len(db_data) >= 5:
+        return _out(db_data, {"status": "SECONDARY_ONLY", "source": "nse_official_db",
+                              "bars": len(db_data), "note": "stale official partial - fresh nahi"})
+    return _out([], {"status": "INSUFFICIENT", "source": "none", "bars": 0,
+                     "note": "primary missing, koi secondary bhi nahi"})

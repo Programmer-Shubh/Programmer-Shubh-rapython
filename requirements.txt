@@ -1,0 +1,27 @@
+fastapi>=0.109.0
+# NOTE: plain uvicorn (no [standard]) - watchfiles/uvloop have no wheels on
+# newer Pythons and break Render builds with ResolutionImpossible. Nothing in
+# the codebase imports uvloop/httptools/watchfiles (verified).
+uvicorn>=0.27.0
+pandas>=2.1.0
+requests>=2.31.0
+numpy>=1.24.0
+python-multipart>=0.0.10
+httpx>=0.26.0
+websockets>=12.0
+reportlab>=4.1.0
+backtrader>=1.9.78.123
+pyotp>=2.9.0
+nsefin>=0.1.5
+nsepython==2.97
+openchart>=0.0.5
+# vectorbt REMOVED (Vercel Lambda 500MB bundle limit): numba+llvmlite+scipy+plotly
+# ka poora tree install hota tha (~400MB). Sab import sites lazy+guarded hain
+# (backtest_engine.run_vectorbt try/except, vectorbt_runner HAS_VECTORBT flag)
+# - na ho to backend fail-open ho jata hai. Chahiye ho to locally pip install.
+backtesting>=0.3.3
+psycopg2-binary>=2.9.9
+yfinance>=0.2.40
+# matplotlib REMOVED: koi direct import nahi (verified grep) - PDF report
+# reportlab se banati hai. Fonts+deps ~100MB bachate hain.
+fyers-apiv3>=2.0.5

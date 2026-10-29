@@ -1,0 +1,230 @@
+import re
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import requests
+from core.models.database import Database
+try:
+    from core.services.free_data import fetch_google_spot, fetch_cloud_spot
+    def fetch_yahoo_spot(s): return 0
+except Exception:
+    def fetch_yahoo_spot(s): return 0
+    def fetch_google_spot(s): return 0
+    def fetch_cloud_spot(s): return {}
+
+from collections import OrderedDict
+_LIVE_CACHE = OrderedDict()
+_LIVE_CACHE_TTL = 300
+_LIVE_CACHE_MAX = 50
+_CHAIN_CACHE = OrderedDict()
+_CHAIN_CACHE_TTL = 300
+_CHAIN_CACHE_MAX = 50
+
+def _live_cache_set(sym, data):
+    if sym in _LIVE_CACHE: _LIVE_CACHE.move_to_end(sym)
+    _LIVE_CACHE[sym] = {"ts": time.time(), "data": data}
+    if len(_LIVE_CACHE) > _LIVE_CACHE_MAX: _LIVE_CACHE.popitem(last=False)
+
+def _chain_cache_set(sym, data):
+    if sym in _CHAIN_CACHE: _CHAIN_CACHE.move_to_end(sym)
+    _CHAIN_CACHE[sym] = {"ts": time.time(), "data": data}
+    if len(_CHAIN_CACHE) > _CHAIN_CACHE_MAX: _CHAIN_CACHE.popitem(last=False)
+
+def _live_cache_get(sym):
+    if sym in _LIVE_CACHE and time.time()-_LIVE_CACHE[sym]["ts"] < _LIVE_CACHE_TTL:
+        _LIVE_CACHE.move_to_end(sym)
+        return _LIVE_CACHE[sym]["data"]
+    return None
+
+def _chain_cache_get(sym):
+    if sym in _CHAIN_CACHE and time.time()-_CHAIN_CACHE[sym]["ts"] < _CHAIN_CACHE_TTL:
+        _CHAIN_CACHE.move_to_end(sym)
+        return _CHAIN_CACHE[sym]["data"]
+    return None
+
+_SYMBOL_MAP = {"NIFTY": "nifty", "BANKNIFTY": "banknifty", "FINNIFTY": "finnifty"}
+
+# NSE cloud IP block: remove niftytrader.in headers; use cloud-friendly sources only
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+# Cloud indicator: no niftytrader.in Referer; use Google/DB/synthetic only
+_CLOUD_ENV = True
+
+
+class LiveMarketData:
+    def __init__(self):
+        self.db = Database.get_instance()
+
+    def get_spot_price(self, symbol: str) -> float:
+        # Try live cache first (NSE->Stooq->Google, no Yahoo)
+        try:
+            live = self.get_live_spot(symbol)
+            if live and live.get("spot") and float(live["spot"]) > 0:
+                return float(live["spot"])
+        except Exception:
+            pass
+        return 0.0
+
+    def get_option_ltp(self, symbol: str, strike: float, option_type: str, expiry: str = "", fresh: bool = False) -> float:
+        # Delegates to the shared contract pricer (broker token-quote ->
+        # fresh DB -> model) so every caller sees the chain's price.
+        try:
+            from core.services.contract_pricer import get_contract_ltp
+            return get_contract_ltp(symbol, strike, option_type, expiry, fresh=fresh)
+        except Exception:
+            pass
+        try:
+            row = self.db.fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND strike_price=? AND option_type=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?)",
+                [symbol, strike, option_type, symbol],
+            )
+            return float(row["close_price"]) if row else None
+        except Exception:
+            return None
+
+    # _fetch_chain_page and fetch_live_from_nse REMOVED - NSE blocked on cloud
+    # Use DB chain → Google Finance → synthetic Black-Scholes instead
+
+    def get_live_spot(self, symbol: str) -> dict:
+        now = time.time()
+        sym = symbol.upper()
+        cached = _live_cache_get(sym)
+        if cached is not None: return cached
+        # 1) Cloud live: NSE -> Stooq -> Google (Yahoo removed, works on Render)
+        try:
+            q = fetch_cloud_spot(sym)
+            if q and float(q.get("spot") or 0) > 0:
+                spot = float(q["spot"])
+                data = {"spot": spot, "formatted": f"INR {spot:,.2f}",
+                        "change": float(q.get("change") or 0),
+                        "high": float(q.get("high") or spot), "low": float(q.get("low") or spot),
+                        "source": q.get("source", "live")}
+                _live_cache_set(sym, data)
+                return data
+        except Exception:
+            pass
+        # 2) DB bhavcopy (stale close, only if cloud fails)
+        try:
+            row = self.db.fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
+                [sym, sym],
+            )
+            if row and row["close_price"] and float(row["close_price"]) > 0:
+                spot = float(row["close_price"])
+                data = {"spot": spot, "formatted": f"INR {spot:,.2f}", "change": 0, "high": spot, "low": spot, "source": "db"}
+                _live_cache_set(sym, data)
+                return data
+        except Exception:
+            pass
+        # 3) No data
+        data = {"spot": 0, "formatted": "No Data", "change": 0, "high": 0, "low": 0, "source": "na"}
+        _live_cache_set(sym, data)
+        return data
+
+    def get_live_spots_cached(self, symbols):
+        result = {}
+        for sym in symbols:
+            cached = _live_cache_get(sym)
+            if cached is not None: result[sym] = cached
+        return result
+
+    def get_live_chain_cached(self, symbol: str) -> dict:
+        sym = symbol.upper()
+        return _chain_cache_get(sym)
+
+    def get_live_spots_parallel(self, symbols, max_workers: int = 8):
+        """Batch live spots (missing method that data_refresher calls).
+        Returns {sym: {spot, formatted, change, high, low, source}}."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        result = {}
+        try:
+            workers = max(1, min(int(max_workers or 8), len(symbols) or 1))
+        except Exception:
+            workers = 4
+        try:
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                futures = {ex.submit(self.get_live_spot, sym): sym for sym in (symbols or [])}
+                for fut in as_completed(futures, timeout=30):
+                    sym = futures[fut]
+                    try:
+                        data = fut.result() if not fut.exception() else None
+                    except Exception:
+                        data = None
+                    if data and data.get("spot"):
+                        result[sym] = data
+        except Exception:
+            pass
+        return result
+
+    def get_live_chains_parallel(self, symbols):
+        now = time.time()
+        result = {}
+        fresh = []
+        for sym in symbols:
+            cached = _chain_cache_get(sym)
+            if cached is not None:
+                result[sym] = cached
+            else:
+                fresh.append(sym)
+        if fresh:
+            with ThreadPoolExecutor(max_workers=len(fresh)) as ex:
+                futures = {ex.submit(self.fetch_live_option_chain, sym): sym for sym in fresh}
+                for fut in as_completed(futures, timeout=20):
+                    sym = futures[fut]
+                    data = fut.result() if not fut.exception() else None
+                    if data and data.get("rows"):
+                        _chain_cache_set(sym, data)
+                        result[sym] = data
+        return result
+
+    def fetch_option_chain_nse(self, symbol: str) -> dict:
+        """Deprecated on cloud (NSE blocked) - returns None, routes use DB+synthetic."""
+        return None
+
+    def fetch_live_option_chain(self, symbol: str) -> dict:
+        """Deprecated on cloud (NSE blocked) - returns None, routes use DB+synthetic."""
+        return None
+
+    def _fetch_chain_page_unused(self, symbol: str) -> dict:
+        try:
+            data = None
+            if not data:
+                return None
+            page_props = data.get("pageProps", {})
+            spot_data = page_props.get("initialSpot", {})
+            chain_rows = page_props.get("initialOptionChainData", [])
+            rows = []
+            spot_price = float(spot_data.get("last_trade_price", 0) or 0)
+            for r in chain_rows:
+                strike = float(r.get("strike_price", 0) or 0)
+                row = {
+                    "strike": strike,
+                    "distance": int(strike - spot_price),
+                    "ce_ltp": r.get("calls_ltp", 0),
+                    "ce_oi": r.get("calls_oi", 0),
+                    "ce_vol": r.get("calls_volume", 0),
+                    "ce_iv": r.get("calls_iv", 0),
+                    "pe_ltp": r.get("puts_ltp", 0),
+                    "pe_oi": r.get("puts_oi", 0),
+                    "pe_vol": r.get("puts_volume", 0),
+                    "pe_iv": r.get("puts_iv", 0),
+                }
+                rows.append(row)
+            if rows:
+                atm_strike = round(spot_price / 50) * 50
+                return {
+                    "symbol": symbol,
+                    "spot": spot_price,
+                    "atm": atm_strike,
+                    "rows": rows,
+                    "source": "niftytrader.in",
+                    "timestamp": spot_data.get("timestamp", ""),
+                    "max_pain": spot_data.get("max_pain", 0),
+                    "pcr": None,
+                }
+        except Exception:
+            pass
+        return None
