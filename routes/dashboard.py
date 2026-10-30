@@ -304,7 +304,11 @@ def get_trade_history():
                 "entry_cost": t.get("total_cost", 0),
                 "exit_cost": t.get("exit_cost", 0),
                 "status": t.get("exit_status", "closed"),
+                "exit_reason": t.get("exit_status", ""),
+                "stop_loss": t.get("stop_loss", 0),
+                "target": t.get("target", 0),
                 "qty": t.get("quantity", 1),
+                "lot_size": t.get("lot_size", 0),
                 "strategy_id": int(t.get("strategy_id") or 0),
                 "strategy_name": _smap.get(int(t.get("strategy_id") or 0)),  # None when not found -> fallback below
                 "spot": _sc.get(str(t.get("symbol")).upper()),
