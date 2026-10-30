@@ -197,6 +197,10 @@ class TradeModel:
                     adv = {}
                 if not isinstance(adv, dict):
                     adv = {}
+                # User rule: trades exit ONLY at SL/TP by default.
+                # Strategy exit_time auto-close is OFF unless explicitly enabled.
+                if str(adv.get("auto_exit_on_time") or "false").lower() != "true":
+                    continue  # exit_time auto-close disabled - trade exits only at SL/TP/manual
                 if str(adv.get("trade_mode") or "intraday").lower() != "intraday":
                     continue  # positional strategy: overnight carry allowed
                 _et = str(adv.get("exit_time") or "15:15").strip()[:5]
