@@ -77,6 +77,9 @@
         .btn-sm{padding:2px 8px;font-size:11px}
         .form-label{font-size:12px;font-weight:600;color:#495057;margin-bottom:4px}
         .form-control,.form-select{border:1px solid #dee2e6;border-radius:4px;padding:4px 8px;font-size:12px}
+        /* Time picker: OK/Set button dikhane ke liye - browser-native time control */
+        input[type="time"]::-webkit-calendar-picker-indicator{cursor:pointer;color:#0d6efd}
+        input[type="time"]{cursor:pointer}
         .tabs{display:flex;gap:0;border-bottom:2px solid #dee2e6;margin-bottom:12px}
         .tabs button{background:none;border:none;color:#6c757d;padding:8px 16px;cursor:pointer;font-size:12px;border-bottom:2px solid transparent;margin-bottom:-2px}
         .tabs button.active{color:#0d6efd;border-bottom-color:#0d6efd;font-weight:600}
@@ -314,6 +317,22 @@
                 <div class="col-6"><div class="card h-100" style="border-left:4px solid #198754"><div class="card-body p-3"><div class="small text-muted">MARKET REGIME</div><h5 id="regime-label" class="fw-bold mb-1">—</h5><div class="small"><span id="regime-conf"></span> <span id="regime-resist" class="text-muted"></span></div><div id="regime-checks" class="mt-2 small"></div></div></div></div>
                 <div class="col-6"><div class="card h-100" style="border-left:4px solid #0d6efd"><div class="card-body p-3"><div class="small text-muted">OPTION SENTIMENT</div><div class="d-flex gap-3 flex-wrap"><div><div class="small text-muted">PCR</div><strong id="sent-pcr">—</strong></div><div><div class="small text-muted">Put OI</div><strong id="sent-put">—</strong></div><div><div class="small text-muted">Call OI</div><strong id="sent-call">—</strong></div></div><div class="small mt-2">Put Writing: <span id="sent-pw">—</span> • Call Writing: <span id="sent-cw">—</span></div><div class="mt-2"><span id="sent-overall" class="badge bg-secondary">—</span> <small id="sent-conf" class="text-muted"></small></div></div></div></div>
             </div>
+            <!-- MARKET WATCH: कस्टम स्टॉक लाइव प्राइस -->
+            <div class="card mb-2">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>Market Watch — कस्टम स्टॉक लाइव प्राइस</span>
+                    <div class="d-flex gap-1 align-items-center">
+                        <input type="text" id="mw-sym" class="form-control form-control-sm" placeholder="स्टॉक सिंबल (जैसे NIFTY, RELIANCE)" style="width:200px" onkeypress="if(event.key==='Enter')mwAdd()">
+                        <button class="btn btn-sm btn-outline-primary" onclick="mwAdd()">+ जोड़ें</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="mwRefresh()">↻ रिफ्रेश</button>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div id="mw-list" class="p-2">
+                        <div class="text-muted small p-2">कोई स्टॉक नहीं जोड़ा गया। ऊपर से सिंबल डालें और + दबाएं।</div>
+                    </div>
+                </div>
+            </div>
             <!-- Arbitrage card REMOVED (user demand) -->
             <div class="row" id="mkt-cards"></div>
             <div class="card">
@@ -469,6 +488,7 @@
                         <div class="col-md-4"><label class="small" title="RSI: momentum filter (oversold bounce <45 / overbought >55)"><input type="checkbox" id="r-ind-rsi"> <strong>RSI</strong>(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="VWAP: intraday price anchor (upar=bullish, neeche=bearish)"><input type="checkbox" id="r-ind-vwap"> <strong>VWAP</strong>(<input type="number" id="r-p-vwap" value="20" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="Combo: RSI70 cross + SuperTrend + VWAP + PCR>=min + Volume spike (strict, quality entries)"><input type="checkbox" id="r-ind-rvp"> <strong>Combo RVP</strong>(RSI<input type="number" id="r-p-rvpe" value="70" min="50" max="90" step="1" style="width:42px;font-size:11px">,PCR<input type="number" id="r-p-rvpp" value="1.0" min="0.5" max="2" step="0.1" style="width:42px;font-size:11px">)</label></div>
+                        <div class="col-md-4"><label class="small" title="Heikin-Ashi candles: smoother trend candles (reduces noise, better for trend following)"><input type="checkbox" id="r-ind-heikin"> <strong>Heikin-Ashi</strong>(<input type="number" id="r-p-ha" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
                     </div>
                     </div>
                     <div class="slab-sec" style="background:linear-gradient(135deg,#fff8e1 0%,#ffffff 100%); border:1px solid #ffe082; padding:6px"><div class="slab-sec-title"><i class="bi bi-sliders"></i> Schedule & Risk</div>
@@ -939,6 +959,46 @@
             if(!sel.value) sel.value='NIFTY';
         }catch(e){}
     }
+    // Market Watch
+    let mwSymbols=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY','HDFCBANK'];
+    async function mwAdd(){
+        const inp=document.getElementById('mw-sym');if(!inp)return;
+        const sym=inp.value.trim().toUpperCase();if(!sym)return;
+        if(!mwSymbols.includes(sym))mwSymbols.push(sym);
+        inp.value='';
+        mwRender();
+        mwRefresh();
+    }
+    async function mwRefresh(){
+        try{
+            const found={};
+            await Promise.all(mwSymbols.map(async(s)=>{
+                try{
+                    const r=await A('/api/dashboard/spot/'+s);
+                    if(r&&!r.error&&r.spot)found[s]=r;
+                }catch(e){}
+            }));
+            mwRender(found);
+        }catch(e){}
+    }
+    function mwRender(found={}){
+        const el=document.getElementById('mw-list');if(!el)return;
+        if(!mwSymbols.length){el.innerHTML='<div class="text-muted small p-2">कोई स्टॉक नहीं जोड़ा गया।</div>';return;}
+        let h='<table class="table table-sm mb-0"><thead><tr><th style="width:40%">सिंबल</th><th style="width:30%">लाइव प्राइस</th><th style="width:15%">स्रोत</th><th style="width:15%">कार्रवाई</th></tr></thead><tbody>';
+        mwSymbols.forEach(s=>{
+            const d=found[s]||{};
+            const spot=d.spot||0;const src=d.source||'—';
+            const cls=spot>0?'price-up':'text-muted';
+            h+=`<tr><td><strong>${s}</strong></td><td class="${cls}">${spot>0?d.formatted||('₹'+spot.toFixed(2)):'—'}</td><td class="text-muted small">${src}</td><td><button class="btn btn-sm btn-danger" onclick="mwRemove('${s}')">× हटाएं</button></td></tr>`;
+        });
+        h+='</tbody></table>';
+        el.innerHTML=h;
+    }
+    function mwRemove(sym){
+        mwSymbols=mwSymbols.filter(s=>s!==sym);
+        mwRender();
+    }
+    if(typeof mwInit==='undefined'){var mwInit=true;setTimeout(()=>{mwRender();mwRefresh();},1000);}
     async function loadMTFSyms(){
         try{
             const r=await A('/api/chain/symbols');
@@ -1910,7 +1970,7 @@ let _lastOpenTrdHTML = null;
             // Checkbox indicators bhi saved list se restore karo (warna form ka purana tick + quant duplicate/mismatch)
             try{
                 const _savedIds=new Set((Array.isArray(s.indicators)?s.indicators:JSON.parse(s.indicators||'[]')).map(iv=>iv.id||iv));
-                const _map={'r-ind-adx':'adx','r-ind-supertrend':'supertrend','r-ind-macd':'macd','r-ind-bb':'dynamic_bollinger','r-ind-nn':'neural_network','r-ind-rsi':'rsi','r-ind-vwap':'vwap','r-ind-rvp':'combo_rsi_vwap_pcr'};
+                const _map={'r-ind-adx':'adx','r-ind-supertrend':'supertrend','r-ind-macd':'macd','r-ind-bb':'dynamic_bollinger','r-ind-nn':'neural_network','r-ind-rsi':'rsi','r-ind-vwap':'vwap','r-ind-rvp':'combo_rsi_vwap_pcr','r-ind-heikin':'heikin_ashi'};
                 Object.keys(_map).forEach(cid=>{try{const el=document.getElementById(cid);if(el)el.checked=_savedIds.has(_map[cid]);}catch(e){}});
             }catch(e){}
             // Entry/exit conditions form me rakh do taaki dobara Run par same rahe (engine AND-logic use karta hai)
@@ -2173,6 +2233,7 @@ let _lastOpenTrdHTML = null;
         if(document.getElementById('r-ind-rsi')?.checked) indicators.push({id:'rsi',params:{period:parseInt(document.getElementById('r-p-rsi')?.value)||14}});
         if(document.getElementById('r-ind-vwap')?.checked) indicators.push({id:'vwap',params:{period:parseInt(document.getElementById('r-p-vwap')?.value)||20,multiplier:2.0}});
         if(document.getElementById('r-ind-rvp')?.checked) indicators.push({id:'combo_rsi_vwap_pcr',params:{rsi_period:parseInt(document.getElementById('r-p-rsi')?.value)||14,rsi_entry:parseFloat(document.getElementById('r-p-rvpe')?.value)||70,rsi_exit:55,st_period:parseInt(document.getElementById('r-p-st')?.value)||10,st_mult:parseFloat(document.getElementById('r-p-stm')?.value)||3,vwap_period:parseInt(document.getElementById('r-p-vwap')?.value)||20,pcr_min:parseFloat(document.getElementById('r-p-rvpp')?.value)||1.0,vol_mult:1.5}});
+        if(document.getElementById('r-ind-heikin')?.checked) indicators.push({id:'heikin_ashi',params:{period:parseInt(document.getElementById('r-p-ha')?.value)||14}});
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         return indicators;
     }
