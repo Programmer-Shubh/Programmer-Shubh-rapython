@@ -131,6 +131,7 @@ class BacktestEngine:
         pending_entry = None
         pending_exit = None
         pending_entry_signal = None
+        pending_entry_signal_time = None  # Signal bar time (candle close)
         pending_auto_buy = None
         daily_trades = 0
         # Diagnostics (spec §13): evaluated/generated/rejected + coverage.
@@ -224,10 +225,13 @@ class BacktestEngine:
                     trade = self._enter_single(cur_date, spot, symbol, auto_leg, strike_sel, delta_target, otm_dist)
                     # Preserve auto choice for display
                     trade["auto_choice"] = "CE-BUY" if is_buy else "PE-BUY"
+                    trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
                 elif is_spread:
                     trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
+                    trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
                 else:
                     trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
+                    trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
                 # Min-premium guard: Rs20 se saste entries (BUY or SELL) kabhi
                 # nahi - signal-time estimate chook sakta hai, isliye ACTUAL
                 # entry premium par final check. Skip without using the day's
@@ -247,6 +251,7 @@ class BacktestEngine:
                 daily_trades += 1
                 pending_entry = None
                 pending_auto_buy = None
+                pending_entry_signal_time = None  # Consumed
 
             # No signal/SL/TP exits on the entry bar of INTRADAY (minute)
             # bars (0-hold round-trips at one timestamp are look-ahead
@@ -457,11 +462,13 @@ class BacktestEngine:
                     if self.is_live or is_spread or auto_signal:
                         pending_entry = i
                         pending_entry_signal = None
+                        pending_entry_signal_time = None  # Immediate execution, no separate signal bar
                         if auto_signal:
                             pending_auto_buy = buy_sig
                     elif pending_entry_signal is None:
                         # Backtest mode: stamp the signal bar; maturation below executes it
                         pending_entry_signal = i
+                        pending_entry_signal_time = str(cur.get("bar_time", "")) or str(cur.get("trade_date", ""))  # Signal time (candle close)
                         if auto_signal:
                             pending_auto_buy = buy_sig
                 # Mature a waiting signal INDEPENDENT of fresh signals: single-bar
@@ -478,6 +485,7 @@ class BacktestEngine:
                     elif can_enter and i - pending_entry_signal >= max(1, latency):
                         pending_entry = i
                         pending_entry_signal = None
+                        # pending_entry_signal_time preserved for trade creation below
                 if has_open and pending_exit is None and (exit_sig or time_exit):
                     pending_exit = "condition" if exit_sig else "time"
 
@@ -2305,6 +2313,7 @@ class BacktestEngine:
                         "validation": None,
                         "vix": None,
                         "is_spread": True,
+                        "signal_time": entry.get("signal_time", entry.get("time", "")),
                     })
                 else:
                     leg_info = entry.get("legs", [{}])[0] if entry.get("legs") else {}
@@ -2355,6 +2364,7 @@ class BacktestEngine:
                         "signal_indicators": _sig.get("indicators", []) or [],
                         "validation": None,
                         "vix": None,
+                        "signal_time": entry.get("signal_time", entry.get("time", "")),
                     })
             equity.append(capital)
         total_return = capital - self.initial_capital

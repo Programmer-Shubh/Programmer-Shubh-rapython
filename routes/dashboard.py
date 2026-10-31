@@ -309,6 +309,7 @@ def get_trade_history():
                 "target": t.get("target", 0),
                 "qty": t.get("quantity", 1),
                 "lot_size": t.get("lot_size", 0),
+                "signal_time": t.get("signal_time", ""),
                 "strategy_id": int(t.get("strategy_id") or 0),
                 "strategy_name": _smap.get(int(t.get("strategy_id") or 0)),  # None when not found -> fallback below
                 "spot": _sc.get(str(t.get("symbol")).upper()),
