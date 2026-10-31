@@ -30,6 +30,7 @@ class BacktestEngine:
         self.is_live = is_live  # Unified switch: False=backtest, True=live/paper
         self._skip_db = False  # True => synthetic-only fast path, no DB roundtrips
         self._cur_close = 0.0
+        self._slippage_pct = 0.5  # Default dynamic slippage % for option selling
 
     def run(self, historical, symbol, start_date, end_date, ind_list, entry_conditions,
             exit_conditions, legs, advanced_options, risk_management, is_live: bool = None) -> dict:
@@ -49,13 +50,17 @@ class BacktestEngine:
         if advanced_options.get("slippage_pct") is not None:
             try:
                 TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage_pct"))
+                self._slippage_pct = float(advanced_options.get("slippage_pct"))
             except Exception:
-                pass
+                self._slippage_pct = 0.5
         elif advanced_options.get("slippage") is not None:
             try:
                 TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage"))
+                self._slippage_pct = float(advanced_options.get("slippage"))
             except Exception:
-                pass
+                self._slippage_pct = 0.5
+        else:
+            self._slippage_pct = 0.5
         # Quant wiring: expiry type, trailing, momentum, entry/exit times
         self._expiry_hint = advanced_options.get("expiry", "weekly")
         # Check legs for expiry override
@@ -286,7 +291,9 @@ class BacktestEngine:
                 if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
                     hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
                     if hit:
-                        sl_exit = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                        # SL हिट होने पर मार्केट स्पाइक के चाले एक्स्ट्रा 1% स्लिपेज (विशेषकर SELL पोजीशन पर)
+                        _sl_extra = 0.01 if str(txn_type or "").lower() == "sell" else 0.0
+                        sl_exit = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=(float(getattr(self, "_slippage_pct", 0.5) or 0.5) + _sl_extra * 100))
                         _trig = f"{'SL' if hit['reason'] == 'stoploss' else 'TP'}@{float(hit['level']):.2f}"
                         self._close_position(entries, exits, entry, sl_exit, hit["reason"], cur_date, qty, txn_type,
                                              trigger=_trig)
@@ -1539,6 +1546,11 @@ class BacktestEngine:
         qty = lots * get_lot_size(symbol)
         strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
         premium = self._entry_premium(date, spot, strike, option_type)
+        # Dynamic Slippage for Option Selling: SELL entry पर प्राइस और खराब (कम) करें
+        # ताकि रियल वर्ल्ड बिड-आस्क स्प्रेड का असर पड़े और बैकटेस्ट लाइव से मिले
+        if str(option_type or "").upper() in ("CE", "PE") and str(txn_type or "").lower() == "sell":
+            _extra_slip = float(getattr(self, "_slippage_pct", 0.5) or 0.5) / 100
+            premium = premium * (1 - _extra_slip)
         premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
         premium = max(premium, 1.5)
         costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
@@ -1598,6 +1610,10 @@ class BacktestEngine:
             else:
                 strike = self._select_strike(spot, symbol, option_type, leg_sel, leg_delta, leg_otm)
             premium = self._entry_premium(date, spot, strike, option_type)
+            # Dynamic Slippage for Option Selling: SELL leg पर प्राइस और खराब (कम) करें
+            if str(option_type or "").upper() in ("CE", "PE") and str(txn_type or "").lower() == "sell":
+                _extra_slip = float(getattr(self, "_slippage_pct", 0.5) or 0.5) / 100
+                premium = premium * (1 - _extra_slip)
             premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
             premium = max(premium, 1.5)
             costs = TransactionCosts.calculate(premium * lqty, txn_type == "sell", self.is_live)
