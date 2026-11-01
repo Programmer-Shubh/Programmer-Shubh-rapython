@@ -1800,6 +1800,7 @@ let _lastOpenTrdHTML = null;
             lock_profit:parseFloat(document.getElementById('s-lock-amount').value),
             // Abhi-chalaya result bhi save ho (config match par) - Backtest Detail dobara run nahi karega
             // Edit+Save par last_backtest chhua nahi jata - purana result DB me rahta hai.
+            last_backtest: window._lastFullBT || null,
         };
         const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         if(r.id){alert('Strategy saved! ID: '+r.id);window._editingStratId=null;await loadStrats();}else{alert('Error saving strategy');}
