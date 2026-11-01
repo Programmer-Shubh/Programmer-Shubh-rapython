@@ -809,7 +809,7 @@
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();loadStrats();loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();await loadStrats();loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     // OTM filter cache-first: memory (15-min) -> localStorage (60-min) -> network.
     // "Loading symbols..." kabhi atakta nahi - pehli baar ke baad turant list.
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
@@ -1224,7 +1224,7 @@
             const r=await P('/api/strategies/purge-symbol',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s,confirm:true})});
             if(r.error){alert(r.error);return;}
             alert('Saaf ho gaya: '+JSON.stringify(r.removed||{}));
-            loadTrades();try{loadStrats();}catch(e){}try{loadDashPositions();loadDashHistory();}catch(e){}
+            loadTrades();await loadStrats();try{loadDashPositions();loadDashHistory();}catch(e){}
         }catch(e){alert('Error: '+(e.message||e));}
     }
     async function setTradeMode(id,mode){const r=await P('/api/trades/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,trade_mode:mode})});_lastOpenTrdHTML=null;if(!r.error){alert('Trade #'+id+' → '+mode.toUpperCase()+' mode');loadTrades();try{loadDashPositions();}catch(e){}}else alert('Error: '+r.error);}
@@ -1547,7 +1547,7 @@ let _lastOpenTrdHTML = null;
                 // count turant refresh - card vs detail mismatch khatm.
                 if(r&&r.stored===false&&r.strategy_id){
                     try{if(typeof loadRobotSaved==='function')loadRobotSaved();}catch(_){}
-                    try{if(typeof loadStrats==='function')loadStrats();}catch(_){}
+                    try{if(typeof loadStrats==='function')await loadStrats();}catch(_){}
                 }
                 // Browser-copy recovery: is browser me is strategy ka purana
                 // BADA result pada ho (server wala chhota/mita ho) to wapas
@@ -2342,7 +2342,7 @@ let _lastOpenTrdHTML = null;
             const r=await P('/api/strategies/'+id+'/lots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lots:lots})});
             if(r.error){alert('Error: '+r.error);return;}
             try{loadRobotSaved();}catch(e){}
-            try{loadStrats();}catch(e){}
+            try{await loadStrats();}catch(e){}
         }catch(e){alert('Error: '+e.message);}
     }
     async function stratLiveToggle(id, enabled){
@@ -2350,7 +2350,7 @@ let _lastOpenTrdHTML = null;
             const r=await P('/api/strategies/'+id+'/live-toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!!enabled})});
             if(r.error){alert('Error: '+r.error);return;}
             try{loadRobotSaved();}catch(e){}
-            try{loadStrats();}catch(e){}
+            try{await loadStrats();}catch(e){}
         }catch(e){alert('Error: '+e.message);}
     }
     async function stratPaperToggle(id, enabled){
@@ -2360,7 +2360,7 @@ let _lastOpenTrdHTML = null;
             const r=await P('/api/strategies/'+id+'/paper-toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!!enabled})});
             if(r.error){alert('Error: '+r.error);return;}
             try{loadRobotSaved();}catch(e){}
-            try{loadStrats();}catch(e){}
+            try{await loadStrats();}catch(e){}
         }catch(e){alert('Error: '+e.message);}
     }
     async function delRobotSaved(id){ if(!confirm('Delete this saved strategy?')) return; try{const r=await fetch('/api/strategies/'+id,{method:'DELETE'});const j=await r.json();if(j.error)alert('Error: '+j.error);else loadRobotSaved();}catch(e){alert('Error: '+e.message);} }
