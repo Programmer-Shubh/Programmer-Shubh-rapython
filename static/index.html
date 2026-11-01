@@ -960,11 +960,13 @@
         }catch(e){}
     }
     // Market Watch
-    let mwSymbols=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY','HDFCBANK'];
+    let mwSymbols=[];try{const ls=localStorage.getItem('mwSymbols');if(ls)mwSymbols=JSON.parse(ls);}catch(e){}if(!mwSymbols.length)mwSymbols=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY','HDFCBANK'];
+    function mwSave(){try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){}}
     async function mwAdd(){
         const inp=document.getElementById('mw-sym');if(!inp)return;
         const sym=inp.value.trim().toUpperCase();if(!sym)return;
         if(!mwSymbols.includes(sym))mwSymbols.push(sym);
+        mwSave();
         inp.value='';
         mwRender();
         mwRefresh();
@@ -996,6 +998,7 @@
     }
     function mwRemove(sym){
         mwSymbols=mwSymbols.filter(s=>s!==sym);
+        mwSave();
         mwRender();
     }
     if(typeof mwInit==='undefined'){var mwInit=true;setTimeout(()=>{mwRender();mwRefresh();},1000);}
