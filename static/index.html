@@ -808,8 +808,8 @@
     function _getDashCache(){try{const v=localStorage.getItem(_dashCacheKey); if(v){const j=JSON.parse(v); if(Date.now()-j.ts<120000) return j.data;}}catch(e){} return null;}
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
-    function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();await loadStrats();loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+    async function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
+        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();try{await loadStrats();}catch(e){}loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     // OTM filter cache-first: memory (15-min) -> localStorage (60-min) -> network.
     // "Loading symbols..." kabhi atakta nahi - pehli baar ke baad turant list.
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
@@ -2675,6 +2675,15 @@ let _lastOpenTrdHTML = null;
     async function downloadReportPDF(){const body=_collectBacktestBody(); if(!body) return; try{const r=await fetch('/api/backtest/report.pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='RaTrade_'+body.symbol+'_'+body.start_date+'.pdf'; a.click();}catch(e){alert(e.message);}}
     function _collectBacktestBody(){return _unifiedBody();}
 
+    // Broker state: init block neeche loadBrokers() call karta hai, isliye
+    // declaration yahan pehle - warna TDZ ReferenceError (brokerData) se
+    // site-load par broker cards kabhi load nahi hote.
+    let brokerData=[];
+
+    // Startup ko 0ms defer karo: neeche declare hui consts (FALLBACK_BROKERS
+    // etc.) TDZ me hoti hain - seedha call karne par "Cannot access before
+    // initialization" aata tha aur brokers/init adhoore reh jaate the.
+    function _bootPage(){
     (function(){const e=new Date(); const s=new Date(e); s.setDate(e.getDate()-20); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('r-start').value=fmt(s); document.getElementById('r-end').value=fmt(e);}catch(e){} try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e){}})();
     document.getElementById('s-index')?.addEventListener('change', renderQInstruments);
     setTimeout(renderQInstruments, 800);
@@ -2687,6 +2696,8 @@ let _lastOpenTrdHTML = null;
     try{silentBrokerConnect();}catch(e){}
     try{ setInterval(()=>{ if(document.hidden) return; try{loadBrokers();}catch(e){} }, 5*60*1000); }catch(e){}
     try{ setInterval(()=>{ if(document.hidden) return; try{silentBrokerConnect();}catch(e){} }, 15*60*1000); }catch(e){}
+    }
+    setTimeout(_bootPage, 0);
     // Deployed version banner (cache diagnosis: purana page khula ho to turant pata chale)
     async function loadVer(){ try{ const v=await A('/api/version'); const el=document.getElementById('ver-badge'); if(el&&v&&v.commit){ el.textContent='v'+String(v.commit).slice(0,7); el.title='Deployed: '+v.commit+' • '+(v.branch||''); } else if(el){ el.style.display='none'; } }catch(e){ try{document.getElementById('ver-badge').style.display='none';}catch(_){} } }
     try{loadVer();}catch(e){}
@@ -2790,7 +2801,6 @@ let _lastOpenTrdHTML = null;
     document.querySelector('.nav button[onclick*=\"robot\"]')?.addEventListener('click', ()=> setTimeout(loadRobotSaved, 300));
 
     let currentBroker='';
-    let brokerData=[];
     // Broker connection state browser me persist: page refresh/close par bhi
     // "Connected" turant dikhe (user demand - algo trading ke liye no flicker).
     // Server baad me confirm/korrect karta rahega.
