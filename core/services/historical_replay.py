@@ -149,15 +149,28 @@ class HistoricalReplayEngine:
         trade_mode = str(self.advanced_options.get("trade_mode", self.advanced_options.get("trade_type", "positional")) or "positional").lower()
         if trade_mode not in ("intraday", "positional", "btst"):
             trade_mode = "positional"
-        max_holding = int(self.advanced_options.get("max_holding_bars", 20))
+        # Holding cap: explicit advanced.max_holding_bars only (parity with the
+        # engine - intraday has no artificial 5-bar time exit; EOD square-off
+        # closes the trade, paper holds until SL/TP/EOD too).
+        try:
+            max_holding = int(self.advanced_options.get("max_holding_bars", 0) or 0)
+        except Exception:
+            max_holding = 0
+        if max_holding <= 0:
+            if trade_mode == "intraday":
+                max_holding = 10 ** 9
+            elif trade_mode == "btst":
+                max_holding = 5
+            else:
+                max_holding = 20
         max_trades_day = int(self.risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(self.risk_management.get("daily_loss_limit", 0) or 0)
         leg_sl = float(leg.get("stop_loss", self.risk_management.get("daily_stop_loss", 1500)) or 0)
         leg_tp = float(leg.get("take_profit", self.risk_management.get("daily_take_profit", 1000)) or 0)
-        # Strategy-wise MTM Stop Loss and Target (dedicated split keys fall
-        # back to full daily values; leg-level always uses full values)
-        strategy_sl = float(self.risk_management.get("strategy_stop_loss", self.risk_management.get("daily_stop_loss", 0)) or 0)
-        strategy_tp = float(self.risk_management.get("strategy_take_profit", self.risk_management.get("daily_take_profit", 0)) or 0)
+        # Parity: strategy_* only (NO daily_* fallback) - engine na bhi clear
+        # kiya, motel MTM kill switch double-enforce ho raha tha.
+        strategy_sl = float(self.risk_management.get("strategy_stop_loss", 0) or 0)
+        strategy_tp = float(self.risk_management.get("strategy_take_profit", 0) or 0)
         
         is_spread = len(self.legs) > 1
         latency = TransactionCosts.latency_delay(False)  # backtest mode
@@ -207,6 +220,22 @@ class HistoricalReplayEngine:
             
             # Execute pending entry from previous bar's signal
             can_enter = not has_open and self.daily_trades < max_trades_day
+            # Engine parity: intraday entry clock window (entry_time..exit/15:00)
+            if can_enter and trade_mode == "intraday" and str(getattr(self.bt_engine, "_cur_bar_time", "") or ""):
+                try:
+                    _rnow = str(getattr(self.bt_engine, "_cur_bar_time", ""))[:5]
+                    _rh, _rm = _rnow.split(":")
+                    _rnowm = int(_rh) * 60 + int(_rm)
+                    _ret = str(getattr(self.bt_engine, "_entry_time", "09:35") or "09:35")[:5]
+                    _reh, _rem = _ret.split(":")
+                    _rstart = int(_reh) * 60 + int(_rem)
+                    _rxt = str(getattr(self.bt_engine, "_exit_time", "15:14") or "15:14")[:5]
+                    _rxh, _rxm = _rxt.split(":")
+                    _rout = min(15 * 60, int(_rxh) * 60 + int(_rxm))
+                    if _rnowm < _rstart or _rnowm >= _rout:
+                        can_enter = False
+                except Exception:
+                    pass
             if self.pending_entry is not None and can_enter:
                 exec_bar = self.historical_data[i]
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
@@ -282,7 +311,8 @@ class HistoricalReplayEngine:
                     hit = self.bt_engine._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
                     if hit:
                         from core.services.transaction_costs import TransactionCosts as _TC
-                        exit_prem = _TC.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", False)
+                        exit_prem = _TC.apply_fill_slippage(hit.get("fill", hit["level"]), "SELL" if txn_type == "buy" else "BUY", False,
+                                                            slippage_pct=float(getattr(self.bt_engine, "_slippage_pct", 0.5) or 0.5))
                         self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem,
                             hit["reason"], cur_date, qty, txn_type)
                         # SIRF hit par sync+pnl (bina hit force-close BUG tha -
@@ -383,15 +413,34 @@ class HistoricalReplayEngine:
                         entry_sig = True
                     exit_sig = time_exit
                 else:
+                    # Parity: explicit exit_conditions par hi signal-exit
+                    # (paper SL/TP/EOD tak hold karta hai).
+                    _r_exit_on_signal = bool(self.exit_conditions)
                     if option_type == "PE":
                         entry_sig = sell_sig if txn_type == "buy" else buy_sig
-                        exit_sig = buy_sig if txn_type == "buy" else sell_sig
+                        exit_sig = (buy_sig if txn_type == "buy" else sell_sig) if _r_exit_on_signal else False
                     else:
                         entry_sig = buy_sig if txn_type == "buy" else sell_sig
-                        exit_sig = sell_sig if txn_type == "buy" else buy_sig
+                        exit_sig = (sell_sig if txn_type == "buy" else buy_sig) if _r_exit_on_signal else False
                 
                 has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
                 can_enter = not has_open and self.daily_trades < max_trades_day
+                # Engine parity: intraday entry clock window at SIGNAL time too
+                if can_enter and trade_mode == "intraday" and str(getattr(self.bt_engine, "_cur_bar_time", "") or ""):
+                    try:
+                        _snow = str(getattr(self.bt_engine, "_cur_bar_time", ""))[:5]
+                        _sh, _sm = _snow.split(":")
+                        _snowm = int(_sh) * 60 + int(_sm)
+                        _set = str(getattr(self.bt_engine, "_entry_time", "09:35") or "09:35")[:5]
+                        _seh, _sem = _set.split(":")
+                        _sstart = int(_seh) * 60 + int(_sem)
+                        _sxt = str(getattr(self.bt_engine, "_exit_time", "15:14") or "15:14")[:5]
+                        _sxh, _sxm = _sxt.split(":")
+                        _sout = min(15 * 60, int(_sxh) * 60 + int(_sxm))
+                        if _snowm < _sstart or _snowm >= _sout:
+                            can_enter = False
+                    except Exception:
+                        pass
                 
                 if entry_sig and can_enter:
                     if is_spread or auto_signal:

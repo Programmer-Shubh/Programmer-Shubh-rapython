@@ -1482,7 +1482,8 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                                  "losing_trades": _sm.get("losing_trades", 0),
                                  "win_rate": _sm.get("win_rate", 0),
                                  "net_pnl": round(_sm.get("net_pnl", 0), 2),
-                                 "data": _dq, "why_zero": _wz}
+                                 "data": _dq, "why_zero": _wz,
+                                 "realism": (_sm.get("realism") or {}) if isinstance(_sm.get("realism"), dict) else {}}
         if not _all_trades:
             # Skip the "SYM: " prefix when the message already names the symbol
             def _e(k, v):
@@ -1693,6 +1694,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             "max_loss_streak": m.get("max_loss_streak", 0),
             "max_trades_in_dd": m.get("max_trades_in_dd", 0),
             "total_brokerage": m["total_brokerage"],
+            "realism": ((_per_symbol.get(req.symbol) or {}).get("realism") or {}) if isinstance(_per_symbol, dict) else {},
         },
         "equity_curve": m.get("equity_curve", []),
         "monthly_pnl": m.get("monthly_pnl", {}),

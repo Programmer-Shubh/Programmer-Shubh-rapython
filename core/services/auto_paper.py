@@ -158,7 +158,7 @@ def _recent_signal_ok(entry_dates, today, lookback_days, traded_dates):
     return False, ""
 
 
-def _today_signal(sid, s, today):
+def _today_signal(sid, s, today, need_more_than=0):
     """True if the strategy's own indicators fire an entry dated TODAY on
     REAL history (backtest engine, same legs/config). Guards:
     - needs 30+ real DB bars (never signals on synthetic fallback);
@@ -209,7 +209,7 @@ def _today_signal(sid, s, today):
             _cfgh = _hl2.md5(_js.dumps(
                 [legs, _js.loads(s.get("indicators") or "[]")],
                 sort_keys=True, default=str).encode()).hexdigest()[:12]
-            _sck = (int(sid or 0), today, _cfgh)
+            _sck = (int(sid or 0), today, _cfgh, int(need_more_than or 0))
             _shit = _SIGNAL_CACHE.get(_sck)
             if _shit and time.time() - _shit[0] < _SIGNAL_TTL:
                 return bool(_shit[1]), str(_shit[2])
@@ -272,10 +272,34 @@ def _today_signal(sid, s, today):
         except Exception:
             tl = []
         try:
-            if any(str(t.get("entry_date", ""))[:10] == today for t in tl):
-                return _sig_store(True, "aaj ka signal mila")
+            _today_tl = [t for t in tl if str(t.get("entry_date", ""))[:10] == today]
         except Exception:
-            pass
+            _today_tl = []
+        # Parity gate for re-entries: paper may only consume the SAME number
+        # of intraday signals the backtest actually produced today (in time
+        # order). Before this, after the first exit the worker re-entered on
+        # "aaj ka signal hai" and produced 12:01/12:17/13:17 trades that the
+        # backtest never had -> same strategy, different sample, 40% vs 86%.
+        if _today_tl:
+            _n_bt_today = len(_today_tl)
+            if int(need_more_than or 0) <= 0:
+                return _sig_store(True, "aaj ka signal mila")
+            if _n_bt_today <= int(need_more_than or 0):
+                return _sig_store(False, f"aaj backtest me sirf {_n_bt_today} signal the, "
+                                         f"{int(need_more_than)} already paper-traded - naya signal nahi")
+            try:
+                _times = sorted(str(t.get("entry_time") or "")[:5] for t in _today_tl
+                                if str(t.get("entry_time") or "").strip())
+                _nxt = _times[int(need_more_than)] if len(_times) > int(need_more_than) else ""
+                import datetime as _dt3
+                _now_ist = (_dt3.datetime.utcnow() + _dt3.timedelta(hours=5, minutes=30)).strftime("%H:%M")
+                if _nxt and _now_ist < _nxt:
+                    return _sig_store(False, f"agla backtest signal {_nxt} par hai - abhi skip "
+                                             f"(parity: entry backtest ke time par hi)")
+            except Exception:
+                pass
+            return _sig_store(True, f"aaj ka signal #{int(need_more_than) + 1} mila "
+                                    f"(backtest me {_n_bt_today})")
         # Lookback fallback: aaj ka signal na ho par pichhle N din me asli
         # signal bana ho AUR us par ab tak koi paper entry na hui ho to lagao
         # (trend-follow, once-per-signal - roz dobara nahi). N =
@@ -314,7 +338,7 @@ def _today_signal(sid, s, today):
         return False, f"signal-check fail: {e}"[:120]
 
 
-def _intraday_signal(sid, s, today):
+def _intraday_signal(sid, s, today, need_more_than=0):
     """Live 15m-bar signal check: runs the strategy's own indicators on
     fresh intraday bars and returns the legs that fired TODAY.
     Returns (fired_legs_or_None, note). Never raises."""
@@ -421,9 +445,26 @@ def _intraday_signal(sid, s, today):
             tl = []
         fired = []
         try:
-            for t in tl:
-                if str(t.get("entry_date", ""))[:10] != today:
-                    continue
+            _today_tl = [t for t in tl if str(t.get("entry_date", ""))[:10] == today]
+            # Same parity gate as _today_signal: only consume today's Nth
+            # backtest signal, and only once its time has actually arrived.
+            if int(need_more_than or 0) > 0:
+                if len(_today_tl) <= int(need_more_than or 0):
+                    return None, (f"aaj backtest me sirf {len(_today_tl)} signal the, "
+                                  f"{int(need_more_than)} already paper-traded")
+                try:
+                    _times = sorted(str(t.get("entry_time") or "")[:5] for t in _today_tl
+                                    if str(t.get("entry_time") or "").strip())
+                    _nxt = _times[int(need_more_than)] if len(_times) > int(need_more_than) else ""
+                    import datetime as _dt4
+                    _now_ist = (_dt4.datetime.utcnow() + _dt4.timedelta(hours=5, minutes=30)).strftime("%H:%M")
+                    if _nxt and _now_ist < _nxt:
+                        return None, f"agla backtest signal {_nxt} par hai - abhi skip"
+                except Exception:
+                    pass
+            _ordered = sorted(_today_tl, key=lambda x: str(x.get("entry_time") or ""))
+            _pick = _ordered[min(int(need_more_than or 0), len(_ordered) - 1)] if _ordered else None
+            for t in ([_pick] if _pick else []):
                 _o = str(t.get("option_type") or "").upper()
                 _p = str(t.get("position") or "").upper()
                 for leg in legs:
@@ -694,6 +735,7 @@ def place_for_strategy(sid, signal_check="daily"):
             max_day = 3
         # Continuous running: re-enter while nothing open, up to max/day.
         # (SL/TP exit ke baad dobara lagana nahi padta - worker khud lagata hai.)
+        n_today_count = 0
         try:
             has_open = db.fetch_one(
                 "SELECT id FROM paper_trades WHERE strategy_id=? AND status='open' LIMIT 1", [sid])
@@ -701,7 +743,8 @@ def place_for_strategy(sid, signal_check="daily"):
                 return {"placed": placed, "notes": [f"{s.get('name')}: open position running - skipped"]}
             n_today = db.fetch_one(
                 "SELECT COUNT(*) as c FROM paper_trades WHERE strategy_id=? AND entry_date=?", [sid, today])
-            if n_today and int(n_today.get("c", 0) or 0) >= max_day:
+            n_today_count = int((n_today or {}).get("c", 0) or 0)
+            if n_today_count >= max_day:
                 return {"placed": placed, "notes": [f"{s.get('name')}: max {max_day}/day reached - skipped"]}
         except Exception:
             pass
@@ -721,7 +764,7 @@ def place_for_strategy(sid, signal_check="daily"):
         # lag jati thi (andha trade). Ab crash = skip + wajah.
         if signal_check == "daily":
             try:
-                _fires, _why = _today_signal(sid, s, today)
+                _fires, _why = _today_signal(sid, s, today, need_more_than=n_today_count)
             except Exception as _ge:
                 return {"placed": placed,
                         "notes": [f"{s.get('name')}: signal-check crash - skipped ({str(_ge)[:80]})"]}
@@ -729,7 +772,7 @@ def place_for_strategy(sid, signal_check="daily"):
                 return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
         elif signal_check == "intraday":
             try:
-                _fired, _why = _intraday_signal(sid, s, today)
+                _fired, _why = _intraday_signal(sid, s, today, need_more_than=n_today_count)
             except Exception as _ge:
                 return {"placed": placed,
                         "notes": [f"{s.get('name')}: live signal-check crash - skipped ({str(_ge)[:80]})"]}

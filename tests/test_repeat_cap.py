@@ -54,7 +54,7 @@ def test_repeat_allowed_until_cap(monkeypatch):
         today = _ist()
         _seed_closed(sid, 1, today)  # 1 closed today, none open
         calls = []
-        monkeypatch.setattr(ap, "_today_signal", lambda a, b, c: (True, "t"))
+        monkeypatch.setattr(ap, "_today_signal", lambda a, b, c, need_more_than=0: (True, "t"))
         monkeypatch.setattr(
             ap, "_execute_legs",
             lambda s, legs, db, tm, today: (calls.append(1) or ([{"trade_id": 1}], [])))
@@ -74,7 +74,7 @@ def test_cap_blocks_at_five(monkeypatch):
         today = _ist()
         _seed_closed(sid, 5, today)  # cap reached
         calls = []
-        monkeypatch.setattr(ap, "_today_signal", lambda a, b, c: (True, "t"))
+        monkeypatch.setattr(ap, "_today_signal", lambda a, b, c, need_more_than=0: (True, "t"))
         monkeypatch.setattr(
             ap, "_execute_legs",
             lambda s, legs, db, tm, today: (calls.append(1) or ([{"trade_id": 1}], [])))
@@ -101,7 +101,7 @@ def test_open_position_blocks(monkeypatch):
             "('NIFTY','CE',25000,'BUY',1,75,100.0,?,'open',?)",
             [today, sid])
         calls = []
-        monkeypatch.setattr(ap, "_today_signal", lambda a, b, c: (True, "t"))
+        monkeypatch.setattr(ap, "_today_signal", lambda a, b, c, need_more_than=0: (True, "t"))
         monkeypatch.setattr(
             ap, "_execute_legs",
             lambda s, legs, db, tm, today: (calls.append(1) or ([{"trade_id": 1}], [])))

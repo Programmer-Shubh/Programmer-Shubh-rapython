@@ -15,7 +15,7 @@ from utils.helpers import get_strike_step, get_lot_size, black_scholes, align_st
 #     liye baseline. Koi bhi "realism"/fills/costs/cutoff change yahan na
 #     gholna - backtest results 17-19-Oct wale OLD behavior par hi rehna
 #     hain. Logic badalna ho to alag engine file banao, isko na chheno.
-ENGINE_VERSION = "v3"
+ENGINE_VERSION = "v4"
 
 
 class BacktestEngine:
@@ -39,6 +39,13 @@ class BacktestEngine:
         self._reset()
         self.premium_cache = {}
         self.bt_symbol = symbol
+        # Execution-resolution diagnostics (added to metrics): intraday bars
+        # are priced per bar; daily bars cannot model a 10:05 entry.
+        try:
+            self._used_intraday_bars = any(bool((h or {}).get("bar_time")) for h in (historical or []))
+        except Exception:
+            self._used_intraday_bars = False
+        self._trade_mode = str(advanced_options.get("trade_mode") or "").lower()
         self.bt_expiry = legs[0].get("expiry_date", "") if legs else ""
         # Unified pricer: paper/live/chain/scan sab model_premium(model_iv)
         # use karte hain. Backtest me custom IV floor (0.18/0.20) alag premium
@@ -78,20 +85,35 @@ class BacktestEngine:
         if trade_mode not in ("intraday", "positional", "btst"):
             trade_mode = "positional"
         self._eq_intraday = (trade_mode == "intraday")
-        max_holding = int(advanced_options.get("max_holding_bars", 20))
-        # Intraday: hold max 5 bars for more trades like Quantman (positional holds longer)
-        if trade_mode == "intraday":
-            max_holding = min(max_holding, 5)
+        # Holding period: an explicit advanced.max_holding_bars always wins.
+        # Intraday default = NO artificial 25-min time exit: paper holds until
+        # SL/TP or the strategy/EOD square-off (15:15), so a 5-bar cap made the
+        # backtest book many small "time" exits paper never takes (same
+        # strategy, different exit distribution = different win rate).
+        try:
+            max_holding = int(advanced_options.get("max_holding_bars", 0) or 0)
+        except Exception:
+            max_holding = 0
+        if max_holding <= 0:
+            if trade_mode == "intraday":
+                max_holding = 10 ** 9  # EOD square-off closes it
+            elif trade_mode == "btst":
+                max_holding = 5
+            else:
+                max_holding = 20
         # BTST holds overnight: increase max_holding for BTST
         if trade_mode == "btst":
             max_holding = max(max_holding, 5)
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
         # Strategy-wise MTM Stop Loss and Target (overall portfolio level).
-        # Dedicated strategy_* keys (per-symbol split by caller) fall back to
-        # full daily_* values. Leg-level SL/TP always uses FULL daily values.
-        strategy_sl = float(risk_management.get("strategy_stop_loss", risk_management.get("daily_stop_loss", 0)) or 0)
-        strategy_tp = float(risk_management.get("strategy_take_profit", risk_management.get("daily_take_profit", 0)) or 0)
+        # ONLY explicit strategy_* keys: daily_stop_loss/take_profit are the
+        # PER-TRADE SL/TP (sltp_premium_level) and are already enforced by the
+        # SL/TP block below + paper's SL monitor. Old fallback applied them a
+        # second time as a portfolio MTM kill-switch, closing trades at
+        # -600/-900 that paper never closed (extra exit = win-rate gap).
+        strategy_sl = float(risk_management.get("strategy_stop_loss", 0) or 0)
+        strategy_tp = float(risk_management.get("strategy_take_profit", 0) or 0)
         # Min entry premium: skip SELL entries cheaper than this (far-OTM lottery
         # tickets like Rs2-3 have tiny max profit but huge adverse-move loss).
         min_premium = float(advanced_options.get("min_entry_premium", 0) or 0)
@@ -215,6 +237,25 @@ class BacktestEngine:
             except Exception:
                 _in_range = True
             can_enter = not has_open and daily_trades < max_trades_day and _in_range
+            # Backtest entry clock window (paper parity): intraday entries
+            # only at/after advanced.entry_time and before exit_time/15:00.
+            # Before this the engine entered on 09:25/09:30 signals while
+            # paper's worker waited for 09:35+ -> different first trade.
+            if can_enter and trade_mode == "intraday" and self._cur_bar_time:
+                try:
+                    _bt = str(self._cur_bar_time)[:5]
+                    _bh, _bm = _bt.split(":")
+                    _nowm = int(_bh) * 60 + int(_bm)
+                    _et = str(getattr(self, "_entry_time", "09:35") or "09:35")[:5]
+                    _eh, _em = _et.split(":")
+                    _startm = int(_eh) * 60 + int(_em)
+                    _xt = str(getattr(self, "_exit_time", "15:14") or "15:14")[:5]
+                    _xh, _xm = _xt.split(":")
+                    _exitm = min(15 * 60, int(_xh) * 60 + int(_xm))
+                    if _nowm < _startm or _nowm >= _exitm:
+                        can_enter = False
+                except Exception:
+                    pass
 
             # Execute pending entry from PREVIOUS bar's signal (no look-ahead)
             if pending_entry is not None and can_enter:
@@ -275,7 +316,7 @@ class BacktestEngine:
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
                 exit_prem = self._exit_premium(cur_date, spot, float(entry["strike"]), option_type)
                 # Apply transaction costs with is_live flag
-                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
                 self._close_position(entries, exits, entry, exit_prem, pending_exit, cur_date, qty, txn_type,
                                      trigger=f"signal:{pending_exit}")
                 daily_pnl += exits[-1]["pnl"]
@@ -292,8 +333,14 @@ class BacktestEngine:
                     hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
                     if hit:
                         # SL हिट होने पर मार्केट स्पाइक के चाले एक्स्ट्रा 1% स्लिपेज (विशेषकर SELL पोजीशन पर)
-                        _sl_extra = 0.01 if str(txn_type or "").lower() == "sell" else 0.0
-                        sl_exit = TransactionCosts.apply_fill_slippage(hit["level"], "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=(float(getattr(self, "_slippage_pct", 0.5) or 0.5) + _sl_extra * 100))
+                        _fill = hit.get("fill", hit["level"])
+                        # Parity: paper close_trade applies the SAME shared
+                        # slippage once. Old code added +1% extra on SELL SL
+                        # exits, so backtest lost more than paper on identical
+                        # trades (win-rate unaffected, PnL gap inflated).
+                        sl_exit = TransactionCosts.apply_fill_slippage(
+                            _fill, "SELL" if txn_type == "buy" else "BUY", self.is_live,
+                            slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
                         _trig = f"{'SL' if hit['reason'] == 'stoploss' else 'TP'}@{float(hit['level']):.2f}"
                         self._close_position(entries, exits, entry, sl_exit, hit["reason"], cur_date, qty, txn_type,
                                              trigger=_trig)
@@ -325,7 +372,7 @@ class BacktestEngine:
                             self._close_spread(entries, exits, entry, "strategy_sl_tp", cur_date, trigger=_trig_mtm)
                         else:
                             exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                            exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                            exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
                             self._close_position(entries, exits, entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type,
                                                  trigger=_trig_mtm)
                         daily_pnl += exits[-1]["pnl"]
@@ -356,7 +403,7 @@ class BacktestEngine:
                     self._close_spread(entries, exits, entry, "intraday", cur_date, trigger="EOD")
                 else:
                     exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
                     self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type,
                                          trigger="EOD")
                 daily_pnl += exits[-1]["pnl"]
@@ -373,7 +420,7 @@ class BacktestEngine:
                     self._close_spread(entries, exits, entry, "expiry_squareoff", cur_date, trigger="expiry")
                 else:
                     exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
                     self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff", cur_date, qty, txn_type,
                                          trigger="expiry")
                 daily_pnl += exits[-1]["pnl"]
@@ -422,12 +469,17 @@ class BacktestEngine:
                 else:
                     # Direction-aware: CE Buy = bullish (buy_sig), PE Buy = bearish (sell_sig)
                     # CE Sell = bearish, PE Sell = bullish
+                    # Signal-based EXIT only when the user wrote explicit
+                    # exit_conditions. Paper holds until SL/TP/EOD (its monitor
+                    # has no opposite-indicator exit), so an empty conditions
+                    # list must NOT create a backtest-only exit.
+                    _exit_on_signal = bool(exit_conditions)
                     if option_type == "PE":
                         entry_sig = sell_sig if txn_type == "buy" else buy_sig
-                        exit_sig = buy_sig if txn_type == "buy" else sell_sig
+                        exit_sig = (buy_sig if txn_type == "buy" else sell_sig) if _exit_on_signal else False
                     else:
                         entry_sig = buy_sig if txn_type == "buy" else sell_sig
-                        exit_sig = sell_sig if txn_type == "buy" else buy_sig
+                        exit_sig = (sell_sig if txn_type == "buy" else buy_sig) if _exit_on_signal else False
                 has_open = len(entries) > len(exits)
                 can_enter = not has_open and daily_trades < max_trades_day
                 # Entry delay: wait N bars after signal for trend confirmation (Quantman style)
@@ -510,7 +562,7 @@ class BacktestEngine:
                 self._close_spread(entries, exits, entry, "end_of_period", last["trade_date"])
             else:
                 exit_prem = self._close_premium(last["trade_date"], float(last["close_price"]), float(entry["strike"]), option_type)
-                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
                 self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type,
                                      trigger="end_of_period")
 
@@ -1531,7 +1583,8 @@ class BacktestEngine:
         # qty = share count (lots field), equity cash costs, intraday-aware.
         if str(option_type).upper() == "EQ":
             qty = max(1, lots)
-            premium = TransactionCosts.apply_fill_slippage(float(spot or 0), "BUY" if txn_type == "buy" else "SELL", self.is_live)
+            premium = TransactionCosts.apply_fill_slippage(float(spot or 0), "BUY" if txn_type == "buy" else "SELL", self.is_live,
+                                                           slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
             costs = TransactionCosts.calculate_equity(premium * qty, txn_type == "sell", getattr(self, "_eq_intraday", True))
             entry_time = getattr(self, '_entry_time', '09:35')
             entry_clock = getattr(self, '_cur_bar_time', '') or entry_time
@@ -1548,10 +1601,11 @@ class BacktestEngine:
         premium = self._entry_premium(date, spot, strike, option_type)
         # Dynamic Slippage for Option Selling: SELL entry पर प्राइस और खराब (कम) करें
         # ताकि रियल वर्ल्ड बिड-आस्क स्प्रेड का असर पड़े और बैकटेस्ट लाइव से मिले
-        if str(option_type or "").upper() in ("CE", "PE") and str(txn_type or "").lower() == "sell":
-            _extra_slip = float(getattr(self, "_slippage_pct", 0.5) or 0.5) / 100
-            premium = premium * (1 - _extra_slip)
-        premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
+        # One shared slippage application only (paper entry does the same).
+        # Old code applied _slippage_pct here AND again in
+        # apply_fill_slippage -> backtest sells filled 2x worse than paper.
+        premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live,
+                                                       slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
         premium = max(premium, 1.5)
         costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
         entry_time = getattr(self, '_entry_time', '09:35')
@@ -1611,10 +1665,9 @@ class BacktestEngine:
                 strike = self._select_strike(spot, symbol, option_type, leg_sel, leg_delta, leg_otm)
             premium = self._entry_premium(date, spot, strike, option_type)
             # Dynamic Slippage for Option Selling: SELL leg पर प्राइस और खराब (कम) करें
-            if str(option_type or "").upper() in ("CE", "PE") and str(txn_type or "").lower() == "sell":
-                _extra_slip = float(getattr(self, "_slippage_pct", 0.5) or 0.5) / 100
-                premium = premium * (1 - _extra_slip)
-            premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live)
+            # One shared slippage application only (parity with paper entry).
+            premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live,
+                                                           slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
             premium = max(premium, 1.5)
             costs = TransactionCosts.calculate(premium * lqty, txn_type == "sell", self.is_live)
             # Correct sign: sell = +premium (credit received), buy = -premium (debit paid)
@@ -1691,16 +1744,21 @@ class BacktestEngine:
         # via Black-Scholes at bar high/low spot. Mixing DB-entry with
         # model-range on one bar minted instant fantasy exits (BPCL 2.86->1.20).
         strike = float(entry.get("strike", 0) or 0)
+        # Daily high/low cache is a WHOLE-SESSION range. On a 5m/15m bar it
+        # contains prices from before/after this bar (look-ahead) - that is
+        # how a 12:05 sell hit TP on the 09:15 low. Clocked bars must use
+        # their own spot high/low (Black-Scholes path below).
         try:
-            _bd = str(current.get("trade_date", ""))[:10]
-            _oh, _ol = 0, 0
-            for _sp in (str(strike), str(int(strike)) if float(strike) == int(float(strike)) else str(strike)):
-                _oh = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_h", 0) or 0)
-                _ol = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_l", 0) or 0)
+            if not self._intraday_bar():
+                _bd = str(current.get("trade_date", ""))[:10]
+                _oh, _ol = 0, 0
+                for _sp in (str(strike), str(int(strike)) if float(strike) == int(float(strike)) else str(strike)):
+                    _oh = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_h", 0) or 0)
+                    _ol = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_l", 0) or 0)
+                    if _oh > 0 and _ol > 0:
+                        break
                 if _oh > 0 and _ol > 0:
-                    break
-            if _oh > 0 and _ol > 0:
-                return self._check_sl_tp_levels(txn_type, sl_level, tp_level, max(_oh, _ol), min(_oh, _ol))
+                    return self._check_sl_tp_levels(txn_type, sl_level, tp_level, max(_oh, _ol), min(_oh, _ol))
         except Exception:
             pass
         try:
@@ -1758,6 +1816,10 @@ class BacktestEngine:
                 _src = "spot"
             elif getattr(self, "is_live", False):
                 _src = "live"
+            elif self._intraday_bar():
+                # Clocked bar never reads the daily bhavcopy print (look-ahead
+                # guard in _entry_premium) - it is model-priced from bar spot.
+                _src = "model"
             elif not getattr(self, "_skip_db", False):
                 from core.models.database import Database as _DB
                 _db = _DB.get_instance()
@@ -1791,7 +1853,12 @@ class BacktestEngine:
         return _src
 
     def _check_sl_tp_levels(self, txn_type, sl_level, tp_level, opt_high, opt_low):
-        """Shared hit comparison for DB-range and model-range callers."""
+        """Shared hit comparison for DB-range and model-range callers.
+
+        `level` is the trigger (same as paper's sltp_premium_level). `fill`
+        is the realistic execution price: a gap through SL fills at the
+        breached extreme (worse), while TP is kept at the level (conservative,
+        never books a better-than-level fill the paper monitor may miss)."""
         try:
             hit_sl, hit_tp = False, False
             if txn_type == "buy":
@@ -1801,9 +1868,10 @@ class BacktestEngine:
                 hit_sl = sl_level > 0 and opt_high >= sl_level
                 hit_tp = tp_level > 0 and opt_low <= tp_level
             if hit_sl:
-                return {"reason": "stoploss", "level": sl_level}
+                fill = min(sl_level, opt_low) if txn_type == "buy" else max(sl_level, opt_high)
+                return {"reason": "stoploss", "level": sl_level, "fill": fill}
             if hit_tp:
-                return {"reason": "target", "level": tp_level}
+                return {"reason": "target", "level": tp_level, "fill": tp_level}
         except Exception:
             pass
         return None
@@ -1870,7 +1938,8 @@ class BacktestEngine:
                         exit_prem = self._close_premium(last_date, float(historical[-1]["close_price"]), 
                             float(entry["strike"]), option_type)
                         exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, 
-                            "SELL" if txn_type == "buy" else "BUY", self.is_live)
+                            "SELL" if txn_type == "buy" else "BUY", self.is_live,
+                            slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
                         self._close_position(entries, exits, entry, exit_prem, "expiry_squareoff",
                             last_date, qty, txn_type, trigger="expiry")
             except Exception:
@@ -1939,14 +2008,29 @@ class BacktestEngine:
         except Exception:
             return 0
 
+    def _intraday_bar(self) -> bool:
+        """True when the engine is executing an intraday (clock) bar.
+
+        Bhavcopy option prints are DAILY (one open/high/low/close per date).
+        A 5m/15m bar at 12:05 must NOT read the 09:15 daily open or the whole
+        day's high/low - that is look-ahead and was the #1 backtest-vs-paper
+        gap (daily print -> same entry premium all day + TP hit on the day's
+        low every time). Intraday bars are priced from the bar's own spot via
+        the shared model/cache instead.
+        """
+        return bool(getattr(self, "_cur_bar_time", ""))
+
     def _entry_premium(self, date, spot, strike, option_type):
         key = f"{date}_{strike}_{option_type}_e"
-        if key in self.premium_cache:
+        _intra = self._intraday_bar()
+        # Intraday bar: the date-only cache holds a DAILY open print (one
+        # value for the whole session). Never use it for a clocked bar.
+        if not _intra and key in self.premium_cache:
             return self.premium_cache[key]
         # 1) Real DB LTP (historical) — skip if table missing (fresh local DB)
         # Fast path: synthetic-only backtest never hits DB (Render free tier = slow roundtrips)
         row = None
-        if not getattr(self, "_skip_db", False):
+        if not _intra and not getattr(self, "_skip_db", False):
             try:
                 row = Database.get_instance().fetch_one(
                     "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
@@ -1974,8 +2058,9 @@ class BacktestEngine:
                     return val
             except Exception:
                 pass
-        # 3) Nearest strike real LTP fallback (skipped on synthetic fast path)
-        if not getattr(self, "_skip_db", False):
+        # 3) Nearest strike real print fallback - DAILY bars only (a nearby
+        # daily print is still a whole-session price, not a 12:05 price).
+        if not _intra and not getattr(self, "_skip_db", False):
             try:
                 from utils.helpers import get_strike_step
                 step = get_strike_step(self.bt_symbol)
@@ -2011,7 +2096,7 @@ class BacktestEngine:
         if spot and spot > 0 and strike and strike > 0:
             dte_days = max(self._days_to_expiry(date, self._get_expiry_type()), 1)
             try:
-                _mkey = f"{date}_{strike}_{option_type}_e_m{int(float(spot))}"
+                _mkey = f"{date}_{strike}_{option_type}_e_m{int(float(spot))}_{getattr(self, '_cur_bar_time', '')}"
             except Exception:
                 _mkey = f"{date}_{strike}_{option_type}_e_mx"
             if _mkey in self.premium_cache:
@@ -2026,7 +2111,9 @@ class BacktestEngine:
                 val = round(float(val), 2)
                 self.premium_cache[_mkey] = val
                 return val
-        self.premium_cache[key] = 5.0
+        # Never poison the date cache with a fake 5.0 on an intraday bar.
+        if not _intra:
+            self.premium_cache[key] = 5.0
         return 5.0
 
     def _get_expiry_type(self):
@@ -2044,10 +2131,11 @@ class BacktestEngine:
         if str(option_type or "").upper() == "EQ":
             return max(float(spot or 0), 0.01)
         key = f"{date}_{strike}_{option_type}_c"
-        if key in self.premium_cache:
+        _intra = self._intraday_bar()
+        if not _intra and key in self.premium_cache:
             return self.premium_cache[key]
         skip_db = getattr(self, "_skip_db", False)
-        if not skip_db:
+        if not _intra and not skip_db:
             try:
                 row = Database.get_instance().fetch_one(
                     "SELECT close_price, open_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
@@ -2075,8 +2163,8 @@ class BacktestEngine:
                     return val
             except Exception:
                 pass
-        # Nearest strike real LTP fallback (skipped on synthetic fast path)
-        if not skip_db:
+        # Nearest strike real print fallback - DAILY bars only
+        if not _intra and not skip_db:
             try:
                 from utils.helpers import get_strike_step
                 step = get_strike_step(self.bt_symbol)
@@ -2097,7 +2185,7 @@ class BacktestEngine:
         if spot and spot > 0 and strike and strike > 0:
             dte_days = max(self._days_to_expiry(date, self._get_expiry_type()), 1)
             try:
-                _mkey = f"{date}_{strike}_{option_type}_c_m{int(float(spot))}"
+                _mkey = f"{date}_{strike}_{option_type}_c_m{int(float(spot))}_{getattr(self, '_cur_bar_time', '')}"
             except Exception:
                 _mkey = f"{date}_{strike}_{option_type}_c_mx"
             if _mkey in self.premium_cache:
@@ -2112,7 +2200,8 @@ class BacktestEngine:
                 val = round(float(val), 2)
                 self.premium_cache[_mkey] = val
                 return val
-        self.premium_cache[key] = 5.0
+        if not _intra:
+            self.premium_cache[key] = 5.0
         return 5.0
 
     def _days_to_expiry(self, bar_date, expiry_type="weekly"):
@@ -2225,7 +2314,8 @@ class BacktestEngine:
             lqty = leg["quantity"]
             spot = self._close_spot_for_date(exit_date)
             prem = self._close_premium(exit_date, spot, strike, option_type)
-            prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY", self.is_live)
+            prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY", self.is_live,
+                                                        slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
             costs = TransactionCosts.calculate(prem * lqty, leg["type"] == "buy", self.is_live)
             exit_costs_total += costs["total"]
             if leg["type"] == "buy":
@@ -2255,6 +2345,10 @@ class BacktestEngine:
         })
 
     def _close_spot_for_date(self, bar_date):
+        # Intraday bars: use the bar's own spot (the daily DB close belongs to
+        # 15:30, not to this clock time - same look-ahead as the premium fix).
+        if self._intraday_bar():
+            return float(getattr(self, "_cur_close", 0) or 0)
         if getattr(self, "_skip_db", False):
             return float(getattr(self, "_cur_close", 0) or 0)
         row = Database.get_instance().fetch_one(
@@ -2441,6 +2535,22 @@ class BacktestEngine:
         for t in trade_list:
             m = t["entry_date"][:7]
             monthly_pnl[m] = monthly_pnl.get(m, 0) + t["pnl"]
+        # Execution-realism audit (not a strategy filter): tells the user
+        # whether this run could actually be reproduced by paper/live.
+        _src_e, _src_x, _reasons = {}, {}, {}
+        for t in trade_list:
+            _src_e[str(t.get("entry_src") or "?")] = _src_e.get(str(t.get("entry_src") or "?"), 0) + 1
+            _src_x[str(t.get("exit_src") or "?")] = _src_x.get(str(t.get("exit_src") or "?"), 0) + 1
+            _reasons[str(t.get("exit_reason") or "?")] = _reasons.get(str(t.get("exit_reason") or "?"), 0) + 1
+        _warn = []
+        if self._used_intraday_bars and _src_e.get("db"):
+            _warn.append("intraday bar par daily option print mila - engine build purana hai")
+        if (not self._used_intraday_bars) and self._trade_mode == "intraday":
+            _warn.append("daily bars + intraday trade_mode: entry 09:15 open par model hui hai, "
+                         "10:05 ka exact fill backtest me simulate nahi ho sakta - intraday timeframe (5m/15m) chuno")
+        _zero_hold = sum(1 for t in trade_list
+                         if str(t.get("entry_date")) == str(t.get("exit_date"))
+                         and str(t.get("entry_time")) == str(t.get("exit_time")))
         return {
             "success": True,
             "metrics": {
@@ -2476,6 +2586,16 @@ class BacktestEngine:
                 "rejected": dict(getattr(self, "_rej", {}) or {}),
                 "coverage": dict(getattr(self, "_cov", {}) or {}),
                 "total_brokerage": round(total_brokerage, 2),
+                "realism": {
+                    "engine_version": ENGINE_VERSION,
+                    "intraday_bars": bool(self._used_intraday_bars),
+                    "trade_mode": self._trade_mode,
+                    "entry_src_counts": _src_e,
+                    "exit_src_counts": _src_x,
+                    "exit_reason_counts": _reasons,
+                    "zero_hold_trades": _zero_hold,
+                    "warnings": _warn,
+                },
                 "equity_curve": equity,
                 "trade_list": trade_list,
                 "monthly_pnl": monthly_pnl,

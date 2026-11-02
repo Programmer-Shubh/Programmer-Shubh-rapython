@@ -162,7 +162,7 @@ def test_lookback_entry_uses_current_legs_and_cap(monkeypatch):
            - datetime.timedelta(days=2)).strftime("%Y-%m-%d")
     seen = {}
 
-    def fake_signal(a, b, c):
+    def fake_signal(a, b, c, need_more_than=0):
         # old signal only (no today hit) -> lookback path
         from core.services import auto_paper as _ap
         tl = [{"entry_date": old, "pnl": 10.0}]
