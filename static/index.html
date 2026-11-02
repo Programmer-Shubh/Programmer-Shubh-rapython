@@ -494,12 +494,12 @@
                     <div class="slab-sec" style="background:linear-gradient(135deg,#fff8e1 0%,#ffffff 100%); border:1px solid #ffe082; padding:6px"><div class="slab-sec-title"><i class="bi bi-sliders"></i> Schedule & Risk</div>
                     <div class="row g-1 mt-1">
                         <div class="col-md-3"><label class="form-label small">Strategy Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
-                        <div class="col-md-3"><label class="form-label small">Strategy Stop Loss (₹) — overall MTM</label><input type="number" id="r-sl" class="form-control form-control-sm" value="1500" min="0" step="100"></div>
-                        <div class="col-md-3"><label class="form-label small">Strategy Target (₹) — overall MTM</label><input type="number" id="r-tp" class="form-control form-control-sm" value="3000" min="0" step="100"></div>
-                        <div class="col-md-3"><label class="form-label small">Overall Stop Loss</label><input type="number" class="form-control form-control-sm" id="s-sl" value="1500" min="0" step="50"></div>
+                        <div class="col-md-3"><label class="form-label small">Strategy Stop Loss (₹) — overall MTM</label><input type="text" inputmode="decimal" id="r-sl" class="form-control form-control-sm" value="1500"></div>
+                        <div class="col-md-3"><label class="form-label small">Strategy Target (₹) — overall MTM</label><input type="text" inputmode="decimal" id="r-tp" class="form-control form-control-sm" value="3000"></div>
+                        <div class="col-md-3"><label class="form-label small">Overall Stop Loss</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-sl" value="1500"></div>
                     </div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Overall Target</label><input type="number" class="form-control form-control-sm" id="s-tp" value="3000" min="0" step="50"></div>
+                        <div class="col-md-3"><label class="form-label small">Overall Target</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-tp" value="3000"></div>
                         <div class="col-md-3"><label class="form-label small">Re-entry on SL</label><select class="form-select form-select-sm" id="s-reentry-sl"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
                         <div class="col-md-3"><label class="form-label small">Re-entry on Tgt</label><select class="form-select form-select-sm" id="s-reentry-tp"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
                         <div class="col-md-3"><label class="form-label small">Trailing Options</label><select class="form-select form-select-sm" id="s-trail"><option selected>Lock</option><option>Partial</option><option>Complete</option></select></div>
@@ -959,8 +959,9 @@
             if(!sel.value) sel.value='NIFTY';
         }catch(e){}
     }
-    // Market Watch
+    // Market Watch — कीमत गायब/गलत न हो: आखिरी ज्ञात कीमत रखता है + ऑटो-रिफ्रेश 30s
     let mwSymbols=[];try{const ls=localStorage.getItem('mwSymbols');if(ls)mwSymbols=JSON.parse(ls);}catch(e){}if(!mwSymbols.length)mwSymbols=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY','HDFCBANK'];
+    let mwLast={};
     function mwSave(){try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){}}
     async function mwAdd(){
         const inp=document.getElementById('mw-sym');if(!inp)return;
@@ -968,21 +969,23 @@
         if(!mwSymbols.includes(sym))mwSymbols.push(sym);
         mwSave();
         inp.value='';
-        mwRender();
         mwRefresh();
     }
     async function mwRefresh(){
         try{
-            const found={};
+            const found={...mwLast};
             await Promise.all(mwSymbols.map(async(s)=>{
                 try{
                     const r=await A('/api/dashboard/spot/'+s);
-                    if(r&&!r.error&&r.spot)found[s]=r;
+                    if(r&&!r.error&&r.spot){found[s]=r;mwLast[s]={spot:r.spot,formatted:r.formatted,source:r.source,ts:Date.now()};}
                 }catch(e){}
             }));
             mwRender(found);
+            mwAuto();
         }catch(e){}
     }
+    let mwTimer=null;
+    function mwAuto(){if(mwTimer)clearTimeout(mwTimer);mwTimer=setTimeout(mwRefresh,30000);}
     function mwRender(found={}){
         const el=document.getElementById('mw-list');if(!el)return;
         if(!mwSymbols.length){el.innerHTML='<div class="text-muted small p-2">कोई स्टॉक नहीं जोड़ा गया।</div>';return;}
@@ -998,10 +1001,12 @@
     }
     function mwRemove(sym){
         mwSymbols=mwSymbols.filter(s=>s!==sym);
+        delete mwLast[sym];
         mwSave();
         mwRender();
     }
-    if(typeof mwInit==='undefined'){var mwInit=true;setTimeout(()=>{mwRender();mwRefresh();},1000);}
+    if(typeof mwInit==='undefined'){var mwInit=true;setTimeout(()=>{mwRefresh();mwAuto();},1000);}
+
     async function loadMTFSyms(){
         try{
             const r=await A('/api/chain/symbols');
@@ -1353,8 +1358,8 @@ let _lastOpenTrdHTML = null;
         const s=document.getElementById('r-start')?.value||'', e=document.getElementById('r-end')?.value||'';
         if(!s||!e){alert('Select start and end date');return null;}
         const lots=parseInt(document.getElementById('r-lots')?.value)||1;
-        const sl=parseFloat(document.getElementById('r-sl')?.value)||1500;
-        const tp=parseFloat(document.getElementById('r-tp')?.value)||3000;
+        const sA=_amtVal('r-sl',1500);const sl=sA.u==='rs'?(sA.v||1500):sA.v;const slUnit=sA.u;
+        const tA=_amtVal('r-tp',3000);const tp=tA.u==='rs'?(tA.v||3000):tA.v;const tpUnit=tA.u;
         const mtd=parseInt(document.getElementById('r-mtd')?.value)||5;
         const slb=Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0));
         const indicators=robotCollectIndicators();
@@ -1377,7 +1382,7 @@ let _lastOpenTrdHTML = null;
         // use karta hai (index 13-15%, stock 30%) - wahi paper/live/scanner
         // use karte hain. Pehle yahan hardcoded 0.14 jata tha (index ka IV)
         // to stock options ka premium 5x chhota dikhta tha.
-        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:document.getElementById('s-trail')?.value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:sl,daily_take_profit:tp,signal_lookback_days:slb}};
+        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:document.getElementById('s-trail')?.value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:slUnit==='rs'?sl:0,daily_take_profit:tpUnit==='rs'?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,signal_lookback_days:slb}};
     }
     async function runBacktest(opts){
         // opts.direct: saved-strategy endpoint ka ready result - dobara fetch nahi, sidha render.
@@ -1767,8 +1772,8 @@ let _lastOpenTrdHTML = null;
         const entryTime=document.getElementById('r-entry').value;
         const exitTime=document.getElementById('r-exit').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
-        const tp=parseFloat(document.getElementById('r-tp').value)||3000;
+        const sA2=_amtVal('r-sl',1500);const sl=sA2.u==='rs'?(sA2.v||1500):sA2.v;const slUnit=sA2.u;
+        const tA2=_amtVal('r-tp',3000);const tp=tA2.u==='rs'?(tA2.v||3000):tA2.v;const tpUnit=tA2.u;
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const startDate=document.getElementById('r-start').value;
         const endDate=document.getElementById('r-end').value;
@@ -1790,6 +1795,8 @@ let _lastOpenTrdHTML = null;
             lots,
             stop_loss:sl,
             take_profit:tp,
+            sl_unit:slUnit,
+            tp_unit:tpUnit,
             start_date:startDate,
             end_date:endDate,
             legs,
@@ -1919,6 +1926,8 @@ let _lastOpenTrdHTML = null;
     // Indicator inputs auto
     document.addEventListener('change',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-ind-')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
     document.addEventListener('input',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
+    // SL/TP "Rs या %" parse (जैसे 2% -> sl_unit:'pct')
+    function _amtVal(el,dflt){const s=String((document.getElementById(el)||{}).value||'').trim().replace(/[\u20b9,\s]/g,'');if(!s)return{v:(dflt||0),u:'rs'};const low=s.toLowerCase();if(low.endsWith('%')||low.endsWith('pct')||low.endsWith('percent'))return{v:(parseFloat(s)||0),u:'pct'};return{v:(parseFloat(s)||0),u:'rs'};}
     // Sync: Overall settings (s-sl/s-tp) <-> Strategy risk (r-sl/r-tp) — dono me se jo bhi bhare, wahi chalega
     function _syncRisk(fromSl,fromTp,toSl,toTp){try{const a=document.getElementById(fromSl),b=document.getElementById(fromTp),c=document.getElementById(toSl),d=document.getElementById(toTp);if(a&&c&&a.value!=='')c.value=a.value;if(b&&d&&b.value!=='')d.value=b.value;}catch(e){}}
     document.getElementById('s-sl')?.addEventListener('change',()=>_syncRisk('s-sl','s-tp','r-sl','r-tp'));
@@ -2202,8 +2211,8 @@ let _lastOpenTrdHTML = null;
         const sym=(rSyms()[0]||'NIFTY');
         let order=document.getElementById('r-order').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
-        const tp=parseFloat(document.getElementById('r-tp').value)||3000;
+        const sA3=_amtVal('r-sl',1500);const sl=sA3.u==='rs'?(sA3.v||1500):sA3.v;const slUnit=sA3.u;
+        const tA3=_amtVal('r-tp',3000);const tp=tA3.u==='rs'?(tA3.v||3000):tA3.v;const tpUnit=tA3.u;
         const strikeType=document.getElementById('r-strike').value;
         const expiry=document.getElementById('r-expiry').value;
         let optR, txnR; { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
@@ -2215,7 +2224,7 @@ let _lastOpenTrdHTML = null;
         }catch(e){ strikeVal=0; }
         document.getElementById('robot-status').innerHTML='<p class="text-success"><span class="spinner"></span> Starting '+sym+' '+order+' '+strikeType+' '+expiry+' SL ₹'+sl+' Target ₹'+tp+' (Strike '+(strikeVal||'ATM')+')...</p>';
         try{
-            const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym, option_type:optR, strike:strikeVal, expiry:expiry, date:new Date().toISOString().split('T')[0], transaction_type:txnR, quantity:lots, stop_loss:sl, take_profit:tp, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()})});
+            const r=await P('/api/chain/place-trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym, option_type:optR, strike:strikeVal, expiry:expiry, date:new Date().toISOString().split('T')[0], transaction_type:txnR, quantity:lots, stop_loss:sl, sl_unit:slUnit, take_profit:tp, tp_unit:tpUnit, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()})});
             if(r.error) document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+r.error+'</p>';
             else document.getElementById('robot-status').innerHTML='<p class="text-success">Strategy started! Trade #'+(r.trade_id||'')+' '+sym+' '+order+' @ ₹'+(r.entry_price||'')+' (Strike '+strikeVal+') SL ₹'+sl+' Target ₹'+tp+' — check Trading Center</p>';
         }catch(e){document.getElementById('robot-status').innerHTML='<p class="text-danger">Error: '+e.message+'</p>'; console.error(e);}
@@ -2247,8 +2256,8 @@ let _lastOpenTrdHTML = null;
         const order=document.getElementById('r-order').value;
         const strikeType=document.getElementById('r-strike').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
-        const tp=parseFloat(document.getElementById('r-tp').value)||3000;
+        const sA4=_amtVal('r-sl',1500);const sl=sA4.u==='rs'?(sA4.v||1500):sA4.v;const slUnit=sA4.u;
+        const tA4=_amtVal('r-tp',3000);const tp=tA4.u==='rs'?(tA4.v||3000):tA4.v;const tpUnit=tA4.u;
         let legs=[];
         const rOtmSave=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
         const rOtmDist=((strikeType.toLowerCase()==='otm'||strikeType.toLowerCase()==='itm'))?rOtmSave:0;
@@ -2271,7 +2280,7 @@ let _lastOpenTrdHTML = null;
             robotCollectIndicators().forEach(iv=>{ if(iv&&iv.id) _seen[iv.id]=iv; });
             Object.keys(_seen).forEach(k=>_saveInds.push(_seen[k]));
         }catch(e){ try{ _saveInds.push(...robotCollectIndicators()); }catch(_){} }
-        const body={id: window._editingStratId||0, name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:sl, daily_take_profit:tp, max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5, signal_lookback_days:Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0))},
+        const body={id: window._editingStratId||0, name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:slUnit==='rs'?sl:0, daily_take_profit:tpUnit==='rs'?tp:0, daily_stop_loss_pct:slUnit==='pct'?sl:0, daily_take_profit_pct:tpUnit==='pct'?tp:0, max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5, signal_lookback_days:Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0))},
             // Abhi-chalaya backtest result bhi save ke saath bhejo - warna card
             // par "Saved BT: —" aata tha (Backtest Detail dabane tak). Backend
             // config match hone par hi attach karta hai.
@@ -2328,7 +2337,7 @@ let _lastOpenTrdHTML = null;
                 if(!pe && !lv) modeH='<span class="badge bg-secondary">OFF</span>';
                 h+=`<tr><td><strong>${s.name}</strong></td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td>`+
 `<td><div class="d-flex align-items-center" style="gap:4px"><button class="btn btn-sm btn-outline-secondary px-2" title="Lot ghatayen" onclick="stratLots(${s.id},${curLots-1})">−</button><strong class="mx-1">${curLots}</strong><button class="btn btn-sm btn-outline-secondary px-2" title="Lot badhayen" onclick="stratLots(${s.id},${curLots+1})">+</button></div><small class="sl-qty-hint text-muted" data-sid="${s.id}" style="font-size:10px">qty: …</small></td>`+
-`<td>₹${(rm.daily_stop_loss||'-')} / ₹${(rm.daily_take_profit||'-')}</td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td><td>${modeH}</td>`+
+`<td>${(rm.daily_stop_loss_pct?rm.daily_stop_loss_pct+'%':('₹'+(rm.daily_stop_loss||'-')))} / ${(rm.daily_take_profit_pct?rm.daily_take_profit_pct+'%':('₹'+(rm.daily_take_profit||'-')))}</td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td><td>${modeH}</td>`+
 `<td><button class="btn btn-sm ${(pe?'btn-success':'btn-outline-secondary')}" title="Paper ON = auto-paper worker isi strategy par trade lagata hai; OFF = naya auto/paper trade band (open positions chalte rahenge)" onclick="stratPaperToggle(${s.id},${!pe})">${pe?'ON':'OFF'}</button></td>`+
 `<td><button class="btn btn-sm ${(lv?'btn-success':'btn-outline-secondary')}" onclick="stratLiveToggle(${s.id},${!lv})">${lv?'ON':'OFF'}</button></td>`+
 `<td style="white-space:nowrap">${onH}<button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id},false,this)">Backtest</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')">History</button> <button class="btn btn-sm btn-outline-info" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
@@ -2585,14 +2594,17 @@ let _lastOpenTrdHTML = null;
             const legs=_parseJsonField(s.legs,[]);
             if(!legs.length){ alert('No legs in this strategy'); return; }
             const rm=_parseJsonField(s.risk_management,{});
-            const sl=rm.daily_stop_loss||1500, tp=rm.daily_take_profit||3000;
+            const sl=rm.daily_stop_loss_pct?rm.daily_stop_loss_pct:(rm.daily_stop_loss||1500);
+            const tp=rm.daily_take_profit_pct?rm.daily_take_profit_pct:(rm.daily_take_profit||3000);
+            const slUnit=rm.daily_stop_loss_pct?'pct':'rs';
+            const tpUnit=rm.daily_take_profit_pct?'pct':'rs';
             const ao=_parseJsonField(s.advanced_options,{});
             const ttype=(ao.trade_mode||'intraday').toLowerCase();
             const previews=[];
             for(const leg of legs){
                 const opt=String(leg.option_type||'CE').toUpperCase();
                 const txn=String(leg.transaction||'buy').toUpperCase();
-                const base={symbol:s.symbol,option_type:opt,transaction_type:txn,quantity:parseInt(leg.lots)||1,strike:0,expiry:leg.expiry||'weekly',stop_loss:sl,take_profit:tp,trade_type:ttype,strategy_id:id};
+                const base={symbol:s.symbol,option_type:opt,transaction_type:txn,quantity:parseInt(leg.lots)||1,strike:0,expiry:leg.expiry||'weekly',stop_loss:sl,sl_unit:slUnit,take_profit:tp,tp_unit:tpUnit,trade_type:ttype,strategy_id:id};
                 const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:true})});
                 if(pv.error){alert('Live blocked: '+pv.error);return;}
                 previews.push(pv.preview||{});
@@ -2605,7 +2617,7 @@ let _lastOpenTrdHTML = null;
                 const leg=legs[i];
                 const opt=String(leg.option_type||'CE').toUpperCase();
                 const txn=String(leg.transaction||'buy').toUpperCase();
-                const base={symbol:s.symbol,option_type:opt,transaction_type:txn,quantity:parseInt(leg.lots)||1,strike:0,expiry:leg.expiry||'weekly',stop_loss:sl,take_profit:tp,trade_type:ttype,strategy_id:id};
+                const base={symbol:s.symbol,option_type:opt,transaction_type:txn,quantity:parseInt(leg.lots)||1,strike:0,expiry:leg.expiry||'weekly',stop_loss:sl,sl_unit:slUnit,take_profit:tp,tp_unit:tpUnit,trade_type:ttype,strategy_id:id};
                 const r=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:false})});
                 if(r.error){alert('Live error (leg '+(i+1)+'): '+r.error);break;}
                 sent.push('Broker #'+(r.broker_order_id||'')+' Trade #'+r.trade_id+' @ Rs'+r.entry_price+(r.paper_trade_id?('| Paper copy Trade #'+r.paper_trade_id+' (sync)'):'')+(r.paper_mirror_note?(' | PAPER MIRROR: '+r.paper_mirror_note):''));
@@ -2624,10 +2636,10 @@ let _lastOpenTrdHTML = null;
         const order=document.getElementById('r-order').value;
         let optR, txnR; { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sl=parseFloat(document.getElementById('r-sl').value)||1500;
-        const tp=parseFloat(document.getElementById('r-tp').value)||3000;
+        const sA4=_amtVal('r-sl',1500);const sl=sA4.u==='rs'?(sA4.v||1500):sA4.v;const slUnit=sA4.u;
+        const tA4=_amtVal('r-tp',3000);const tp=tA4.u==='rs'?(tA4.v||3000):tA4.v;const tpUnit=tA4.u;
         const expiry=document.getElementById('r-expiry').value;
-        const base={symbol:sym, option_type:optR, transaction_type:txnR, quantity:lots, strike:0, expiry:expiry, stop_loss:sl, take_profit:tp, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()};
+        const base={symbol:sym, option_type:optR, transaction_type:txnR, quantity:lots, strike:0, expiry:expiry, stop_loss:sl, sl_unit:slUnit, take_profit:tp, tp_unit:tpUnit, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()};
         try{
             // Step 1: dry-run preview - exact broker payload, sends nothing
             const pv=await P('/api/broker/place-live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,dry_run:true})});

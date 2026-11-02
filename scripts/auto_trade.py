@@ -77,6 +77,8 @@ def check_stoploss_target(confirm_secs=2):
         # Old inline copy yahan duplicate thi (drift ka khatra) - ab single source.
         from utils.helpers import sltp_premium_level as _lvl
         _qty = int(trade.get("quantity", 1) or 1)
+        _sl_u = trade.get("sl_unit") or None
+        _tp_u = trade.get("tp_unit") or None
         # Lot fallback: stored 0/NULL par effective_lot_size (sibling paths
         # trade_model 208-211 jaisa). Seedha 0 jaane par units=1 hokar SL
         # level 0.05/1600 ban jata tha = SL kabhi nahi kat-ta tha.
@@ -87,8 +89,8 @@ def check_stoploss_target(confirm_secs=2):
             _lot = int(trade.get("lot_size", 0) or 0)
         if _lot <= 0:
             _lot = 50
-        sl_level = _lvl(entry, sl, _qty, _lot, trade["transaction_type"], True)
-        tp_level = _lvl(entry, tp, _qty, _lot, trade["transaction_type"], False)
+        sl_level = _lvl(entry, sl, _qty, _lot, trade["transaction_type"], True, unit=_sl_u)
+        tp_level = _lvl(entry, tp, _qty, _lot, trade["transaction_type"], False, unit=_tp_u)
         # Conservative intra-candle: current is proxy for High/Low - hit if breached
         hit_sl = (current <= sl_level) if is_buy else (current >= sl_level) if sl_level > 0 else False
         hit_tp = (current >= tp_level) if is_buy else (current <= tp_level) if tp_level > 0 else False

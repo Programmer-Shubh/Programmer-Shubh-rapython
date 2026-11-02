@@ -5,6 +5,7 @@ import json
 import asyncio
 from core.models.database import Database
 from core.services.broker_fyers import FyersV3
+from utils.helpers import sltp_unit
 
 router = APIRouter()
 
@@ -134,6 +135,8 @@ class LiveOrderRequest(BaseModel):
     expiry: str = ""
     stop_loss: float = 1500.0
     take_profit: float = 3000.0
+    sl_unit: str = "rs"
+    tp_unit: str = "rs"
     broker: str = ""
     dry_run: bool = False
     trade_type: str = "intraday"
@@ -1502,7 +1505,7 @@ def _latest_paper_entry(strategy_id: int, symbol: str, opt: str) -> dict:
         return {}
 
 def _paper_mirror_insert(strategy_id, tm, adj, costs, _dt, lots, lot, symbol,
-                         opt, strike, exp_ymd, txn, sl, tp):
+                         opt, strike, exp_ymd, txn, sl, tp, sl_unit="rs", tp_unit="rs"):
     """LIVE order ka PAPER mirror (user rule: Paper + Live dono ON to DONO
     orders). Live insert ke turant baad strategy_id se PAPER trade bhi likhi
     jati hai - entry_price bilkul live `adj` ke barabar (ek hi reference
@@ -1531,6 +1534,7 @@ def _paper_mirror_insert(strategy_id, tm, adj, costs, _dt, lots, lot, symbol,
                 "expiry_date": exp_ymd, "transaction_type": txn,
                 "quantity": lots, "lot_size": lot, "entry_price": adj,
                 "stop_loss": float(sl or 0), "target": float(tp or 0),
+                "sl_unit": sltp_unit(sl_unit), "tp_unit": sltp_unit(tp_unit),
                 "total_cost": float(costs.get("total", 0) or 0),
                 "entry_date": _dt.datetime.now().strftime("%Y-%m-%d"),
                 "trade_mode": "paper", "broker_order_id": "",
@@ -2061,6 +2065,7 @@ async def place_live_order(req: LiveOrderRequest):
             "expiry_date": exp_ymd, "transaction_type": txn,
             "quantity": lots, "lot_size": lot, "entry_price": adj,
             "stop_loss": float(req.stop_loss or 0), "target": float(req.take_profit or 0),
+            "sl_unit": sltp_unit(req.sl_unit), "tp_unit": sltp_unit(req.tp_unit),
             "total_cost": costs["total"],
             "entry_date": _dt.datetime.now().strftime("%Y-%m-%d"),
             "trade_mode": "live", "broker_order_id": order_id,
@@ -2074,7 +2079,8 @@ async def place_live_order(req: LiveOrderRequest):
         _paper_tid, _pm_note = _paper_mirror_insert(
             req.strategy_id, tm, adj, costs, _dt, lots, lot,
             symbol, opt, strike, exp_ymd, txn,
-            float(req.stop_loss or 0), float(req.take_profit or 0))
+            float(req.stop_loss or 0), float(req.take_profit or 0),
+            sl_unit=req.sl_unit, tp_unit=req.tp_unit)
         _lresp = {"success": True, "trade_id": tid, "broker_order_id": order_id,
                 "broker": broker, "broker_symbol": broker_ref, "quantity": broker_qty,
                 "entry_price": round(adj, 2), "mode": "live",

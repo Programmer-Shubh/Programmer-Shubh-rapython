@@ -6,7 +6,7 @@ from core.models.bhavcopy_model import BhavcopyModel
 from core.models.trade_model import TradeModel
 from core.services.live_market_data import LiveMarketData
 from core.services.transaction_costs import TransactionCosts
-from utils.helpers import get_lot_size, get_strike_step, align_strike_price, black_scholes, model_premium
+from utils.helpers import get_lot_size, get_strike_step, align_strike_price, black_scholes, model_premium, sltp_unit
 
 router = APIRouter()
 
@@ -21,6 +21,8 @@ class TradeRequest(BaseModel):
     quantity: int = 1
     stop_loss: float = 500.0
     take_profit: float = 1000.0
+    sl_unit: str = "rs"
+    tp_unit: str = "rs"
     trade_type: str = "intraday"
     strategy_id: int = 0
 
@@ -803,6 +805,8 @@ def place_trade(req: TradeRequest):
                 "entry_price": adj_premium,
                 "stop_loss": req.stop_loss,
                 "target": req.take_profit,
+                "sl_unit": sltp_unit(req.sl_unit),
+                "tp_unit": sltp_unit(req.tp_unit),
                 "total_cost": costs["total"],
                 "entry_date": req.date,
                 "entry_iv": _model_iv(req.symbol),

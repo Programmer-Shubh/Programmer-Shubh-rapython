@@ -165,12 +165,31 @@ class HistoricalReplayEngine:
                 max_holding = 20
         max_trades_day = int(self.risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(self.risk_management.get("daily_loss_limit", 0) or 0)
-        leg_sl = float(leg.get("stop_loss", self.risk_management.get("daily_stop_loss", 1500)) or 0)
-        leg_tp = float(leg.get("take_profit", self.risk_management.get("daily_take_profit", 1000)) or 0)
+        # Per-trade SL/TP rupees YA premium ka percent ('2%' -> *_pct keys).
+        # Engine ka SAME resolver (replay == backtest contract).
+        leg_sl, leg_tp, sl_unit, tp_unit = self.bt_engine._resolve_sltp(
+            leg, self.risk_management or {})
         # Parity: strategy_* only (NO daily_* fallback) - engine na bhi clear
         # kiya, motel MTM kill switch double-enforce ho raha tha.
         strategy_sl = float(self.risk_management.get("strategy_stop_loss", 0) or 0)
         strategy_tp = float(self.risk_management.get("strategy_take_profit", 0) or 0)
+        # Strategy MTM percent mode: initial capital ka % -> Rs threshold.
+        try:
+            _rsp = float(self.risk_management.get("strategy_stop_loss_pct", 0) or 0)
+            if _rsp > 0 and _rsp <= 100 and self.initial_capital > 0:
+                strategy_sl = self.initial_capital * _rsp / 100.0
+        except Exception:
+            pass
+        try:
+            _rtp = float(self.risk_management.get("strategy_take_profit_pct", 0) or 0)
+            if _rtp > 0 and _rtp <= 100 and self.initial_capital > 0:
+                strategy_tp = self.initial_capital * _rtp / 100.0
+        except Exception:
+            pass
+        # Engine ke unit attrs set karo - replay ka _check_sl_tp engine par
+        # hi chalta hai (parity: same resolver, same units).
+        self.bt_engine._sl_unit = sl_unit
+        self.bt_engine._tp_unit = tp_unit
         
         is_spread = len(self.legs) > 1
         latency = TransactionCosts.latency_delay(False)  # backtest mode

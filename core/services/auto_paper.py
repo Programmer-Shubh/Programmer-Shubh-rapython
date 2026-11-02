@@ -506,8 +506,20 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
         rm = _js.loads(s.get("risk_management") or "{}")
     except Exception:
         rm = {}
-    sl = float(rm.get("daily_stop_loss") or 1500)
-    tp = float(rm.get("daily_take_profit") or 3000)
+    from utils.helpers import sltp_amount as _sltp_am
+    _sl_amt, sl_u = (_sltp_am(rm.get("daily_stop_loss_pct"), "pct")
+                     if rm.get("daily_stop_loss_pct") is not None
+                     else _sltp_am(rm.get("daily_stop_loss"), "rs"))
+    _tp_amt, tp_u = (_sltp_am(rm.get("daily_take_profit_pct"), "pct")
+                     if rm.get("daily_take_profit_pct") is not None
+                     else _sltp_am(rm.get("daily_take_profit"), "rs"))
+    # Purane strategies ki default (rupees) same rahegi
+    sl = _sl_amt if _sl_amt > 0 else 1500
+    if _sl_amt <= 0:
+        sl_u = "rs"
+    tp = _tp_amt if _tp_amt > 0 else 3000
+    if _tp_amt <= 0:
+        tp_u = "rs"
     sym = str(s.get("symbol") or "").upper()
     if not sym:
         return placed, ["no symbol - skipped"]
@@ -597,7 +609,8 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
                         symbol=sym, option_type=opt, transaction_type=txn,
                         quantity=max(1, int(leg.get("lots") or 1)),
                         strike=float(strike or 0), expiry=str(leg.get("expiry") or ""),
-                        stop_loss=sl, take_profit=tp, trade_type="intraday",
+                        stop_loss=sl, take_profit=tp, sl_unit=sl_u, tp_unit=tp_u,
+                        trade_type="intraday",
                         strategy_id=int(sid or 0), dry_run=False)
                     _lres = _aio.run(place_live_order(_lreq))
                     if isinstance(_lres, dict) and _lres.get("success"):
@@ -620,6 +633,7 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
                 expiry="", date=today, transaction_type=txn,
                 quantity=max(1, int(leg.get("lots") or 1)),
                 stop_loss=sl, take_profit=tp,
+                sl_unit=sl_u, tp_unit=tp_u,
                 trade_type="intraday", strategy_id=int(sid or 0))
             res = place_trade(req)
             if isinstance(res, dict) and res.get("trade_id"):

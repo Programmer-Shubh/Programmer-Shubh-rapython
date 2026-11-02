@@ -5,7 +5,7 @@ from core.models.trade_model import TradeModel
 from core.services.transaction_costs import TransactionCosts
 from core.services.historical_replay import HistoricalReplayEngine
 from core.services.backtest_engine import BacktestEngine
-from utils.helpers import get_lot_size, format_currency, effective_lot_size
+from utils.helpers import get_lot_size, format_currency, effective_lot_size, sltp_unit
 
 router = APIRouter()
 
@@ -19,6 +19,8 @@ class PlaceTradeRequest(BaseModel):
     entry_price: float
     stop_loss: float = 1500.0
     take_profit: float = 3000.0
+    sl_unit: str = "rs"
+    tp_unit: str = "rs"
     date: str = ""
     trade_type: str = "intraday"
     strategy_id: int = 0
@@ -34,6 +36,8 @@ class UpdateSLTPRequest(BaseModel):
     trade_id: int
     stop_loss: Optional[float] = None
     target: Optional[float] = None
+    sl_unit: Optional[str] = None
+    tp_unit: Optional[str] = None
 
 
 class TradeModeRequest(BaseModel):
@@ -97,6 +101,8 @@ def get_open_trades():
                 "est_exit_costs": t.get("est_exit_costs", 0),
                 "sl": t["trade"]["stop_loss"],
                 "tp": t["trade"]["target"],
+                "sl_unit": t["trade"].get("sl_unit", "rs"),
+                "tp_unit": t["trade"].get("tp_unit", "rs"),
                 "trade_mode": t["trade"].get("trade_mode", "paper"),
                 "broker_order_id": t["trade"].get("broker_order_id", ""),
                 "trade_type": t["trade"].get("trade_type", "intraday"),
@@ -298,6 +304,8 @@ def place_trade(req: PlaceTradeRequest):
             "entry_price": adj_premium,
             "stop_loss": req.stop_loss,
             "target": req.take_profit,
+            "sl_unit": sltp_unit(req.sl_unit),
+            "tp_unit": sltp_unit(req.tp_unit),
             "total_cost": costs["total"],
             "entry_date": req.date,
             "trade_type": req.trade_type,
@@ -335,8 +343,10 @@ def close_trade(req: CloseTradeRequest):
 @router.post("/update-sltp")
 def update_sltp(req: UpdateSLTPRequest):
     trade_model = TradeModel()
-    trade_model.update_management(req.trade_id, req.stop_loss, req.target, "OFF")
-    return {"status": "updated", "trade_id": req.trade_id}
+    trade_model.update_management(req.trade_id, req.stop_loss, req.target, "OFF",
+                                  sl_unit=req.sl_unit, tp_unit=req.tp_unit)
+    return {"status": "updated", "trade_id": req.trade_id, "sl_unit": req.sl_unit or "rs",
+            "tp_unit": req.tp_unit or "rs"}
 
 
 @router.post("/check-sltp")

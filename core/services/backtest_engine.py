@@ -114,6 +114,20 @@ class BacktestEngine:
         # -600/-900 that paper never closed (extra exit = win-rate gap).
         strategy_sl = float(risk_management.get("strategy_stop_loss", 0) or 0)
         strategy_tp = float(risk_management.get("strategy_take_profit", 0) or 0)
+        # Strategy MTM SL/TP PERCENT mode ('2%' ya strategy_stop_loss_pct=2):
+        # % ka matlab initial capital ka percent -> Rs threshold ban jata hai.
+        try:
+            _ssp = float(risk_management.get("strategy_stop_loss_pct", 0) or 0)
+            if _ssp > 0 and _ssp <= 100 and self.initial_capital > 0:
+                strategy_sl = self.initial_capital * _ssp / 100.0
+        except Exception:
+            pass
+        try:
+            _stp = float(risk_management.get("strategy_take_profit_pct", 0) or 0)
+            if _stp > 0 and _stp <= 100 and self.initial_capital > 0:
+                strategy_tp = self.initial_capital * _stp / 100.0
+        except Exception:
+            pass
         # Min entry premium: skip SELL entries cheaper than this (far-OTM lottery
         # tickets like Rs2-3 have tiny max profit but huge adverse-move loss).
         min_premium = float(advanced_options.get("min_entry_premium", 0) or 0)
@@ -136,8 +150,9 @@ class BacktestEngine:
         else:
             qty = int(leg.get("lots", 1)) * get_lot_size(symbol)
         txn_type = leg.get("transaction", "buy").lower()
-        leg_sl = float(leg.get("stop_loss", risk_management.get("daily_stop_loss", 500)) or 0)
-        leg_tp = float(leg.get("take_profit", risk_management.get("daily_take_profit", 1000)) or 0)
+        leg_sl, leg_tp, sl_unit, tp_unit = self._resolve_sltp(leg, risk_management)
+        self._sl_unit = sl_unit
+        self._tp_unit = tp_unit
         strike_sel = advanced_options.get("strike_selection", "otm")
         delta_target = advanced_options.get("delta_target")
         otm_dist = int(advanced_options.get("otm_distance", 2))
@@ -1709,12 +1724,33 @@ class BacktestEngine:
                 best = test
         return best
 
+    def _resolve_sltp(self, leg: dict, risk_management: dict):
+        """SL/TP rupees YA percent-of-premium ('2%' / *_pct key) - ek jagah
+        parse, `_check_sl_tp` ko unit milti hai (paper SL monitor wahi unit
+        trade par store karta hai). Returns (sl_amt, tp_amt, sl_unit, tp_unit)."""
+        from utils.helpers import sltp_amount as _am
+        sl_amt, sl_unit = _am(leg.get("stop_loss", risk_management.get("daily_stop_loss", 500)))
+        tp_amt, tp_unit = _am(leg.get("take_profit", risk_management.get("daily_take_profit", 1000)))
+        # Explicit *_pct keys win (UI "%" suffix unme bhejta hai)
+        try:
+            if float(risk_management.get("daily_stop_loss_pct", 0) or 0) > 0:
+                sl_amt, sl_unit = float(risk_management["daily_stop_loss_pct"]), "pct"
+        except Exception:
+            pass
+        try:
+            if float(risk_management.get("daily_take_profit_pct", 0) or 0) > 0:
+                tp_amt, tp_unit = float(risk_management["daily_take_profit_pct"]), "pct"
+        except Exception:
+            pass
+        return sl_amt, tp_amt, sl_unit, tp_unit
+
     def _check_sl_tp(self, current, entry, option_type, txn_type, sl_amt, tp_amt, qty=0):
         entry_price = float(entry["price"])
         qty = int(qty or entry.get("quantity", 0) or 0)
         if qty <= 0:
             qty = 1
-        # Overall SL/TP from UI are RUPEES per trade (e.g. 1500). Convert to premium points.
+        # Overall SL/TP from UI are RUPEES per trade (e.g. 1500) YA premium ka
+        # PERCENT ('2%'). Convert to premium level via shared helper.
         # Old bug: (sl_amt / entry_price)*100 treated Rs as % of premium, giving 3000%
         # levels that never hit, so Sell trades bled -23k instead of -1500 exit.
         # Shared helper (utils.helpers.sltp_premium_level): paper SL monitor
@@ -1723,7 +1759,9 @@ class BacktestEngine:
         from utils.helpers import sltp_premium_level as _lvl
 
         def _to_level(amt, is_sl):
-            return _lvl(entry_price, amt, qty, 1, txn_type, is_sl)
+            return _lvl(entry_price, amt, qty, 1, txn_type, is_sl,
+                        unit=(getattr(self, "_sl_unit", None) if is_sl
+                              else getattr(self, "_tp_unit", None)))
 
         sl_level = _to_level(sl_amt, True)
         tp_level = _to_level(tp_amt, False)

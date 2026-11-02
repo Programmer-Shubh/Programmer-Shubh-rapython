@@ -501,6 +501,8 @@ class Database:
                     broker_order_id TEXT DEFAULT '',
                     exit_status TEXT DEFAULT 'manual',
                     entry_iv REAL DEFAULT NULL,
+                    sl_unit TEXT DEFAULT 'rs',
+                    tp_unit TEXT DEFAULT 'rs',
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
@@ -648,6 +650,14 @@ class Database:
             cols = _colnames("paper_trades")
             if "broker_order_id" not in cols:
                 self.execute("ALTER TABLE paper_trades ADD COLUMN broker_order_id TEXT DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            cols = _colnames("paper_trades")
+            if "sl_unit" not in cols:
+                self.execute("ALTER TABLE paper_trades ADD COLUMN sl_unit TEXT DEFAULT 'rs'")
+            if "tp_unit" not in cols:
+                self.execute("ALTER TABLE paper_trades ADD COLUMN tp_unit TEXT DEFAULT 'rs'")
         except Exception:
             pass
         try:

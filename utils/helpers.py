@@ -437,28 +437,96 @@ def model_premium(spot: float, strike: float, expiry_days: float, option_type: s
     return max(round(float(bs), 2), OPTION_MODEL_MIN)
 
 
+def sltp_unit(value) -> str:
+    """SL/TP unit normalize: 'rs' ya 'pct' (kuch bhi aur = 'rs').
+    Trade rows par default 'rs' - purane trades bilkul purana behavior."""
+    try:
+        if isinstance(value, str) and value.strip().lower() in ("pct", "%", "percent"):
+            return "pct"
+    except Exception:
+        pass
+    return "rs"
+
+
+def sltp_amount(value, default_unit: str = "rs"):
+    """SL/TP value ko (amount, unit) me parse karo - unit 'rs' | 'pct'.
+    Har jagah (backtest risk, paper trade, live orders, sliders) yehi parser
+    chalta hai taaki '% of premium' entry har input se same samjhe jaye:
+      - Number            -> (value, default_unit)
+      - String '2%'/'2pct'/'2percent' -> (2.0, 'pct')
+      - String '1500'/'Rs1500'/'1500rs' -> (1500.0, 'rs')
+    Purani rupee entries mera-purana behavior: number jo UI me 1500 jaisa bhar
+    jaata hai wahi rupees hai (default_unit='rs')."""
+    try:
+        dflt = str(default_unit or "rs")
+        if value is None:
+            return 0.0, dflt
+        if isinstance(value, bool):
+            return 0.0, dflt
+        if isinstance(value, (int, float)):
+            return float(value), dflt
+        s = str(value).strip().replace("\u20b9", "").replace(",", "")
+        if not s:
+            return 0.0, dflt
+        low = s.lower()
+        if low.endswith("%"):
+            num = low[:-1].strip()
+            try:
+                return float(num), "pct"
+            except Exception:
+                return 0.0, "pct"
+        for _suf in ("percent", "pct"):
+            if low.endswith(_suf):
+                num = low[:-len(_suf)].strip()
+                try:
+                    return float(num), "pct"
+                except Exception:
+                    return 0.0, "pct"
+        if low.endswith("rs"):
+            num = low[:-2].strip()
+            try:
+                return float(num), "rs"
+            except Exception:
+                return 0.0, "rs"
+        try:
+            return float(s), dflt
+        except Exception:
+            return 0.0, dflt
+    except Exception:
+        return 0.0, str(default_unit or "rs")
+
+
 def sltp_premium_level(entry_price: float, amount: float, quantity: int,
-                       lot_size: int, transaction_type: str, is_sl: bool) -> float:
+                       lot_size: int, transaction_type: str, is_sl: bool,
+                       unit: str = None) -> float:
     """SINGLE source of truth for SL/TP premium levels (backtest engine,
     paper SL monitor, open-position auto-exit - sab yahi use karte hain taaki
     paper wahi level par kate jahan backtest kat-ta hai).
-    UI me SL/TP RUPEES-total me hote hain (e.g. 1500):
-      - amount > 20  -> rupees total -> premium points = amount/(qty*lot).
+    UI me SL/TP RUPEES-total me hote hain (e.g. 1500) YA premium ka PERCENT
+    (e.g. '2%' ya daily_stop_loss_pct=2):
+      - unit None  -> legacy heuristic: amount > 20 -> rupees, <= 20 -> percent
+        (purane trades/backtests bilkul waisa hi behavior).
+      - unit 'rs'   -> rupees total -> premium points = amount/(qty*lot).
         BUY: SL = entry-pts, TP = entry+pts.
         SELL: SL = entry+pts, TP = entry-pts (floor 0.05).
-      - amount <= 20 -> legacy percent of premium (purane backtests parity).
+      - unit 'pct'  -> percent of premium (chhota percent bhi, e.g. 2).
         BUY: SL = entry*(1-amt%), TP = entry*(1+amt%).
         SELL: SL = entry*(1+amt%), TP = entry*(1-amt%).
-    amount <= 0 -> 0 (disabled). Win = net pnl strictly > 0 (kahin aur)."""
+    NaN amount / <= 0 -> 0 (disabled). Win = net pnl strictly > 0 (kahin aur)."""
     try:
         entry = float(entry_price or 0)
+        if isinstance(amount, str):
+            amount, unit = sltp_amount(amount)
         amt = float(amount or 0)
-        if amt <= 0 or entry <= 0:
+        if amt != amt or amt <= 0 or entry <= 0:   # NaN / disabled guard
             return 0.0
         txn = str(transaction_type or "BUY").upper()
         is_buy = txn != "SELL"
+        u = str(unit or "").lower()
+        if u not in ("rs", "pct"):
+            u = "rs" if amt > 20 else "pct"       # legacy amount-based heuristic
         units = max(int(quantity or 1) * int(lot_size or 0), 1)
-        if amt > 20:
+        if u == "rs":
             pts = amt / units
             if is_buy:
                 lvl = (entry - pts) if is_sl else (entry + pts)

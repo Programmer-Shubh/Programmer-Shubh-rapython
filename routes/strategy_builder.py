@@ -1351,6 +1351,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         risk_sym["strategy_stop_loss"] = float(risk_sym["daily_stop_loss"]) / _n_syms
                     if float(risk_sym.get("daily_take_profit", 0) or 0) > 0:
                         risk_sym["strategy_take_profit"] = float(risk_sym["daily_take_profit"]) / _n_syms
+                    # Percent mode: % threshold bhi symbol count se split hoga
+                    if float(risk_sym.get("daily_stop_loss_pct", 0) or 0) > 0:
+                        risk_sym["strategy_stop_loss_pct"] = float(risk_sym["daily_stop_loss_pct"]) / _n_syms
+                    if float(risk_sym.get("daily_take_profit_pct", 0) or 0) > 0:
+                        risk_sym["strategy_take_profit_pct"] = float(risk_sym["daily_take_profit_pct"]) / _n_syms
                     if float(risk_sym.get("daily_loss_limit", 0) or 0) > 0:
                         risk_sym["daily_loss_limit"] = float(risk_sym["daily_loss_limit"]) / _n_syms
             except Exception:
@@ -1659,6 +1664,8 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                    "exit_time": str(advanced_in.get("exit_time", "") or advanced_in.get("early_exit_time", "")),
                    "sl": float(risk_in.get("daily_stop_loss", 0) or 0),
                    "tp": float(risk_in.get("daily_take_profit", 0) or 0),
+                   "sl_unit": ("pct" if (float(risk_in.get("daily_stop_loss_pct", 0) or 0) > 0) else "rs"),
+                   "tp_unit": ("pct" if (float(risk_in.get("daily_take_profit_pct", 0) or 0) > 0) else "rs"),
                    "max_trades_per_day": int(risk_in.get("max_trades_per_day", 0) or 0)},
         "engine": _engine_name,
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,

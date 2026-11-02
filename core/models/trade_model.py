@@ -45,6 +45,24 @@ class TradeModel:
             self.db.execute("ALTER TABLE paper_trades ADD COLUMN broker_order_id TEXT DEFAULT ''")
         except Exception:
             pass
+        # SL/TP unit ('rs' | 'pct'): percent entries har jagah (engine, monitor,
+        # UI) same way samjhe jayen. Default 'rs' = purane trades wahi behavior.
+        try:
+            self.db.execute("ALTER TABLE paper_trades ADD COLUMN sl_unit TEXT DEFAULT 'rs'")
+        except Exception:
+            pass
+        try:
+            self.db.execute("ALTER TABLE paper_trades ADD COLUMN tp_unit TEXT DEFAULT 'rs'")
+        except Exception:
+            pass
+        def _unit_of(v, key):
+            try:
+                if v is None:
+                    return "rs"
+                u = str(data.get(key) or ("pct" if (isinstance(v, str) and ("%" in v or v.lower().endswith(("pct", "percent")))) else "rs")).lower()
+                return u if u in ("rs", "pct") else "rs"
+            except Exception:
+                return "rs"
         tt = str(data.get("trade_type", "intraday") or "intraday").lower()
         if tt not in ("intraday", "positional"):
             tt = "intraday"
@@ -52,14 +70,17 @@ class TradeModel:
             """INSERT INTO paper_trades
                (user_id, strategy_id, symbol, option_type, strike_price, expiry_date,
                 transaction_type, quantity, lot_size, entry_price, stop_loss, target,
+                sl_unit, tp_unit,
                 auto_action, total_cost, entry_date, trade_mode, trade_type, broker_order_id, entry_iv, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
             [
                 data.get("user_id", 1), data.get("strategy_id"), data["symbol"],
                 data["option_type"], data["strike_price"], data.get("expiry_date", ""),
                 data["transaction_type"], data.get("quantity", 1),
                 data.get("lot_size", get_lot_size(data["symbol"])),
                 data["entry_price"], data.get("stop_loss", 1500), data.get("target", 1000),
+                _unit_of(data.get("stop_loss", 1500), "sl_unit"),
+                _unit_of(data.get("target", 1000), "tp_unit"),
                 data.get("auto_action", "OFF"), data.get("total_cost", 0),
                 data.get("entry_date", ""), data.get("trade_mode", "paper"), tt,
                 data.get("broker_order_id", ""),
@@ -121,8 +142,10 @@ class TradeModel:
         try:
             from utils.helpers import sltp_premium_level as _lvl
             _txn = t.get("transaction_type", "BUY")
-            sl_level = _lvl(entry, t.get("stop_loss", 0), qty, lot, _txn, True)
-            tp_level = _lvl(entry, t.get("target", 0), qty, lot, _txn, False)
+            sl_level = _lvl(entry, t.get("stop_loss", 0), qty, lot, _txn, True,
+                            unit=(t.get("sl_unit") or None))
+            tp_level = _lvl(entry, t.get("target", 0), qty, lot, _txn, False,
+                            unit=(t.get("tp_unit") or None))
         except Exception:
             sl_level, tp_level = 0, 0
         return sl_level, tp_level
@@ -403,7 +426,8 @@ class TradeModel:
                     try:
                         from utils.helpers import sltp_premium_level as _lvl
                         return _lvl(entry_p, level, qty_l, lot_l,
-                                    t.get("transaction_type", "BUY"), is_sl)
+                                    t.get("transaction_type", "BUY"), is_sl,
+                                    unit=(t.get("sl_unit") if is_sl else t.get("tp_unit")) or None)
                     except Exception:
                         return 0.0
                 try:
@@ -736,9 +760,16 @@ class TradeModel:
         )
         return 1
 
-    def update_management(self, trade_id: int, stop_loss: float, target: float, auto_action: str) -> int:
+    def update_management(self, trade_id: int, stop_loss: float, target: float, auto_action: str,
+                          sl_unit: str = None, tp_unit: str = None) -> int:
         # Only update fields actually sent (None = untouched) so editing SL
         # doesn't erase Target and vice versa.
+        def _nu(u):
+            try:
+                u = str(u or "").lower()
+                return u if u in ("rs", "pct") else None
+            except Exception:
+                return None
         sets, vals = [], []
         if stop_loss is not None:
             sets.append("stop_loss=?")
@@ -746,6 +777,12 @@ class TradeModel:
         if target is not None:
             sets.append("target=?")
             vals.append(target)
+        if _nu(sl_unit):
+            sets.append("sl_unit=?")
+            vals.append(_nu(sl_unit))
+        if _nu(tp_unit):
+            sets.append("tp_unit=?")
+            vals.append(_nu(tp_unit))
         if auto_action:
             sets.append("auto_action=?")
             vals.append(auto_action)
