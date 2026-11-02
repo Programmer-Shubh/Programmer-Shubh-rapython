@@ -2297,7 +2297,10 @@ let _lastOpenTrdHTML = null;
             const boxes=['dash-robot-saved','tc-robot-saved'].map(id=>document.getElementById(id)).filter(Boolean);
             if(!boxes.length)return;
             const r=await A('/api/strategies/list');
-            const robots=(r.strategies||[]).filter(s=> (s.description==='robot') || (s.name||'').includes('_Robot_') || (s.name||'').includes('_Strategy_'));
+            // Saari saved strategies dikhni chahiye (pehle sirf robot/naam
+            // filter wali aati thi, isliye cards me 3 ON par table me 1 hi
+            // row dikhti thi). Cards aur table ab same list use karte hain.
+            const robots=(r.strategies||[]).slice();
             if(!robots.length){ boxes.forEach(b=>b.innerHTML='<p class="text-muted p-3 small">No saved strategies yet — click Save Strategy.</p>'); return; }
             let h='<table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Symbol</th><th>Order</th><th>Lots</th><th>SL/TP</th><th>Saved BT</th><th>Status</th><th>Mode</th><th>Paper</th><th>Live</th><th>Action</th></tr></thead><tbody>';
             robots.forEach(s=>{
