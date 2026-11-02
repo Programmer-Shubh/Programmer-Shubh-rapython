@@ -2420,8 +2420,24 @@ let _lastOpenTrdHTML = null;
                     }catch(_sve2){}
                 }
                 const _sctl=new AbortController(); const _stmo=setTimeout(()=>_sctl.abort(),45000);
+                // Use the user's CURRENT r-sl/r-tp selection (not just saved) so
+                // SL/TP changes reflect in the backtest result. Populate from saved
+                // strategy only if the input is empty (preserve user edits).
+                try{
+                    const _s0=await A('/api/strategies/'+id);
+                    if(_s0&&!_s0.error){
+                        const _rm0=_parseJsonField(_s0.risk_management,{});
+                        const _savedSl=_rm0.daily_stop_loss_pct?_rm0.daily_stop_loss_pct:(_rm0.daily_stop_loss||1500);
+                        const _savedTp=_rm0.daily_take_profit_pct?_rm0.daily_take_profit_pct:(_rm0.daily_take_profit||3000);
+                        const _rsl=document.getElementById('r-sl');const _rtp=document.getElementById('r-tp');
+                        if(_rsl&&!_rsl.value) _rsl.value=_savedSl;
+                        if(_rtp&&!_rtp.value) _rtp.value=_savedTp;
+                    }
+                }catch(_e0){}
+                const _slA=_amtVal('r-sl',1500);const _tpA=_amtVal('r-tp',3000);
+                const _qs=new URLSearchParams(); if(force) _qs.set('refresh','1'); _qs.set('sl',_slA.v); _qs.set('sl_unit',_slA.u); _qs.set('tp',_tpA.v); _qs.set('tp_unit',_tpA.u);
                 let r=null;
-                try{ r=await P('/api/strategies/'+id+'/backtest'+(force?'?refresh=1':''),{method:'POST',signal:_sctl.signal}); }
+                try{ r=await P('/api/strategies/'+id+'/backtest?'+_qs.toString(),{method:'POST',signal:_sctl.signal}); }
                 catch(_te){ r={error:'timeout'}; }
                 finally{clearTimeout(_stmo);}
                 if(r&&!r.error&&(r.metrics||r.trade_list)){
@@ -2442,8 +2458,8 @@ let _lastOpenTrdHTML = null;
             const legs=_parseJsonField(s.legs,[]);
             if(legs.length){ try{stratLegs=JSON.parse(JSON.stringify(legs));renderLegs();}catch(e){} }
             const rm=_parseJsonField(s.risk_management,{});
-            document.getElementById('r-sl').value=rm.daily_stop_loss||1500;
-            document.getElementById('r-tp').value=rm.daily_take_profit||3000;
+            if(!document.getElementById('r-sl').value) document.getElementById('r-sl').value=rm.daily_stop_loss||1500;
+            if(!document.getElementById('r-tp').value) document.getElementById('r-tp').value=rm.daily_take_profit||3000;
             try{if(rm.signal_lookback_days!=null)document.getElementById('r-slb').value=rm.signal_lookback_days;}catch(e){}
             const ao=_parseJsonField(s.advanced_options,{});
             if(ao.trade_mode) document.getElementById('r-type').value=ao.trade_mode;

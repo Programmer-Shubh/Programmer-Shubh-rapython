@@ -966,7 +966,8 @@ def rollover_endpoint(strat_id: int):
 
 
 @router.post("/{strat_id}/backtest")
-def strategy_backtest(strat_id: int, refresh: int = 0):
+def strategy_backtest(strat_id: int, refresh: int = 0, sl: float = None, tp: float = None,
+                     sl_unit: str = None, tp_unit: str = None):
     """Saved strategy ka backtest EXACT saved config par - form round-trip
     me kho jaane wale fields (entry/exit conditions, lots, mtd, checkbox
     indicators) se zero-metrics aata tha. Ye endpoint DB se sidha
@@ -997,6 +998,27 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
         exit_conditions = _ld(row.get("exit_conditions"), [])
         advanced = _ld(row.get("advanced_options"), {})
         risk = _ld(row.get("risk_management"), {})
+        # SL/TP override from current UI selection (backtestFromRobot passes the
+        # user's edited r-sl/r-tp) - saved-strategy backtest otherwise ignored
+        # the user's changes (cached saved result / saved risk were used) and
+        # SL@ levels didn't move. Override wins over saved risk_management.
+        try:
+            if sl is not None and float(sl) > 0:
+                if str(sl_unit or "").lower() == "pct":
+                    risk["daily_stop_loss"] = 0
+                    risk["daily_stop_loss_pct"] = float(sl)
+                else:
+                    risk["daily_stop_loss"] = float(sl)
+                    risk["daily_stop_loss_pct"] = 0
+            if tp is not None and float(tp) > 0:
+                if str(tp_unit or "").lower() == "pct":
+                    risk["daily_take_profit"] = 0
+                    risk["daily_take_profit_pct"] = float(tp)
+                else:
+                    risk["daily_take_profit"] = float(tp)
+                    risk["daily_take_profit_pct"] = 0
+        except Exception:
+            pass
         # Top-level timeframe bhi advanced me mirror karo (form sirf
         # advanced.timeframe padhta tha, purani rows me top-level tha)
         try:
@@ -1049,7 +1071,8 @@ def strategy_backtest(strat_id: int, refresh: int = 0):
             row.get("symbol"), row.get("start_date"), row.get("end_date"),
             row.get("timeframe"), indicators, entry_conditions,
             exit_conditions, legs, advanced, risk)
-        if not refresh and row.get("last_backtest"):
+        _sltp_override = (sl is not None and float(sl) > 0) or (tp is not None and float(tp) > 0)
+        if not refresh and not _sltp_override and row.get("last_backtest"):
             # Backtest Detail (refresh=0): SAVED result TURANT wapas - chahe
             # config badli ho ya engine naya ho. Pehle hash-mismatch par
             # chupke se FULL fresh run hota tha - 45s client timeout + busy
