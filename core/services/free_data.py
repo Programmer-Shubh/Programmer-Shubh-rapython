@@ -275,19 +275,38 @@ def fetch_cloud_spot(symbol: str) -> dict:
     Returns {spot,change,high,low,source} or {}."""
     spot, source = 0, ""
     chg = 0.0
-    # 1) NSE direct (free, most accurate; blocked from some cloud IPs)
+    # 0) Connected broker quote (Fyers) FIRST - real NSE tick, most accurate
+    # when broker connected (realtime, no delay). User has Fyers connected.
     try:
-        from core.services.nse_client import nse_fetch_spot
-        d = nse_fetch_spot(symbol, timeout=4)
-        if d and float(d.get("spot") or 0) > 0:
-            spot, source = float(d["spot"]), "nse"
-            chg = float(d.get("change") or 0)
+        from core.services.contract_pricer import _fyers_auth, _fyers_underlying
+        _app_id, _tok = _fyers_auth()
+        _under = _fyers_underlying(symbol)
+        if _app_id and _tok and _under:
+            from core.services.contract_pricer import _fyers_quotes_raw, _fy_quote_rows
+            _body = _fyers_quotes_raw(_under, _app_id, _tok)
+            _node = _fy_quote_rows(_body).get(_under) or {}
+            if isinstance(_node, dict):
+                for _f in ("lp", "last_price", "lastPrice", "ltp"):
+                    try:
+                        _px = float(_node.get(_f, 0) or 0)
+                    except Exception:
+                        _px = 0
+                    if _px > 0:
+                        spot, source = _px, "fyers"
+                        break
     except Exception:
         pass
-    # 1b) Connected broker quote (Fyers) - real index tick, same broker the
-    # live orders go to (so paper/live strike + premium align).
+    # 1) NSE direct (free, most accurate; blocked from some cloud IPs)
     if not spot:
         try:
+            from core.services.nse_client import nse_fetch_spot
+            d = nse_fetch_spot(symbol, timeout=4)
+            if d and float(d.get("spot") or 0) > 0:
+                spot, source = float(d["spot"]), "nse"
+                chg = float(d.get("change") or 0)
+        except Exception:
+            pass
+    # (old 1b Fyers block removed - moved to step 0)
             from core.services.contract_pricer import _fyers_auth, _fyers_underlying
             _app_id, _tok = _fyers_auth()
             _under = _fyers_underlying(symbol)
