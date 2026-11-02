@@ -215,14 +215,9 @@ async def _startup_background():
                 _db = _DBs.get_instance()
                 # Ensure protected column exists (idempotent, works on PG+SQLite)
                 try:
-                    _cols = _db._colnames("strategies") if hasattr(_db, "_colnames") else set()
+                    _db.execute("ALTER TABLE strategies ADD COLUMN protected INTEGER DEFAULT 0")
                 except Exception:
-                    _cols = set()
-                if "protected" not in _cols:
-                    try:
-                        _db.execute("ALTER TABLE strategies ADD COLUMN protected INTEGER DEFAULT 0")
-                    except Exception:
-                        pass
+                    pass
                 # Check if already exists
                 try:
                     _existing = _db.fetch_one("SELECT id FROM strategies WHERE name='rakesh nifty' LIMIT 1")
