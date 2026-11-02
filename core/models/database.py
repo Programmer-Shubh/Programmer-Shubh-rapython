@@ -352,6 +352,7 @@ class Database:
                     advanced_options TEXT DEFAULT '{}',
                     risk_management TEXT DEFAULT '{}',
                     status TEXT DEFAULT 'active',
+                    protected INTEGER DEFAULT 0,
                     last_backtest TEXT DEFAULT NULL,
                     last_backtest_hash TEXT DEFAULT NULL,
                     last_backtest_at TEXT DEFAULT NULL,
@@ -523,6 +524,7 @@ class Database:
                     advanced_options TEXT DEFAULT '{}',
                     risk_management TEXT DEFAULT '{}',
                     status TEXT DEFAULT 'active',
+                    protected INTEGER DEFAULT 0,
                     last_backtest TEXT DEFAULT NULL,
                     last_backtest_hash TEXT DEFAULT NULL,
                     last_backtest_at TEXT DEFAULT NULL,
@@ -630,7 +632,8 @@ class Database:
                 self.execute("ALTER TABLE strategies ADD COLUMN status TEXT DEFAULT 'active'")
             for _cc, _ct in (("last_backtest", "TEXT DEFAULT NULL"),
                              ("last_backtest_hash", "TEXT DEFAULT NULL"),
-                             ("last_backtest_at", "TEXT DEFAULT NULL")):
+                             ("last_backtest_at", "TEXT DEFAULT NULL"),
+                             ("protected", "INTEGER DEFAULT 0")):
                 if _cc not in cols:
                     try:
                         self.execute(f"ALTER TABLE strategies ADD COLUMN {_cc} {_ct}")

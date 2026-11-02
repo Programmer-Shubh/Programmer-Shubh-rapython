@@ -711,6 +711,9 @@ def strategy_paper_state(strat_id: int):
 @router.delete("/{strat_id}")
 def delete_strategy(strat_id: int):
     db = Database.get_instance()
+    row = db.fetch_one("SELECT protected FROM strategies WHERE id=?", [strat_id])
+    if row and int(row.get("protected") or 0) == 1:
+        return {"error": "Default strategy 'rakesh nifty' cannot be deleted", "protected": True}
     db.execute("DELETE FROM strategies WHERE id=?", [strat_id])
     return {"status": "deleted", "id": strat_id}
 
