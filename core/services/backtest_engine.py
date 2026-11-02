@@ -130,6 +130,18 @@ class BacktestEngine:
             pass
         # Min entry premium: skip SELL entries cheaper than this (far-OTM lottery
         # tickets like Rs2-3 have tiny max profit but huge adverse-move loss).
+        vix_max = float(risk_management.get("vix_max", 0) or 0)
+        vix_data = advanced_options.get("vix_data") or {}
+        if not vix_data:
+            try:
+                import json as _vj, os as _vo
+                _vp = os.path.join(os.path.dirname(__file__), "..", "..", "data", "india_vix.json")
+                if os.path.exists(_vp):
+                    vix_data = _vj.load(open(_vp))
+            except Exception:
+                vix_data = {}
+        # Min entry premium: skip SELL entries cheaper than this (far-OTM lottery
+        # tickets like Rs2-3 have tiny max profit but huge adverse-move loss).
         min_premium = float(advanced_options.get("min_entry_premium", 0) or 0)
         # Entry delay: wait N bars after entry_time for trend confirmation (Quantman-style)
         # e.g., 3-6 bars = 15-30 min after 09:35
@@ -516,6 +528,14 @@ class BacktestEngine:
                         est_prem = _bsmp(spot_est, strike_est, 5, opt_type,
                                          symbol=symbol, iv=(self.implied_volatility or None))
                         if (est_prem or 0) < min_premium:
+                            can_enter = False
+                    except Exception:
+                        pass
+                # VIX filter: skip entry on high-volatility days (VIX > threshold)
+                if can_enter and vix_max > 0:
+                    try:
+                        _vix = float(vix_data.get(str(cur_date)[:10], 0) or 0)
+                        if _vix > 0 and _vix > vix_max:
                             can_enter = False
                     except Exception:
                         pass
