@@ -271,15 +271,57 @@ def _archive_result(strategy_id, res, config_hash="", stored_at=""):
         return 0
 
 
+def _latest_archived_result(strategy_id):
+    """strategy_results (history) se is strategy ka sabse naya saved result.
+    last_backtest column khaali/kharaab ho (delete-recreate, purani DB row)
+    tab bhi card par Saved BT dikhe - data archive me pada hota hai."""
+    import json as _js
+    try:
+        _sid = int(strategy_id or 0)
+    except Exception:
+        return None
+    if not _sid:
+        return None
+    try:
+        _ensure_results_table()
+    except Exception:
+        pass
+    try:
+        _row = Database.get_instance().fetch_one(
+            "SELECT result_json, stored_at FROM strategy_results"
+            " WHERE strategy_id=? ORDER BY id DESC LIMIT 1", [_sid])
+        if not _row or not _row.get("result_json"):
+            return None
+        raw = _row.get("result_json")
+        res = _js.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(res, dict):
+            return None
+        return (res, _row.get("stored_at") or "")
+    except Exception:
+        return None
+
+
 def _bt_summary(row) -> dict:
     """List/cards ke liye halka summary (poora JSON nahi - list halki rahe)."""
     import json as _js
     try:
         raw = row.get("last_backtest") or ""
-        if not raw:
-            return {}
-        _r = _js.loads(raw) if isinstance(raw, str) else raw
+        _stored_at = row.get("last_backtest_at") or ""
+        _r = None
+        if raw:
+            try:
+                _r = _js.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                _r = None
         _m = (_r or {}).get("metrics") or {}
+        # Fallback: last_backtest khaali/invalid ho to history archive se
+        # sabse naya saved result lo (delete ke baad re-save / legacy rows).
+        if not isinstance(_m, dict) or "total_trades" not in _m:
+            _arc = _latest_archived_result(row.get("id"))
+            if _arc:
+                _r, _arc_at = _arc
+                _m = (_r or {}).get("metrics") or {}
+                _stored_at = _arc_at or _stored_at
         if not isinstance(_m, dict) or "total_trades" not in _m:
             return {}
         return {"trades": int(_m.get("total_trades") or 0),
@@ -288,7 +330,7 @@ def _bt_summary(row) -> dict:
                 "run_id": (_r or {}).get("run_id") or "",
                 # Cards ko batao saved result purane engine ka hai (red chip)
                 "stale_engine": _stored_engine_stale(_r),
-                "stored_at": row.get("last_backtest_at") or ""}
+                "stored_at": _stored_at}
     except Exception:
         return {}
 
@@ -468,6 +510,25 @@ def save_strategy(req: StrategyRequest):
             _attach_res = req.last_backtest
     except Exception:
         pass
+    # Delete -> dobara same config se nayi strategy banane par purana saved BT
+    # wapas mile: history archive me same config-hash ka result pada hota hai.
+    # (Sirf NEW strategy ke liye - update par maujooda last_backtest chhedna
+    # nahi hai.)
+    if _attach_res is None and not req.id and _new_hash:
+        try:
+            _ensure_results_table()
+            _cand = db.fetch_one(
+                "SELECT result_json FROM strategy_results"
+                " WHERE config_hash=? ORDER BY id DESC LIMIT 1", [_new_hash])
+            if _cand and _cand.get("result_json"):
+                _cand_res = json.loads(_cand["result_json"])
+                if isinstance(_cand_res, dict) and _result_matches_config(
+                        _cand_res, req.symbol, req.start_date, req.end_date,
+                        req.indicators, req.legs, req.risk_management,
+                        req.advanced_options):
+                    _attach_res = _cand_res
+        except Exception:
+            pass
     try:
         from datetime import datetime as _dtn, timedelta as _tdn, timezone as _tzn
         _now_s = _dtn.now(_tzn(_tdn(hours=5, minutes=30))).strftime("%Y-%m-%d %H:%M")
