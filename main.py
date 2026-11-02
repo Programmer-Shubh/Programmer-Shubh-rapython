@@ -213,8 +213,27 @@ async def _startup_background():
                 import json as _js
                 from core.models.database import Database as _DBs
                 _db = _DBs.get_instance()
-                _existing = _db.fetch_one("SELECT id FROM strategies WHERE name='rakesh nifty' AND protected=1 LIMIT 1")
+                # Ensure protected column exists (idempotent, works on PG+SQLite)
+                try:
+                    _cols = _db._colnames("strategies") if hasattr(_db, "_colnames") else set()
+                except Exception:
+                    _cols = set()
+                if "protected" not in _cols:
+                    try:
+                        _db.execute("ALTER TABLE strategies ADD COLUMN protected INTEGER DEFAULT 0")
+                    except Exception:
+                        pass
+                # Check if already exists
+                try:
+                    _existing = _db.fetch_one("SELECT id FROM strategies WHERE name='rakesh nifty' LIMIT 1")
+                except Exception:
+                    _existing = None
                 if _existing:
+                    # Mark protected
+                    try:
+                        _db.execute("UPDATE strategies SET protected=1 WHERE name='rakesh nifty'")
+                    except Exception:
+                        pass
                     return
                 _adv = {"trade_mode":"intraday","timeframe":"5m","entry_time":"09:35","exit_time":"15:15","slippage_pct":0.5,"strike_selection":"otm","otm_distance":4,"max_holding_bars":1000000}
                 _risk = {"daily_stop_loss":3000,"daily_take_profit":0,"max_trades_per_day":1,"signal_lookback_days":0}
@@ -227,8 +246,12 @@ async def _startup_background():
                      "Default NIFTY intraday option selling strategy (rakesh nifty). Sell PE in uptrend (Supertrend+RSI).",
                      _js.dumps(_inds),_js.dumps([]),_js.dumps([]),_js.dumps(_legs),
                      _js.dumps(_adv),_js.dumps(_risk),"active",1])
-            except Exception:
-                pass
+            except Exception as e:
+                try:
+                    import sys as _sys
+                    print("[seed] error:", e, flush=True)
+                except Exception:
+                    pass
         import threading as _th_seed
         _th_seed.Thread(target=_seed_default_strat, daemon=True).start()
     except: pass

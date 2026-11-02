@@ -622,6 +622,11 @@ class Database:
         # (purana bug: saari SQLite migrations silently skip ho rahi thin).
         def _colnames(table):
             try:
+                if self._is_postgres():
+                    rows = self.fetch_all(
+                        "SELECT column_name AS name FROM information_schema.columns "
+                        "WHERE table_name=%s", [table])
+                    return {(r["name"] if isinstance(r, dict) else r[0]) for r in (rows or [])}
                 return {(r["name"] if isinstance(r, dict) else r[1])
                         for r in self.fetch_all(f"PRAGMA table_info({table})")}
             except Exception:
