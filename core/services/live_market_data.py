@@ -13,7 +13,7 @@ except Exception:
 
 from collections import OrderedDict
 _LIVE_CACHE = OrderedDict()
-_LIVE_CACHE_TTL = 300
+_LIVE_CACHE_TTL = 60
 _LIVE_CACHE_MAX = 50
 _CHAIN_CACHE = OrderedDict()
 _CHAIN_CACHE_TTL = 300
@@ -88,11 +88,12 @@ class LiveMarketData:
     # _fetch_chain_page and fetch_live_from_nse REMOVED - NSE blocked on cloud
     # Use DB chain → Google Finance → synthetic Black-Scholes instead
 
-    def get_live_spot(self, symbol: str) -> dict:
+    def get_live_spot(self, symbol: str, fresh: bool = False) -> dict:
         now = time.time()
         sym = symbol.upper()
-        cached = _live_cache_get(sym)
-        if cached is not None: return cached
+        if not fresh:
+            cached = _live_cache_get(sym)
+            if cached is not None: return cached
         # 1) Cloud live: NSE -> Stooq -> Google (Yahoo removed, works on Render)
         try:
             q = fetch_cloud_spot(sym)

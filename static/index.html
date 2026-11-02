@@ -976,7 +976,7 @@
             const found={...mwLast};
             await Promise.all(mwSymbols.map(async(s)=>{
                 try{
-                    const r=await A('/api/dashboard/spot/'+s);
+                    const r=await A('/api/dashboard/spot/'+s+'?fresh=1');
                     if(r&&!r.error&&r.spot){found[s]=r;mwLast[s]={spot:r.spot,formatted:r.formatted,source:r.source,ts:Date.now()};}
                 }catch(e){}
             }));

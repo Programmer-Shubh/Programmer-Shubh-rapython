@@ -184,6 +184,22 @@ def _yahoo_fallback_quote(symbol: str, timeout: float = 5) -> dict:
             res = (j.get("chart", {}).get("result") or [{}])[0]
             meta = res.get("meta", {})
             px = float(meta.get("regularMarketPrice") or 0)
+            # Intraday (15m) ka last close zyada recent/accurate hota hai
+            # (regularMarketPrice stale ho sakta hai - PGINVIT jaisa).
+            try:
+                url2 = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=15m&range=5d"
+                r2 = _sess.get(url2, timeout=timeout) if _sess is not None else requests.get(url2, headers=_UA, timeout=timeout)
+                if r2 is not None and r2.status_code == 200:
+                    j2 = r2.json()
+                    res2 = (j2.get("chart", {}).get("result") or [{}])[0]
+                    q2 = (res2.get("indicators", {}).get("quote") or [{}])[0]
+                    closes2 = [c for c in (q2.get("close") or []) if c is not None]
+                    if closes2:
+                        intraday_px = float(closes2[-1])
+                        if intraday_px > 0:
+                            px = intraday_px
+            except Exception:
+                pass
             if px <= 0:
                 return {}
             prev = float(meta.get("previousClose") or meta.get("chartPreviousClose") or 0)

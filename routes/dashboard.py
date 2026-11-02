@@ -82,9 +82,9 @@ def get_spots():
 
 
 @router.get("/spot/{symbol}")
-def get_spot_single(symbol: str):
+def get_spot_single(symbol: str, fresh: int = 0):
     """Single symbol live spot price (cloud-first: Yahoo/Google/Stooq -> DB stale)."""
-    spot, src = _free_latest_spot(symbol)
+    spot, src = _free_latest_spot(symbol, fresh=bool(fresh))
     if spot > 0:
         return {"symbol": symbol.upper(), "spot": round(spot, 2),
                 "formatted": f"INR {spot:,.2f}", "source": src}
@@ -92,11 +92,11 @@ def get_spot_single(symbol: str):
             "source": "na"}
 
 
-def _free_latest_spot(symbol: str):
+def _free_latest_spot(symbol: str, fresh: bool = False):
     """Cloud-first: LiveMarketData (Yahoo/Google/Stooq, no NSE-direct), then DB stale close."""
     try:
         live = LiveMarketData()
-        data = live.get_live_spot(symbol)
+        data = live.get_live_spot(symbol, fresh=fresh)
         if data and data.get("spot") and float(data["spot"]) > 0:
             return float(data["spot"]), data.get("source", "live")
     except Exception:
