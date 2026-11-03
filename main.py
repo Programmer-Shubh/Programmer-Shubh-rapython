@@ -206,51 +206,6 @@ async def _startup_background():
         _th.Thread(target=_lot_backfill, daemon=True).start()
     except: pass
     try:
-        # Default strategy seed: "rakesh nifty" (NIFTY intraday Sell PE) always
-        # present, protected (not deletable). Settings persist across restarts.
-        def _seed_default_strat():
-            try:
-                import json as _js
-                from core.models.database import Database as _DBs
-                _db = _DBs.get_instance()
-                # Ensure protected column exists (idempotent, works on PG+SQLite)
-                try:
-                    _db.execute("ALTER TABLE strategies ADD COLUMN protected INTEGER DEFAULT 0")
-                except Exception:
-                    pass
-                # Check if already exists
-                try:
-                    _existing = _db.fetch_one("SELECT id FROM strategies WHERE name='rakesh nifty' LIMIT 1")
-                except Exception:
-                    _existing = None
-                if _existing:
-                    # Mark protected
-                    try:
-                        _db.execute("UPDATE strategies SET protected=1 WHERE name='rakesh nifty'")
-                    except Exception:
-                        pass
-                    return
-                _adv = {"trade_mode":"intraday","timeframe":"5m","entry_time":"09:35","exit_time":"15:15","slippage_pct":0.5,"strike_selection":"otm","otm_distance":4,"max_holding_bars":1000000}
-                _risk = {"daily_stop_loss":3000,"daily_take_profit":0,"max_trades_per_day":1,"signal_lookback_days":0}
-                _inds = [{"id":"supertrend","params":{"period":10,"multiplier":3}},{"id":"rsi","params":{"period":14}}]
-                _legs = [{"option_type":"PE","transaction":"sell","lots":6,"strike_selection":"otm","otm_distance":4,"expiry":"weekly"}]
-                _db.execute(
-                    """INSERT INTO strategies (user_id,name,symbol,start_date,end_date,timeframe,description,indicators,entry_conditions,exit_conditions,legs,advanced_options,risk_management,status,protected)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    [1,"rakesh nifty","NIFTY","2026-08-01","2026-10-30","5m",
-                     "Default NIFTY intraday option selling strategy (rakesh nifty). Sell PE in uptrend (Supertrend+RSI).",
-                     _js.dumps(_inds),_js.dumps([]),_js.dumps([]),_js.dumps(_legs),
-                     _js.dumps(_adv),_js.dumps(_risk),"active",1])
-            except Exception as e:
-                try:
-                    import sys as _sys
-                    print("[seed] error:", e, flush=True)
-                except Exception:
-                    pass
-        import threading as _th_seed
-        _th_seed.Thread(target=_seed_default_strat, daemon=True).start()
-    except: pass
-    try:
         print("[lifespan] background systems scheduled", flush=True)
     except: pass
 
