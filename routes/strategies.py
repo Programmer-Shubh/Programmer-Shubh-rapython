@@ -301,6 +301,43 @@ def _latest_archived_result(strategy_id):
         return None
 
 
+def _resolve_saved_result(row):
+    """Strategy ka saved result dhundo: pehle last_backtest, warna history
+    archive (strategy_results) ka sabse naya result.
+
+    Kyun: cards ka 'Saved BT' _bt_summary ke archive-fallback se dikhta hai,
+    lekin Backtest Detail sirf last_backtest padhta tha. Aise strategy par
+    card me "Saved BT: 17 trades" dikhta tha aur button dabane par
+    "saved result nahi hai" / fresh 0-trade run aata tha (saved result gayab
+    lagta tha). Dono jagah ab SAME source.
+
+    Returns: (result_dict | None, stored_at, source) where source is
+    "last_backtest" ya "history".
+    """
+    import json as _js
+    try:
+        raw = row.get("last_backtest") or ""
+        stored_at = row.get("last_backtest_at") or ""
+        res = None
+        if raw:
+            try:
+                res = _js.loads(raw) if isinstance(raw, str) else dict(raw)
+            except Exception:
+                res = None
+        if isinstance(res, dict) and (res.get("metrics") or res.get("trade_list") is not None):
+            return res, stored_at, "last_backtest"
+        # last_backtest khaali/corrupt - history archive se (jo card par
+        # pehle se 'Saved BT' dikha raha hai).
+        _arc = _latest_archived_result(row.get("id"))
+        if _arc:
+            ares, aat = _arc
+            if isinstance(ares, dict) and (ares.get("metrics") or ares.get("trade_list") is not None):
+                return ares, (aat or stored_at), "history"
+    except Exception:
+        pass
+    return None, (row.get("last_backtest_at") or ""), ""
+
+
 def _bt_summary(row) -> dict:
     """List/cards ke liye halka summary (poora JSON nahi - list halki rahe)."""
     import json as _js
@@ -1133,7 +1170,11 @@ def strategy_backtest(strat_id: int, refresh: int = 0, sl: float = None, tp: flo
             row.get("timeframe"), indicators, entry_conditions,
             exit_conditions, legs, advanced, risk)
         _sltp_override = (sl is not None and float(sl) > 0) or (tp is not None and float(tp) > 0)
-        if not refresh and not _sltp_override and row.get("last_backtest"):
+        # Saved result ka EK hi source: last_backtest, warna history archive.
+        # (Card par archive se 'Saved BT' dikhta tha, par yahan sirf
+        # last_backtest padha jata tha -> click par fresh 0-trade run.)
+        _saved_res, _saved_at, _saved_src = _resolve_saved_result(row)
+        if not refresh and not _sltp_override and isinstance(_saved_res, dict):
             # Backtest Detail (refresh=0): SAVED result TURANT wapas - chahe
             # config badli ho ya engine naya ho. Pehle hash-mismatch par
             # chupke se FULL fresh run hota tha - 45s client timeout + busy
@@ -1141,21 +1182,22 @@ def strategy_backtest(strat_id: int, refresh: int = 0, sl: float = None, tp: flo
             # saved history hi dikhao; naya run sirf ↻ Naya run (refresh=1)
             # par. Purane engine ka result red badge me saaf bata do.
             try:
-                _stored = _js.loads(row["last_backtest"]) if isinstance(row["last_backtest"], str) else dict(row["last_backtest"])
-                if isinstance(_stored, dict) and (_stored.get("metrics") or _stored.get("trade_list") is not None):
-                    _stored["stored"] = True
-                    _stored["stored_at"] = row.get("last_backtest_at") or ""
-                    _stored["strategy_id"] = strat_id
-                    _stored["strategy_name"] = row.get("name") or ""
-                    _stored["config_changed"] = bool(
-                        _cfg_hash and str(row.get("last_backtest_hash") or "") != _cfg_hash)
-                    _stored["stale_engine"] = _stored_engine_stale(_stored)
-                    try:
-                        _stored["took_ms"] = 5
-                        _stored["cached"] = True
-                    except Exception:
-                        pass
-                    return _stored
+                _stored = dict(_saved_res)
+                _stored["stored"] = True
+                _stored["stored_at"] = _saved_at or ""
+                _stored["strategy_id"] = strat_id
+                _stored["strategy_name"] = row.get("name") or ""
+                _stored["config_changed"] = bool(
+                    _cfg_hash and str(row.get("last_backtest_hash") or "") != _cfg_hash)
+                _stored["stale_engine"] = _stored_engine_stale(_stored)
+                if _saved_src == "history":
+                    _stored["from_history"] = True
+                try:
+                    _stored["took_ms"] = 5
+                    _stored["cached"] = True
+                except Exception:
+                    pass
+                return _stored
             except Exception:
                 pass
         res = _run_backtest_core(req)
@@ -1177,7 +1219,16 @@ def strategy_backtest(strat_id: int, refresh: int = 0, sl: float = None, tp: flo
         _kept = False
         if isinstance(res, dict) and not res.get("error") and (res.get("metrics") or res.get("trade_list") is not None):
             try:
-                if not _should_overwrite_saved(row.get("last_backtest"), res):
+                # Guard me bhi archive-fallback wala saved result count karo:
+                # last_backtest khaali ho par history me 17 trades hon to
+                # 0-trade fresh run usse card/detail se gayab na kare.
+                _guard_stored = row.get("last_backtest")
+                if not _guard_stored and isinstance(_saved_res, dict):
+                    try:
+                        _guard_stored = _js.dumps(_saved_res, default=str)
+                    except Exception:
+                        _guard_stored = None
+                if not _should_overwrite_saved(_guard_stored, res):
                     _kept = True
                     # Fresh 0-trade ne SAVED non-zero history ko overwrite
                     # nahi kiya - CLIENT ko bhi WAHI saved result bhejo
@@ -1185,15 +1236,17 @@ def strategy_backtest(strat_id: int, refresh: int = 0, sl: float = None, tp: flo
                     # 0-trade fresh se overwrite ho jaata tha - "detail
                     # nahi dikha raha" bug).
                     try:
-                        _sv_raw = row.get("last_backtest") or ""
-                        _sv = _js.loads(_sv_raw) if isinstance(_sv_raw, str) else _sv_raw
-                        if isinstance(_sv, dict) and (_sv.get("metrics") or _sv.get("trade_list") is not None):
+                        if isinstance(_saved_res, dict) and (
+                                _saved_res.get("metrics") or _saved_res.get("trade_list") is not None):
+                            _sv = dict(_saved_res)
                             _sv["stored"] = True
-                            _sv["stored_at"] = row.get("last_backtest_at") or ""
+                            _sv["stored_at"] = _saved_at or ""
                             _sv["strategy_id"] = strat_id
                             _sv["strategy_name"] = row.get("name") or ""
                             _sv["kept_saved"] = True
                             _sv["config_changed"] = True
+                            if _saved_src == "history":
+                                _sv["from_history"] = True
                             return _sv
                     except Exception:
                         pass
@@ -1265,17 +1318,19 @@ def strategy_saved_result(strat_id: int):
         row = db.fetch_one("SELECT * FROM strategies WHERE id=?", [strat_id])
         if not row:
             return {"error": "Strategy not found"}
-        raw = row.get("last_backtest") or ""
-        if not raw:
-            return {"error": "Is strategy ka saved result nahi hai - pehle Run Backtest karke Save karo"}
-        try:
-            res = _js.loads(raw) if isinstance(raw, str) else dict(raw)
-        except Exception:
-            return {"error": "Saved result corrupt hai - Naya run karo"}
+        # last_backtest khaali/corrupt ho par history archive me result ho to
+        # WAHI do (card par yahi 'Saved BT' dikh raha hota hai).
+        res, _stored_at, _source = _resolve_saved_result(row)
         if not isinstance(res, dict) or not (res.get("metrics") or res.get("trade_list") is not None):
-            return {"error": "Saved result adhura hai - Naya run karo"}
+            return {"error": "Is strategy ka saved result nahi hai - pehle Run Backtest karke Save karo"}
+        res = dict(res)
         res["stored"] = True
-        res["stored_at"] = row.get("last_backtest_at") or ""
+        res["stored_at"] = _stored_at or ""
+        if _source == "history":
+            res["from_history"] = True
+            res.setdefault("note", "")
+            res["note"] = ((res.get("note") or "") +
+                           " Ye result history archive se wapas laya gaya hai.").strip()
         res["strategy_id"] = strat_id
         res["strategy_name"] = row.get("name") or ""
         # Purane engine ka saved result? (v2 ke fake 100%-win jaise) -

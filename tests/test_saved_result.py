@@ -98,3 +98,99 @@ def test_saved_result_missing_is_honest_error():
         assert r.get("error"), r
     finally:
         _drop()
+
+
+# ---------------------------------------------------------------------------
+# Archive fallback: card par _bt_summary archive se "Saved BT" dikhata tha,
+# lekin Backtest Detail sirf last_backtest padhta tha -> click par saved result
+# "gayab". Dono ab same source (_resolve_saved_result) use karte hain.
+# ---------------------------------------------------------------------------
+ARCH_TAG = "t-saved-result-archive-probe"
+
+
+def _seed_archive_only():
+    from core.models.database import Database
+    from routes.strategies import _ensure_results_table
+    db = Database.get_instance()
+    db.execute("DELETE FROM strategies WHERE name=?", [ARCH_TAG])
+    _ensure_results_table()
+    sid = int(db.execute(
+        "INSERT INTO strategies (user_id, name, symbol, start_date, end_date,"
+        " timeframe, indicators, legs, advanced_options, risk_management,"
+        " status, last_backtest, last_backtest_at)"
+        " VALUES (1,?,?,?,?,?,?,?,?,?,?,NULL,NULL)",
+        [ARCH_TAG, "NIFTY", "2026-09-01", "2026-09-30", "5m", "[]",
+         json.dumps([{"option_type": "PE", "transaction": "sell", "lots": 1}]),
+         "{}", "{}", "active"]))
+    stored = {"run_id": "bt-archived", "engine_version": "v1",
+              "metrics": {"total_trades": 7, "win_rate": 71.4, "net_pnl": 1234.0},
+              "trade_list": [{"symbol": "NIFTY", "pnl": 100.0}] * 7,
+              "params": {"symbols": ["NIFTY"]}}
+    db.execute(
+        "INSERT INTO strategy_results (strategy_id, config_hash, run_id,"
+        " stored_at, trades, net_pnl, win_rate, result_json)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        [sid, "h-arch", "bt-archived", "2026-11-01 10:00", 7, 1234.0, 71.4,
+         json.dumps(stored)])
+    return sid
+
+
+def _drop_archive():
+    from core.models.database import Database
+    db = Database.get_instance()
+    try:
+        rows = db.fetch_all("SELECT id FROM strategies WHERE name=?", [ARCH_TAG])
+        for r in rows or []:
+            db.execute("DELETE FROM strategy_results WHERE strategy_id=?", [int(r["id"])])
+        db.execute("DELETE FROM strategies WHERE name=?", [ARCH_TAG])
+    except Exception:
+        pass
+
+
+def test_saved_result_falls_back_to_history_archive():
+    from routes.strategies import strategy_saved_result
+    sid = _seed_archive_only()
+    try:
+        r = strategy_saved_result(sid)
+        assert not r.get("error"), r
+        assert r.get("stored") is True
+        assert r.get("from_history") is True
+        assert r.get("strategy_id") == sid
+        assert (r.get("metrics") or {}).get("total_trades") == 7
+        assert len(r.get("trade_list") or []) == 7
+    finally:
+        _drop_archive()
+
+
+def test_backtest_detail_returns_archive_without_fresh_run(monkeypatch):
+    import routes.strategy_builder as sbuilder
+    from routes.strategies import strategy_backtest
+    sid = _seed_archive_only()
+    try:
+        def _boom(req, progress_cb=None):
+            raise AssertionError("archive saved result hai to fresh run nahi hona chahiye")
+        monkeypatch.setattr(sbuilder, "_run_backtest_core", _boom)
+        r = strategy_backtest(sid)
+        assert not r.get("error"), r
+        assert r.get("stored") is True
+        assert r.get("run_id") == "bt-archived"
+        assert (r.get("metrics") or {}).get("total_trades") == 7
+        assert len(r.get("trade_list") or []) == 7
+    finally:
+        _drop_archive()
+
+
+def test_bt_summary_and_detail_agree_on_archive():
+    """Card ka 'Saved BT' aur Backtest Detail same numbers dikhayein."""
+    from routes.strategies import _bt_summary, strategy_saved_result
+    from core.models.database import Database
+    sid = _seed_archive_only()
+    try:
+        row = Database.get_instance().fetch_one("SELECT * FROM strategies WHERE id=?", [sid])
+        summary = _bt_summary(row)
+        detail = strategy_saved_result(sid)
+        assert summary.get("trades") == 7
+        assert (detail.get("metrics") or {}).get("total_trades") == 7
+        assert summary.get("run_id") == detail.get("run_id") == "bt-archived"
+    finally:
+        _drop_archive()

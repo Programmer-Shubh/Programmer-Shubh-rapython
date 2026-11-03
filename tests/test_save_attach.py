@@ -63,15 +63,26 @@ def test_match_attaches_with_count():
         _drop()
 
 
-def test_mismatch_honest_reason():
-    """Run ke baad date badal kar save -> attach nahi + wajah saaf."""
+def test_mismatch_still_attaches_with_stale_marker():
+    """Run ke baad config badal kar save -> result phir bhi attach (history
+    kabhi na khoye) + config_changed marker ke saath dikhega.
+
+    (Purana test 'attach nahi hota' expect karta tha; c75cc69 ke baad mismatch
+    par bhi result save hota hai - warna saved BT card/detail se gayab ho jata
+    tha. Backtest Detail config_changed badge dikha kar fresh run offer karta
+    hai.)"""
     from routes.strategies import StrategyRequest, save_strategy
+    from core.models.database import Database
     _drop()
     try:
         r = save_strategy(StrategyRequest(**_body(end_date="2026-09-25")))
         assert r.get("id"), r
-        assert r.get("result_saved") is not True, r
-        assert "end date" in str(r.get("result_skip_reason", "")).lower(), r
+        assert r.get("result_saved") is True, r
+        assert r.get("result_trades") == 188, r
+        row = Database.get_instance().fetch_one(
+            "SELECT last_backtest FROM strategies WHERE id=?", [r["id"]])
+        saved = json.loads(row["last_backtest"])
+        assert saved.get("run_id") == "bt-probe9", saved
     finally:
         _drop()
 
