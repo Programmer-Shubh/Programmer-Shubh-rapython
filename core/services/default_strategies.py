@@ -67,9 +67,49 @@ DEFAULT_STRATEGIES = [
 ]
 
 
+def _run_backtest_and_save(db, strat_id, _sc):
+    """Run backtest for a default strategy and save result so BT detail always shows."""
+    import json as _js
+    try:
+        from routes.strategy_builder import _run_backtest_core, BacktestRequest
+        req = BacktestRequest(
+            symbol=_sc["symbol"], symbols=[_sc["symbol"]],
+            start_date=_sc["start_date"], end_date=_sc["end_date"],
+            indicators=_sc["indicators"],
+            entry_conditions=_sc["entry_conditions"],
+            exit_conditions=_sc["exit_conditions"],
+            legs=_sc["legs"],
+            advanced=_sc["advanced_options"],
+            risk=_sc["risk_management"],
+        )
+        res = _run_backtest_core(req) or {}
+        m = res.get("metrics") or {}
+        if isinstance(m, dict) and m.get("total_trades") is not None:
+            db.execute(
+                "UPDATE strategies SET last_backtest=?, last_backtest_at=datetime('now') WHERE id=?",
+                [_js.dumps(res, default=str), strat_id],
+            )
+            # Also archive to strategy_results so _bt_summary fallback works
+            try:
+                from routes.strategies import _ensure_results_table, _archive_result
+                _ensure_results_table()
+                _archive_result(strat_id, res, "default-seed", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+            except Exception:
+                pass
+            return True
+    except Exception as e:
+        try:
+            import sys as _sys
+            print(f"[seed BT] {_sc['name']}: {e}", file=_sys.stderr, flush=True)
+        except Exception:
+            pass
+    return False
+
+
 def seed_default_strategies():
     """Seed default NIFTY strategies (always present, protected). Idempotent."""
     import json as _js
+    import datetime as _dt
     from core.models.database import Database
     db = Database.get_instance()
     # Ensure protected column exists
@@ -79,7 +119,7 @@ def seed_default_strategies():
         pass
     for _sc in DEFAULT_STRATEGIES:
         try:
-            _existing = db.fetch_one("SELECT id FROM strategies WHERE name=?", [_sc["name"]])
+            _existing = db.fetch_one("SELECT id, last_backtest FROM strategies WHERE name=?", [_sc["name"]])
             if _existing:
                 # Update protected flag and settings (always re-save)
                 db.execute(
@@ -92,6 +132,10 @@ def seed_default_strategies():
                      _js.dumps(_sc["entry_conditions"]), _js.dumps(_sc["exit_conditions"]),
                      _js.dumps(_sc["legs"]), _js.dumps(_sc["advanced_options"]),
                      _js.dumps(_sc["risk_management"]), _sc["status"], _existing["id"]])
+                # If no backtest result, run one and save it
+                _need_bt = not _existing.get("last_backtest")
+                if _need_bt:
+                    _run_backtest_and_save(db, _existing["id"], _sc)
             else:
                 db.execute(
                     """INSERT INTO strategies (user_id,name,symbol,start_date,end_date,timeframe,description,indicators,entry_conditions,exit_conditions,legs,advanced_options,risk_management,status,protected)
@@ -101,6 +145,9 @@ def seed_default_strategies():
                      _js.dumps(_sc["entry_conditions"]), _js.dumps(_sc["exit_conditions"]),
                      _js.dumps(_sc["legs"]), _js.dumps(_sc["advanced_options"]),
                      _js.dumps(_sc["risk_management"]), _sc["status"], _sc["protected"]])
+                _row = db.fetch_one("SELECT id FROM strategies WHERE name=? ORDER BY id DESC LIMIT 1", [_sc["name"]])
+                if _row:
+                    _run_backtest_and_save(db, _row["id"], _sc)
         except Exception as e:
             try:
                 import sys as _sys
