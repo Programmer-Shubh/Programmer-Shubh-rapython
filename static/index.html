@@ -494,7 +494,6 @@
                     </div>
                     <div class="slab-sec" style="background:linear-gradient(135deg,#fff8e1 0%,#ffffff 100%); border:1px solid #ffe082; padding:6px"><div class="slab-sec-title"><i class="bi bi-sliders"></i> Schedule & Risk</div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Strategy Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
                         <div class="col-md-3"><label class="form-label small">Overall Stop Loss</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-sl" value="1500"></div>
                     </div>
                     <div class="row g-1 mt-1">
@@ -1368,7 +1367,7 @@ let _lastOpenTrdHTML = null;
             const strikeType=document.getElementById('r-strike')?.value.toLowerCase()||'atm';
             const rOtm=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm')?.value)||1));
             const rOtmDist=(strikeType==='otm'||strikeType==='itm')?rOtm:0;
-            const rExp=document.getElementById('r-expiry')?.value.toLowerCase()||'weekly';
+            const rExp='weekly';
             {const pp=order.split('-');legs=[{option_type:pp[0],transaction:pp[1].toLowerCase(),lots:lots,strike_selection:strikeType,otm_distance:rOtmDist,expiry:rExp}];}
         }
         const rType=(document.getElementById('r-type')?.value||'intraday').toLowerCase();
@@ -1836,7 +1835,7 @@ let _lastOpenTrdHTML = null;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
         const order=document.getElementById('r-order').value;
         const strikeSel=document.getElementById('r-strike').value.toLowerCase();
-        const expiry=document.getElementById('r-expiry').value.toLowerCase();
+        const expiry='weekly';
         const offset = expiry==='weekly'?0:0;
         const sOtm=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
         {const pp=order.split('-');stratLegs.push({option_type:pp[0], transaction:pp[1].toLowerCase(), strike_selection:strikeSel, otm_distance:(strikeSel==='otm'||strikeSel==='itm')?sOtm:0, lots:lots, expiry:expiry, offset:offset, dte:expiry==='weekly'?7:28});}
@@ -1920,7 +1919,7 @@ let _lastOpenTrdHTML = null;
     }
      document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta'); scheduleAutoBT();});
     document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); scheduleAutoBT(); });
-    ['r-order','r-strike','r-lots','r-expiry','r-type','s-sl','s-tp','r-mtd','r-slb','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
+    ['r-order','r-strike','r-lots','r-type','s-sl','s-tp','r-mtd','r-slb','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
     document.getElementById('r-syms')?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();});
     // Indicator inputs auto
     document.addEventListener('change',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-ind-')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
@@ -2210,7 +2209,7 @@ let _lastOpenTrdHTML = null;
         const sA3=_amtVal('s-sl',1500);const sl=sA3.u==='rs'?(sA3.v||1500):sA3.v;const slUnit=sA3.u;
         const tA3=_amtVal('s-tp',3000);const tp=tA3.u==='rs'?(tA3.v||3000):tA3.v;const tpUnit=tA3.u;
         const strikeType=document.getElementById('r-strike').value;
-        const expiry=document.getElementById('r-expiry').value;
+        const expiry='weekly';
         let optR, txnR; { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
         // Compute ATM strike for display (fallback if backend expects strike 0 = ATM)
         let strikeVal=0;
@@ -2651,7 +2650,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
         const lots=parseInt(document.getElementById('r-lots').value)||1;
         const sA4=_amtVal('s-sl',1500);const sl=sA4.u==='rs'?(sA4.v||1500):sA4.v;const slUnit=sA4.u;
         const tA4=_amtVal('s-tp',3000);const tp=tA4.u==='rs'?(tA4.v||3000):tA4.v;const tpUnit=tA4.u;
-        const expiry=document.getElementById('r-expiry').value;
+        const expiry='weekly';
         const base={symbol:sym, option_type:optR, transaction_type:txnR, quantity:lots, strike:0, expiry:expiry, stop_loss:sl, sl_unit:slUnit, take_profit:tp, tp_unit:tpUnit, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()};
         try{
             // Step 1: dry-run preview - exact broker payload, sends nothing
