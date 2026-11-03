@@ -1010,3 +1010,59 @@ class IndicatorEngine:
         except Exception:
             pass
         return {"adx": adx, "plus_di": pdi, "minus_di": mdi}
+
+    def calculate_market_regime(self, historical, closes, params=None):
+        params = params or {}
+        n = len(closes)
+        buy = [False] * n
+        sell = [False] * n
+        regime = ['sideways'] * n
+        if n < 2:
+            return {'buy': buy, 'sell': sell, 'regime': regime}
+        try:
+            vwap = self.calculate_vwap(historical, int(params.get('vwap_period', 20) or 20),
+                                       float(params.get('vwap_mult', 2.0) or 2.0))
+            vwap_line = vwap.get('vwap', []) if isinstance(vwap, dict) else []
+            ema_fast = self.calculate_ema(closes, int(params.get('ema_fast', 20) or 20)) or []
+            ema_slow = self.calculate_ema(closes, int(params.get('ema_slow', 50) or 50)) or []
+            adx = self.calculate_adx(historical, int(params.get('adx_period', 14) or 14)) or {}
+            adx_vals = adx.get('adx', []) if isinstance(adx, dict) else []
+            pdi = adx.get('plus_di', []) if isinstance(adx, dict) else []
+            mdi = adx.get('minus_di', []) if isinstance(adx, dict) else []
+            thr = float(params.get('adx_threshold', 20) or 20)
+            for i in range(n):
+                v = vwap_line[i] if i < len(vwap_line) else None
+                ef = ema_fast[i] if i < len(ema_fast) else None
+                es = ema_slow[i] if i < len(ema_slow) else None
+                a = adx_vals[i] if i < len(adx_vals) else None
+                p = pdi[i] if i < len(pdi) else None
+                m = mdi[i] if i < len(mdi) else None
+                bullish = 0
+                bearish = 0
+                if v is not None:
+                    if closes[i] > v:
+                        bullish += 1
+                    elif closes[i] < v:
+                        bearish += 1
+                if ef is not None and es is not None:
+                    if ef > es:
+                        bullish += 1
+                    elif ef < es:
+                        bearish += 1
+                if a is not None and p is not None and m is not None:
+                    if a >= thr:
+                        if p > m:
+                            bullish += 1
+                        elif m > p:
+                            bearish += 1
+                if bullish >= 2 and bullish > bearish:
+                    buy[i] = True
+                    regime[i] = 'bullish'
+                elif bearish >= 2 and bearish > bullish:
+                    sell[i] = True
+                    regime[i] = 'bearish'
+                else:
+                    regime[i] = 'sideways'
+        except Exception:
+            pass
+        return {'buy': buy, 'sell': sell, 'regime': regime}

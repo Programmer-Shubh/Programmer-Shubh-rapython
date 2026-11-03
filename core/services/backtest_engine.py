@@ -507,6 +507,22 @@ class BacktestEngine:
                     else:
                         entry_sig = buy_sig if txn_type == "buy" else sell_sig
                         exit_sig = (sell_sig if txn_type == "buy" else buy_sig) if _exit_on_signal else False
+                # Market Regime filter: when selected, only enter in matching regime
+                if "market_regime" in (pre_calc or {}):
+                    try:
+                        mr = pre_calc["market_regime"]
+                        rg = mr.get("regime", []) if isinstance(mr, dict) else []
+                        _cur_regime = rg[effective_idx] if effective_idx < len(rg) else "sideways"
+                        # PE Sell / CE Buy enter on buy_sig -> need bullish regime
+                        if (option_type == "PE" and txn_type == "sell") or (option_type == "CE" and txn_type == "buy"):
+                            if _cur_regime == "bearish":
+                                entry_sig = False
+                        # CE Sell / PE Buy enter on sell_sig -> need bearish regime
+                        if (option_type == "CE" and txn_type == "sell") or (option_type == "PE" and txn_type == "buy"):
+                            if _cur_regime == "bullish":
+                                entry_sig = False
+                    except Exception:
+                        pass
                 has_open = len(entries) > len(exits)
                 can_enter = not has_open and daily_trades < max_trades_day
                 # Entry delay: wait N bars after signal for trend confirmation (Quantman style)
@@ -740,6 +756,12 @@ class BacktestEngine:
                     result["combo_rvp"] = self._calc_combo_rsi_vwap_pcr(historical, closes, params)
                 except Exception:
                     result["combo_rvp"] = {"buy": [], "sell": []}
+            elif iid == "market_regime":
+                try:
+                    result["market_regime"] = self.indicators.calculate_market_regime(
+                        historical, closes, params)
+                except Exception:
+                    result["market_regime"] = {"buy": [], "sell": [], "regime": []}
         return result
 
     def _calc_opp_combo(self, historical, closes, params):

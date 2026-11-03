@@ -1347,15 +1347,16 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             risk_sym = dict(risk_in)
             try:
                 if _n_syms > 1:
-                    if float(risk_sym.get("daily_stop_loss", 0) or 0) > 0:
-                        risk_sym["strategy_stop_loss"] = float(risk_sym["daily_stop_loss"]) / _n_syms
-                    if float(risk_sym.get("daily_take_profit", 0) or 0) > 0:
-                        risk_sym["strategy_take_profit"] = float(risk_sym["daily_take_profit"]) / _n_syms
-                    # Percent mode: % threshold bhi symbol count se split hoga
-                    if float(risk_sym.get("daily_stop_loss_pct", 0) or 0) > 0:
-                        risk_sym["strategy_stop_loss_pct"] = float(risk_sym["daily_stop_loss_pct"]) / _n_syms
-                    if float(risk_sym.get("daily_take_profit_pct", 0) or 0) > 0:
-                        risk_sym["strategy_take_profit_pct"] = float(risk_sym["daily_take_profit_pct"]) / _n_syms
+                    # Portfolio-level MTM kill-switch DISABLED for multi-symbol:
+                    # per-trade SL/TP (daily_stop_loss/take_profit) is already
+                    # enforced by the engine per symbol. Splitting the portfolio
+                    # cap across symbols (daily/n_syms) made it too tight and
+                    # killed trades prematurely (strategy_sl_tp exits) - that
+                    # was the "no strategy profitable" root cause.
+                    risk_sym["strategy_stop_loss"] = 0
+                    risk_sym["strategy_stop_loss_pct"] = 0
+                    risk_sym["strategy_take_profit"] = 0
+                    risk_sym["strategy_take_profit_pct"] = 0
                     if float(risk_sym.get("daily_loss_limit", 0) or 0) > 0:
                         risk_sym["daily_loss_limit"] = float(risk_sym["daily_loss_limit"]) / _n_syms
             except Exception:
