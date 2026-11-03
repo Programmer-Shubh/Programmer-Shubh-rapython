@@ -32,17 +32,20 @@ def _otm_calc(trade_like: dict, spot_cache: dict):
 
 
 @router.get("/spot")
-def get_spots():
+def get_spots(symbols: str = ""):
     # Cloud-first live prices (parallel, ~5s max): Yahoo -> Google -> Stooq -> DB stale.
     # Sequential 8s fetches caused proxy 502s; parallel fixes it.
+    if symbols:
+        syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    else:
+        syms = ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "HDFCBANK", "TCS", "INFY"]
     live = LiveMarketData()
-    symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "HDFCBANK", "TCS", "INFY"]
     try:
-        found = live.get_live_spots_parallel(symbols, max_workers=8) or {}
+        found = live.get_live_spots_parallel(syms, max_workers=8) or {}
     except Exception:
         found = {}
     result = {}
-    for sym in symbols:
+    for sym in syms:
         try:
             d = found.get(sym)
         except Exception:

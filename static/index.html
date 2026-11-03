@@ -972,12 +972,16 @@
     async function mwRefresh(){
         try{
             const found={...mwLast};
-            await Promise.all(mwSymbols.map(async(s)=>{
-                try{
-                    const r=await A('/api/dashboard/spot/'+s+'?fresh=1');
-                    if(r&&!r.error&&r.spot){found[s]=r;mwLast[s]={spot:r.spot,formatted:r.formatted,source:r.source,ts:Date.now()};}
-                }catch(e){}
-            }));
+            // Batch fetch (single request) to avoid Cloudflare 429 rate limit
+            try{
+                const r=await A('/api/dashboard/spot?symbols='+mwSymbols.join(','));
+                if(r&&!r.error){
+                    mwSymbols.forEach(s=>{
+                        const d=r[s];
+                        if(d&&d.spot){found[s]=d;mwLast[s]={spot:d.spot,formatted:d.formatted,source:d.source,ts:Date.now()};}
+                    });
+                }
+            }catch(e){}
             mwRender(found);
             mwAuto();
         }catch(e){}
