@@ -519,11 +519,17 @@ def save_strategy(req: StrategyRequest):
     _attach_res = None
     _attach_reasons = []
     try:
-        if isinstance(req.last_backtest, dict) and _result_matches_config(
-                req.last_backtest, req.symbol, req.start_date, req.end_date,
-                req.indicators, req.legs, req.risk_management,
-                req.advanced_options, reasons=_attach_reasons):
-            _attach_res = req.last_backtest
+        if isinstance(req.last_backtest, dict) and (req.last_backtest.get("metrics") or req.last_backtest.get("trade_list")):
+            # Attach if config matches OR if no strict match (user ran BT, show it)
+            if _result_matches_config(
+                    req.last_backtest, req.symbol, req.start_date, req.end_date,
+                    req.indicators, req.legs, req.risk_management,
+                    req.advanced_options, reasons=_attach_reasons):
+                _attach_res = req.last_backtest
+            else:
+                # Config changed since BT run - still attach but mark stale
+                _attach_res = req.last_backtest
+                _attach_reasons = ["config_changed_since_bt"]
     except Exception:
         pass
     # Delete -> dobara same config se nayi strategy banane par purana saved BT
