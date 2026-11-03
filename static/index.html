@@ -959,7 +959,20 @@
     }
     // Market Watch — कीमत गायब/गलत न हो: आखिरी ज्ञात कीमत रखता है + ऑटो-रिफ्रेश 30s
     let mwSymbols=[];let mwLast={};
-    async function mwLoad(){try{const r=await A('/api/dashboard/market-watch');if(r&&Array.isArray(r.symbols)&&r.symbols.length){mwSymbols=r.symbols;try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){}return;} }catch(e){} try{const ls=localStorage.getItem('mwSymbols');if(ls){const p=JSON.parse(ls);if(Array.isArray(p)&&p.length)mwSymbols=p;}}catch(e){} if(!mwSymbols.length)mwSymbols=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY','HDFCBANK'];}
+    async function mwLoad(){
+        // localStorage first (instant, no network) - so symbols show immediately
+        try{const ls=localStorage.getItem('mwSymbols');if(ls){const p=JSON.parse(ls);if(Array.isArray(p)&&p.length){mwSymbols=p;}} }catch(e){}
+        if(!mwSymbols.length)mwSymbols=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY','HDFCBANK'];
+        // Server sync in background (with retry) - permanent persistence
+        for(let _retry=0;_retry<3;_retry++){
+            try{
+                await new Promise(r=>setTimeout(r, 2000*_retry));
+                const r=await A('/api/dashboard/market-watch');
+                if(r&&Array.isArray(r.symbols)&&r.symbols.length){mwSymbols=r.symbols;try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){}return;}
+                break;
+            }catch(e){ if(_retry===2) console.warn('mwLoad server sync failed, using localStorage'); }
+        }
+    }
     function mwSave(){try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){} try{P('/api/dashboard/market-watch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbols:mwSymbols})});}catch(e){}}
     async function mwAdd(){
         const inp=document.getElementById('mw-sym');if(!inp)return;
@@ -1007,7 +1020,7 @@
         mwSave();
         mwRender();
     }
-    if(typeof mwInit==='undefined'){var mwInit=true;setTimeout(async()=>{await mwLoad();mwRender();mwRefresh();mwAuto();},1000);}
+    if(typeof mwInit==='undefined'){var mwInit=true;setTimeout(async()=>{mwRender();await mwLoad();mwRender();mwRefresh();mwAuto();},5000);}
 
     async function loadMTFSyms(){
         try{
