@@ -327,16 +327,15 @@ def _fyers_headers(app_id, token):
 
 
 def _fyers_underlying(symbol: str) -> str:
-    """Fyers index instrument symbol (NSE:NIFTY50-INDEX etc)."""
+    """Fyers index instrument symbol (NSE:NIFTY50-INDEX etc) or stock EQ symbol."""
     try:
         from core.services.symbol_resolver import FYERS_UNDERLYING
-        sym = (symbol or "").upper()
-        # Indices: explicit map
-        if sym in FYERS_UNDERLYING:
-            return FYERS_UNDERLYING[sym]
-        # Stocks: generic NSE F&O format (NSE:RELIANCE-EQ, NSE:PGINVIT-EQ, etc.)
-        if sym and sym.isalpha():
-            return f"NSE:{sym}-EQ"
+        up = (symbol or "").upper()
+        if up in FYERS_UNDERLYING:
+            return FYERS_UNDERLYING[up]
+        # Stocks: use Fyers EQ format (NSE:SYMBOL-EQ)
+        if up and up not in ("NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX"):
+            return f"NSE:{up}-EQ"
         return ""
     except Exception:
         return ""

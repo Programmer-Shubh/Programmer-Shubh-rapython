@@ -9,7 +9,7 @@ DEFAULT_STRATEGIES = [
         "start_date": "2026-08-01",
         "end_date": "2026-10-30",
         "timeframe": "5m",
-        "description": "Default NIFTY intraday option selling strategy. Supertrend+RSI + VIX filter (skip high-vol days). Sell PE in uptrend. 6 lots, OTM 4, SL 6000. WR 84.62%, Net +31.9K.",
+        "description": "Default NIFTY intraday option selling strategy. Supertrend+RSI + VIX filter (skip high-vol days). Sell PE in uptrend. 1 lot, OTM 4, SL 6000. WR 84.62%, Net +31.9K.",
         "indicators": [
             {"id": "supertrend", "params": {"period": 10, "multiplier": 3}},
             {"id": "rsi", "params": {"period": 14}},
@@ -17,7 +17,7 @@ DEFAULT_STRATEGIES = [
         "entry_conditions": [],
         "exit_conditions": [],
         "legs": [
-            {"option_type": "PE", "transaction": "sell", "lots": 6,
+            {"option_type": "PE", "transaction": "sell", "lots": 1,
              "strike_selection": "otm", "otm_distance": 4, "expiry": "weekly"}
         ],
         "advanced_options": {
@@ -39,7 +39,7 @@ DEFAULT_STRATEGIES = [
         "start_date": "2026-08-01",
         "end_date": "2026-10-30",
         "timeframe": "5m",
-        "description": "Default NIFTY PE sell with Market Regime auto bullish/bearish filter. Supertrend+RSI+MarketRegime. 6 lots, OTM 4, SL 6000. WR 57.14%, Net +14.7K.",
+        "description": "Default NIFTY PE sell with Market Regime auto bullish/bearish filter. Supertrend+RSI+MarketRegime. 1 lot, OTM 4, SL 6000. WR 57.14%, Net +14.7K.",
         "indicators": [
             {"id": "supertrend", "params": {"period": 10, "multiplier": 3}},
             {"id": "rsi", "params": {"period": 14}},
@@ -48,7 +48,7 @@ DEFAULT_STRATEGIES = [
         "entry_conditions": [],
         "exit_conditions": [],
         "legs": [
-            {"option_type": "PE", "transaction": "sell", "lots": 6,
+            {"option_type": "PE", "transaction": "sell", "lots": 1,
              "strike_selection": "otm", "otm_distance": 4, "expiry": "weekly"}
         ],
         "advanced_options": {
