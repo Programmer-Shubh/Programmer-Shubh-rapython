@@ -744,7 +744,7 @@ def place_for_strategy(sid, signal_check="daily"):
         except Exception:
             rm0 = {}
         try:
-            max_day = max(1, int((rm0 or {}).get("max_trades_per_day") or 3))
+            max_day = 8  # user rule: always 8 trades/day regardless of strategy config
         except Exception:
             max_day = 3
         # Continuous running: re-enter while nothing open, up to max/day.

@@ -206,6 +206,21 @@ async def _startup_background():
         _th.Thread(target=_lot_backfill, daemon=True).start()
     except: pass
     try:
+        # Seed default NIFTY strategies (always present, protected)
+        def _seed_defaults():
+            try:
+                from core.services.default_strategies import seed_default_strategies
+                seed_default_strategies()
+            except Exception as e:
+                try:
+                    import sys as _sys
+                    print(f"[seed] default strategies: {e}", file=_sys.stderr, flush=True)
+                except Exception:
+                    pass
+        import threading as _th_seed
+        _th_seed.Thread(target=_seed_defaults, daemon=True).start()
+    except: pass
+    try:
         print("[lifespan] background systems scheduled", flush=True)
     except: pass
 
