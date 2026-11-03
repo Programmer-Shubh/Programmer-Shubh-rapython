@@ -1068,6 +1068,14 @@ class BacktestEngine:
             bl = oc.get("buy", []) if isinstance(oc, dict) else []
             if modes.get("opp_combo", "both") != "bearish" and effective_idx < len(bl) and bl[effective_idx]:
                 return True
+        # Market Regime: auto bullish/bearish standalone gate.
+        if "market_regime" in pre_calc:
+            mr = pre_calc["market_regime"]
+            if isinstance(mr, dict):
+                _rg = mr.get("regime", [])
+                if effective_idx < len(_rg) and _rg[effective_idx] == "bullish":
+                    if modes.get("market_regime", "both") != "bearish":
+                        return True
         # RSI+VWAP+ST+PCR combo: standalone gate (paancho shartein calc me).
         if "combo_rvp" in pre_calc:
             rc = pre_calc["combo_rvp"]
@@ -1383,6 +1391,14 @@ class BacktestEngine:
             sl2 = oc.get("sell", []) if isinstance(oc, dict) else []
             if modes.get("opp_combo", "both") != "bullish" and effective_idx < len(sl2) and sl2[effective_idx]:
                 return True
+        # Market Regime: auto bullish/bearish standalone gate (sell side).
+        if "market_regime" in pre_calc:
+            mr = pre_calc["market_regime"]
+            if isinstance(mr, dict):
+                _rg = mr.get("regime", [])
+                if effective_idx < len(_rg) and _rg[effective_idx] == "bearish":
+                    if modes.get("market_regime", "both") != "bullish":
+                        return True
         # RSI+VWAP+ST+PCR combo: standalone gate (mirror).
         if "combo_rvp" in pre_calc:
             rc = pre_calc["combo_rvp"]
