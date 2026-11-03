@@ -81,8 +81,48 @@ def get_spots():
     return result
 
 
-@router.get("/spot/{symbol}")
-def get_spot_single(symbol: str, fresh: int = 0):
+@router.get("/market-watch")
+def get_market_watch():
+    """Server-side persisted market watch symbols (survives browser cache clear / new day)."""
+    db = Database.get_instance()
+    row = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key='market_watch_symbols'")
+    syms = []
+    if row and row.get("setting_value"):
+        try:
+            import json as _j
+            syms = _j.loads(row["setting_value"]) or []
+        except Exception:
+            syms = []
+    if not syms:
+        syms = ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "TCS", "INFY", "HDFCBANK"]
+    return {"symbols": syms}
+
+
+@router.post("/market-watch")
+def save_market_watch(body: dict):
+    """Persist market watch symbols server-side (permanent, not localStorage)."""
+    db = Database.get_instance()
+    syms = (body or {}).get("symbols", [])
+    if not isinstance(syms, list):
+        syms = []
+    syms = [str(s).strip().upper() for s in syms if str(s).strip()]
+    import json as _j
+    val = _j.dumps(syms)
+    # Upsert (works on both SQLite and Postgres)
+    try:
+        db.execute(
+            "INSERT INTO settings (setting_key, setting_value, updated_at) VALUES ('market_watch_symbols', ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(setting_key) DO UPDATE SET setting_value=?, updated_at=CURRENT_TIMESTAMP",
+            [val, val],
+        )
+    except Exception:
+        try:
+            db.execute("DELETE FROM settings WHERE setting_key='market_watch_symbols'")
+            db.execute("INSERT INTO settings (setting_key, setting_value, updated_at) VALUES ('market_watch_symbols', ?, CURRENT_TIMESTAMP)",
+                       [val])
+        except Exception:
+            pass
+    return {"ok": True, "symbols": syms}
     """Single symbol live spot price (cloud-first: Yahoo/Google/Stooq -> DB stale)."""
     spot, src = _free_latest_spot(symbol, fresh=bool(fresh))
     if spot > 0:
