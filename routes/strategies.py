@@ -556,6 +556,39 @@ def save_strategy(req: StrategyRequest):
         _now_s = _dtn.now(_tzn(_tdn(hours=5, minutes=30))).strftime("%Y-%m-%d %H:%M")
     except Exception:
         _now_s = ""
+    if _attach_res is None:
+        # No backtest result attached by user - auto-run one and save it
+        # so BT detail ALWAYS shows (never "No BT yet").
+        try:
+            from routes.strategy_builder import _run_backtest_core, BacktestRequest
+            import json as _json
+            _rq = BacktestRequest(
+                symbol=req.symbol, symbols=[req.symbol],
+                start_date=req.start_date, end_date=req.end_date,
+                indicators=req.indicators,
+                entry_conditions=req.entry_conditions,
+                exit_conditions=req.exit_conditions,
+                legs=req.legs,
+                advanced=req.advanced_options,
+                risk=req.risk_management,
+            )
+            _r = _run_backtest_core(_rq) or {}
+            if isinstance(_r, dict) and (_r.get("metrics") or {}).get("total_trades") is not None:
+                _attach_res = _r
+                try:
+                    _new_hash = _canonical_config_hash(
+                        req.symbol, req.start_date, req.end_date, req.timeframe,
+                        req.indicators, req.entry_conditions, req.exit_conditions,
+                        req.legs, req.advanced_options, req.risk_management)
+                except Exception:
+                    _new_hash = "auto"
+        except Exception as _e:
+            try:
+                import sys as _dbg
+                print(f"[save auto-bt] failed: {_e}", file=_dbg.stderr, flush=True)
+            except Exception:
+                pass
+
     if _attach_res is not None:
         try:
             data["last_backtest"] = json.dumps(_attach_res, default=str)
