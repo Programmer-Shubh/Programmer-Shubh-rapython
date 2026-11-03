@@ -494,7 +494,6 @@
                     <div class="slab-sec" style="background:linear-gradient(135deg,#fff8e1 0%,#ffffff 100%); border:1px solid #ffe082; padding:6px"><div class="slab-sec-title"><i class="bi bi-sliders"></i> Schedule & Risk</div>
                     <div class="row g-1 mt-1">
                         <div class="col-md-3"><label class="form-label small">Strategy Expiry</label><select id="r-expiry" class="form-select form-select-sm"><option selected>Weekly</option><option>Monthly</option></select></div>
-                        <div class="col-md-3"><label class="form-label small">Strategy Stop Loss (₹) — overall MTM</label><input type="text" inputmode="decimal" id="r-sl" class="form-control form-control-sm" value="1500"></div>
                         <div class="col-md-3"><label class="form-label small">Strategy Target (₹) — overall MTM</label><input type="text" inputmode="decimal" id="r-tp" class="form-control form-control-sm" value="3000"></div>
                         <div class="col-md-3"><label class="form-label small">Overall Stop Loss</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-sl" value="1500"></div>
                     </div>
@@ -1358,7 +1357,7 @@ let _lastOpenTrdHTML = null;
         const s=document.getElementById('r-start')?.value||'', e=document.getElementById('r-end')?.value||'';
         if(!s||!e){alert('Select start and end date');return null;}
         const lots=parseInt(document.getElementById('r-lots')?.value)||1;
-        const sA=_amtVal('r-sl',1500);const sl=sA.u==='rs'?(sA.v||1500):sA.v;const slUnit=sA.u;
+        const sA=_amtVal('s-sl',1500);const sl=sA.u==='rs'?(sA.v||1500):sA.v;const slUnit=sA.u;
         const tA=_amtVal('r-tp',3000);const tp=tA.u==='rs'?(tA.v||3000):tA.v;const tpUnit=tA.u;
         const mtd=parseInt(document.getElementById('r-mtd')?.value)||5;
         const slb=Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0));
@@ -1772,7 +1771,7 @@ let _lastOpenTrdHTML = null;
         const entryTime=document.getElementById('r-entry').value;
         const exitTime=document.getElementById('r-exit').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA2=_amtVal('r-sl',1500);const sl=sA2.u==='rs'?(sA2.v||1500):sA2.v;const slUnit=sA2.u;
+        const sA2=_amtVal('s-sl',1500);const sl=sA2.u==='rs'?(sA2.v||1500):sA2.v;const slUnit=sA2.u;
         const tA2=_amtVal('r-tp',3000);const tp=tA2.u==='rs'?(tA2.v||3000):tA2.v;const tpUnit=tA2.u;
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const startDate=document.getElementById('r-start').value;
@@ -1921,24 +1920,21 @@ let _lastOpenTrdHTML = null;
     }
      document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta'); scheduleAutoBT();});
     document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); scheduleAutoBT(); });
-    ['r-order','r-strike','r-lots','r-expiry','r-type','r-sl','r-tp','r-mtd','r-slb','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
+    ['r-order','r-strike','r-lots','r-expiry','r-type','s-sl','r-tp','r-mtd','r-slb','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
     document.getElementById('r-syms')?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();});
     // Indicator inputs auto
     document.addEventListener('change',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-ind-')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
     document.addEventListener('input',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
     // SL/TP "Rs या %" parse (जैसे 2% -> sl_unit:'pct')
     function _amtVal(el,dflt){const s=String((document.getElementById(el)||{}).value||'').trim().replace(/[\u20b9,\s]/g,'');if(!s)return{v:(dflt||0),u:'rs'};const low=s.toLowerCase();if(low.endsWith('%')||low.endsWith('pct')||low.endsWith('percent'))return{v:(parseFloat(s)||0),u:'pct'};return{v:(parseFloat(s)||0),u:'rs'};}
-    // Sync: Overall settings (s-sl/s-tp) <-> Strategy risk (r-sl/r-tp) — dono me se jo bhi bhare, wahi chalega
+    // Overall Stop Loss (s-sl) is the single SL input now (r-sl removed).
     function _syncRisk(fromSl,fromTp,toSl,toTp){try{const a=document.getElementById(fromSl),b=document.getElementById(fromTp),c=document.getElementById(toSl),d=document.getElementById(toTp);if(a&&c&&a.value!=='')c.value=a.value;if(b&&d&&b.value!=='')d.value=b.value;}catch(e){}}
-    document.getElementById('s-sl')?.addEventListener('change',()=>_syncRisk('s-sl','s-tp','r-sl','r-tp'));
-    document.getElementById('s-tp')?.addEventListener('change',()=>_syncRisk('s-sl','s-tp','r-sl','r-tp'));
-    document.getElementById('r-sl')?.addEventListener('change',()=>_syncRisk('r-sl','r-tp','s-sl','s-tp'));
-    document.getElementById('r-tp')?.addEventListener('change',()=>_syncRisk('r-sl','r-tp','s-sl','s-tp'));
+    document.getElementById('s-tp')?.addEventListener('change',()=>_syncRisk('s-sl','s-tp','s-sl','r-tp'));
 
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
         document.getElementById('r-lots').value=1;
-        document.getElementById('r-sl').value=1500;
+        document.getElementById('s-sl').value=1500;
         document.getElementById('r-tp').value=3000;
         try{document.getElementById('r-slb').value=0;}catch(e){}
         try{document.getElementById('s-sl').value=1500;document.getElementById('s-tp').value=3000;}catch(e){}
@@ -1971,7 +1967,7 @@ let _lastOpenTrdHTML = null;
             }catch(e){}
             try{
                 _rm=(typeof s.risk_management==='string')?JSON.parse(s.risk_management||'{}'):(s.risk_management||{});
-                if(_rm.daily_stop_loss)document.getElementById('r-sl').value=_rm.daily_stop_loss;
+                if(_rm.daily_stop_loss)document.getElementById('s-sl').value=_rm.daily_stop_loss;
                 if(_rm.daily_take_profit)document.getElementById('r-tp').value=_rm.daily_take_profit;
                 if(_rm.max_trades_per_day)try{document.getElementById('r-mtd').value=_rm.max_trades_per_day;}catch(e){}
                 try{if(_rm.signal_lookback_days!=null)document.getElementById('r-slb').value=_rm.signal_lookback_days;}catch(e){}
@@ -2211,7 +2207,7 @@ let _lastOpenTrdHTML = null;
         const sym=(rSyms()[0]||'NIFTY');
         let order=document.getElementById('r-order').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA3=_amtVal('r-sl',1500);const sl=sA3.u==='rs'?(sA3.v||1500):sA3.v;const slUnit=sA3.u;
+        const sA3=_amtVal('s-sl',1500);const sl=sA3.u==='rs'?(sA3.v||1500):sA3.v;const slUnit=sA3.u;
         const tA3=_amtVal('r-tp',3000);const tp=tA3.u==='rs'?(tA3.v||3000):tA3.v;const tpUnit=tA3.u;
         const strikeType=document.getElementById('r-strike').value;
         const expiry=document.getElementById('r-expiry').value;
@@ -2256,7 +2252,7 @@ let _lastOpenTrdHTML = null;
         const order=document.getElementById('r-order').value;
         const strikeType=document.getElementById('r-strike').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA4=_amtVal('r-sl',1500);const sl=sA4.u==='rs'?(sA4.v||1500):sA4.v;const slUnit=sA4.u;
+        const sA4=_amtVal('s-sl',1500);const sl=sA4.u==='rs'?(sA4.v||1500):sA4.v;const slUnit=sA4.u;
         const tA4=_amtVal('r-tp',3000);const tp=tA4.u==='rs'?(tA4.v||3000):tA4.v;const tpUnit=tA4.u;
         let legs=[];
         const rOtmSave=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
@@ -2429,12 +2425,12 @@ let _lastOpenTrdHTML = null;
                         const _rm0=_parseJsonField(_s0.risk_management,{});
                         const _savedSl=_rm0.daily_stop_loss_pct?_rm0.daily_stop_loss_pct:(_rm0.daily_stop_loss||1500);
                         const _savedTp=_rm0.daily_take_profit_pct?_rm0.daily_take_profit_pct:(_rm0.daily_take_profit||3000);
-                        const _rsl=document.getElementById('r-sl');const _rtp=document.getElementById('r-tp');
+                        const _rsl=document.getElementById('s-sl');const _rtp=document.getElementById('r-tp');
                         if(_rsl&&!_rsl.value) _rsl.value=_savedSl;
                         if(_rtp&&!_rtp.value) _rtp.value=_savedTp;
                     }
                 }catch(_e0){}
-                const _slA=_amtVal('r-sl',1500);const _tpA=_amtVal('r-tp',3000);
+                const _slA=_amtVal('s-sl',1500);const _tpA=_amtVal('r-tp',3000);
                 const _qs=new URLSearchParams(); if(force) _qs.set('refresh','1'); _qs.set('sl',_slA.v); _qs.set('sl_unit',_slA.u); _qs.set('tp',_tpA.v); _qs.set('tp_unit',_tpA.u);
                 let r=null;
                 try{ r=await P('/api/strategies/'+id+'/backtest?'+_qs.toString(),{method:'POST',signal:_sctl.signal}); }
@@ -2458,7 +2454,7 @@ let _lastOpenTrdHTML = null;
             const legs=_parseJsonField(s.legs,[]);
             if(legs.length){ try{stratLegs=JSON.parse(JSON.stringify(legs));renderLegs();}catch(e){} }
             const rm=_parseJsonField(s.risk_management,{});
-            if(!document.getElementById('r-sl').value) document.getElementById('r-sl').value=rm.daily_stop_loss||1500;
+            if(!document.getElementById('s-sl').value) document.getElementById('s-sl').value=rm.daily_stop_loss||1500;
             if(!document.getElementById('r-tp').value) document.getElementById('r-tp').value=rm.daily_take_profit||3000;
             try{if(rm.signal_lookback_days!=null)document.getElementById('r-slb').value=rm.signal_lookback_days;}catch(e){}
             const ao=_parseJsonField(s.advanced_options,{});
@@ -2652,7 +2648,7 @@ let _lastOpenTrdHTML = null;
         const order=document.getElementById('r-order').value;
         let optR, txnR; { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA4=_amtVal('r-sl',1500);const sl=sA4.u==='rs'?(sA4.v||1500):sA4.v;const slUnit=sA4.u;
+        const sA4=_amtVal('s-sl',1500);const sl=sA4.u==='rs'?(sA4.v||1500):sA4.v;const slUnit=sA4.u;
         const tA4=_amtVal('r-tp',3000);const tp=tA4.u==='rs'?(tA4.v||3000):tA4.v;const tpUnit=tA4.u;
         const expiry=document.getElementById('r-expiry').value;
         const base={symbol:sym, option_type:optR, transaction_type:txnR, quantity:lots, strike:0, expiry:expiry, stop_loss:sl, sl_unit:slUnit, take_profit:tp, tp_unit:tpUnit, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()};
@@ -2706,7 +2702,7 @@ let _lastOpenTrdHTML = null;
     async function runBacktestMonteCarlo(){const btn=document.getElementById('s-run'); const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Monte Carlo (2000 shuffles)...</p>'; try{const r=await P('/api/backtest/monte-carlo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); document.getElementById('bt-metrics').innerHTML='<div class="alert alert-info"><strong>Monte Carlo</strong> p5:'+r.p5+' p50:'+r.p50+' p95:'+r.p95+' prob_profit:'+(r.prob_profit||'-')+'</div>';}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
     async function runWalkForward(){const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Walk-forward (unseen-data check)...</p>'; try{const r=await P('/api/backtest/walk-forward',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error){document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';return;} const ws=r.windows||[]; let h='<div class="alert alert-info"><strong>Walk-forward</strong> '+ws.length+' windows | avg efficiency: '+(r.avg_efficiency||0)+'% '+(r.avg_efficiency>=70?'(robust - trade layak)':r.avg_efficiency>=30?'(ok-ish, chhota size)':'(overfit - mat chalao)')+'</div>'; if(ws.length){h+='<table class="bt-table"><thead><tr><th>IS period</th><th>OOS period</th><th>IS net</th><th>OOS net</th><th>Eff%</th></tr></thead><tbody>'; ws.forEach(w=>{h+='<tr><td>'+w.is.start+'→'+w.is.end+'</td><td>'+w.oos.start+'→'+w.oos.end+'</td><td>'+((w.is.metrics||{}).net_pnl||0)+'</td><td>'+((w.oos.metrics||{}).net_pnl||0)+'</td><td>'+w.efficiency+'%</td></tr>';}); h+='</tbody></table>';} document.getElementById('bt-metrics').innerHTML=h;}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
     async function runOptimize(){const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Optimizing SL x TP (9 backtests)...</p>'; try{const r=await P('/api/backtest/optimize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error){document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';return;} const rows=r.rows||[]; const b=r.best||{}; let h='<div class="alert alert-success"><strong>Best setting: SL ₹'+(b.sl||'-')+' x TP ₹'+(b.tp||'-')+'</strong> — net ₹'+(b.net||0)+' | PF '+(b.profit_factor||0)+' | Win '+(b.win_rate||0)+'% <button class="btn btn-sm btn-success ms-2" onclick="applyBestSLTP('+b.sl+','+b.tp+')">Apply</button></div>'; if(rows.length){h+='<table class="bt-table"><thead><tr><th>SL ₹</th><th>TP ₹</th><th>Net ₹</th><th>Win%</th><th>Trades</th><th>PF</th><th>MaxDD</th></tr></thead><tbody>'; rows.forEach(x=>{h+='<tr><td>'+x.sl+'</td><td>'+x.tp+'</td><td>'+x.net+'</td><td>'+x.win_rate+'</td><td>'+x.trades+'</td><td>'+x.profit_factor+'</td><td>'+x.max_dd+'</td></tr>';}); h+='</tbody></table>';} document.getElementById('bt-metrics').innerHTML=h;}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
-    function applyBestSLTP(sl,tp){try{if(sl){document.getElementById('r-sl').value=sl;document.getElementById('s-sl').value=sl;}if(tp){document.getElementById('r-tp').value=tp;document.getElementById('s-tp').value=tp;}try{updateRunSummary();}catch(e){}alert('Best SL ₹'+sl+' / TP ₹'+tp+' lag gaya - ab Run Backtest dabao');}catch(e){alert('Apply failed: '+e.message);}}
+    function applyBestSLTP(sl,tp){try{if(sl){document.getElementById('s-sl').value=sl;document.getElementById('s-sl').value=sl;}if(tp){document.getElementById('r-tp').value=tp;document.getElementById('s-tp').value=tp;}try{updateRunSummary();}catch(e){}alert('Best SL ₹'+sl+' / TP ₹'+tp+' lag gaya - ab Run Backtest dabao');}catch(e){alert('Apply failed: '+e.message);}}
     async function downloadReportPDF(){const body=_collectBacktestBody(); if(!body) return; try{const r=await fetch('/api/backtest/report.pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='RaTrade_'+body.symbol+'_'+body.start_date+'.pdf'; a.click();}catch(e){alert(e.message);}}
     function _collectBacktestBody(){return _unifiedBody();}
 
