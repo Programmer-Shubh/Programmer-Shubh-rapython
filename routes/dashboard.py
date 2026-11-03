@@ -123,6 +123,10 @@ def save_market_watch(body: dict):
         except Exception:
             pass
     return {"ok": True, "symbols": syms}
+
+
+@router.get("/spot/{symbol}")
+def get_spot_single(symbol: str, fresh: int = 0):
     """Single symbol live spot price (cloud-first: Yahoo/Google/Stooq -> DB stale)."""
     spot, src = _free_latest_spot(symbol, fresh=bool(fresh))
     if spot > 0:
