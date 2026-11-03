@@ -964,14 +964,25 @@
         try{const ls=localStorage.getItem('mwSymbols');if(ls){const p=JSON.parse(ls);if(Array.isArray(p)&&p.length){mwSymbols=p;}} }catch(e){}
         try{const pc=localStorage.getItem('mwPriceCache');if(pc){const p=JSON.parse(pc);if(p&&typeof p==='object')mwPriceCache=p;mwLast={...mwPriceCache};} }catch(e){}
         if(!mwSymbols.length)mwSymbols=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY','HDFCBANK'];
-        // Server sync in background (with retry) - permanent persistence
-        for(let _retry=0;_retry<3;_retry++){
+        // Server sync (single request: symbols + prices) - permanent persistence
+        for(let _retry=0;_retry<2;_retry++){
             try{
-                await new Promise(r=>setTimeout(r, 2000*_retry));
+                await new Promise(r=>setTimeout(r, 1000*_retry));
                 const r=await A('/api/dashboard/market-watch');
-                if(r&&Array.isArray(r.symbols)&&r.symbols.length){mwSymbols=r.symbols;try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){}return;}
+                if(r&&Array.isArray(r.symbols)&&r.symbols.length){
+                    mwSymbols=r.symbols;
+                    try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){}
+                    if(r.prices&&typeof r.prices==='object'){
+                        Object.keys(r.prices).forEach(s=>{
+                            const d=r.prices[s];
+                            if(d&&d.spot){mwLast[s]={spot:d.spot,formatted:d.formatted,source:d.source,ts:Date.now()};mwPriceCache[s]=mwLast[s];}
+                        });
+                        try{localStorage.setItem('mwPriceCache',JSON.stringify(mwPriceCache));}catch(e){}
+                    }
+                    return;
+                }
                 break;
-            }catch(e){ if(_retry===2) console.warn('mwLoad server sync failed, using localStorage'); }
+            }catch(e){ if(_retry===1) console.warn('mwLoad server sync failed, using localStorage'); }
         }
     }
     function mwSave(){try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){} try{P('/api/dashboard/market-watch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbols:mwSymbols})});}catch(e){}}
@@ -988,12 +999,14 @@
             const found={...mwLast};
             // Batch fetch (single request) to avoid Cloudflare 429 rate limit
             try{
-                const r=await A('/api/dashboard/spot?symbols='+mwSymbols.join(','));
+                const r=await A('/api/dashboard/market-watch');
                 if(r&&!r.error){
                     mwSymbols.forEach(s=>{
-                        const d=r[s];
-                        if(d&&d.spot){found[s]=d;mwLast[s]={spot:d.spot,formatted:d.formatted,source:d.source,ts:Date.now()};}
+                        const d=(r.prices||{})[s];
+                        if(d&&d.spot){found[s]=d;mwLast[s]={spot:d.spot,formatted:d.formatted,source:d.source,ts:Date.now()};mwPriceCache[s]=mwLast[s];}
                     });
+                    if(Array.isArray(r.symbols)&&r.symbols.length){mwSymbols=r.symbols;try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){}}
+                    try{localStorage.setItem('mwPriceCache',JSON.stringify(mwPriceCache));}catch(e){}
                 }
             }catch(e){}
             try{localStorage.setItem('mwPriceCache',JSON.stringify(mwLast));}catch(e){}

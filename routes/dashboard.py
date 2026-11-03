@@ -86,7 +86,8 @@ def get_spots(symbols: str = ""):
 
 @router.get("/market-watch")
 def get_market_watch():
-    """Server-side persisted market watch symbols (survives browser cache clear / new day)."""
+    """Server-side persisted market watch symbols + live prices (single request
+    to avoid Cloudflare 429 rate limit on browser-side per-symbol fetches)."""
     db = Database.get_instance()
     row = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key='market_watch_symbols'")
     syms = []
@@ -98,7 +99,36 @@ def get_market_watch():
             syms = []
     if not syms:
         syms = ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "TCS", "INFY", "HDFCBANK"]
-    return {"symbols": syms}
+    # Fetch prices server-side (not blocked by Cloudflare)
+    live = LiveMarketData()
+    prices = {}
+    try:
+        found = live.get_live_spots_parallel(syms, max_workers=8) or {}
+    except Exception:
+        found = {}
+    for sym in syms:
+        d = found.get(sym) if isinstance(found, dict) else None
+        spot = float(d.get("spot") or 0) if d else 0
+        if spot > 0:
+            prices[sym] = {
+                "spot": round(spot, 2),
+                "formatted": f"INR {spot:,.2f}",
+                "change": round(float(d.get("change") or 0), 2),
+                "source": d.get("source", "live"),
+            }
+        else:
+            # DB stale fallback
+            try:
+                row2 = db.fetch_one(
+                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1",
+                    [sym],
+                )
+                if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
+                    s2 = float(row2["close_price"])
+                    prices[sym] = {"spot": round(s2, 2), "formatted": f"INR {s2:,.2f}", "change": 0, "source": "db"}
+            except Exception:
+                pass
+    return {"symbols": syms, "prices": prices}
 
 
 @router.post("/market-watch")
