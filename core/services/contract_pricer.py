@@ -330,7 +330,14 @@ def _fyers_underlying(symbol: str) -> str:
     """Fyers index instrument symbol (NSE:NIFTY50-INDEX etc)."""
     try:
         from core.services.symbol_resolver import FYERS_UNDERLYING
-        return FYERS_UNDERLYING.get((symbol or "").upper(), "")
+        sym = (symbol or "").upper()
+        # Indices: explicit map
+        if sym in FYERS_UNDERLYING:
+            return FYERS_UNDERLYING[sym]
+        # Stocks: generic NSE F&O format (NSE:RELIANCE-EQ, NSE:PGINVIT-EQ, etc.)
+        if sym and sym.isalpha():
+            return f"NSE:{sym}-EQ"
+        return ""
     except Exception:
         return ""
 
