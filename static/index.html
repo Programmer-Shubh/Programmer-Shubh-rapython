@@ -2318,7 +2318,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                 // "Paper Trade"/"Live Trade" action buttons hata diye (orders
                 // signal se hi lagte hain; manual force ki zaroorat nahi).
                 // Action column me status: sirf LIVE ON / PAPER ON / BOTH ON / OFF
-                const btH=(s.bt&&s.bt.trades!=null)?`<strong>${s.bt.trades}</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span><br><small class="text-muted">${s.bt.win_rate||0}% • ${s.bt.stored_at||'saved'}</small>`:'<small class="text-muted">—</small>';
+                const btH=(s.bt&&s.bt.trades!=null)?`<strong>${s.bt.trades}</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span><br><small class="text-muted">${s.bt.win_rate||0}% • ${s.bt.stored_at||'saved'}</small>`:'<small class="text-muted">No BT yet — click Backtest</small>';
                 // Action status badge: dono ON / sirf LIVE / sirf PAPER / OFF
                 let onH='';
                 if(pe&&lv) onH='<span class="badge bg-danger" title="Paper + Live dono ON - signal par PAPER copy aur LIVE broker order dono lagte hain">BOTH ON</span> ';

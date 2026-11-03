@@ -530,7 +530,7 @@ def save_strategy(req: StrategyRequest):
     # wapas mile: history archive me same config-hash ka result pada hota hai.
     # (Sirf NEW strategy ke liye - update par maujooda last_backtest chhedna
     # nahi hai.)
-    if _attach_res is None and not req.id and _new_hash:
+    if _attach_res is None and _new_hash:
         try:
             _ensure_results_table()
             _cand = db.fetch_one(
