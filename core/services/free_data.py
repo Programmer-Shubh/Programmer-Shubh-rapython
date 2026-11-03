@@ -306,29 +306,35 @@ def fetch_cloud_spot(symbol: str) -> dict:
                 chg = float(d.get("change") or 0)
         except Exception:
             pass
-    # (old 1b Fyers block removed - moved to step 0)
-            from core.services.contract_pricer import _fyers_auth, _fyers_underlying
-            _app_id, _tok = _fyers_auth()
-            _under = _fyers_underlying(symbol)
-            if _app_id and _tok and _under:
-                from core.services.contract_pricer import _fyers_quotes_raw, _fy_quote_rows
-                _body = _fyers_quotes_raw(_under, _app_id, _tok)
-                _node = _fy_quote_rows(_body).get(_under) or {}
-                if isinstance(_node, dict):
-                    for _f in ("lp", "last_price", "lastPrice", "ltp"):
-                        try:
-                            _px = float(_node.get(_f, 0) or 0)
-                        except Exception:
-                            _px = 0
-                        if _px > 0:
-                            spot, source = _px, "fyers"
-                            break
-        except Exception:
-            pass
-    # 2) Yahoo v8 API (works on cloud, indices included) - labelled 'live', never 'yahoo'
+    # 1c) NSE pre-open (works on cloud unlike quote-equity; gives lastPrice
+    #     close to current for stocks not covered by Fyers/NSE direct).
+    #     For PGINVIT: NSE pre-open gives 105.22 (actual ~105) vs Yahoo 103.48.
     if not spot:
+        try:
+            import requests as _rq
+            _sess2 = _rq.Session()
+            _sess2.get("https://www.nseindia.com/", headers=_UA, timeout=5)
+            _r2 = _sess2.get("https://www.nseindia.com/api/market-data-pre-open?key=ALL",
+                             headers={**_UA, "Accept": "application/json"}, timeout=8)
+            if _r2.status_code == 200:
+                for _item in (_r2.json().get("data") or []):
+                    if (_item.get("metadata", {}).get("symbol") or "").upper() == symbol.upper():
+                        _lp = float(_item.get("metadata", {}).get("lastPrice") or 0)
+                        if _lp > 0:
+                            spot, source = _lp, "nse-preopen"
+                            chg = float(_item.get("metadata", {}).get("pChange") or 0)
+                        break
+        except Exception as _e:
+            import sys as _dbg
+            print(f"[fetch_cloud_spot] NSE pre-open failed for {symbol}: {_e}", file=_dbg.stderr, flush=True)
+    # 2) Yahoo v8 API (works on cloud, indices included) - labelled 'live', never 'yahoo'
+    # Prefer NSE pre-open over Yahoo if both available and differ (NSE is authoritative)
+    if spot and source == "nse-preopen":
+        pass  # keep NSE pre-open
+    elif not spot:
         q = _yahoo_fallback_quote(symbol)
         if q and q.get("spot"):
+            # If NSE pre-open was not available, use Yahoo
             return q
     # 3) Google Finance quote page (free scrape) - tried before Stooq to avoid stale Stooq
     if not spot:
