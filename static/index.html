@@ -1139,7 +1139,7 @@
     function otmVal(){try{const s=localStorage.getItem('otmCap');const v=(s!=null&&s!=='')?parseFloat(s):20;return isFinite(v)?v:20;}catch(e){return 20;}}
     function otmFilterChange(){try{localStorage.setItem('otmCap',document.getElementById('otm-filter').value);}catch(e){}try{loadDashPositions();}catch(e){}try{loadDashHistory();}catch(e){}}
     function otmPass(v){const c=otmVal();if(!c)return true;return !(v!=null&&isFinite(v)&&v>c);}
-    function otmBadge(v){if(v==null||!isFinite(v))return '<small class="text-muted">—</small>';const c=otmVal();const bad=c>0&&v>c;return '<span class="badge '+(bad?'bg-danger':'bg-success')+'" style="font-size:10px" title="Strike spot se door (live swap) '+(bad?('- '+c+'% cap se bahar'):'(within cap)')+'">'+v+'%</span>';}
+    function otmBadge(v){if(v==null||!isFinite(v))return '<small class="text-muted">No BT yet — click Backtest</small>';const c=otmVal();const bad=c>0&&v>c;return '<span class="badge '+(bad?'bg-danger':'bg-success')+'" style="font-size:10px" title="Strike spot se door (live swap) '+(bad?('- '+c+'% cap se bahar'):'(within cap)')+'">'+v+'%</span>';}
     function otmInitSel(){try{const el=document.getElementById('otm-filter');if(el)el.value=String(otmVal());}catch(e){}}
     async function loadDashPositions(){
         try{

@@ -322,6 +322,22 @@ def _bt_summary(row) -> dict:
                 _r, _arc_at = _arc
                 _m = (_r or {}).get("metrics") or {}
                 _stored_at = _arc_at or _stored_at
+        # Fallback 2 (PERMANENT): strategy_results table me koi bhi result
+        if not isinstance(_m, dict) or "total_trades" not in _m:
+            try:
+                _any = Database.get_instance().fetch_one(
+                    "SELECT result_json, stored_at FROM strategy_results "
+                    "WHERE strategy_id=? ORDER BY id DESC LIMIT 1",
+                    [row.get("id")])
+                if _any and _any.get("result_json"):
+                    _r2 = _js.loads(_any["result_json"]) if isinstance(_any["result_json"], str) else _any["result_json"]
+                    _m2 = (_r2 or {}).get("metrics") or {}
+                    if isinstance(_m2, dict) and "total_trades" in _m2:
+                        _r = _r2
+                        _m = _m2
+                        _stored_at = _any.get("stored_at") or _stored_at
+            except Exception:
+                pass
         if not isinstance(_m, dict) or "total_trades" not in _m:
             return {}
         return {"trades": int(_m.get("total_trades") or 0),
