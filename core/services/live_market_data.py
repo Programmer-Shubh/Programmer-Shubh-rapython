@@ -1,4 +1,5 @@
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
@@ -42,6 +43,25 @@ def _chain_cache_get(sym):
     return None
 
 _SYMBOL_MAP = {"NIFTY": "nifty", "BANKNIFTY": "banknifty", "FINNIFTY": "finnifty"}
+
+# Shared bounded executor. The old code created a brand-new ThreadPoolExecutor
+# on every WS tick / spot request (8 threads each, ~2s), which on Render's
+# 0.15 CPU burned scheduler time and spiked memory. One 4-worker pool is
+# enough for the handful of symbols we track and keeps CPU predictable.
+_EXECUTOR = None
+_EXECUTOR_LOCK = threading.Lock()
+
+
+def _get_executor(max_workers: int = 4) -> ThreadPoolExecutor:
+    global _EXECUTOR
+    if _EXECUTOR is None:
+        with _EXECUTOR_LOCK:
+            if _EXECUTOR is None:
+                _EXECUTOR = ThreadPoolExecutor(
+                    max_workers=max(1, int(max_workers or 4)),
+                    thread_name_prefix="live-md",
+                )
+    return _EXECUTOR
 
 # NSE cloud IP block: remove niftytrader.in headers; use cloud-friendly sources only
 _HEADERS = {
@@ -138,47 +158,66 @@ class LiveMarketData:
 
     def get_live_spots_parallel(self, symbols, max_workers: int = 8):
         """Batch live spots (missing method that data_refresher calls).
-        Returns {sym: {spot, formatted, change, high, low, source}}."""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        Returns {sym: {spot, formatted, change, high, low, source}}.
+
+        Uses the process-wide bounded executor instead of creating a new
+        ThreadPoolExecutor per call (WS ticks, dashboard polls, refresher all
+        share 4 worker threads)."""
         result = {}
+        ex = _get_executor(4)
+        futures = {}
         try:
-            workers = max(1, min(int(max_workers or 8), len(symbols) or 1))
-        except Exception:
-            workers = 4
-        try:
-            with ThreadPoolExecutor(max_workers=workers) as ex:
-                futures = {ex.submit(self.get_live_spot, sym): sym for sym in (symbols or [])}
-                for fut in as_completed(futures, timeout=30):
-                    sym = futures[fut]
-                    try:
-                        data = fut.result() if not fut.exception() else None
-                    except Exception:
-                        data = None
-                    if data and data.get("spot"):
-                        result[sym] = data
+            futures = {ex.submit(self.get_live_spot, sym): sym for sym in (symbols or [])}
+            for fut in as_completed(futures, timeout=25):
+                sym = futures[fut]
+                try:
+                    data = fut.result() if not fut.exception() else None
+                except Exception:
+                    data = None
+                if data and data.get("spot"):
+                    result[sym] = data
         except Exception:
             pass
+        finally:
+            # Don't block the caller/event loop on stragglers - let them
+            # finish on the shared pool and cancel what hasn't started.
+            for fut in futures:
+                if not fut.done():
+                    try:
+                        fut.cancel()
+                    except Exception:
+                        pass
         return result
 
     def get_live_chains_parallel(self, symbols):
-        now = time.time()
         result = {}
         fresh = []
-        for sym in symbols:
+        for sym in symbols or []:
             cached = _chain_cache_get(sym)
             if cached is not None:
                 result[sym] = cached
             else:
                 fresh.append(sym)
         if fresh:
-            with ThreadPoolExecutor(max_workers=len(fresh)) as ex:
+            ex = _get_executor(4)
+            futures = {}
+            try:
                 futures = {ex.submit(self.fetch_live_option_chain, sym): sym for sym in fresh}
-                for fut in as_completed(futures, timeout=20):
+                for fut in as_completed(futures, timeout=25):
                     sym = futures[fut]
                     data = fut.result() if not fut.exception() else None
                     if data and data.get("rows"):
                         _chain_cache_set(sym, data)
                         result[sym] = data
+            except Exception:
+                pass
+            finally:
+                for fut in futures:
+                    if not fut.done():
+                        try:
+                            fut.cancel()
+                        except Exception:
+                            pass
         return result
 
     def fetch_option_chain_nse(self, symbol: str) -> dict:

@@ -17,17 +17,31 @@ import time
 _LAST_RUN = 0.0
 _LOCK = threading.Lock()
 _MIN_INTERVAL = 20
+_CHECK_FN = None
+_CHECK_FN_TRIED = False
 
 
 def _check_fn():
-    """Load scripts/auto_trade.check_stoploss_target (single math source)."""
+    """Load scripts/auto_trade.check_stoploss_target (single math source).
+
+    Cached: the old version re-executed the module on EVERY 10s scan, which
+    re-inserted sys.path entries and rebuilt module globals forever - a slow
+    but real leak on a long-running 512MB Render instance.
+    """
+    global _CHECK_FN, _CHECK_FN_TRIED
+    if _CHECK_FN is not None:
+        return _CHECK_FN
+    if _CHECK_FN_TRIED:
+        return None
+    _CHECK_FN_TRIED = True
     try:
         base = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "auto_trade.py")
         base = os.path.abspath(base)
         spec = importlib.util.spec_from_file_location("ratrade_auto_trade", base)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return mod.check_stoploss_target
+        _CHECK_FN = mod.check_stoploss_target
+        return _CHECK_FN
     except Exception:
         return None
 

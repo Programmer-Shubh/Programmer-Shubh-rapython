@@ -8,6 +8,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from core.models.database import Database
 
+try:  # lightweight stdlib+psutil module; optional so a missing wheel never breaks boot
+    from core.services import resource_monitor as _resource_monitor
+except Exception:  # pragma: no cover
+    _resource_monitor = None
+
 os.environ.setdefault("DB_PATH", os.path.join(os.path.dirname(__file__), "data", "ratrade.db"))
 
 
@@ -62,6 +67,13 @@ async def lifespan(app: FastAPI):
 
 async def _startup_background():
     """Fire-and-forget boot of every background system (never blocks health)."""
+    # Process resource monitor (psutil): periodic RSS/CPU log + soft memory
+    # ceiling that gc's and trims caches before Render's 512MB OOM killer.
+    try:
+        if _resource_monitor is not None:
+            _resource_monitor.start()
+    except Exception:
+        pass
     # Data-fix (permanent): bina ASLI broker order wale 'live' tags ko wapas
     # paper karo - iske bina Live toggle OFF strategy ke open trades bhi
     # LIVE dikh rahe the (NIFTY/BOSCHLTD tag bug).
@@ -134,7 +146,24 @@ async def _startup_background():
         # Opportunities cache warmup: cold scans exceed the UI timeout.
         def _opp_warm():
             import time as _t
-            _t.sleep(90)
+            # Free-tier OOM guard: importing pandas/numpy + a full universe
+            # scan at boot is the single biggest RAM spike on a 512MB box.
+            # On Render it now runs only when explicitly enabled (WARM_OPPS=1)
+            # AND the market is open. Locally it keeps the old behaviour.
+            _t.sleep(300)
+            _on_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_NAME"))
+            if _on_render and str(os.environ.get("WARM_OPPS", "0")).lower() not in ("1", "true", "yes", "on"):
+                try:
+                    print("[warm] opp warmup skipped (WARM_OPPS not set)", flush=True)
+                except Exception:
+                    pass
+                return
+            try:
+                from core.services.data_refresher import _market_open_now as _mkt
+                if not _mkt():
+                    return
+            except Exception:
+                pass
             try:
                 # Heavy imports (pandas/numpy ~20s first time) background
                 # me pehle se load - taaki pehla backtest tez chale.
@@ -242,6 +271,15 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 async def add_cache_header(request, call_next):
     response = await call_next(request)
     try:
+        # Cheap resource observability: cached sample only (no psutil call on
+        # the request path). Lets you confirm in DevTools/Render logs which
+        # response ran close to the 512MB ceiling.
+        try:
+            _rss = _resource_monitor.current_rss_mb() if _resource_monitor else None
+            if _rss is not None:
+                response.headers["X-RSS-MB"] = str(_rss)
+        except Exception:
+            pass
         if request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "public, max-age=3600, immutable"
             response.headers["X-Content-Type-Options"] = "nosniff"
@@ -311,6 +349,24 @@ def version():
         "service": _os.environ.get("RENDER_SERVICE_NAME", ""),
         "branch": _os.environ.get("RENDER_GIT_BRANCH", ""),
     }
+
+
+@app.get("/api/health/resources")
+def health_resources():
+    """Live process memory/CPU (psutil), from the cached sample.
+    Full sample history: GET /api/health/resources/history."""
+    try:
+        return _resource_monitor.snapshot(include_history=False) if _resource_monitor else {"psutil": False}
+    except Exception as e:
+        return {"error": str(e)[:200], "psutil": False}
+
+
+@app.get("/api/health/resources/history")
+def health_resources_history():
+    try:
+        return _resource_monitor.snapshot(include_history=True) if _resource_monitor else {"psutil": False}
+    except Exception as e:
+        return {"error": str(e)[:200], "psutil": False}
 
 
 @app.get("/api/db-status")

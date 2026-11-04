@@ -1063,10 +1063,44 @@
             h+='</table>';el.innerHTML=h;
         }catch(e){try{document.getElementById('mtf-box').innerHTML='<span class="text-danger small">Failed</span>';}catch(_){}}
     }
+    // ---- Connection badge state machine -------------------------------
+    // The header used to show "Offline" the moment ONE request failed
+    // (Render cold start, Cloudflare 429, a 1s proxy hiccup) and then flip
+    // back to Connected by itself. That is noise, not reality. We now keep
+    // the last good state and show "Reconnecting…" for transient failures;
+    // "Offline" is never rendered. Only a sustained outage (>4 consecutive
+    // failures) keeps Reconnecting… on screen.
+    let _connFails=0, _connEverOk=false, _connLastOkAt=0, _connWsOpen=false;
+    function _setConnStatus(state){
+        try{
+            const el=document.getElementById('status'); if(!el) return;
+            if(state==='live'){
+                _connFails=0; _connEverOk=true; _connLastOkAt=Date.now();
+                el.innerHTML='<span class="live-dot"></span> Live Streaming'; return;
+            }
+            if(state==='ok'){
+                _connFails=0; _connEverOk=true; _connLastOkAt=Date.now();
+                el.innerHTML='<span class="live-dot"></span> Connected'; return;
+            }
+            if(state==='cached'){
+                // Cached data is still usable - never downgrade a live badge.
+                if(!_connEverOk) el.innerHTML='<span class="live-dot"></span> Cached';
+                return;
+            }
+            // failure / reconnect
+            // If the WebSocket is open the server is reachable by definition;
+            // a single failed REST call (429, cold-start proxy) must not
+            // downgrade the live badge.
+            if(_connWsOpen) return;
+            _connFails++;
+            if(!_connEverOk && _connFails<3) return;   // stay on "Connecting..."
+            el.innerHTML='<span class="live-dot" style="background:#ffc107"></span> Reconnecting…';
+        }catch(e){}
+    }
     async function loadDash(){
         // Instant cached render for refresh perception (0s)
-        try{const _c=_getDashCache(); if(_c&&_c.spot){let h='';for(const [sym,d] of Object.entries(_c.spot)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; document.getElementById('status').innerHTML='<span class="live-dot"></span> Cached';}}catch(e){}
-        try{const s=await A('/api/dashboard/spot');document.getElementById('status').innerHTML='<span class="live-dot"></span> Connected';let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; try{_setDashCache({spot:s});}catch(e){}}catch(e){document.getElementById('status').innerHTML='Offline';}
+        try{const _c=_getDashCache(); if(_c&&_c.spot){let h='';for(const [sym,d] of Object.entries(_c.spot)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; _setConnStatus('cached');}}catch(e){}
+        try{const s=await A('/api/dashboard/spot');_setConnStatus('ok');let h='';for(const [sym,d] of Object.entries(s)){const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:'';const src=(d.source||'live').toUpperCase().replace('YAHOO','LIVE');h+=`<div class="col"><div class="card stat-card"><div class="label">${sym}</div><div class="value">${d.formatted}</div>${chg}<div class="label">${src}</div></div></div>`;}document.getElementById('mkt-cards').innerHTML=h; try{_setDashCache({spot:s});}catch(e){}}catch(e){_setConnStatus('fail');}
         loadRegimeSyms().then(()=>{loadRegime();loadMTFSyms();});
         loadOpps();loadDashScanner();loadDashPositions();loadDashHistory();loadFnoTop5();loadMTF();
     }
@@ -2848,12 +2882,15 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
         if(mins<555||mins>945) return; // 9:15-15:45 IST
         if(typeof loadOpps==='function') loadOpps();
     }catch(e){}},150000);
-    let _dashWS=null, _dashWSRetry=0;
+    let _dashWS=null, _dashWSRetry=0, _dashWSDownSince=0;
     function connectDashWS(){
         try{
+            // Guard: visibilitychange/online handlers can race the retry timer.
+            if(_dashWS && (_dashWS.readyState===0 || _dashWS.readyState===1)) return;
             const proto=location.protocol==='https:'?'wss:':'ws:';
             _dashWS=new WebSocket(proto+'//'+location.host+'/api/ws/live');
             let _prevSpots={};
+            _dashWS.onopen=()=>{ _dashWSRetry=0; _dashWSDownSince=0; _connWsOpen=true; _setConnStatus('live'); };
             _dashWS.onmessage=e=>{
                 try{
                     const msg=JSON.parse(e.data);
@@ -2868,7 +2905,8 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                             h+=`<div class="col"><div class="card stat-card ${flash}"><div class="label">${sym}</div><div class="value">${fmt}</div>${chg}<div class="label">${d.source||'live'}</div></div></div>`;
                         }
                         if(h) document.getElementById('mkt-cards').innerHTML=h;
-                        document.getElementById('status').innerHTML='<span class="live-dot"></span> Live Streaming';
+                        _dashWSDownSince=0;
+                        _setConnStatus('live');
                         // Real-time P&L sync — rAF batch: coalesce ticks, update once per frame
                         if(!window._wsPending) window._wsPending=false;
                         if(!window._wsRaf) window._wsRaf=null;
@@ -2891,7 +2929,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                     }
                 }catch(err){}
             };
-            _dashWS.onclose=()=>{ _dashWS=null; _dashWSRetry++; setTimeout(connectDashWS, Math.min(5000, 1000*_dashWSRetry)); };
+            _dashWS.onclose=()=>{ _dashWS=null; _connWsOpen=false; _dashWSRetry++; if(!_dashWSDownSince) _dashWSDownSince=Date.now(); _setConnStatus('fail'); setTimeout(connectDashWS, Math.min(5000, 1000*_dashWSRetry)+Math.floor(Math.random()*500)); };
             _dashWS.onerror=()=>{ try{_dashWS.close();}catch(e){} };
         }catch(e){}
     }
@@ -2906,9 +2944,29 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
             else if(el.querySelector('table')) el.querySelector('table').insertAdjacentHTML('beforeend', row);
         }catch(e){}
     }
-    // Fallback HTTP refresh if WS not connected — 30s (positions must tick
-    // live even with dead WS; payload is ~2KB so diet impact is negligible)
-    setInterval(()=>{ if(!_dashWS || _dashWS.readyState!==1){ loadDash(); } },30000);
+    // Fallback HTTP refresh only when the WS has been down for a while.
+    // Previously this ran every 30s whenever the socket was momentarily
+    // reconnecting and a single failed request painted "Offline" in the
+    // header. 60s grace + visible-tab check removes the flicker and the
+    // needless payloads during cold starts.
+    setInterval(()=>{
+        try{
+            if(document.hidden) return;
+            if(_dashWS && _dashWS.readyState===1) return;
+            if(!_dashWSDownSince){ _dashWSDownSince=Date.now(); return; }
+            if(Date.now()-_dashWSDownSince < 60000) return;
+            loadDash();
+        }catch(e){}
+    },30000);
+    // Reconnect instantly when the tab returns or the network comes back.
+    try{
+        document.addEventListener('visibilitychange',()=>{
+            try{ if(!document.hidden && (!_dashWS || _dashWS.readyState!==1)){ _dashWSRetry=0; connectDashWS(); } }catch(e){}
+        });
+        window.addEventListener('online',()=>{
+            try{ _dashWSRetry=0; connectDashWS(); }catch(e){}
+        });
+    }catch(e){}
     // No polling — WebSocket is primary (0.4s change-only). HTTP fallback only when WS dead.
     // Polling was the main latency source (1.5s) — now updates are push-driven via rAF.
     // chain auto-refresh removed — manual Load only (no flicker)
