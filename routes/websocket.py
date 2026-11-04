@@ -108,32 +108,57 @@ def _build_spot_frame(live: LiveMarketData, prev: dict):
 
 
 async def _spot_broadcaster():
-    """Single process-wide tick producer. Stops when nobody is listening."""
+    """Single process-wide tick producer. Stops when nobody is listening.
+
+    Sending is DECOUPLED from fetching. The data batch can take up to 25s on
+    Render's free CPU (network quotes + shared 4-thread pool), and a proxy in
+    front of the app drops a socket that sees no traffic for ~20-30s. So the
+    fetch runs as a background thread task while this loop keeps sending the
+    last snapshot every HEARTBEAT_SEC. That is what keeps the socket alive.
+    """
     global _spot_task, _spot_snapshot_text, _spot_snapshot_ts
     live = LiveMarketData()
     prev = dict(_spot_prev)
-    last_beat = 0.0
+    last_sent = 0.0
+    last_fetch = 0.0
+    fetch_task = None
     try:
         while _spot_subs:
-            try:
-                ticks, changed = await asyncio.to_thread(_build_spot_frame, live, prev)
-            except Exception:
-                ticks, changed = {}, False
-            if ticks:
-                prev = {k: v.get("spot", 0) for k, v in ticks.items()}
-                _spot_prev.clear()
-                _spot_prev.update(prev)
             now = time.time()
+            # Kick off one fetch at a time; never await it on this loop.
+            if fetch_task is None and now - last_fetch >= TICK_INTERVAL:
+                last_fetch = now
+                fetch_task = asyncio.create_task(
+                    asyncio.to_thread(_build_spot_frame, live, dict(prev))
+                )
+
             payload = None
-            if ticks and (changed or now - last_beat >= HEARTBEAT_SEC):
-                payload = json.dumps({
-                    "type": "tick", "ticks": ticks,
-                    "interval_ms": TICK_INTERVAL * 1000,
-                })
+            if fetch_task is not None and fetch_task.done():
+                try:
+                    ticks, changed = fetch_task.result()
+                except Exception:
+                    ticks, changed = {}, False
+                fetch_task = None
+                if ticks:
+                    prev = {k: v.get("spot", 0) for k, v in ticks.items()}
+                    _spot_prev.clear()
+                    _spot_prev.update(prev)
+                    if changed:
+                        payload = json.dumps({
+                            "type": "tick", "ticks": ticks,
+                            "interval_ms": TICK_INTERVAL * 1000,
+                        })
+
+            # Proxy keep-alive: repeat the last snapshot even while the next
+            # fetch is still in flight.
+            now = time.time()
+            if payload is None and _spot_snapshot_text and now - last_sent >= HEARTBEAT_SEC:
+                payload = _spot_snapshot_text
+
+            if payload:
                 _spot_snapshot_text = payload
                 _spot_snapshot_ts = now
-                last_beat = now
-            if payload:
+                last_sent = now
                 dead = []
                 for ws in list(_spot_subs):
                     try:
@@ -143,12 +168,17 @@ async def _spot_broadcaster():
                 for ws in dead:
                     _spot_subs.discard(ws)
                     _connections.discard(ws)
-            await asyncio.sleep(TICK_INTERVAL)
+            await asyncio.sleep(1)
     except asyncio.CancelledError:
         pass
     except Exception as e:  # never let the broadcaster die silently
         logger.warning("[ws] spot broadcaster stopped: %s", e)
     finally:
+        if fetch_task is not None:
+            try:
+                fetch_task.cancel()
+            except Exception:
+                pass
         _spot_task = None
         # If a connection arrived while this task was winding down, restart.
         if _spot_subs:
@@ -227,14 +257,27 @@ async def _chain_broadcaster(sym: str):
     bhav = BhavcopyModel()
     last_text = None
     last_sent = 0.0
+    last_fetch = 0.0
+    fetch_task = None
     try:
         while _chain_subs.get(sym):
-            text = None
-            try:
-                text = await asyncio.to_thread(_build_chain_frame, sym, bhav)
-            except Exception:
-                text = None
             now = time.time()
+            if fetch_task is None and now - last_fetch >= CHAIN_INTERVAL:
+                last_fetch = now
+                fetch_task = asyncio.create_task(
+                    asyncio.to_thread(_build_chain_frame, sym, bhav)
+                )
+            text = None
+            if fetch_task is not None and fetch_task.done():
+                try:
+                    text = fetch_task.result()
+                except Exception:
+                    text = None
+                fetch_task = None
+            now = time.time()
+            # Same proxy keep-alive rule as the spot stream.
+            if text is None and last_text and now - last_sent >= CHAIN_HEARTBEAT:
+                text = last_text
             if text and (text != last_text or now - last_sent >= CHAIN_HEARTBEAT):
                 dead = []
                 for ws in list(_chain_subs.get(sym, ())):
@@ -247,12 +290,17 @@ async def _chain_broadcaster(sym: str):
                     _connections.discard(ws)
                 last_text = text
                 last_sent = now
-            await asyncio.sleep(CHAIN_INTERVAL)
+            await asyncio.sleep(1)
     except asyncio.CancelledError:
         pass
     except Exception as e:
         logger.warning("[ws] chain broadcaster %s stopped: %s", sym, e)
     finally:
+        if fetch_task is not None:
+            try:
+                fetch_task.cancel()
+            except Exception:
+                pass
         _chain_tasks.pop(sym, None)
         if _chain_subs.get(sym):
             try:
