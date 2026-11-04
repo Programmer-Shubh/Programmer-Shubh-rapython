@@ -29,9 +29,9 @@ SPOT_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "HDFCBANK", "TCS", "
 # Hard cap: keep a misbehaving client / reconnect storm from eating memory.
 MAX_CONNECTIONS = 20   # per stream
 TICK_INTERVAL = 3      # seconds between broadcaster passes (was 2s per client)
-HEARTBEAT_SEC = 30     # re-send unchanged snapshot this often
+HEARTBEAT_SEC = 8      # re-send unchanged snapshot this often (proxy keep-alive)
 CHAIN_INTERVAL = 8     # seconds between chain passes (was 0.6s per client)
-CHAIN_HEARTBEAT = 60
+CHAIN_HEARTBEAT = 10   # keep chain sockets alive through the proxy too
 
 # --- process-wide state ---------------------------------------------------
 _connections: set = set()          # every accepted socket (for /stats)

@@ -975,7 +975,11 @@
                     if(r.prices&&typeof r.prices==='object'){
                         Object.keys(r.prices).forEach(s=>{
                             const d=r.prices[s];
-                            if(d&&d.spot){mwLast[s]={spot:d.spot,formatted:d.formatted,source:d.source,ts:Date.now()};mwPriceCache[s]=mwLast[s];}
+                            if(d&&d.spot){
+                                const prev=mwLast[s];
+                                if(d.source==='db'&&prev&&prev.source!=='db'&&(Date.now()-(prev.ts||0))<30000) return;
+                                mwLast[s]={spot:d.spot,formatted:d.formatted,source:d.source,ts:Date.now()};mwPriceCache[s]=mwLast[s];
+                            }
                         });
                         try{localStorage.setItem('mwPriceCache',JSON.stringify(mwPriceCache));}catch(e){}
                     }
@@ -1003,7 +1007,13 @@
                 if(r&&!r.error){
                     mwSymbols.forEach(s=>{
                         const d=(r.prices||{})[s];
-                        if(d&&d.spot){found[s]=d;mwLast[s]={spot:d.spot,formatted:d.formatted,source:d.source,ts:Date.now()};mwPriceCache[s]=mwLast[s];}
+                        if(d&&d.spot){
+                            // A transient DB fallback must not overwrite a fresh
+                            // live price already pushed by the WebSocket.
+                            const prev=mwLast[s];
+                            if(d.source==='db'&&prev&&prev.source!=='db'&&(Date.now()-(prev.ts||0))<30000) return;
+                            found[s]=d;mwLast[s]={spot:d.spot,formatted:d.formatted,source:d.source,ts:Date.now()};mwPriceCache[s]=mwLast[s];
+                        }
                     });
                     if(Array.isArray(r.symbols)&&r.symbols.length){mwSymbols=r.symbols;try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){}}
                     try{localStorage.setItem('mwPriceCache',JSON.stringify(mwPriceCache));}catch(e){}
@@ -1015,7 +1025,34 @@
         }catch(e){}
     }
     let mwTimer=null;
-    function mwAuto(){if(mwTimer)clearTimeout(mwTimer);mwTimer=setTimeout(mwRefresh,60000);}
+    function mwAuto(){if(mwTimer)clearTimeout(mwTimer);mwTimer=setTimeout(mwRefresh,20000);}
+    // Live WS ticks -> Market Watch (same live feed as the dashboard cards).
+    // Without this the table waited up to 60s and looked stale vs the cards.
+    let _mwLastPaint=0;
+    function mwApplyTicks(ticks){
+        try{
+            if(!ticks||!mwSymbols.length) return;
+            let changed=false;
+            mwSymbols.forEach(s=>{
+                const d=ticks[s];
+                const spot=Number(d&&d.spot)||0;
+                if(spot>0){
+                    mwLast[s]={spot:spot,
+                               formatted:'INR '+spot.toLocaleString('en-IN',{minimumFractionDigits:2}),
+                               change:Number(d.change)||0,
+                               source:d.source||'live', ts:Date.now()};
+                    mwPriceCache[s]=mwLast[s];
+                    changed=true;
+                }
+            });
+            if(!changed) return;
+            try{localStorage.setItem('mwPriceCache',JSON.stringify(mwPriceCache));}catch(e){}
+            if(Date.now()-_mwLastPaint>4000){
+                _mwLastPaint=Date.now();
+                try{ const pg=document.getElementById('pg-dashboard'); if(!pg||!pg.classList.contains('hidden')) mwRender(mwLast); }catch(e){}
+            }
+        }catch(e){}
+    }
     function mwRender(found={}){
         const el=document.getElementById('mw-list');if(!el)return;
         if(!mwSymbols.length){el.innerHTML='<div class="text-muted small p-2">कोई स्टॉक नहीं जोड़ा गया।</div>';return;}
@@ -1070,15 +1107,26 @@
     // the last good state and show "Reconnecting…" for transient failures;
     // "Offline" is never rendered. Only a sustained outage (>4 consecutive
     // failures) keeps Reconnecting… on screen.
-    let _connFails=0, _connEverOk=false, _connLastOkAt=0, _connWsOpen=false;
+    let _connFails=0, _connEverOk=false, _connLastOkAt=0, _connWsOpen=false, _connFailTimer=null;
+    function _scheduleReconnectBadge(){
+        // A proxy/cluster may drop the socket for a second during a deploy or
+        // a network blip. Don't paint "Reconnecting…" for a blip - only if
+        // the reconnect doesn't succeed within 12s.
+        try{
+            if(_connFailTimer) clearTimeout(_connFailTimer);
+            _connFailTimer=setTimeout(()=>{ _connFailTimer=null; _setConnStatus('fail'); },12000);
+        }catch(e){}
+    }
     function _setConnStatus(state){
         try{
             const el=document.getElementById('status'); if(!el) return;
             if(state==='live'){
+                if(_connFailTimer){clearTimeout(_connFailTimer);_connFailTimer=null;}
                 _connFails=0; _connEverOk=true; _connLastOkAt=Date.now();
                 el.innerHTML='<span class="live-dot"></span> Live Streaming'; return;
             }
             if(state==='ok'){
+                if(_connFailTimer){clearTimeout(_connFailTimer);_connFailTimer=null;}
                 _connFails=0; _connEverOk=true; _connLastOkAt=Date.now();
                 el.innerHTML='<span class="live-dot"></span> Connected'; return;
             }
@@ -2907,6 +2955,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                         if(h) document.getElementById('mkt-cards').innerHTML=h;
                         _dashWSDownSince=0;
                         _setConnStatus('live');
+                        try{ mwApplyTicks(msg.ticks); }catch(e){}
                         // Real-time P&L sync — rAF batch: coalesce ticks, update once per frame
                         if(!window._wsPending) window._wsPending=false;
                         if(!window._wsRaf) window._wsRaf=null;
@@ -2929,7 +2978,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                     }
                 }catch(err){}
             };
-            _dashWS.onclose=()=>{ _dashWS=null; _connWsOpen=false; _dashWSRetry++; if(!_dashWSDownSince) _dashWSDownSince=Date.now(); _setConnStatus('fail'); setTimeout(connectDashWS, Math.min(5000, 1000*_dashWSRetry)+Math.floor(Math.random()*500)); };
+            _dashWS.onclose=()=>{ _dashWS=null; _connWsOpen=false; _dashWSRetry++; if(!_dashWSDownSince) _dashWSDownSince=Date.now(); _scheduleReconnectBadge(); setTimeout(connectDashWS, Math.min(5000, 1000*_dashWSRetry)+Math.floor(Math.random()*500)); };
             _dashWS.onerror=()=>{ try{_dashWS.close();}catch(e){} };
         }catch(e){}
     }

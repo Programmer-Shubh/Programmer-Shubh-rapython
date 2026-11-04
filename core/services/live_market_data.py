@@ -21,8 +21,21 @@ _CHAIN_CACHE_TTL = 300
 _CHAIN_CACHE_MAX = 50
 
 def _live_cache_set(sym, data):
+    # Live data is good for a minute; a stale DB close should be retried
+    # quickly (8s) so Market Watch never stays on yesterday's price for a
+    # whole minute after one transient quote failure.
+    src = (data or {}).get("source")
+    ttl = _LIVE_CACHE_TTL if src not in ("db", "na") else 8
+    if src in ("db", "na"):
+        cur = _LIVE_CACHE.get(sym)
+        if cur:
+            cur_data = cur.get("data") or {}
+            # Never downgrade a recent live quote to a stale DB fallback.
+            if (cur_data.get("source") not in ("db", "na")
+                    and time.time() - float(cur.get("ts") or 0) < 300):
+                return
     if sym in _LIVE_CACHE: _LIVE_CACHE.move_to_end(sym)
-    _LIVE_CACHE[sym] = {"ts": time.time(), "data": data}
+    _LIVE_CACHE[sym] = {"ts": time.time(), "data": data, "ttl": ttl}
     if len(_LIVE_CACHE) > _LIVE_CACHE_MAX: _LIVE_CACHE.popitem(last=False)
 
 def _chain_cache_set(sym, data):
@@ -31,9 +44,12 @@ def _chain_cache_set(sym, data):
     if len(_CHAIN_CACHE) > _CHAIN_CACHE_MAX: _CHAIN_CACHE.popitem(last=False)
 
 def _live_cache_get(sym):
-    if sym in _LIVE_CACHE and time.time()-_LIVE_CACHE[sym]["ts"] < _LIVE_CACHE_TTL:
-        _LIVE_CACHE.move_to_end(sym)
-        return _LIVE_CACHE[sym]["data"]
+    if sym in _LIVE_CACHE:
+        entry = _LIVE_CACHE[sym]
+        ttl = float(entry.get("ttl") or _LIVE_CACHE_TTL)
+        if time.time() - entry["ts"] < ttl:
+            _LIVE_CACHE.move_to_end(sym)
+            return entry["data"]
     return None
 
 def _chain_cache_get(sym):
@@ -127,7 +143,21 @@ class LiveMarketData:
                 return data
         except Exception:
             pass
-        # 2) DB bhavcopy (stale close, only if cloud fails)
+        # 2) Last known LIVE quote (<=5 min) - better than a stale DB close.
+        #    Reuse it for a short 10s window so a failing quote source isn't
+        #    hammered every 3s by the WS broadcaster, but recovery is quick.
+        try:
+            entry = _LIVE_CACHE.get(sym)
+            if entry:
+                e_data = entry.get("data") or {}
+                if (e_data.get("source") not in ("db", "na")
+                        and time.time() - float(entry.get("ts") or 0) < 300):
+                    entry["ts"] = time.time()
+                    entry["ttl"] = 10
+                    return e_data
+        except Exception:
+            pass
+        # 3) DB bhavcopy (stale close, only if cloud fails)
         try:
             row = self.db.fetch_one(
                 "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=(SELECT MAX(trade_date) FROM bhavcopy_data WHERE symbol=?) AND option_type IS NULL",
