@@ -1892,40 +1892,58 @@ let _lastOpenTrdHTML = null;
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const startDate=document.getElementById('r-start').value;
         const endDate=document.getElementById('r-end').value;
+        const timeframe=document.getElementById('r-timeframe')?.value||'5m';
         let legs = stratLegs.length ? JSON.parse(JSON.stringify(stratLegs)) : [];
         if(!legs.length){
             const rOrder=document.getElementById('r-order').value;
             const legStrike=document.getElementById('r-strike').value;
             const rOtm=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
-            {const pp=rOrder.split('-');legs.push({option_type:pp[0],position:pp[1],strike_type:legStrike,lots, transaction: pp[1].toLowerCase(), strike_selection: legStrike.toLowerCase(),otm_distance:rOtm});}
+            {const pp=rOrder.split('-');legs.push({option_type:pp[0],position:pp[1],strike_type:legStrike,lots, transaction: pp[1].toLowerCase(), strike_selection: legStrike.toLowerCase(),otm_distance:rOtm,expiry:'weekly'});}
         }
+        // Indicators from checkbox panel (r-ind-*)
+        const inds=robotCollectIndicators?robotCollectIndicators():[];
         const body={
             id: window._editingStratId||0,
             name:(document.getElementById('s-name').value||'').trim()||(idx+'_'+stratType),
             symbol:idx,
-            strategy_type:stratType,
-            entry_time:entryTime,
-            exit_time:exitTime,
-            momentum,
-            lots,
-            stop_loss:sl,
-            take_profit:tp,
-            sl_unit:slUnit,
-            tp_unit:tpUnit,
-            start_date:startDate,
-            end_date:endDate,
-            legs,
-            reentry_on_sl:document.getElementById('s-reentry-sl').value,
-            reentry_on_tp:document.getElementById('s-reentry-tp').value,
-            trailing:document.getElementById('s-trail').value,
-            lock_profit_at:parseFloat(document.getElementById('s-lock-profit').value),
-            lock_profit:parseFloat(document.getElementById('s-lock-amount').value),
+            timeframe:timeframe,
+            description:'',
+            indicators:inds,
+            entry_conditions:window._stratEntryConds||[],
+            exit_conditions:window._stratExitConds||[],
+            legs:legs,
+            advanced_options:{
+                trade_mode:stratType,
+                entry_time:entryTime,
+                exit_time:exitTime,
+                timeframe:timeframe,
+                momentum:momentum,
+                slippage_pct:0.5,
+                strike_selection:(legs[0]&&legs[0].strike_selection)||'atm',
+                otm_distance:(legs[0]&&legs[0].otm_distance)||0,
+                max_holding_bars:1000000,
+                auto_exit_on_time:true,
+                reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'',
+                reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'',
+                trailing:document.getElementById('s-trail')?.value||'',
+                lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,
+                lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,
+            },
+            risk_management:{
+                daily_stop_loss:sl,
+                daily_take_profit:tp,
+                sl_unit:slUnit,
+                tp_unit:tpUnit,
+                max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5,
+                signal_lookback_days:parseInt(document.getElementById('r-slb')?.value)||0,
+            },
+            status:'active',
             // Abhi-chalaya result bhi save ho (config match par) - Backtest Detail dobara run nahi karega
             // Edit+Save par last_backtest chhua nahi jata - purana result DB me rahta hai.
             last_backtest: window._lastFullBT || null,
         };
         const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        if(r.id){alert('Strategy saved! ID: '+r.id);window._editingStratId=null;await loadStrats();}else{alert('Error saving strategy');}
+        if(r.id){alert('Strategy saved! ID: '+r.id);window._editingStratId=null;await loadStrats();}else{alert('Error saving strategy'+(r.error?': '+JSON.stringify(r.error):''));}
     }
     let stratLegs=[];
     let _payoffSpot=24500;
@@ -2291,7 +2309,7 @@ let _lastOpenTrdHTML = null;
         }catch(e){}
     }
     async function saveAlertConfig(){
-        const cfg={sl_pct:parseFloat(document.getElementById('alert-sl').value)||2,tp_pct:parseFloat(document.getElementById('alert-tp').value)||4,max_trades:int(document.getElementById('alert-max').value)||5,daily_loss_limit:parseFloat(document.getElementById('alert-dl').value)||5000,trailing:document.getElementById('alert-trail').value,lock_at:parseFloat(document.getElementById('alert-lock').value)||1};
+        const cfg={sl_pct:parseFloat(document.getElementById('alert-sl').value)||2,tp_pct:parseFloat(document.getElementById('alert-tp').value)||4,max_trades:parseInt(document.getElementById('alert-max').value)||5,daily_loss_limit:parseFloat(document.getElementById('alert-dl').value)||5000,trailing:document.getElementById('alert-trail').value,lock_at:parseFloat(document.getElementById('alert-lock').value)||1};
         try{await P('/api/email-alerts/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});alert('Config saved!');}catch(e){alert('Error: '+e.message);}
     }
     function whToken(){try{return localStorage.getItem('whToken')||'';}catch(e){return '';}}
