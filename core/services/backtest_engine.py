@@ -46,6 +46,7 @@ class BacktestEngine:
         except Exception:
             self._used_intraday_bars = False
         self._trade_mode = str(advanced_options.get("trade_mode") or "").lower()
+        self._advanced = advanced_options
         self.bt_expiry = legs[0].get("expiry_date", "") if legs else ""
         # Unified pricer: paper/live/chain/scan sab model_premium(model_iv)
         # use karte hain. Backtest me custom IV floor (0.18/0.20) alag premium
@@ -105,7 +106,11 @@ class BacktestEngine:
         if trade_mode == "btst":
             max_holding = max(max_holding, 5)
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
-        daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
+        daily_loss_limit = float(risk_management.get("daily_loss_limit", risk_management.get("daily_stop_loss", 0)) or 0)
+        # Risk-per-trade position sizing: lots = (risk_pct * capital) / (SL_points * lot_size)
+        risk_per_trade_pct = float(risk_management.get("risk_per_trade_pct", 0) or 0)
+        risk_per_trade_rs = float(risk_management.get("risk_per_trade_rs", 0) or 0)
+        auto_position_size = bool(risk_management.get("auto_position_size", False))
         # Strategy-wise MTM Stop Loss and Target (overall portfolio level).
         # ONLY explicit strategy_* keys: daily_stop_loss/take_profit are the
         # PER-TRADE SL/TP (sltp_premium_level) and are already enforced by the
@@ -140,6 +145,35 @@ class BacktestEngine:
                     vix_data = _vj.load(open(_vp))
             except Exception:
                 vix_data = {}
+        # Production VIX fallback: fetch latest India VIX from NSE if static
+        # file is missing/stale (Render free tier = no persistent data dir).
+        _vix_latest = None
+        if vix_max > 0 and not vix_data:
+            try:
+                import urllib.request as _ur, json as _vjson
+                _ur_headers = {"User-Agent": "Mozilla/5.0"}
+                # NSE India VIX endpoint
+                for _url in ["https://www.nseindia.com/api/allIndices?index=INDIA%20VIX",
+                             "https://www.nseindia.com/api/option-chain-indices?symbol=INDIAVIX"]:
+                    try:
+                        _req = _ur.Request(_url, headers=_ur_headers)
+                        with _ur.urlopen(_req, timeout=5) as _r:
+                            _vj = _vjson.loads(_r.read().decode())
+                            if "data" in _vj:
+                                for _d in _vj["data"]:
+                                    if str(_d.get("index", "")).upper() == "INDIA VIX":
+                                        _vix_latest = float(_d.get("last", 0) or 0)
+                                        break
+                            if "records" in _vj and "underlyingValue" in _vj["records"]:
+                                _vix_latest = float(_vj["records"]["underlyingValue"] or 0)
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+        # Neutral default VIX if nothing available (won't trigger filter)
+        if _vix_latest is None:
+            _vix_latest = 15.0
         # Min entry premium: skip SELL entries cheaper than this (far-OTM lottery
         # tickets like Rs2-3 have tiny max profit but huge adverse-move loss).
         min_premium = float(advanced_options.get("min_entry_premium", 0) or 0)
@@ -286,7 +320,24 @@ class BacktestEngine:
 
             # Execute pending entry from PREVIOUS bar's signal (no look-ahead)
             if pending_entry is not None and can_enter:
-                # Execution happens at NEXT candle's OPEN (no look-ahead bias)
+                # ---- Position sizing: risk-per-trade % auto-lots ----
+                entry_leg = dict(legs[0]) if legs else {"option_type": "CE", "lots": 1}
+                if auto_position_size and (risk_per_trade_pct > 0 or risk_per_trade_rs > 0):
+                    try:
+                        spot_for_size = float(cur.get("open_price", 0) or cur.get("close_price", 0))
+                        step = get_strike_step(symbol)
+                        atm_for_size = round(spot_for_size / step) * step
+                        strike_for_size = self._select_strike(spot_for_size, symbol, entry_leg.get("option_type","CE"), entry_leg.get("strike_selection","otm"), delta_target, int(entry_leg.get("otm_distance", otm_dist)))
+                        prem_for_size = self._entry_premium(cur_date, spot_for_size, strike_for_size, entry_leg.get("option_type","CE"))
+                        prem_for_size = max(TransactionCosts.apply_fill_slippage(prem_for_size, "BUY" if entry_leg.get("transaction","buy").lower()=="buy" else "SELL", self.is_live, slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5)), 1.5)
+                        lot_sz = int(get_lot_size(symbol) or 50)
+                        sl_amt = risk_per_trade_rs if risk_per_trade_rs > 0 else (self.initial_capital * risk_per_trade_pct / 100.0)
+                        sl_pts = sl_amt / lot_sz
+                        if sl_pts > 0 and prem_for_size > sl_pts:
+                            max_lots = max(1, int(sl_amt / (sl_pts * lot_sz)))
+                            entry_leg["lots"] = max_lots
+                    except Exception:
+                        pass
                 exec_idx = i
                 exec_bar = historical[exec_idx] if exec_idx < len(historical) else cur
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
@@ -303,7 +354,7 @@ class BacktestEngine:
                     trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
                     trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
                 else:
-                    trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
+                    trade = self._enter_single(cur_date, spot, symbol, entry_leg, strike_sel, delta_target, otm_dist)
                     trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
                 # Min-premium guard: Rs20 se saste entries (BUY or SELL) kabhi
                 # nahi - signal-time estimate chook sakta hai, isliye ACTUAL
@@ -322,6 +373,17 @@ class BacktestEngine:
                 entries.append(trade)
                 entry_bars.append(i)
                 daily_trades += 1
+                # ---- Per-trade risk amount (for R-multiple) ----
+                try:
+                    _sl_unit = getattr(self, "_sl_unit", "rs")
+                    _sl_amt = leg_sl if leg_sl else 0
+                    if _sl_unit == "pct" and _sl_amt > 0:
+                        _risk_rs = (_sl_amt / 100.0) * float(trade.get("price", 0)) * int(trade.get("quantity", 0))
+                    else:
+                        _risk_rs = float(_sl_amt)
+                    trade["risk_amount_rs"] = round(_risk_rs, 2)
+                except Exception:
+                    trade["risk_amount_rs"] = 0.0
                 pending_entry = None
                 pending_auto_buy = None
                 pending_entry_signal_time = None  # Consumed
@@ -357,7 +419,7 @@ class BacktestEngine:
             if has_open:
                 entry = entries[len(exits)]
                 if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
-                    hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
+                    hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty, entry_idx=len(exits))
                     if hit:
                         # SL हिट होने पर मार्केट स्पाइक के चाले एक्स्ट्रा 1% स्लिपेज (विशेषकर SELL पोजीशन पर)
                         _fill = hit.get("fill", hit["level"])
@@ -551,6 +613,9 @@ class BacktestEngine:
                 if can_enter and vix_max > 0:
                     try:
                         _vix = float(vix_data.get(str(cur_date)[:10], 0) or 0)
+                        # Fallback to latest VIX if date not in static data
+                        if _vix == 0 and _vix_latest:
+                            _vix = _vix_latest
                         if _vix > 0 and _vix > vix_max:
                             can_enter = False
                     except Exception:
@@ -1814,7 +1879,7 @@ class BacktestEngine:
             pass
         return sl_amt, tp_amt, sl_unit, tp_unit
 
-    def _check_sl_tp(self, current, entry, option_type, txn_type, sl_amt, tp_amt, qty=0):
+    def _check_sl_tp(self, current, entry, option_type, txn_type, sl_amt, tp_amt, qty=0, entry_idx=None):
         entry_price = float(entry["price"])
         qty = int(qty or entry.get("quantity", 0) or 0)
         if qty <= 0:
@@ -1835,6 +1900,49 @@ class BacktestEngine:
 
         sl_level = _to_level(sl_amt, True)
         tp_level = _to_level(tp_amt, False)
+
+        # ---- Trailing Stop: lock in profits as price moves in favor ----
+        trailing = str(getattr(self, "_advanced", {}).get("trailing", "") or "").strip()
+        if trailing and trailing.lower() not in ("off", "none", "0", "false", "lock"):
+            try:
+                trail_dist = float(trailing)
+            except Exception:
+                trail_dist = 0.0
+            if trail_dist > 0 and entry_idx is not None:
+                # Current premium range for this bar
+                _cur_best = float(current.get("high_price", 0) or current.get("close_price", 0) or 0)
+                _cur_worst = float(current.get("low_price", 0) or current.get("close_price", 0) or 0)
+                prev_best = self._trailing_best.get(entry_idx)
+                if txn_type == "buy":
+                    # BUY: trail SL up as price rises; best = highest high seen
+                    if prev_best is None or _cur_best > prev_best:
+                        self._trailing_best[entry_idx] = _cur_best
+                        prev_best = _cur_best
+                    if prev_best > 0:
+                        trailed_sl = prev_best - trail_dist
+                        if trailed_sl > sl_level:
+                            sl_level = trailed_sl
+                else:  # sell
+                    # SELL: trail SL down as price falls; best = lowest low seen
+                    if prev_best is None or _cur_worst < prev_best:
+                        self._trailing_best[entry_idx] = _cur_worst
+                        prev_best = _cur_worst
+                    if prev_best > 0:
+                        trailed_sl = prev_best + trail_dist
+                        if trailed_sl < sl_level or sl_level == 0:
+                            sl_level = trailed_sl
+            elif trailing.lower() == "lock":
+                # "Lock": once in profit by trail_dist pts, move SL to entry (break-even)
+                # No distance param; uses entry price as lock level
+                _cur_best = float(current.get("high_price", 0) or current.get("close_price", 0) or 0)
+                _cur_worst = float(current.get("low_price", 0) or current.get("close_price", 0) or 0)
+                profit_pts = (_cur_best - entry_price) if txn_type == "buy" else (entry_price - _cur_worst)
+                if profit_pts >= trail_dist if trail_dist > 0 else profit_pts > 0:
+                    if txn_type == "buy":
+                        sl_level = max(sl_level, entry_price)
+                    else:
+                        sl_level = min(sl_level, entry_price) if sl_level > 0 else entry_price
+        # ... rest of method
 
         # EQ (equity spot) legs: SL/TP on the BAR's spot high/low directly -
         # no Black-Scholes, no option chain. Same source as EQ entry.
@@ -2531,6 +2639,7 @@ class BacktestEngine:
                         "validation": None,
                         "vix": None,
                         "is_spread": True,
+                        "r_multiple": round(exit.get("pnl", 0) / max(trade.get("risk_amount_rs", 0) or 0.01, 0.01), 2) if trade.get("risk_amount_rs", 0) > 0 else 0.0,
                         "signal_time": entry.get("signal_time", entry.get("time", "")),
                     })
                 else:
@@ -2553,6 +2662,7 @@ class BacktestEngine:
                         _sig = entry.get("signal", {}) or {}
                     except Exception:
                         _sig = {}
+                    _risk_amt = float(entry.get("risk_amount_rs", 0) or 0)
                     trade_list.append({
                         "index": total_trades,
                         "symbol": symbol,
@@ -2582,6 +2692,8 @@ class BacktestEngine:
                         "signal_indicators": _sig.get("indicators", []) or [],
                         "validation": None,
                         "vix": None,
+                        "risk_amount_rs": round(_risk_amt, 2),
+                        "r_multiple": round(pnl / max(_risk_amt, 0.01), 2) if _risk_amt > 0 else 0.0,
                         "signal_time": entry.get("signal_time", entry.get("time", "")),
                     })
             equity.append(capital)
@@ -2591,7 +2703,8 @@ class BacktestEngine:
         loss_rate = 100 - win_rate if total_trades > 0 else 0
         avg_win = sum(win_amounts) / len(win_amounts) if win_amounts else 0
         avg_loss = sum(loss_amounts) / len(loss_amounts) if loss_amounts else 0
-        profit_factor = sum(win_amounts) / max(sum(loss_amounts), 0.01) if loss_amounts else (999 if win_amounts else 0)
+        profit_factor = sum(win_amounts) / max(sum(loss_amounts), 0.01) if loss_amounts else (float('inf') if win_amounts else 0.0)
+        profit_factor_display = round(profit_factor, 4) if profit_factor != float('inf') else 999999.0
         max_dd = self._max_drawdown(equity)
         sharpe = self._sharpe(equity)
         # Frontend expects many extra fields - provide 0/default when no trades to avoid NaN/undefined
@@ -2669,7 +2782,8 @@ class BacktestEngine:
                 "win_rate": round(win_rate, 2),
                 "loss_rate": round(loss_rate, 2),
                 "max_drawdown": round(max_dd, 4),
-                "profit_factor": round(profit_factor, 4),
+                "profit_factor": profit_factor_display,
+                "profit_factor_infinite": profit_factor == float('inf'),
                 "sharpe_ratio": round(sharpe, 4),
                 "total_trades": total_trades,
                 "winning_trades": wins,
@@ -2737,3 +2851,4 @@ class BacktestEngine:
         self.bt_symbol = ""
         self.bt_expiry = ""
         self._prem_src_cache = {}
+        self._trailing_best = {}  # trade index -> best price seen (for trailing SL)
