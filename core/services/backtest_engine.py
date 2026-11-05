@@ -107,10 +107,8 @@ class BacktestEngine:
             max_holding = max(max_holding, 5)
         max_trades_day = int(risk_management.get("max_trades_per_day", 5))
         daily_loss_limit = float(risk_management.get("daily_loss_limit", risk_management.get("daily_stop_loss", 0)) or 0)
-        # Risk-per-trade position sizing: lots = (risk_pct * capital) / (SL_points * lot_size)
-        risk_per_trade_pct = float(risk_management.get("risk_per_trade_pct", 0) or 0)
-        risk_per_trade_rs = float(risk_management.get("risk_per_trade_rs", 0) or 0)
-        auto_position_size = bool(risk_management.get("auto_position_size", False))
+        # Position sizing: यूजर मैन्युअल lots सेट करता है — ऑटो नहीं (user demand).
+        # Risk amount केवल R-multiple display के लिए SL सेटिंग से निकाला जाएगा।
         # Strategy-wise MTM Stop Loss and Target (overall portfolio level).
         # ONLY explicit strategy_* keys: daily_stop_loss/take_profit are the
         # PER-TRADE SL/TP (sltp_premium_level) and are already enforced by the
@@ -320,24 +318,6 @@ class BacktestEngine:
 
             # Execute pending entry from PREVIOUS bar's signal (no look-ahead)
             if pending_entry is not None and can_enter:
-                # ---- Position sizing: risk-per-trade % auto-lots ----
-                entry_leg = dict(legs[0]) if legs else {"option_type": "CE", "lots": 1}
-                if auto_position_size and (risk_per_trade_pct > 0 or risk_per_trade_rs > 0):
-                    try:
-                        spot_for_size = float(cur.get("open_price", 0) or cur.get("close_price", 0))
-                        step = get_strike_step(symbol)
-                        atm_for_size = round(spot_for_size / step) * step
-                        strike_for_size = self._select_strike(spot_for_size, symbol, entry_leg.get("option_type","CE"), entry_leg.get("strike_selection","otm"), delta_target, int(entry_leg.get("otm_distance", otm_dist)))
-                        prem_for_size = self._entry_premium(cur_date, spot_for_size, strike_for_size, entry_leg.get("option_type","CE"))
-                        prem_for_size = max(TransactionCosts.apply_fill_slippage(prem_for_size, "BUY" if entry_leg.get("transaction","buy").lower()=="buy" else "SELL", self.is_live, slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5)), 1.5)
-                        lot_sz = int(get_lot_size(symbol) or 50)
-                        sl_amt = risk_per_trade_rs if risk_per_trade_rs > 0 else (self.initial_capital * risk_per_trade_pct / 100.0)
-                        sl_pts = sl_amt / lot_sz
-                        if sl_pts > 0 and prem_for_size > sl_pts:
-                            max_lots = max(1, int(sl_amt / (sl_pts * lot_sz)))
-                            entry_leg["lots"] = max_lots
-                    except Exception:
-                        pass
                 exec_idx = i
                 exec_bar = historical[exec_idx] if exec_idx < len(historical) else cur
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
@@ -354,7 +334,7 @@ class BacktestEngine:
                     trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
                     trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
                 else:
-                    trade = self._enter_single(cur_date, spot, symbol, entry_leg, strike_sel, delta_target, otm_dist)
+                    trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
                     trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
                 # Min-premium guard: Rs20 se saste entries (BUY or SELL) kabhi
                 # nahi - signal-time estimate chook sakta hai, isliye ACTUAL

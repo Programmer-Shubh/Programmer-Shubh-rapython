@@ -133,11 +133,13 @@ async def _startup_background():
     except: pass
     try:
         # Live signal worker: ACTIVE strategies evaluated on fresh 15m
-        # candles every 5 min in market hours (ADX/ST/BB live loop).
+        # candles every 60 sec in market hours (ADX/ST/BB live loop).
+        # 15-min गैप से intraday entry signal miss होते थे (सिग्नल 10:07 पर
+        # बने और worker 10:15 पर जागा → trade miss). अब हर मिनट चेक होगा.
         def _live_sig_loop():
             try:
                 from core.services.auto_paper import start_live_background as _lsb
-                _lsb(900)
+                _lsb(60)
             except: pass
         import threading as _th6
         _th6.Thread(target=_live_sig_loop, daemon=True).start()
