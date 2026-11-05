@@ -2619,7 +2619,9 @@ class BacktestEngine:
                         "validation": None,
                         "vix": None,
                         "is_spread": True,
-                        "r_multiple": round(exit.get("pnl", 0) / max(trade.get("risk_amount_rs", 0) or 0.01, 0.01), 2) if trade.get("risk_amount_rs", 0) > 0 else 0.0,
+                        "risk_amount_rs": round(float(entry.get("risk_amount_rs", 0) or 0), 2),
+                        "r_multiple": round(pnl / max(float(entry.get("risk_amount_rs", 0) or 0), 0.01), 2)
+                        if float(entry.get("risk_amount_rs", 0) or 0) > 0 else 0.0,
                         "signal_time": entry.get("signal_time", entry.get("time", "")),
                     })
                 else:
