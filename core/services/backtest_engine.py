@@ -2752,6 +2752,63 @@ class BacktestEngine:
         _zero_hold = sum(1 for t in trade_list
                          if str(t.get("entry_date")) == str(t.get("exit_date"))
                          and str(t.get("entry_time")) == str(t.get("exit_time")))
+
+        # ---- Option-Selling Risk Metrics (naked sell = unlimited risk) ----
+        _is_naked_sell = False
+        _max_profit_per_trade = 0.0   # premium received (capped profit for sell)
+        _max_possible_loss_est = 0.0  # theoretical worst-case if spot gaps deep ITM
+        _margin_estimate_rs = 0.0     # rough margin blocked (20-25% of notional)
+        _gap_risk_warning = False
+        _sell_trades = [t for t in trade_list if str(t.get("position", "")).lower() == "sell"]
+        if _sell_trades:
+            _is_naked_sell = True
+            _spot_ref = 0.0
+            try:
+                _spot_ref = float((historical[-1] or {}).get("close_price", 0) or 0) if historical else 0.0
+            except Exception:
+                pass
+            for _t in _sell_trades:
+                try:
+                    _prem = float(_t.get("entry_price", 0) or 0)
+                    _qty = int(_t.get("quantity", 0) or 0)
+                    _strike = float(_t.get("strike", 0) or 0)
+                    _opt = str(_t.get("option_type", "")).upper()
+                    # Max profit = premium received (capped for option selling)
+                    _max_profit_per_trade = max(_max_profit_per_trade, _prem * _qty)
+                    # Max possible loss estimate: if spot goes deep ITM
+                    # CE Sell: loss if spot >> strike; PE Sell: loss if spot << strike
+                    if _opt == "CE" and _strike > _spot_ref and _spot_ref > 0:
+                        _loss = (_strike - _spot_ref) * _qty  # per unit, approx
+                    elif _opt == "PE" and _spot_ref > _strike and _spot_ref > 0:
+                        _loss = (_spot_ref - _strike) * _qty
+                    else:
+                        _loss = _strike * 0.5 * _qty  # conservative fallback
+                    _max_possible_loss_est = max(_max_possible_loss_est, _loss)
+                    # Margin estimate: ~20% of notional for naked short (broker varies)
+                    _notional = _strike * _qty if _strike > 0 else _prem * _qty * 10
+                    _margin_estimate_rs = max(_margin_estimate_rs, _notional * 0.20)
+                except Exception:
+                    pass
+            # Gap risk: if strategy holds overnight (positional or daily bars)
+            if self._trade_mode != "intraday" or not self._used_intraday_bars:
+                _gap_risk_warning = True
+            # Also warn if any trade stayed overnight
+            for _t in trade_list:
+                try:
+                    if str(_t.get("entry_date", "")) != str(_t.get("exit_date", "")):
+                        _gap_risk_warning = True
+                        break
+                except Exception:
+                    pass
+        _warn_opt = []
+        if _is_naked_sell:
+            _warn_opt.append("NAKED SELL: single-leg short — unlimited loss possible. Spread/hedge लगाओ या चोटा साइज़ रखो।")
+        if _gap_risk_warning:
+            _warn_opt.append("गैप रिस्क: रात भर पोज़िशन carry करने पर गैप-अप/गैप-डाउन से SL breach हो सकता है।")
+        if _max_possible_loss_est > 0:
+            _warn_opt.append(f"सबसे बुरा अनुमानित नुकसान: ₹{_max_possible_loss_est:,.0f} प्रति ट्रेड (स्टॉक ज़ीरो पर जाने का सैद्धांतिक केस)।")
+        _warn.extend(_warn_opt)
+
         return {
             "success": True,
             "metrics": {
@@ -2774,6 +2831,11 @@ class BacktestEngine:
                 "net_pnl": round(net_pnl, 2),
                 "max_win": round(max_win, 2),
                 "max_loss": round(max_loss, 2),
+                "max_profit_per_trade": round(_max_profit_per_trade, 2),
+                "max_possible_loss_est": round(_max_possible_loss_est, 2),
+                "margin_estimate_rs": round(_margin_estimate_rs, 2),
+                "is_naked_sell": _is_naked_sell,
+                "gap_risk_warning": _gap_risk_warning,
                 "max_dd_duration": max_dd_duration,
                 "max_trades_in_dd": max_trades_in_dd,
                 "return_maxdd": round(return_maxdd, 2),
