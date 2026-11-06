@@ -132,7 +132,7 @@ def resolve_weekly_expiry(symbol: str = "") -> str:
     Yahi shared date paper, chain aur live order teeno use karte hain.
     Expiry ke DIN stock ka entry NEXT month (physically-settled block)."""
     try:
-        from core.services.symbol_resolver import order_expiry, stock_order_expiry, has_weekly_options
+        from core.services.symbol_resolver import order_expiry, has_weekly_options, roll_two_days
         if not has_weekly_options(symbol):
             _se = order_expiry(symbol)
             if _se:
@@ -140,26 +140,13 @@ def resolve_weekly_expiry(symbol: str = "") -> str:
     except Exception:
         pass
     try:
-        from core.services.symbol_resolver import _nearest_on_or_after
+        from core.services.symbol_resolver import _nearest_on_or_after, roll_two_days
         _exps = _fyers_expiry_list()
         if _exps:
             _snap = _nearest_on_or_after(_exps)
             if _snap:
-                # 2-DAY ROLL for weekly indices: agar snapped expiry
-                # 2 din ke andar hai (ya nikal gayi hai) to NEXT weekly lelo.
-                # NIFTY/SENSEX/BANKEX ke liye "expiry se 2 din pehle next week"
-                # — far-OTM ₹1/₹0.5 junk se bachne ke liye.
-                import datetime as _dt2
-                _today_s = _ist_today()
-                _td = _dt2.datetime.strptime(_today_s, "%Y-%m-%d").date()
-                _sd = _dt2.datetime.strptime(str(_snap)[:10], "%Y-%m-%d").date()
-                if (_sd - _td).days <= 2:
-                    _later = [e for e in _exps
-                              if _dt2.datetime.strptime(str(e)[:10], "%Y-%m-%d").date() > _sd]
-                    if _later:
-                        _snap = min(_later,
-                                    key=lambda e: _dt2.datetime.strptime(str(e)[:10], "%Y-%m-%d").date())
-                return _snap[:10]
+                # 2-DAY ROLL: within 2 days (or passed) -> next REAL expiry.
+                return roll_two_days(symbol, _snap)
     except Exception:
         pass
     try:
@@ -169,15 +156,18 @@ def resolve_weekly_expiry(symbol: str = "") -> str:
             _ne = _nxnorm(_ne)
         except Exception:
             pass
-        if _ne and _ne >= _ist_today():
-            return _ne[:10]
+        if _ne:
+            from core.services.symbol_resolver import roll_two_days
+            return roll_two_days(symbol, _ne)
     except Exception:
         pass
     try:
         import datetime as _dt
+        from core.services.symbol_resolver import roll_two_days
         _tom = (_dt.datetime.strptime(_ist_today(), "%Y-%m-%d")
                 + _dt.timedelta(days=1)).strftime("%Y-%m-%d")
-        return next_weekly_on_or_after(symbol, _tom)
+        _base = next_weekly_on_or_after(symbol, _tom)
+        return roll_two_days(symbol, _base) if _base else ""
     except Exception:
         return ""
 
@@ -208,7 +198,8 @@ def resolve_expiry_hint(symbol: str = "", hint: str = "") -> str:
                 # phantom contract par broker/NSE quotes aate hi nahi aur
                 # paper model-price par lag jata tha (backtest se gap).
                 snapped = _snap_future_expiry(symbol, _d.strftime("%Y-%m-%d"))
-                return snapped
+                from core.services.symbol_resolver import roll_two_days
+                return roll_two_days(symbol, snapped)
     except Exception:
         pass
     if h.lower().startswith("month"):
@@ -223,18 +214,13 @@ def resolve_expiry_hint(symbol: str = "", hint: str = "") -> str:
         try:
             import calendar as _cal
             import datetime as _dt
+            from core.services.symbol_resolver import roll_two_days
             _today = _dt.datetime.strptime(_ist_today(), "%Y-%m-%d").date()
             _wd = 3 if (symbol or "").upper() == "SENSEX" else 1
             _last = _dt.date(_today.year, _today.month, _cal.monthrange(_today.year, _today.month)[1])
             while _last.weekday() != _wd:
                 _last -= _dt.timedelta(days=1)
-            if _last < _today:
-                _m = _today.month + 1 if _today.month < 12 else 1
-                _y = _today.year if _today.month < 12 else _today.year + 1
-                _last = _dt.date(_y, _m, _cal.monthrange(_y, _m)[1])
-                while _last.weekday() != _wd:
-                    _last -= _dt.timedelta(days=1)
-            return _last.strftime("%Y-%m-%d")
+            return roll_two_days(symbol, _last, monthly=True)
         except Exception:
             pass
     return resolve_weekly_expiry(symbol)

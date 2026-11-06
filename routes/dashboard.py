@@ -261,6 +261,12 @@ def get_portfolio():
     for _p in positions:
         _otm_calc({"symbol": _p["trade"].get("symbol"),
                    "strike": _p["trade"].get("strike_price")}, _sc)
+    # Strategy name (Recent Trades jaisa hi - har open position ke samne naam)
+    try:
+        _srows = trade_model.db.fetch_all("SELECT id, name FROM strategies") or []
+        _smap = {int(r.get("id") or 0): str(r.get("name") or "") for r in _srows}
+    except Exception:
+        _smap = {}
     return {
         "open_count": len(positions),
         "total_pnl": round(total_pnl, 2),
@@ -290,6 +296,7 @@ def get_portfolio():
                 "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
                 "expiry_date": t["trade"].get("expiry_date", ""),
                 "strategy_id": t["trade"].get("strategy_id", 0) or 0,
+                "strategy_name": _smap.get(int(t["trade"].get("strategy_id") or 0), "") or (f"Strategy #{int(t['trade'].get('strategy_id') or 0)}" if int(t["trade"].get("strategy_id") or 0) else ""),
                 "spot": _sc.get(str(t["trade"]["symbol"]).upper()),
                 **{"otm_pct": _otm_calc({"symbol": t["trade"].get("symbol"), "strike": t["trade"].get("strike_price")}, _sc)[1]},
             }

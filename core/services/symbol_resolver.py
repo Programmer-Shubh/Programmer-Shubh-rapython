@@ -54,6 +54,52 @@ FYERS_UNDERLYING = {
 }
 
 
+def _last_weekday_of_month(y: int, m: int, wd: int) -> "_dt.date":
+    import calendar as _cal
+    d = _dt.date(y, m, _cal.monthrange(y, m)[1])
+    while d.weekday() != wd:
+        d -= _dt.timedelta(days=1)
+    return d
+
+
+def roll_two_days(symbol: str, exp_ymd: str, today=None, monthly: bool = False) -> str:
+    """2-DAY EXPIRY ROLL (user demand, 2026-11): agar candidate expiry aaj ke
+    2 din ke ANDAR hai (future OR already expired), order NEXT expiry par
+    jata hai. Kabhi expiry ke kareeb ka contract nahi:
+      - NIFTY/SENSEX/BANKEX (weekly indices): next weekly (NSE Tue / BSE Thu);
+      - BANKNIFTY/FINNIFTY/MIDCPNIFTY/stocks/options: NEXT expiry's last
+        weekday of the month (monthly rule).
+    Returns the (possibly rolled) YYYY-MM-DD expiry. "+2 days" = expiry 2 din
+    pahle se roll - user demand."""
+    try:
+        today = today or _today_ist()
+        d = _dt.datetime.strptime(str(exp_ymd)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return str(exp_ymd or "")
+    wd = 3 if str(symbol or "").upper().replace(" ", "") in ("SENSEX", "BANKEX") else 1
+    if (d - today).days > 2:
+        return d.strftime("%Y-%m-%d")    # >2 days away: no roll needed
+    if monthly or not has_weekly_options(symbol):
+        # Monthly: last expiry-weekday of month, else next month's.
+        wd_m = wd
+        y, m = d.year, d.month
+        for _ in range(36):
+            last = _last_weekday_of_month(y, m, wd_m)
+            if (last - today).days > 2:
+                return last.strftime("%Y-%m-%d")
+            y, m = _next_month(y, m)
+        return d.strftime("%Y-%m-%d")
+    # Weekly (NIFTY/SENSEX/BANKEX): advance to the first real weekly expiry
+    # that is > today+2.
+    exp = d
+    while True:
+        exp = exp + _dt.timedelta(days=1)
+        while exp.weekday() != wd:
+            exp += _dt.timedelta(days=1)
+        if (exp - today).days > 2:
+            return exp.strftime("%Y-%m-%d")
+
+
 def stock_monthly_expiry(symbol: str, hint: str = "") -> str:
     """Nearest REAL stock-option expiry date (NSE stocks: MONTHLY only).
 
@@ -86,9 +132,9 @@ def stock_monthly_expiry(symbol: str, hint: str = "") -> str:
     if explicit:
         # Explicit date same month ka ho to us month ka real expiry; warna
         # (purani/ghayr-month date) aaj ke baad ka nearest monthly.
-        if d < today:
+        if (d - today).days <= 2:
             d = _last_tue(*_next_month(today.year, today.month))
-    elif d < today:
+    elif (d - today).days <= 2:
         d = _last_tue(*_next_month(today.year, today.month))
     return d.strftime("%Y-%m-%d")
 
@@ -180,23 +226,25 @@ def snap_hint_to_expiry(symbol: str, hint: str) -> str:
     if explicit:
         try:
             from core.services.contract_pricer import _snap_future_expiry as _snap
-            return _snap(symbol, hint[:10]) or hint[:10]
+            snapped = _snap(symbol, hint[:10]) or hint[:10]
+            return roll_two_days(symbol, snapped) if snapped else hint[:10]
         except Exception:
-            return hint[:10]
+            return roll_two_days(symbol, hint[:10])
     if hint.lower().startswith("month") or (symbol.upper() not in WEEKLY_IDX):
         last = _dt.date(today.year, today.month, _cal.monthrange(today.year, today.month)[1])
         while last.weekday() != wd:
             last -= _dt.timedelta(days=1)
-        if last < today:
-            m = today.month + 1 if today.month < 12 else 1
-            y = today.year if today.month < 12 else today.year + 1
-            last = _dt.date(y, m, _cal.monthrange(y, m)[1])
-            while last.weekday() != wd:
-                last -= _dt.timedelta(days=1)
+        if (last - today).days <= 2:
+            y, m = _next_month(today.year, today.month)
+            last = _last_weekday_of_month(y, m, wd)
         return last.strftime("%Y-%m-%d")
     d = today + _dt.timedelta(days=1)
     while d.weekday() != wd:
         d += _dt.timedelta(days=1)
+    # 2-DAY EXPIRY ROLL (user demand): within 2 days of expiry, take the NEXT
+    # expiry, never the imminent one.
+    if (d - today).days <= 2:
+        d += _dt.timedelta(days=7)
     return d.strftime("%Y-%m-%d")
 
 
@@ -315,15 +363,17 @@ async def resolve_contract(broker: str, creds: dict, underlying: str,
         use_exp = order_expiry(underlying, expiry_hint or "weekly")
         src = "fyers-constructed"
         if live_exps:
+            # 2-DAY EXPIRY ROLL (user demand): nearest live expiry within 2
+            # days of today is NEVER used for a new order — next one instead.
             if explicit and guess in live_exps:
-                use_exp = guess
+                use_exp = roll_two_days(underlying, guess)
                 src = "fyers-validated"
             else:
                 # Weekly/Monthly hint OR stale explicit date: snap to nearest
                 # live expiry (a dead contract can never trade; preview shows it)
                 snapped = _nearest_on_or_after(live_exps)
                 if snapped:
-                    use_exp = snapped
+                    use_exp = roll_two_days(underlying, snapped)
                     src = "fyers-validated" if not explicit else "fyers-snapped"
                 elif explicit:
                     return {"ok": False,

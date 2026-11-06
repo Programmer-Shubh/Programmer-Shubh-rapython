@@ -1983,6 +1983,14 @@ class BacktestEngine:
         try:
             exp = getattr(self, "bt_expiry", "") or ""
             cur_d = str(current.get("trade_date", ""))
+            if not exp and cur_d:
+                # bt_expiry khali (koi fixed contract nahi): bar date ke
+                # exchange expiry se compute karo. Held-into-expiry stale
+                # bt_expiry pehle jaisi hi priority rakhta hai (t floor).
+                try:
+                    exp = self._expiry_for_date(cur_d)
+                except Exception:
+                    exp = ""
             if exp and cur_d:
                 import datetime as _dt
                 d1 = _dt.datetime.strptime(cur_d, "%Y-%m-%d")
@@ -2361,7 +2369,7 @@ class BacktestEngine:
             return max(float(spot or 0), 0.01)
         return self._entry_premium(date, spot, strike, option_type)
 
-    def _close_premium(self, date, spot, strike, option_type):
+    def _close_premium(self, date, spot, strike, option_type, anchor_exp=None):
         # EQ legs exit at the execution-bar spot (no option chain involved)
         if str(option_type or "").upper() == "EQ":
             return max(float(spot or 0), 0.01)
@@ -2418,7 +2426,7 @@ class BacktestEngine:
         # entry/exit mismatch se fake winrate banta tha. Cache key me SPOT
         # (entry-side jaisa intraday freeze fix).
         if spot and spot > 0 and strike and strike > 0:
-            dte_days = max(self._days_to_expiry(date, self._get_expiry_type()), 1)
+            dte_days = max(self._days_to_expiry(date, self._get_expiry_type(), anchor=anchor_exp), 1)
             try:
                 _mkey = f"{date}_{strike}_{option_type}_c_m{int(float(spot))}_{getattr(self, '_cur_bar_time', '')}"
             except Exception:
@@ -2439,33 +2447,59 @@ class BacktestEngine:
             self.premium_cache[key] = 5.0
         return 5.0
 
-    def _days_to_expiry(self, bar_date, expiry_type="weekly"):
+    def _expiry_for_date(self, bar_date):
+        """Exchange expiry for PRICING on `bar_date`: NSE weekly = Tuesday,
+        BSE = Thursday, monthly = last expiry weekday. NOTE: pure exchange
+        calendar (parity-pinned tests) - the 2-day roll is a LIVE
+        order-routing rule (order_expiry/roll_two_days), backtest pricing
+        us se alag chalne par entry/DTE shape kuchal jata tha."""
         import datetime
-        if not self.bt_expiry:
-            try:
-                d = datetime.datetime.strptime(bar_date, "%Y-%m-%d").date() if bar_date else datetime.date.today()
-            except Exception:
-                d = datetime.date.today()
-            wd = self._expiry_weekday()
-            if self._use_weekly(expiry_type):
-                # Next expiry strictly after today (same "2-day roll" spirit as
-                # live order routing: an expiring-today contract isn't entered).
-                days_ahead = (wd - d.weekday()) % 7
-                if days_ahead <= 0:
-                    days_ahead += 7
-                exp = d + datetime.timedelta(days=days_ahead)
-            else:
-                # Monthly: last expiry-weekday of the month; strictly in the future.
-                exp = self._last_weekday_of_month(d.year, d.month, wd)
-                if exp <= d:
-                    y, m = self._next_month(d.year, d.month)
-                    exp = self._last_weekday_of_month(y, m, wd)
-            self.bt_expiry = exp.strftime("%Y-%m-%d")
         try:
-            exp_dt = datetime.datetime.strptime(self.bt_expiry, "%Y-%m-%d")
-            bar_dt = datetime.datetime.strptime(bar_date, "%Y-%m-%d") if bar_date else datetime.datetime.now()
+            d = datetime.datetime.strptime(str(bar_date)[:10], "%Y-%m-%d").date() if bar_date else datetime.date.today()
+        except Exception:
+            d = datetime.date.today()
+        wd = self._expiry_weekday()
+        if self._use_weekly(self._get_expiry_type()):
+            days = (wd - d.weekday()) % 7
+            if days == 0:
+                days = 7
+            return (d + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+        last = self._last_weekday_of_month(d.year, d.month, wd)
+        if last <= d:
+            y, m = self._next_month(d.year, d.month)
+            last = self._last_weekday_of_month(y, m, wd)
+        return last.strftime("%Y-%m-%d")
+
+    def _days_to_expiry(self, bar_date, expiry_type="weekly", anchor=None):
+        import datetime
+        # PRE-SET CONTRACT WINS (base-parity semantics): bt_expiry ko run()
+        # (legs.expiry_date), replay engine ya test fixtures pehle se de sakte
+        # hain - non-empty hone par sab pricing USI date tak chalti hai,
+        # overwrite kabhi nahi. Khali hai to bar date ke exchange calendar se
+        # recompute hota hai (aur next call ke liye cache hota hai - base
+        # behavior: expire hone par run-loop ise clear kar deta hai).
+        try:
+            if not anchor:
+                anchor = str(getattr(self, "bt_expiry", "") or "")[:10]
+        except Exception:
+            pass
+        if anchor:
+            try:
+                a = datetime.datetime.strptime(str(anchor)[:10], "%Y-%m-%d").date()
+                b = datetime.datetime.strptime(str(bar_date)[:10], "%Y-%m-%d").date() if bar_date else a
+                return max(1, (a - b).days)
+            except Exception:
+                return 7
+        exp_date = self._expiry_for_date(bar_date)
+        try:
+            self.bt_expiry = str(exp_date)[:10]
+        except Exception:
+            pass
+        try:
+            bar_dt = datetime.datetime.strptime(bar_date, "%Y-%m-%d").date() if bar_date else datetime.date.today()
+            exp_dt = datetime.datetime.strptime(str(exp_date)[:10], "%Y-%m-%d").date()
             return max(1, (exp_dt - bar_dt).days)
-        except:
+        except Exception:
             return 7
 
     def _open_unrealized(self, entry, cur, option_type, txn_type, qty):
