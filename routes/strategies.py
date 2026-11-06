@@ -806,11 +806,25 @@ def delete_strategy(strat_id: int):
     try:
         row = db.fetch_one("SELECT protected FROM strategies WHERE id=?", [strat_id])
         if row and int(row.get("protected") or 0) == 1:
-            return {"error": "Default NIFTY strategy cannot be deleted", "protected": True}
+            return {"error": "Default strategy cannot be deleted (protected)", "protected": True}
     except Exception:
         pass
     db.execute("DELETE FROM strategies WHERE id=?", [strat_id])
     return {"status": "deleted", "id": strat_id}
+
+
+@router.post("/{strat_id}/protected")
+def set_strategy_protected(strat_id: int, body: dict = None):
+    """Default/protected flag toggle: protected=1 -> Delete button hide +
+    DELETE 400-ish error + purge-symbol is strategy ko skip karta hai.
+    (User 2026-11: BANKNIFTY default strategy delete-lock.)"""
+    db = Database.get_instance()
+    row = db.fetch_one("SELECT id FROM strategies WHERE id=?", [strat_id])
+    if not row:
+        return {"error": "Strategy not found"}
+    val = 1 if ((body or {}).get("protected", True)) else 0
+    db.execute("UPDATE strategies SET protected=? WHERE id=?", [val, strat_id])
+    return {"id": strat_id, "protected": val}
 
 
 @router.post("/purge-symbol")
@@ -829,8 +843,19 @@ def purge_symbol(body: dict):
         except Exception:
             pass
         db = Database.get_instance()
+        # Protected (default) strategies kabhi purge par delete nahi hote -
+        # unke paper trades/results bhi bachate hain (default #285 jaisi open
+        # position orphan na ho). Purani DB me protected column na ho to
+        # gracefully empty (schema add_area columns normally non-essential).
+        try:
+            _prot_ids = {int(r.get("id") or 0) for r in
+                         (db.fetch_all("SELECT id FROM strategies WHERE symbol=?" +
+                                       " AND protected=1", [sym]) or [])}
+        except Exception:
+            _prot_ids = set()
         _sids = [int(r.get("id") or 0) for r in
-                 (db.fetch_all("SELECT id FROM strategies WHERE symbol=?", [sym]) or [])]
+                 (db.fetch_all("SELECT id FROM strategies WHERE symbol=?", [sym]) or [])
+                 if int(r.get("id") or 0) not in _prot_ids]
         _open = db.fetch_one(
             "SELECT COUNT(*) c FROM paper_trades WHERE symbol=? AND status='open'", [sym])
         _closed = db.fetch_one(
@@ -842,6 +867,8 @@ def purge_symbol(body: dict):
                  "open_trades": int((_open or {}).get("c") or 0),
                  "closed_trades": int((_closed or {}).get("c") or 0),
                  "saved_results": int((_res or {}).get("c") or 0)}
+        if _prot_ids:
+            _info["protected_skipped"] = len(_prot_ids)
         if not body.get("confirm"):
             _info["deleted"] = False
             _info["hint"] = "Delete ke liye confirm=true bhejo"
@@ -854,6 +881,9 @@ def purge_symbol(body: dict):
         for _tid in [int(r.get("id") or 0) for r in
                      (db.fetch_all("SELECT id FROM paper_trades WHERE symbol=?", [sym]) or [])]:
             try:
+                _prow = db.fetch_one("SELECT strategy_id FROM paper_trades WHERE id=?", [_tid])
+                if _prow and int(_prow.get("strategy_id") or 0) in _prot_ids:
+                    continue    # default strategy ka trade bacha raho
                 if _ltd:
                     _row = db.fetch_one("SELECT * FROM paper_trades WHERE id=?", [_tid])
                     if _row:
