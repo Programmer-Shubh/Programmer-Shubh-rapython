@@ -542,7 +542,9 @@ def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
     return {"ok": len(failed) == 0, "passed": passed, "failed": failed}
 
 
-def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict:
+def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0,
+                          start_date: str = "", end_date: str = "",
+                          per_symbol_metrics: list = None) -> dict:
     """Combine per-symbol trade lists into one portfolio-level metrics dict."""
     trades = sorted(all_trades, key=lambda t: str(t.get("exit_date", "") or t.get("entry_date", "")))
     pnls = []
@@ -597,13 +599,94 @@ def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict
             monthly[mk] = round(monthly.get(mk, 0) + float(t.get("pnl", 0) or 0), 2)
         except Exception:
             pass
+    # Sharpe: annualised from DAILY equity marks (weekday calendar), never
+    # from one point per trade times sqrt(252).
     sharpe = 0.0
-    if n > 1:
-        mean = sum(pnls) / n
-        var = sum((p - mean) ** 2 for p in pnls) / (n - 1)
-        if var > 0:
-            import math as _m
-            sharpe = round(mean / _m.sqrt(var) * _m.sqrt(252), 4)
+    try:
+        import datetime as _dt
+        try:
+            _y1, _m1, _d1 = [int(x) for x in str(start_date)[:10].split("-")]
+            _y2, _m2, _d2 = [int(x) for x in str(end_date)[:10].split("-")]
+            _cur, _end = _dt.date(_y1, _m1, _d1), _dt.date(_y2, _m2, _d2)
+        except Exception:
+            _cur = _end = None
+        if _cur is not None and _end is not None:
+            _by_day = {}
+            _cap = 0.0
+            _k = 0
+            for t in trades:
+                _cap += float(t.get("pnl", 0) or 0)
+                _k += 1
+                _d = str(t.get("exit_date") or t.get("entry_date") or "")[:10]
+                if _d:
+                    _by_day[_d] = _cap
+            _eq = [base + 0.0]
+            _run_cap = 0.0
+            while _cur <= _end:
+                if _cur.weekday() < 5:
+                    _ds = _cur.strftime("%Y-%m-%d")
+                    if _ds in _by_day:
+                        _run_cap = _by_day[_ds]
+                    _eq.append(base + _run_cap)
+                _cur += _dt.timedelta(days=1)
+            _rets = [(_eq[i] - _eq[i - 1]) / max(_eq[i - 1], 1.0)
+                     for i in range(1, len(_eq))]
+            if len(_rets) > 1:
+                _mean = sum(_rets) / len(_rets)
+                _var = sum((r - _mean) ** 2 for r in _rets) / (len(_rets) - 1)
+                import math as _m2
+                _std = _m2.sqrt(_var)
+                sharpe = round(_mean / _std * _m2.sqrt(252), 4) if _std > 0 else 0.0
+        elif n > 1:
+            mean = sum(pnls) / n
+            var = sum((p - mean) ** 2 for p in pnls) / (n - 1)
+            if var > 0:
+                import math as _m
+                sharpe = round(mean / _m.sqrt(var) * _m.sqrt(252), 4)
+    except Exception:
+        sharpe = 0.0
+    # Profit factor: full precision (2dp rounding hid sub-1.0 results as
+    # "1.0"). No losses -> infinite marker (UI shows ∞), never fake 0.0.
+    _pf_inf = False
+    if gross_loss > 0:
+        profit_factor = round(gross_win / gross_loss, 4)
+    elif gross_win > 0:
+        profit_factor = 999999.0
+        _pf_inf = True
+    else:
+        profit_factor = 0.0
+    # Option-selling risk metrics: aggregate the per-symbol engine estimates
+    # (each carries its own spot anchor), fall back to trade-level math.
+    _is_naked_sell = False
+    _gap_risk = False
+    _max_profit = 0.0
+    _max_possible_loss = 0.0
+    _margin_est = 0.0
+    for _em in (per_symbol_metrics or []):
+        try:
+            _is_naked_sell = _is_naked_sell or bool(_em.get("is_naked_sell"))
+            _gap_risk = _gap_risk or bool(_em.get("gap_risk_warning"))
+            _max_profit = max(_max_profit, float(_em.get("max_profit_per_trade", 0) or 0))
+            _max_possible_loss = max(_max_possible_loss, float(_em.get("max_possible_loss_est", 0) or 0))
+            _margin_est = max(_margin_est, float(_em.get("margin_estimate_rs", 0) or 0))
+        except Exception:
+            pass
+    if not (per_symbol_metrics or []):
+        for t in trades:
+            try:
+                if str(t.get("position", "")).lower() == "sell":
+                    _is_naked_sell = True
+                    _max_profit = max(_max_profit,
+                                      float(t.get("entry_price", 0) or 0) * int(t.get("quantity", 0) or 0))
+                    if str(t.get("entry_date", ""))[:10] != str(t.get("exit_date", ""))[:10]:
+                        _gap_risk = True
+                    try:
+                        _notional = float(str(t.get("strike", 0) or 0).split("/")[0] or 0) * int(t.get("quantity", 0) or 0)
+                    except Exception:
+                        _notional = 0.0
+                    _margin_est = max(_margin_est, _notional * 0.20)
+            except Exception:
+                pass
     base = 1000000.0
     return {
         "initial_capital": base,
@@ -613,7 +696,8 @@ def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict
         "win_rate": round(wins / n * 100, 2) if n else 0.0,
         "loss_rate": round(losses / n * 100, 2) if n else 0.0,
         "max_drawdown": round(max_dd, 2),
-        "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else 0.0,
+        "profit_factor": profit_factor,
+        "profit_factor_infinite": _pf_inf,
         "sharpe_ratio": sharpe,
         "total_trades": n,
         "winning_trades": wins,
@@ -632,6 +716,11 @@ def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0) -> dict
         "max_loss_streak": mls,
         "max_trades_in_dd": max_dd_run,
         "total_brokerage": round(total_brokerage, 2),
+        "is_naked_sell": _is_naked_sell,
+        "gap_risk_warning": _gap_risk,
+        "max_profit_per_trade": round(_max_profit, 2),
+        "max_possible_loss_est": round(_max_possible_loss, 2),
+        "margin_estimate_rs": round(_margin_est, 2),
         "trade_list": trades,
         "equity_curve": equity,
         "monthly_pnl": monthly,
@@ -1011,6 +1100,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         _syms = _syms[:25]
         _all_trades = []
         _per_symbol = {}
+        _engine_metrics_list = []
         _brokerage = 0.0
         _diag_eval, _diag_sig, _diag_rej, _cov_by_sym = 0, 0, {}, {}
         _diag_buy, _diag_sell = 0, 0
@@ -1431,6 +1521,10 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 pass
             if _first_m is None:
                 _first_m = _sm
+            try:
+                _engine_metrics_list.append(_sm)
+            except Exception:
+                pass
             for _t in (_sm.get("trade_list") or []):
                 try:
                     _t["symbol"] = _sym
@@ -1505,12 +1599,15 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 if _first_m is not None:
                     m = _first_m
                 else:
-                    m = _merge_trade_metrics([], 0)
+                    m = _merge_trade_metrics([], 0, start_date, end_date,
+                                             per_symbol_metrics=_engine_metrics_list)
                     _all_trades = []
             else:
-                m = _merge_trade_metrics(_all_trades, _brokerage)
+                m = _merge_trade_metrics(_all_trades, _brokerage, start_date, end_date,
+                                        per_symbol_metrics=_engine_metrics_list)
         else:
-            m = _merge_trade_metrics(_all_trades, _brokerage)
+            m = _merge_trade_metrics(_all_trades, _brokerage, start_date, end_date,
+                                     per_symbol_metrics=_engine_metrics_list)
         # Data provenance note: symbols alag-alag data paths par chale hon
         # (official DB vs intraday vs synthetic) to user ko saaf dikhe -
         # mixed windows me trade-count compare karna misleading hota hai.
@@ -1684,6 +1781,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             "loss_rate": m.get("loss_rate", 0),
             "max_drawdown": m["max_drawdown"],
             "profit_factor": m["profit_factor"],
+            "profit_factor_infinite": bool(m.get("profit_factor_infinite") or (m.get("profit_factor", 0) or 0) >= 999999.0),
             "sharpe_ratio": m["sharpe_ratio"],
             "total_trades": m["total_trades"],
             "winning_trades": m["winning_trades"],

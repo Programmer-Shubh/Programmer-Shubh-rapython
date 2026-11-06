@@ -33,7 +33,6 @@ class HistoricalReplayEngine:
         self.risk_management = {}
         self.pending_entry = None
         self.pending_exit = None
-        self.pending_entry_signal = None
         self.pending_auto_buy = None
         self.daily_trades = 0
         self.daily_pnl = 0.0
@@ -192,7 +191,6 @@ class HistoricalReplayEngine:
         self.bt_engine._tp_unit = tp_unit
         
         is_spread = len(self.legs) > 1
-        latency = TransactionCosts.latency_delay(False)  # backtest mode
         entry_time = self.advanced_options.get("entry_time", "09:35")
         exit_time = self.advanced_options.get("exit_time", "15:14")
         
@@ -255,6 +253,10 @@ class HistoricalReplayEngine:
                         can_enter = False
                 except Exception:
                     pass
+            if (self.pending_entry is not None and self.pending_entry != i - 1):
+                # Pending order valid for exactly one bar; dropped otherwise.
+                self.pending_entry = None
+                self.pending_auto_buy = None
             if self.pending_entry is not None and can_enter:
                 exec_bar = self.historical_data[i]
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
@@ -462,22 +464,9 @@ class HistoricalReplayEngine:
                         pass
                 
                 if entry_sig and can_enter:
-                    if is_spread or auto_signal:
-                        self.pending_entry = i
-                        self.pending_entry_signal = None
-                        if auto_signal:
-                            self.pending_auto_buy = buy_sig
-                    elif self.pending_entry_signal is None:
-                        self.pending_entry_signal = i
-                        if auto_signal:
-                            self.pending_auto_buy = buy_sig
-                # Mature waiting signals independent of fresh signals (same as engine)
-                if self.pending_entry_signal is not None and not is_spread and not auto_signal:
-                    if i - self.pending_entry_signal > 3:
-                        self.pending_entry_signal = None
-                    elif can_enter and i - self.pending_entry_signal >= max(1, latency):
-                        self.pending_entry = i
-                        self.pending_entry_signal = None
+                    self.pending_entry = i
+                    if auto_signal:
+                        self.pending_auto_buy = buy_sig
                 
                 if has_open and self.pending_exit is None and (exit_sig or time_exit):
                     self.pending_exit = "condition" if exit_sig else "time"
@@ -735,7 +724,6 @@ class HistoricalReplayEngine:
         self.current_bar_idx = 0
         self.pending_entry = None
         self.pending_exit = None
-        self.pending_entry_signal = None
         self.pending_auto_buy = None
         self.daily_trades = 0
         self.daily_pnl = 0.0

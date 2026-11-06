@@ -1,5 +1,6 @@
 import math
 import time
+import datetime
 from typing import List, Dict
 from core.services.indicator_engine import IndicatorEngine
 from core.services.transaction_costs import TransactionCosts
@@ -15,7 +16,13 @@ from utils.helpers import get_strike_step, get_lot_size, black_scholes, align_st
 #     liye baseline. Koi bhi "realism"/fills/costs/cutoff change yahan na
 #     gholna - backtest results 17-19-Oct wale OLD behavior par hi rehna
 #     hain. Logic badalna ho to alag engine file banao, isko na chheno.
-ENGINE_VERSION = "v4"
+# v5: stale-pending drop, 1-bar signal->execution, per-session entry delay,
+#     in-range signal gate, exchange-true expiry calendar (NSE Tue / BSE Thu
+#     / monthly last-Tue) applied to DTE + expiry square-off, causal trailing
+#     stop (prior-bar best), "Lock" NameError fixed, merged metrics now keep
+#     option-selling risk metrics, daily-marks Sharpe, unrounded Profit
+#     Factor. Any saved v4 result does NOT carry in (fresh re-run by design).
+ENGINE_VERSION = "v5"
 
 
 class BacktestEngine:
@@ -28,6 +35,7 @@ class BacktestEngine:
         self.bt_expiry = ""
         self.implied_volatility = None  # None = per-symbol model_iv (unified)
         self.is_live = is_live  # Unified switch: False=backtest, True=live/paper
+        self._cur_bar_time = ""
         self._skip_db = False  # True => synthetic-only fast path, no DB roundtrips
         self._cur_close = 0.0
         self._slippage_pct = 0.5  # Default dynamic slippage % for option selling
@@ -47,7 +55,8 @@ class BacktestEngine:
             self._used_intraday_bars = False
         self._trade_mode = str(advanced_options.get("trade_mode") or "").lower()
         self._advanced = advanced_options
-        self.bt_expiry = legs[0].get("expiry_date", "") if legs else ""
+        self.bt_expiry = str(legs[0].get("expiry_date", "") if legs else "")[:10]
+        self._explicit_expiry = bool(self.bt_expiry)
         # Unified pricer: paper/live/chain/scan sab model_premium(model_iv)
         # use karte hain. Backtest me custom IV floor (0.18/0.20) alag premium
         # deta tha -> wahi winrate divergence. None = per-symbol NSE-typical
@@ -216,7 +225,6 @@ class BacktestEngine:
         entries, exits, entry_bars = [], [], []
         pending_entry = None
         pending_exit = None
-        pending_entry_signal = None
         pending_entry_signal_time = None  # Signal bar time (candle close)
         pending_auto_buy = None
         daily_trades = 0
@@ -248,6 +256,7 @@ class BacktestEngine:
         legs = legs if legs else [{"option_type": "CE", "lots": 1, "transaction": "buy"}]
         is_spread = len(legs) > 1
 
+        session_start_idx = min_bars  # bar index where the current session started
         for i in range(min_bars, len(historical)):
             cur = historical[i]
             try:
@@ -283,6 +292,7 @@ class BacktestEngine:
                 daily_pnl = 0.0
                 kill_switch_on = False
                 last_date = cur_date
+                session_start_idx = i
 
             if kill_switch_on:
                 continue
@@ -316,7 +326,16 @@ class BacktestEngine:
                 except Exception:
                     pass
 
-            # Execute pending entry from PREVIOUS bar's signal (no look-ahead)
+            # Execute pending entry from PREVIOUS bar's signal (no look-ahead).
+            # A pending order is valid for exactly ONE bar (the bar after the
+            # signal bar). If that bar cannot trade (entry clock over, warmup
+            # bar outside start_date, position already open) the order is DROPPED
+            # - it must never linger and fill days later at a different price.
+            if (pending_entry is not None
+                    and pending_entry != i - 1):
+                pending_entry = None
+                pending_auto_buy = None
+                pending_entry_signal_time = None
             if pending_entry is not None and can_enter:
                 exec_idx = i
                 exec_bar = historical[exec_idx] if exec_idx < len(historical) else cur
@@ -554,7 +573,7 @@ class BacktestEngine:
                     try:
                         mr = pre_calc["market_regime"]
                         rg = mr.get("regime", []) if isinstance(mr, dict) else []
-                        _cur_regime = rg[effective_idx] if effective_idx < len(rg) else "sideways"
+                        _cur_regime = rg[i] if i < len(rg) else "sideways"
                         # PE Sell / CE Buy enter on buy_sig -> need bullish regime
                         if (option_type == "PE" and txn_type == "sell") or (option_type == "CE" and txn_type == "buy"):
                             if _cur_regime == "bearish":
@@ -566,11 +585,11 @@ class BacktestEngine:
                     except Exception:
                         pass
                 has_open = len(entries) > len(exits)
-                can_enter = not has_open and daily_trades < max_trades_day
-                # Entry delay: wait N bars after signal for trend confirmation (Quantman style)
+                can_enter = not has_open and daily_trades < max_trades_day and _in_range
+                # Entry delay: wait N bars after the SESSION opens (per-day), not
+                # since the start of the whole backtest window.
                 if entry_delay_bars > 0:
-                    # Check if enough bars have passed since entry_time
-                    bars_since_open = i - min_bars
+                    bars_since_open = i - session_start_idx
                     if bars_since_open < entry_delay_bars:
                         can_enter = False
                 # Min premium filter: skip SELL entries with premium below threshold
@@ -611,36 +630,13 @@ class BacktestEngine:
                 except Exception:
                     pass
                 if entry_sig and can_enter:
-                    # Apply latency: in backtest mode, wait enough bars for latency to elapse
-                    # In live mode, execute immediately
-                    # For spreads/auto, execute immediately to ensure not stuck on 1-bar delay
-                    if self.is_live or is_spread or auto_signal:
-                        pending_entry = i
-                        pending_entry_signal = None
-                        pending_entry_signal_time = None  # Immediate execution, no separate signal bar
-                        if auto_signal:
-                            pending_auto_buy = buy_sig
-                    elif pending_entry_signal is None:
-                        # Backtest mode: stamp the signal bar; maturation below executes it
-                        pending_entry_signal = i
-                        pending_entry_signal_time = str(cur.get("bar_time", "")) or str(cur.get("trade_date", ""))  # Signal time (candle close)
-                        if auto_signal:
-                            pending_auto_buy = buy_sig
-                # Mature a waiting signal INDEPENDENT of fresh signals: single-bar
-                # crossover signals (MACD cross, UT Bot flips) must execute on the
-                # next bar even when that bar has no fresh signal. Stale waits
-                # (>3 bars, e.g. blocked by an open position) are dropped.
-                if pending_entry_signal is not None and not is_spread and not auto_signal:
-                    if i - pending_entry_signal > 3:
-                        pending_entry_signal = None
-                        try:
-                            self._rej["signal_expired_3bars"] = self._rej.get("signal_expired_3bars", 0) + 1
-                        except Exception:
-                            pass
-                    elif can_enter and i - pending_entry_signal >= max(1, latency):
-                        pending_entry = i
-                        pending_entry_signal = None
-                        # pending_entry_signal_time preserved for trade creation below
+                    # Signal is on bar i's close; execution happens at bar i+1's
+                    # open. One pending order per signal, consumed on the next bar
+                    # (dropped if that bar cannot trade).
+                    pending_entry = i
+                    pending_entry_signal_time = (str(cur.get("bar_time", "")) or str(cur.get("trade_date", ""))) if not (self.is_live or is_spread or auto_signal) else None
+                    if auto_signal:
+                        pending_auto_buy = buy_sig
                 if has_open and pending_exit is None and (exit_sig or time_exit):
                     pending_exit = "condition" if exit_sig else "time"
 
@@ -1859,6 +1855,26 @@ class BacktestEngine:
             pass
         return sl_amt, tp_amt, sl_unit, tp_unit
 
+    def _trail_update(self, entry_idx, bar_high, bar_low, txn_type):
+        """Record the bar's extreme for NEXT-bar trailing. Called at the END of
+        each bar's check, so a bar never trails its own stop with the extreme it
+        also uses to test the stop. BUY trails the highest high; SELL trails the
+        lowest low."""
+        if entry_idx is None:
+            return
+        try:
+            prev = self._trailing_best.get(entry_idx)
+            if (txn_type or "").lower() == "buy":
+                cand = float(bar_high or 0)
+                if cand > 0:
+                    self._trailing_best[entry_idx] = cand if prev is None or cand > prev else prev
+            else:
+                cand = float(bar_low or 0)
+                if cand > 0:
+                    self._trailing_best[entry_idx] = cand if prev is None or cand < prev else prev
+        except Exception:
+            pass
+
     def _check_sl_tp(self, current, entry, option_type, txn_type, sl_amt, tp_amt, qty=0, entry_idx=None):
         entry_price = float(entry["price"])
         qty = int(qty or entry.get("quantity", 0) or 0)
@@ -1882,46 +1898,40 @@ class BacktestEngine:
         tp_level = _to_level(tp_amt, False)
 
         # ---- Trailing Stop: lock in profits as price moves in favor ----
+        # Causal: the trailed stop for bar i uses the best price reached on
+        # CLOSED bars only. (Before this, the bar's own extreme raised the
+        # stop, then the same bar's opposite extreme was tested against the
+        # raised stop = within-bar look-ahead; plus trailing="Lock" hit an
+        # undefined trail_dist -> NameError -> whole backtest errored.)
         trailing = str(getattr(self, "_advanced", {}).get("trailing", "") or "").strip()
-        if trailing and trailing.lower() not in ("off", "none", "0", "false", "lock"):
+        if trailing and trailing.lower() not in ("off", "none", "0", "false", "lock") and entry_idx is not None:
             try:
-                trail_dist = float(trailing)
+                _trail_dist = float(trailing)
             except Exception:
-                trail_dist = 0.0
-            if trail_dist > 0 and entry_idx is not None:
-                # Current premium range for this bar
-                _cur_best = float(current.get("high_price", 0) or current.get("close_price", 0) or 0)
-                _cur_worst = float(current.get("low_price", 0) or current.get("close_price", 0) or 0)
-                prev_best = self._trailing_best.get(entry_idx)
+                _trail_dist = 0.0
+            if _trail_dist > 0:
+                # prev_best is updated at the END of each bar (see below).
+                _prev = self._trailing_best.get(entry_idx)
                 if txn_type == "buy":
-                    # BUY: trail SL up as price rises; best = highest high seen
-                    if prev_best is None or _cur_best > prev_best:
-                        self._trailing_best[entry_idx] = _cur_best
-                        prev_best = _cur_best
-                    if prev_best > 0:
-                        trailed_sl = prev_best - trail_dist
-                        if trailed_sl > sl_level:
-                            sl_level = trailed_sl
+                    if _prev and _prev > 0:
+                        _td = _prev - _trail_dist
+                        if _td > sl_level:
+                            sl_level = _td
                 else:  # sell
-                    # SELL: trail SL down as price falls; best = lowest low seen
-                    if prev_best is None or _cur_worst < prev_best:
-                        self._trailing_best[entry_idx] = _cur_worst
-                        prev_best = _cur_worst
-                    if prev_best > 0:
-                        trailed_sl = prev_best + trail_dist
-                        if trailed_sl < sl_level or sl_level == 0:
-                            sl_level = trailed_sl
-            elif trailing.lower() == "lock":
-                # "Lock": once in profit by trail_dist pts, move SL to entry (break-even)
-                # No distance param; uses entry price as lock level
-                _cur_best = float(current.get("high_price", 0) or current.get("close_price", 0) or 0)
-                _cur_worst = float(current.get("low_price", 0) or current.get("close_price", 0) or 0)
-                profit_pts = (_cur_best - entry_price) if txn_type == "buy" else (entry_price - _cur_worst)
-                if profit_pts >= trail_dist if trail_dist > 0 else profit_pts > 0:
-                    if txn_type == "buy":
-                        sl_level = max(sl_level, entry_price)
-                    else:
-                        sl_level = min(sl_level, entry_price) if sl_level > 0 else entry_price
+                    if _prev and _prev > 0:
+                        _td = _prev + _trail_dist
+                        if sl_level == 0 or _td < sl_level:
+                            sl_level = _td
+        elif trailing and trailing.lower() == "lock" and entry_idx is not None:
+            # Break-even lock once any prior bar closed in profit.
+            _prev = self._trailing_best.get(entry_idx)
+            if _prev and _prev > 0:
+                if txn_type == "buy":
+                    if (_prev - entry_price) > 0 and sl_level < entry_price:
+                        sl_level = entry_price
+                else:  # sell
+                    if (entry_price - _prev) > 0 and (sl_level == 0 or sl_level > entry_price):
+                        sl_level = entry_price
         # ... rest of method
 
         # EQ (equity spot) legs: SL/TP on the BAR's spot high/low directly -
@@ -1931,8 +1941,9 @@ class BacktestEngine:
                 _hs = float(current.get("high_price", 0) or current.get("close_price", 0) or 0)
                 _ls = float(current.get("low_price", 0) or current.get("close_price", 0) or 0)
                 if _hs and _ls:
-                    return self._check_sl_tp_levels(txn_type, sl_level, tp_level,
-                                                    max(_hs, _ls), min(_hs, _ls))
+                    _eh, _el = max(_hs, _ls), min(_hs, _ls)
+                    self._trail_update(entry_idx, _eh, _el, txn_type)
+                    return self._check_sl_tp_levels(txn_type, sl_level, tp_level, _eh, _el)
             except Exception:
                 pass
         # SL/TP is on OPTION PREMIUM, not spot. Prefer the option's OWN
@@ -1954,7 +1965,9 @@ class BacktestEngine:
                     if _oh > 0 and _ol > 0:
                         break
                 if _oh > 0 and _ol > 0:
-                    return self._check_sl_tp_levels(txn_type, sl_level, tp_level, max(_oh, _ol), min(_oh, _ol))
+                    _eh, _el = max(_oh, _ol), min(_oh, _ol)
+                    self._trail_update(entry_idx, _eh, _el, txn_type)
+                    return self._check_sl_tp_levels(txn_type, sl_level, tp_level, _eh, _el)
         except Exception:
             pass
         try:
@@ -1993,6 +2006,7 @@ class BacktestEngine:
             prem_high, prem_low = float("inf"), 0
         opt_high = max(prem_high, prem_low)
         opt_low = min(prem_high, prem_low)
+        self._trail_update(entry_idx, opt_high, opt_low, txn_type)
         return self._check_sl_tp_levels(txn_type, sl_level, tp_level, opt_high, opt_low)
 
     def _prem_source(self, date, strike, option_type) -> str:
@@ -2052,9 +2066,12 @@ class BacktestEngine:
         """Shared hit comparison for DB-range and model-range callers.
 
         `level` is the trigger (same as paper's sltp_premium_level). `fill`
-        is the realistic execution price: a gap through SL fills at the
-        breached extreme (worse), while TP is kept at the level (conservative,
-        never books a better-than-level fill the paper monitor may miss)."""
+        (SAME contract as paper parity tests): a gap through SL fills at the
+        breached extreme (worst realistic case), while TP fills at the level
+        (conservative, never a better-than-level fill the paper monitor may
+        miss). TP is a limit order at the level; SL is treated as a stop-market
+        fill at the worst touched price. Changing this fill model is a separate
+        modeling decision - do not drift it silently with other fixes."""
         try:
             hit_sl, hit_tp = False, False
             if txn_type == "buy":
@@ -2101,7 +2118,6 @@ class BacktestEngine:
         revision ran this on EVERY bar, closing positions at the FUTURE last-bar
         price days early (look-ahead) and freeing bogus re-entries."""
         import datetime
-        import calendar
         # Find the last bar's date
         last_date = historical[-1]["trade_date"] if historical else ""
         if cur_date and cur_date != last_date:
@@ -2109,23 +2125,20 @@ class BacktestEngine:
         # Check if any position is open and we're on or near expiry
         open_positions = len(entries) - len(exits)
         if open_positions > 0:
-            # Parse expiry from legs - if weekly, next Thursday; if monthly, last Thursday
+            # Parse expiry: legs' explicit expiry_date wins; otherwise the
+            # exchange rule (NSE Tue / BSE Thu weekly; last one monthly).
             exp_type = getattr(self, '_expiry_hint', 'weekly')
-            # Determine if today is expiry day (last Thursday of month for Nifty/BankNifty)
             try:
                 bar_dt = datetime.datetime.strptime(last_date, "%Y-%m-%d")
-                if exp_type == "monthly":
-                    # Last Thursday of the month
-                    last_day = datetime.datetime(bar_dt.year, bar_dt.month, 
-                        calendar.monthrange(bar_dt.year, bar_dt.month)[1])
-                    while last_day.weekday() != 3:
-                        last_day -= datetime.timedelta(days=1)
-                    is_expiry = (last_day.strftime("%Y-%m-%d") == last_date)
+                if getattr(self, '_explicit_expiry', False) and self.bt_expiry:
+                    # Fixed contract the user chose: square off on ITS expiry day.
+                    is_expiry = (self.bt_expiry[:10] == last_date)
+                elif self._use_weekly(exp_type):
+                    is_expiry = (bar_dt.weekday() == self._expiry_weekday())
                 else:
-                    # Weekly: the window's last bar IS the expiry Thursday.
-                    # (Old math asked for the NEXT Thursday, so expiry day
-                    # itself never matched - dead for the common case.)
-                    is_expiry = (bar_dt.weekday() == 3)
+                    _last = self._last_weekday_of_month(bar_dt.year, bar_dt.month,
+                                                        self._expiry_weekday())
+                    is_expiry = (_last.strftime("%Y-%m-%d") == last_date)
                 
                 if is_expiry:
                     # Square off all positions at close price (last bar's close)
@@ -2312,6 +2325,32 @@ class BacktestEngine:
             self.premium_cache[key] = 5.0
         return 5.0
 
+    def _expiry_weekday(self) -> int:
+        """Expiry weekday (NSE 2025+ rule). NSE weeklies = TUESDAY; BSE
+        (SENSEX/BANKEX) = THURSDAY. Same for monthly contracts (last one of
+        the month). BANKNIFTY/FINNIFTY/stocks are NSE."""
+        sym = str(getattr(self, "bt_symbol", "") or "").upper().replace(" ", "")
+        return 3 if sym in ("SENSEX", "BANKEX") else 1
+
+    def _use_weekly(self, expiry_type) -> bool:
+        """Weekly only when hinted weekly AND the symbol actually has weekly
+        contracts (BANKNIFTY/FINNIFTY and stocks have MONTHLY only)."""
+        if str(expiry_type or "weekly").lower() == "monthly":
+            return False
+        sym = str(getattr(self, "bt_symbol", "") or "").upper().replace(" ", "")
+        return sym in ("NIFTY", "SENSEX", "BANKEX")
+
+    def _last_weekday_of_month(self, year, month, wd: int):
+        import datetime
+        import calendar
+        d = datetime.date(year, month, calendar.monthrange(year, month)[1])
+        while d.weekday() != wd:
+            d -= datetime.timedelta(days=1)
+        return d
+
+    def _next_month(self, y: int, m: int):
+        return (y, m + 1) if m < 12 else (y + 1, 1)
+
     def _get_expiry_type(self):
         # Check legs for expiry hint
         return getattr(self, '_expiry_hint', 'weekly')
@@ -2402,31 +2441,25 @@ class BacktestEngine:
 
     def _days_to_expiry(self, bar_date, expiry_type="weekly"):
         import datetime
-        import calendar
         if not self.bt_expiry:
-            d = datetime.datetime.strptime(bar_date, "%Y-%m-%d") if bar_date else datetime.datetime.now()
-            if expiry_type == "monthly":
-                # Last Thursday of month (Nifty monthly expiry)
-                last_day = calendar.monthrange(d.year, d.month)[1]
-                last = datetime.datetime(d.year, d.month, last_day)
-                # Find last Thursday (weekday 3)
-                while last.weekday() != 3:
-                    last -= datetime.timedelta(days=1)
-                if last <= d:
-                    # Next month's last Thursday
-                    nm = d.month + 1 if d.month < 12 else 1
-                    ny = d.year if d.month < 12 else d.year + 1
-                    last_day = calendar.monthrange(ny, nm)[1]
-                    last = datetime.datetime(ny, nm, last_day)
-                    while last.weekday() != 3:
-                        last -= datetime.timedelta(days=1)
-                exp = last
-            else:
-                # Weekly: next Thursday
-                days_ahead = 3 - d.weekday()
+            try:
+                d = datetime.datetime.strptime(bar_date, "%Y-%m-%d").date() if bar_date else datetime.date.today()
+            except Exception:
+                d = datetime.date.today()
+            wd = self._expiry_weekday()
+            if self._use_weekly(expiry_type):
+                # Next expiry strictly after today (same "2-day roll" spirit as
+                # live order routing: an expiring-today contract isn't entered).
+                days_ahead = (wd - d.weekday()) % 7
                 if days_ahead <= 0:
                     days_ahead += 7
                 exp = d + datetime.timedelta(days=days_ahead)
+            else:
+                # Monthly: last expiry-weekday of the month; strictly in the future.
+                exp = self._last_weekday_of_month(d.year, d.month, wd)
+                if exp <= d:
+                    y, m = self._next_month(d.year, d.month)
+                    exp = self._last_weekday_of_month(y, m, wd)
             self.bt_expiry = exp.strftime("%Y-%m-%d")
         try:
             exp_dt = datetime.datetime.strptime(self.bt_expiry, "%Y-%m-%d")
@@ -2688,7 +2721,7 @@ class BacktestEngine:
         profit_factor = sum(win_amounts) / max(sum(loss_amounts), 0.01) if loss_amounts else (float('inf') if win_amounts else 0.0)
         profit_factor_display = round(profit_factor, 4) if profit_factor != float('inf') else 999999.0
         max_dd = self._max_drawdown(equity)
-        sharpe = self._sharpe(equity)
+        sharpe = self._sharpe(self._daily_equity(trade_list, start_date, end_date))
         # Frontend expects many extra fields - provide 0/default when no trades to avoid NaN/undefined
         avg_profit_per_trade = (total_return / total_trades) if total_trades > 0 else 0
         max_win = max(win_amounts) if win_amounts else 0
@@ -2881,6 +2914,38 @@ class BacktestEngine:
             max_dd = max(max_dd, dd)
         return max_dd * 100
 
+    def _daily_equity(self, trade_list, start_date="", end_date=""):
+        """Equity marked on every WEEKDAY of the requested window.
+
+        Flat days carry the previous capital, so return variance is measured
+        on calendar trading days rather than on one point per trade (the old
+        per-trade curve, multiplied by sqrt(252), annualised variance that
+        happened to have n_trades samples with no sense of time decay)."""
+        try:
+            y1, m1, d1 = [int(x) for x in str(start_date)[:10].split("-")]
+            y2, m2, d2 = [int(x) for x in str(end_date)[:10].split("-")]
+            cur, end = datetime.date(y1, m1, d1), datetime.date(y2, m2, d2)
+        except Exception:
+            return [self.initial_capital] + [self.initial_capital + sum(
+                float(t.get("pnl", 0) or 0) for t in (trade_list or []))]
+        by_day = {}
+        cap = self.initial_capital
+        for t in trade_list or []:
+            cap += float(t.get("pnl", 0) or 0)
+            d = str(t.get("exit_date") or t.get("entry_date") or "")[:10]
+            if d:
+                by_day[d] = cap
+        eq = [self.initial_capital]
+        cur_cap = self.initial_capital
+        while cur <= end:
+            if cur.weekday() < 5:
+                _d = cur.strftime("%Y-%m-%d")
+                if _d in by_day:
+                    cur_cap = by_day[_d]
+                eq.append(cur_cap)
+            cur += datetime.timedelta(days=1)
+        return eq
+
     def _sharpe(self, equity):
         if len(equity) < 2:
             return 0
@@ -2894,5 +2959,8 @@ class BacktestEngine:
         self.ohlc_cache = {}
         self.bt_symbol = ""
         self.bt_expiry = ""
-        self._prem_src_cache = {}
+        self._explicit_expiry = False  # legs expiry_date = fixed contract (respect it)
+        self._cur_bar_time = ""
+        self._used_intraday_bars = False
         self._trailing_best = {}  # trade index -> best price seen (for trailing SL)
+        self._prem_src_cache = {}
