@@ -1476,6 +1476,51 @@ def _angel_direct_ltp(symbol: str, strike: float, opt: str, expiry_ymd: str) -> 
     return 0.0
 
 
+def _strategy_sltp_from_db(strategy_id):
+    """Read a strategy's saved SL/TP (the ONLY source used by execution).
+
+    Priority per field: percent key -> rupee key. Returns
+    (sl, sl_unit, tp, tp_unit); any of them None when the strategy has not
+    saved a value (caller then keeps its own value). Editing SL/TP on the
+    strategy card immediately changes the next Fyers order.
+    """
+    if not strategy_id:
+        return None, None, None, None
+    try:
+        row = Database.get_instance().fetch_one(
+            "SELECT risk_management FROM strategies WHERE id=?",
+            [int(strategy_id)])
+    except Exception:
+        return None, None, None, None
+    if not row:
+        return None, None, None, None
+    try:
+        rm = json.loads(row.get("risk_management") or "{}")
+    except Exception:
+        rm = {}
+    if not isinstance(rm, dict):
+        rm = {}
+
+    def _pick(pct_key, rs_key):
+        try:
+            p = rm.get(pct_key)
+            if p not in (None, "", 0, 0.0) and float(p) > 0:
+                return float(p), "pct"
+        except Exception:
+            pass
+        try:
+            r = rm.get(rs_key)
+            if r not in (None, "", 0, 0.0) and float(r) > 0:
+                return float(r), "rs"
+        except Exception:
+            pass
+        return None, None
+
+    dsl, dsl_u = _pick("daily_stop_loss_pct", "daily_stop_loss")
+    dtp, dtp_u = _pick("daily_take_profit_pct", "daily_take_profit")
+    return dsl, dsl_u, dtp, dtp_u
+
+
 def _latest_paper_entry(strategy_id: int, symbol: str, opt: str) -> dict:
     """Latest PAPER entry of the same strategy+symbol+option (price parity
     check between paper and live). {} = no paper trade yet."""
@@ -1576,38 +1621,11 @@ async def place_live_order(req: LiveOrderRequest):
         # default. Editing the value on the strategy card changes the next
         # Fyers order automatically.
         if req.strategy_id:
-            try:
-                _sltp_row = Database.get_instance().fetch_one(
-                    "SELECT risk_management FROM strategies WHERE id=?",
-                    [int(req.strategy_id)])
-                if _sltp_row:
-                    try:
-                        _rm_s = json.loads(_sltp_row.get("risk_management") or "{}")
-                    except Exception:
-                        _rm_s = {}
-                    if isinstance(_rm_s, dict):
-                        def _db_sltp(pct_key, rs_key):
-                            try:
-                                _p = _rm_s.get(pct_key)
-                                if _p not in (None, "", 0, 0.0) and float(_p) > 0:
-                                    return float(_p), "pct"
-                            except Exception:
-                                pass
-                            try:
-                                _r = _rm_s.get(rs_key)
-                                if _r not in (None, "", 0, 0.0) and float(_r) > 0:
-                                    return float(_r), "rs"
-                            except Exception:
-                                pass
-                            return None, None
-                        _dsl, _dsl_u = _db_sltp("daily_stop_loss_pct", "daily_stop_loss")
-                        _dtp, _dtp_u = _db_sltp("daily_take_profit_pct", "daily_take_profit")
-                        if _dsl is not None:
-                            req.stop_loss, req.sl_unit = _dsl, _dsl_u
-                        if _dtp is not None:
-                            req.take_profit, req.tp_unit = _dtp, _dtp_u
-            except Exception:
-                pass
+            _dsl, _dsl_u, _dtp, _dtp_u = _strategy_sltp_from_db(req.strategy_id)
+            if _dsl is not None:
+                req.stop_loss, req.sl_unit = _dsl, _dsl_u
+            if _dtp is not None:
+                req.take_profit, req.tp_unit = _dtp, _dtp_u
         try:
             from utils.helpers import is_optionable as _isopt3
             if not _isopt3(symbol):
