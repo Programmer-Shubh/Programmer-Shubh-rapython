@@ -50,8 +50,9 @@ def _save_trades(trades):
 class AlertConfig(BaseModel):
     sl_pct: Optional[float] = 2.0
     tp_pct: Optional[float] = 4.0
-    max_trades: Optional[int] = 5
-    daily_loss_limit: Optional[float] = 5000
+    # 0 = unlimited (daily caps removed, user rule 2026-11)
+    max_trades: Optional[int] = 0
+    daily_loss_limit: Optional[float] = 0
     trailing: Optional[str] = "lock"
     lock_at: Optional[float] = 1.0
 

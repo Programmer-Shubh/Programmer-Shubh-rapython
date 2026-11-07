@@ -143,7 +143,7 @@ def test_run_once_market_closed_skips(monkeypatch):
     assert out.get("placed") == []
 
 
-def test_lookback_entry_uses_current_legs_and_cap(monkeypatch):
+def test_lookback_entry_uses_current_legs_and_no_cap(monkeypatch):
     import core.services.auto_paper as ap
     from core.models.database import Database
     db = Database.get_instance()
@@ -183,7 +183,8 @@ def test_lookback_entry_uses_current_legs_and_cap(monkeypatch):
         assert out["placed"], out
         # legs forwarded must be the CURRENT saved legs (lots 2), not stale
         assert seen["legs"][0].get("lots") == 2, seen
-        # cap still enforced with lookback on: fill 5 closed today -> blocked
+        # Daily trade-count cap REMOVED (user rule 2026-11): 5 closed trades
+        # today must NOT block the next valid signal.
         db.execute("DELETE FROM paper_trades WHERE strategy_id=?", [sid])
         for _ in range(5):
             db.execute(
@@ -193,8 +194,9 @@ def test_lookback_entry_uses_current_legs_and_cap(monkeypatch):
                 "('NIFTY','CE',25000,'BUY',1,75,100.0,90.0,?,?, -750.0,'closed',?)",
                 [today, today, sid])
         out2 = ap.place_for_strategy(sid, signal_check="daily")
-        assert out2["placed"] == [] and any(
-            "max" in str(n).lower() for n in out2.get("notes", [])), out2
+        assert out2["placed"], out2
+        assert not any("max" in str(n).lower() and "day" in str(n).lower()
+                       for n in out2.get("notes", [])), out2
     finally:
         db.execute("DELETE FROM paper_trades WHERE strategy_id=?", [sid])
         db.execute("DELETE FROM strategies WHERE id=?", [sid])

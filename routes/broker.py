@@ -1571,6 +1571,43 @@ async def place_live_order(req: LiveOrderRequest):
         symbol = (req.symbol or "").upper()
         if not symbol:
             return {"error": "Symbol required"}
+        # DATA-DRIVEN SL/TP (user rule 2026-11): a strategy-triggered order ALWAYS
+        # uses the SL/TP saved on that strategy (DB), never a caller's hardcoded
+        # default. Editing the value on the strategy card changes the next
+        # Fyers order automatically.
+        if req.strategy_id:
+            try:
+                _sltp_row = Database.get_instance().fetch_one(
+                    "SELECT risk_management FROM strategies WHERE id=?",
+                    [int(req.strategy_id)])
+                if _sltp_row:
+                    try:
+                        _rm_s = json.loads(_sltp_row.get("risk_management") or "{}")
+                    except Exception:
+                        _rm_s = {}
+                    if isinstance(_rm_s, dict):
+                        def _db_sltp(pct_key, rs_key):
+                            try:
+                                _p = _rm_s.get(pct_key)
+                                if _p not in (None, "", 0, 0.0) and float(_p) > 0:
+                                    return float(_p), "pct"
+                            except Exception:
+                                pass
+                            try:
+                                _r = _rm_s.get(rs_key)
+                                if _r not in (None, "", 0, 0.0) and float(_r) > 0:
+                                    return float(_r), "rs"
+                            except Exception:
+                                pass
+                            return None, None
+                        _dsl, _dsl_u = _db_sltp("daily_stop_loss_pct", "daily_stop_loss")
+                        _dtp, _dtp_u = _db_sltp("daily_take_profit_pct", "daily_take_profit")
+                        if _dsl is not None:
+                            req.stop_loss, req.sl_unit = _dsl, _dsl_u
+                        if _dtp is not None:
+                            req.take_profit, req.tp_unit = _dtp, _dtp_u
+            except Exception:
+                pass
         try:
             from utils.helpers import is_optionable as _isopt3
             if not _isopt3(symbol):

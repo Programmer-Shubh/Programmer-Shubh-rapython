@@ -173,9 +173,11 @@ def _result_matches_config(res: dict, symbol, start_date, end_date,
                 _why(f"target alag hai (run: {_ptp} vs save: {_stp})")
                 return False
             try:
-                _pm = int(p.get("max_trades_per_day") or 0)
-                _sm = int(_rk.get("max_trades_per_day") or 0)
-                if _pm and _sm and _pm != _sm:
+                # <=0 means unlimited (no daily trade-count cap) - never a
+                # mismatch; only compare two explicit positive caps.
+                _pm = int(p.get("max_trades_per_day") or -1)
+                _sm = int(_rk.get("max_trades_per_day") or -1)
+                if _pm > 0 and _sm > 0 and _pm != _sm:
                     _why(f"max trades/day alag hai (run: {_pm} vs save: {_sm})")
                     return False
             except Exception:
@@ -524,6 +526,16 @@ def get_strategy(strat_id: int):
 @router.post("/save")
 def save_strategy(req: StrategyRequest):
     import json
+    # Daily caps removed (user rule 2026-11): persist unlimited no matter what
+    # an older client sends, so execution never has a max-loss/max-trades stop.
+    try:
+        if isinstance(req.risk_management, dict):
+            req.risk_management["max_trades_per_day"] = -1
+            for _cap_key in ("daily_loss_limit", "daily_max_loss", "max_daily_loss"):
+                if _cap_key in req.risk_management:
+                    req.risk_management[_cap_key] = 0
+    except Exception:
+        pass
     db = Database.get_instance()
     data = {
         "name": req.name,
@@ -709,6 +721,14 @@ class LotsUpdateRequest(BaseModel):
     lots: int
 
 
+class SltpUpdateRequest(BaseModel):
+    """Per-saved-strategy Stop-Loss / Target edit (percent or rupees/points)."""
+    sl: Optional[float] = None
+    tp: Optional[float] = None
+    sl_unit: Optional[str] = None  # "pct" or "rs"
+    tp_unit: Optional[str] = None
+
+
 class LiveToggleRequest(BaseModel):
     enabled: bool
 
@@ -741,6 +761,100 @@ def update_strategy_lots(strat_id: int, req: LotsUpdateRequest):
         "UPDATE strategies SET legs=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
         [_js.dumps(legs), strat_id])
     return {"status": "updated", "id": strat_id, "lots": lots}
+
+
+@router.post("/{strat_id}/sltp")
+def update_strategy_sltp(strat_id: int, req: SltpUpdateRequest):
+    """Edit one saved strategy's Stop-Loss / Target from its card/settings.
+
+    Persisted in strategies.risk_management (daily_stop_loss_pct /
+    daily_take_profit_pct for %, daily_stop_loss / daily_take_profit for
+    rupees) AND mirrored into every leg. Fyers live orders and the auto-paper
+    worker read these DB values on the next signal - no hardcoded SL/TP.
+    """
+    import json as _js
+    db = Database.get_instance()
+    row = db.fetch_one("SELECT * FROM strategies WHERE id=?", [strat_id])
+    if not row:
+        return {"error": "Strategy not found"}
+    try:
+        rm = _js.loads(row.get("risk_management") or "{}")
+        if not isinstance(rm, dict):
+            rm = {}
+    except Exception:
+        rm = {}
+    try:
+        legs = _js.loads(row.get("legs") or "[]")
+        if not isinstance(legs, list):
+            legs = []
+    except Exception:
+        legs = []
+
+    def _norm_unit(u, fallback):
+        u = str(u or "").strip().lower()
+        if u in ("pct", "%", "percent", "percentage"):
+            return "pct"
+        if u in ("rs", "inr", "rupee", "rupees", "point", "points", "pt", "pts", "₹"):
+            return "rs"
+        return fallback
+
+    if req.sl is None and req.tp is None:
+        return {"error": "SL ya TP me se kam se kam ek value bhejo"}
+
+    resp = {"id": strat_id, "status": "updated"}
+
+    if req.sl is not None:
+        sl_v = float(req.sl)
+        if sl_v <= 0:
+            return {"error": "Stop-Loss 0 se bada hona chahiye"}
+        sl_u = _norm_unit(req.sl_unit,
+                          "pct" if float(rm.get("daily_stop_loss_pct") or 0) > 0 else "rs")
+        if sl_u == "pct" and sl_v > 1000:
+            return {"error": "Stop-Loss % 1000 se zyada nahi ho sakta"}
+        if sl_u == "rs" and sl_v > 10000000:
+            return {"error": "Stop-Loss amount bahut bada hai"}
+        if sl_u == "pct":
+            rm["daily_stop_loss_pct"] = round(sl_v, 4)
+            rm["daily_stop_loss"] = 0
+        else:
+            rm["daily_stop_loss"] = round(sl_v, 2)
+            rm["daily_stop_loss_pct"] = 0
+        rm["sl_unit"] = sl_u
+        for leg in legs:
+            if isinstance(leg, dict):
+                leg["stop_loss"] = (f"{sl_v}%" if sl_u == "pct" else sl_v)
+        resp.update({"sl": sl_v, "sl_unit": sl_u})
+
+    if req.tp is not None:
+        tp_v = float(req.tp)
+        if tp_v <= 0:
+            return {"error": "Target 0 se bada hona chahiye"}
+        tp_u = _norm_unit(req.tp_unit,
+                          "pct" if float(rm.get("daily_take_profit_pct") or 0) > 0 else "rs")
+        if tp_u == "pct" and tp_v > 1000:
+            return {"error": "Target % 1000 se zyada nahi ho sakta"}
+        if tp_u == "rs" and tp_v > 10000000:
+            return {"error": "Target amount bahut bada hai"}
+        if tp_u == "pct":
+            rm["daily_take_profit_pct"] = round(tp_v, 4)
+            rm["daily_take_profit"] = 0
+        else:
+            rm["daily_take_profit"] = round(tp_v, 2)
+            rm["daily_take_profit_pct"] = 0
+        rm["tp_unit"] = tp_u
+        for leg in legs:
+            if isinstance(leg, dict):
+                leg["take_profit"] = (f"{tp_v}%" if tp_u == "pct" else tp_v)
+        resp.update({"tp": tp_v, "tp_unit": tp_u})
+
+    # Daily trade-count cap removed: an edited strategy runs unconstrained.
+    rm["max_trades_per_day"] = -1
+
+    db.execute(
+        "UPDATE strategies SET risk_management=?, legs=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        [_js.dumps(rm), _js.dumps(legs), strat_id])
+    resp["risk_management"] = rm
+    return resp
 
 
 @router.get("/{strat_id}/live-state")

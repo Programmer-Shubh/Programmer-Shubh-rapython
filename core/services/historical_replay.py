@@ -162,7 +162,12 @@ class HistoricalReplayEngine:
                 max_holding = 5
             else:
                 max_holding = 20
-        max_trades_day = int(self.risk_management.get("max_trades_per_day", 5))
+        try:
+            _mt_raw = self.risk_management.get("max_trades_per_day", -1)
+            max_trades_day = -1 if _mt_raw in (None, "") else int(_mt_raw)
+        except Exception:
+            max_trades_day = -1
+        _unlimited_trades = max_trades_day < 0
         daily_loss_limit = float(self.risk_management.get("daily_loss_limit", 0) or 0)
         # Per-trade SL/TP rupees YA premium ka percent ('2%' -> *_pct keys).
         # Engine ka SAME resolver (replay == backtest contract).
@@ -236,7 +241,7 @@ class HistoricalReplayEngine:
             has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
             
             # Execute pending entry from previous bar's signal
-            can_enter = not has_open and self.daily_trades < max_trades_day
+            can_enter = not has_open and (_unlimited_trades or self.daily_trades < max_trades_day)
             # Engine parity: intraday entry clock window (entry_time..exit/15:00)
             if can_enter and trade_mode == "intraday" and str(getattr(self.bt_engine, "_cur_bar_time", "") or ""):
                 try:
@@ -445,7 +450,7 @@ class HistoricalReplayEngine:
                         exit_sig = (sell_sig if txn_type == "buy" else buy_sig) if _r_exit_on_signal else False
                 
                 has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
-                can_enter = not has_open and self.daily_trades < max_trades_day
+                can_enter = not has_open and (_unlimited_trades or self.daily_trades < max_trades_day)
                 # Engine parity: intraday entry clock window at SIGNAL time too
                 if can_enter and trade_mode == "intraday" and str(getattr(self.bt_engine, "_cur_bar_time", "") or ""):
                     try:

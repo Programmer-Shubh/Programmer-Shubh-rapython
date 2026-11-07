@@ -114,8 +114,17 @@ class BacktestEngine:
         # BTST holds overnight: increase max_holding for BTST
         if trade_mode == "btst":
             max_holding = max(max_holding, 5)
-        max_trades_day = int(risk_management.get("max_trades_per_day", 5))
-        daily_loss_limit = float(risk_management.get("daily_loss_limit", risk_management.get("daily_stop_loss", 0)) or 0)
+        # Daily caps (user rule 2026-11 = unconstrained):
+        #   -1 / missing  -> UNLIMITED (new default)
+        #    0            -> legacy explicit "zero trades" (tests / diagnostics)
+        #   >0            -> explicit simulation cap
+        try:
+            _mt_raw = risk_management.get("max_trades_per_day", -1)
+            max_trades_day = -1 if _mt_raw in (None, "") else int(_mt_raw)
+        except Exception:
+            max_trades_day = -1
+        _unlimited_trades = max_trades_day < 0
+        daily_loss_limit = float(risk_management.get("daily_loss_limit", 0) or 0)
         # Position sizing: यूजर मैन्युअल lots सेट करता है — ऑटो नहीं (user demand).
         # Risk amount केवल R-multiple display के लिए SL सेटिंग से निकाला जाएगा।
         # Strategy-wise MTM Stop Loss and Target (overall portfolio level).
@@ -305,7 +314,7 @@ class BacktestEngine:
                 _in_range = str(cur_date) >= str(start_date)[:10]
             except Exception:
                 _in_range = True
-            can_enter = not has_open and daily_trades < max_trades_day and _in_range
+            can_enter = not has_open and (_unlimited_trades or daily_trades < max_trades_day) and _in_range
             # Backtest entry clock window (paper parity): intraday entries
             # only at/after advanced.entry_time and before exit_time/15:00.
             # Before this the engine entered on 09:25/09:30 signals while
@@ -585,7 +594,7 @@ class BacktestEngine:
                     except Exception:
                         pass
                 has_open = len(entries) > len(exits)
-                can_enter = not has_open and daily_trades < max_trades_day and _in_range
+                can_enter = not has_open and (_unlimited_trades or daily_trades < max_trades_day) and _in_range
                 # Entry delay: wait N bars after the SESSION opens (per-day), not
                 # since the start of the whole backtest window.
                 if entry_delay_bars > 0:
@@ -623,7 +632,7 @@ class BacktestEngine:
                     if entry_sig and not can_enter and _in_range:
                         if has_open:
                             self._rej["position_already_open"] = self._rej.get("position_already_open", 0) + 1
-                        elif daily_trades >= max_trades_day:
+                        elif (not _unlimited_trades) and daily_trades >= max_trades_day:
                             self._rej["max_trades_day"] = self._rej.get("max_trades_day", 0) + 1
                         else:
                             self._rej["entry_gates"] = self._rej.get("entry_gates", 0) + 1
@@ -1840,8 +1849,20 @@ class BacktestEngine:
         parse, `_check_sl_tp` ko unit milti hai (paper SL monitor wahi unit
         trade par store karta hai). Returns (sl_amt, tp_amt, sl_unit, tp_unit)."""
         from utils.helpers import sltp_amount as _am
-        sl_amt, sl_unit = _am(leg.get("stop_loss", risk_management.get("daily_stop_loss", 500)))
-        tp_amt, tp_unit = _am(leg.get("take_profit", risk_management.get("daily_take_profit", 1000)))
+        # Strategy DB value WINS over any stale leg-level value (user rule:
+        # execution/backtest must use the SL/TP saved on the strategy card).
+        # IMPORTANT: an explicit 0 means "disabled" and must NOT fall through
+        # to a different source (only a missing key does).
+        _rm_sl = risk_management.get("daily_stop_loss")
+        _rm_tp = risk_management.get("daily_take_profit")
+        _leg_sl = leg.get("stop_loss")
+        _leg_tp = leg.get("take_profit")
+        _sl_src = _rm_sl if _rm_sl not in (None, "") else (
+            _leg_sl if _leg_sl not in (None, "") else 500)
+        _tp_src = _rm_tp if _rm_tp not in (None, "") else (
+            _leg_tp if _leg_tp not in (None, "") else 1000)
+        sl_amt, sl_unit = _am(_sl_src)
+        tp_amt, tp_unit = _am(_tp_src)
         # Explicit *_pct keys win (UI "%" suffix unme bhejta hai)
         try:
             if float(risk_management.get("daily_stop_loss_pct", 0) or 0) > 0:

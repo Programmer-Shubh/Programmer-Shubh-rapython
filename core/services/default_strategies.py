@@ -28,7 +28,9 @@ DEFAULT_STRATEGIES = [
         },
         "risk_management": {
             "daily_stop_loss": 6000, "daily_take_profit": 0,
-            "max_trades_per_day": 8, "signal_lookback_days": 0,
+            # -1 = unlimited (daily limits removed, user rule 2026-11)
+            "max_trades_per_day": -1, "daily_loss_limit": 0,
+            "signal_lookback_days": 0,
         },
         "status": "active",
         "protected": 1,
@@ -123,3 +125,57 @@ def seed_default_strategies():
                 print(f"[seed] {_sc['name']}: {e}", file=_sys.stderr, flush=True)
             except Exception:
                 pass
+    # One-time data migration: existing saved strategies carried legacy caps
+    # (max 5 trades/day, ₹5000 daily loss). Normalize them to unlimited so
+    # Fyers keeps taking every valid signal all day.
+    try:
+        normalize_daily_limits(db)
+    except Exception:
+        pass
+
+
+def normalize_daily_limits(db=None):
+    """Set legacy daily caps on all saved strategies to UNLIMITED.
+
+    max_trades_per_day: -1 (engine sentinel = unlimited)
+    daily_loss_limit / daily_max_loss / max_daily_loss: 0 (disabled)
+    Only writes when a legacy positive cap is found (idempotent).
+    """
+    import json as _js
+    if db is None:
+        from core.models.database import Database
+        db = Database.get_instance()
+    try:
+        rows = db.fetch_all("SELECT id, risk_management FROM strategies")
+    except Exception:
+        return 0
+    changed = 0
+    for r in rows or []:
+        try:
+            rm = _js.loads(r.get("risk_management") or "{}")
+            if not isinstance(rm, dict):
+                continue
+            dirty = False
+            try:
+                _mt = int(rm.get("max_trades_per_day", -1))
+            except Exception:
+                _mt = -1
+            if _mt >= 0:
+                rm["max_trades_per_day"] = -1
+                dirty = True
+            for _k in ("daily_loss_limit", "daily_max_loss", "max_daily_loss"):
+                if _k in rm:
+                    try:
+                        if float(rm.get(_k) or 0) != 0:
+                            rm[_k] = 0
+                            dirty = True
+                    except Exception:
+                        rm[_k] = 0
+                        dirty = True
+            if dirty:
+                db.execute("UPDATE strategies SET risk_management=? WHERE id=?",
+                           [_js.dumps(rm), r.get("id")])
+                changed += 1
+        except Exception:
+            continue
+    return changed

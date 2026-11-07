@@ -505,7 +505,7 @@
                     <div class="row g-1 mt-1">
                         <div class="col-md-3"><label class="form-label small">Lock if profit reaches</label><input type="number" class="form-control form-control-sm" id="s-lock-profit" value="0" min="0" step="50"></div>
                         <div class="col-md-3"><label class="form-label small">Lock profit</label><input type="number" class="form-control form-control-sm" id="s-lock-amount" value="1" min="0" step="1"></div>
-                        <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="s-mtd" value="5" min="1"></div>
+                        <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="text" class="form-control form-control-sm" id="s-mtd" value="Unlimited" readonly title="Daily trade-count limit removed - din bhar jitne valid signals aayenge, sab execute honge"></div>
                         <div class="col-md-3"><label class="form-label small">Slippage (%) <span class="badge bg-warning text-dark">strategy</span></label><input type="number" class="form-control form-control-sm" id="s-slippage" value="0.50" step="0.05" min="0" max="2" title="Add Slippage to make results realistic (market impact + spread)"></div>
                     </div>
                     <div class="row g-1 mt-1">
@@ -689,8 +689,8 @@
                                 <div class="row g-1">
                                     <div class="col-6"><label class="form-label small">Stop Loss %</label><input type="number" class="form-control form-control-sm" id="alert-sl" value="2" step="0.5" min="0.5" max="10"></div>
                                     <div class="col-6"><label class="form-label small">Target %</label><input type="number" class="form-control form-control-sm" id="alert-tp" value="4" step="0.5" min="0.5" max="20"></div>
-                                    <div class="col-6"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="alert-max" value="5" min="1" max="20"></div>
-                                    <div class="col-6"><label class="form-label small">Daily Loss Limit</label><input type="number" class="form-control form-control-sm" id="alert-dl" value="5000" step="500" min="0"></div>
+                                    <div class="col-6"><label class="form-label small">Max Trades/Day</label><input type="text" class="form-control form-control-sm" id="alert-max" value="Unlimited" readonly title="Daily trade limit removed"></div>
+                                    <div class="col-6"><label class="form-label small">Daily Loss Limit</label><input type="text" class="form-control form-control-sm" id="alert-dl" value="Unlimited" readonly title="Daily max-loss cap removed"></div>
                                     <div class="col-6"><label class="form-label small">Trailing SL</label><select class="form-select form-select-sm" id="alert-trail"><option value="lock">Lock Profit</option><option value="partial">Partial Book</option><option value="none">None</option></select></div>
                                     <div class="col-6"><label class="form-label small">Lock at Profit %</label><input type="number" class="form-control form-control-sm" id="alert-lock" value="1" step="0.5" min="0.5"></div>
                                 </div>
@@ -717,7 +717,7 @@
                             <div class="row g-2" id="risk-status">
                                 <div class="col"><div class="stat-card-sm"><div class="label">Today's P&L</div><div class="value" id="rs-pnl">₹0</div></div></div>
                                 <div class="col"><div class="stat-card-sm"><div class="label">Trades Today</div><div class="value" id="rs-trades">0</div></div></div>
-                                <div class="col"><div class="stat-card-sm"><div class="label">Daily Limit</div><div class="value" id="rs-limit">₹5,000</div></div></div>
+                                <div class="col"><div class="stat-card-sm"><div class="label">Daily Limit</div><div class="value" id="rs-limit">Unlimited</div></div></div>
                                 <div class="col"><div class="stat-card-sm"><div class="label">Circuit Breaker</div><div class="value" id="rs-breaker" style="color:#198754">ON</div></div></div>
                             </div>
                         </div>
@@ -1477,7 +1477,8 @@ let _lastOpenTrdHTML = null;
         const lots=parseInt(document.getElementById('r-lots')?.value)||1;
         const sA=_amtVal('s-sl',1500);const sl=sA.u==='rs'?(sA.v||1500):sA.v;const slUnit=sA.u;
         const tA=_amtVal('s-tp',3000);const tp=tA.u==='rs'?(tA.v||3000):tA.v;const tpUnit=tA.u;
-        const mtd=parseInt(document.getElementById('r-mtd')?.value)||5;
+        // Daily trade-count cap removed: -1 = unlimited in the engine.
+        const mtd=-1;
         const slb=Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0));
         const indicators=robotCollectIndicators();
         let legs=(typeof stratLegs!=='undefined'&&stratLegs.length)?JSON.parse(JSON.stringify(stratLegs)):[];
@@ -1942,7 +1943,7 @@ let _lastOpenTrdHTML = null;
                 daily_take_profit_pct:tpUnit==='pct'?tp:0,
                 sl_unit:slUnit,
                 tp_unit:tpUnit,
-                max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5,
+                max_trades_per_day:-1,
                 signal_lookback_days:parseInt(document.getElementById('r-slb')?.value)||0,
             },
             status:'active',
@@ -2178,7 +2179,7 @@ let _lastOpenTrdHTML = null;
                 else if(_rm.daily_stop_loss)document.getElementById('s-sl').value=_rm.daily_stop_loss;
                 if(_rm.daily_take_profit_pct)document.getElementById('s-tp').value=_rm.daily_take_profit_pct+'%';
                 else if(_rm.daily_take_profit)document.getElementById('s-tp').value=_rm.daily_take_profit;
-                if(_rm.max_trades_per_day)try{document.getElementById('r-mtd').value=_rm.max_trades_per_day;}catch(e){}
+                try{document.getElementById('s-mtd').value='Unlimited';}catch(e){}
                 try{if(_rm.signal_lookback_days!=null)document.getElementById('r-slb').value=_rm.signal_lookback_days;}catch(e){}
             }catch(e){}
             if(s.legs)try{stratLegs=Array.isArray(s.legs)?s.legs:JSON.parse(s.legs);try{stratLegs.forEach(l=>{l.lots=l.lots||1;l.expiry=l.expiry||'weekly';l.strike_selection=l.strike_selection||'atm';l.otm_distance=l.otm_distance||0;});}catch(e){}renderLegs();}catch(e){}
@@ -2300,7 +2301,7 @@ let _lastOpenTrdHTML = null;
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{const r=await A('/api/strategies/list');const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3"><div class="text-center p-4"><i class="bi bi-lightbulb" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">No strategies yet</p><small class="text-muted">Create your first strategy to get started</small></div></p>';return;}
     // Running status per strategy: count open paper/live trades by strategy_id
     let runMap={};try{const o=await A('/api/trades/open');(o.positions||[]).forEach(t=>{const sid=t.strategy_id||0;if(!sid)return;runMap[sid]=runMap[sid]||{paper:0,live:0};if((t.trade_mode||'paper')==='live'&&(t.broker_order_id&&String(t.broker_order_id).trim()))runMap[sid].live++;else runMap[sid].paper++;});}catch(e){}
-    let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const disp=s.display_status||s.status||'active';const isExp=(s.expired===true||disp==='expired');const statusCls=isExp?'expired':s.status==='active'?'active':s.status==='draft'?'draft':'paused';const statusLbl=isExp?'expired':(s.status||'active');const run=runMap[s.id]||{paper:0,live:0};const runH=(run.paper?`<span class="badge bg-success ms-1">● PAPER (${run.paper})</span>`:'')+(run.live?`<span class="badge bg-danger ms-1">● LIVE (${run.live})</span>`:'');const dis=isExp?'title="Expired - trade lagane par next expiry par auto-shift hoga"':`<small class="text-muted">No BT yet \u2014 click Backtest</small>`;const btH=(s.bt&&s.bt.trades!=null)?`<div class="mb-2 small">Saved BT: <strong>${s.bt.trades} trades</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span> • Win ${s.bt.win_rate||0}% ${(s.bt.stale_engine?'<span class="badge bg-danger" style="font-size:10px">purana engine</span>':'')} <span class="text-muted">(${s.bt.stored_at||'saved'})</span></div>`:`<div class="mb-2 small text-muted">Saved BT: No BT yet — click Backtest</div>`;h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px;${isExp?'opacity:0.65':''}"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name} <span class="badge bg-secondary ms-1">#${s.id}</span>${s.protected?'<span class="badge bg-info ms-1" title="Default strategy - delete lock on">DEFAULT</span>':''}</h6><span><span class="badge badge-${statusCls}">${statusLbl}</span>${runH}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}<span class="d-inline-flex align-items-center ms-2" style="gap:3px;font-size:11px">Lots: <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="stratLots(${s.id},${Math.max(1,(parseInt((s.legs||[])[0]&&((s.legs||[])[0].lots||1))||1)-1)})">−</button><strong id="st-lots-${s.id}">${Math.max(1,parseInt((s.legs||[])[0]&&((s.legs||[])[0].lots||1))||1)}</strong><button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="stratLots(${s.id},${(Math.max(1,parseInt(((s.legs||[])[0]||{}).lots)||1))+1})">+</button></span></div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div>${btH}<div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-sm ${(s.live_enabled?'btn-danger':'btn-outline-secondary')}" id="st-live-${s.id}" onclick="stratLiveToggle(${s.id},${!s.live_enabled})" title="Is strategy ka Live ON/OFF">${s.live_enabled?'Live ON':'Live OFF'}</button><button class="btn btn-sm ${s.status==='active'?'btn-success':'btn-outline-secondary'}" onclick="atFromStrat(${s.id},'${s.status}')" title="Paper trading on/off (signal par paper trade)">${s.status==='active'?'Paper ON':'Paper OFF'}</button><button class="btn btn-sm btn-info" onclick="backtestStrat(${s.id},false,this)">Backtest Detail</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')" title="Saved backtest result history - purane saved versions dekho">History</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})" title="Saved strategy edit karo - symbol, SL/TP, lots, indicators badlo">${s.live_enabled?'✏ Edit':'Edit'}</button><button class="btn btn-sm btn-outline-primary" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button>${s.protected?'':'<button class="btn btn-sm btn-outline-info" onclick="stratSetDefault('+s.id+')" title="Default bana do - delete lock (purge par bachega)">Set Default</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat('+s.id+')">Delete</button>'}</div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
+    let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const rm=_parseJsonField(s.risk_management,{});const _slTxt=(rm.daily_stop_loss_pct?rm.daily_stop_loss_pct+'%':('₹'+(rm.daily_stop_loss||'—')));const _tpTxt=(rm.daily_take_profit_pct?rm.daily_take_profit_pct+'%':('₹'+(rm.daily_take_profit||'—')));const slH='<div class="mb-2 small"><span class="me-2">SL: <strong>'+_slTxt+'</strong> | TP: <strong>'+_tpTxt+'</strong></span><button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:11px" onclick="stratEditSltp('+s.id+')" title="Strategy ka SL/TP edit karo - Fyers execution inhi values ko use karega">✏ Edit SL/TP</button></div>';const disp=s.display_status||s.status||'active';const isExp=(s.expired===true||disp==='expired');const statusCls=isExp?'expired':s.status==='active'?'active':s.status==='draft'?'draft':'paused';const statusLbl=isExp?'expired':(s.status||'active');const run=runMap[s.id]||{paper:0,live:0};const runH=(run.paper?`<span class="badge bg-success ms-1">● PAPER (${run.paper})</span>`:'')+(run.live?`<span class="badge bg-danger ms-1">● LIVE (${run.live})</span>`:'');const dis=isExp?'title="Expired - trade lagane par next expiry par auto-shift hoga"':`<small class="text-muted">No BT yet \u2014 click Backtest</small>`;const btH=(s.bt&&s.bt.trades!=null)?`<div class="mb-2 small">Saved BT: <strong>${s.bt.trades} trades</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span> • Win ${s.bt.win_rate||0}% ${(s.bt.stale_engine?'<span class="badge bg-danger" style="font-size:10px">purana engine</span>':'')} <span class="text-muted">(${s.bt.stored_at||'saved'})</span></div>`:`<div class="mb-2 small text-muted">Saved BT: No BT yet — click Backtest</div>`;h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px;${isExp?'opacity:0.65':''}"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name} <span class="badge bg-secondary ms-1">#${s.id}</span>${s.protected?'<span class="badge bg-info ms-1" title="Default strategy - delete lock on">DEFAULT</span>':''}</h6><span><span class="badge badge-${statusCls}">${statusLbl}</span>${runH}</span></div><p class="text-muted small mb-2">${s.description||'No description'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}<span class="d-inline-flex align-items-center ms-2" style="gap:3px;font-size:11px">Lots: <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="stratLots(${s.id},${Math.max(1,(parseInt((s.legs||[])[0]&&((s.legs||[])[0].lots||1))||1)-1)})">−</button><strong id="st-lots-${s.id}">${Math.max(1,parseInt((s.legs||[])[0]&&((s.legs||[])[0].lots||1))||1)}</strong><button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="stratLots(${s.id},${(Math.max(1,parseInt(((s.legs||[])[0]||{}).lots)||1))+1})">+</button></span></div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div>${btH}${slH}<div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-sm ${(s.live_enabled?'btn-danger':'btn-outline-secondary')}" id="st-live-${s.id}" onclick="stratLiveToggle(${s.id},${!s.live_enabled})" title="Is strategy ka Live ON/OFF">${s.live_enabled?'Live ON':'Live OFF'}</button><button class="btn btn-sm ${s.status==='active'?'btn-success':'btn-outline-secondary'}" onclick="atFromStrat(${s.id},'${s.status}')" title="Paper trading on/off (signal par paper trade)">${s.status==='active'?'Paper ON':'Paper OFF'}</button><button class="btn btn-sm btn-info" onclick="backtestStrat(${s.id},false,this)">Backtest Detail</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')" title="Saved backtest result history - purane saved versions dekho">History</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})" title="Saved strategy edit karo - symbol, SL/TP, lots, indicators badlo">${s.live_enabled?'✏ Edit':'Edit'}</button><button class="btn btn-sm btn-outline-primary" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button>${s.protected?'':'<button class="btn btn-sm btn-outline-info" onclick="stratSetDefault('+s.id+')" title="Default bana do - delete lock (purge par bachega)">Set Default</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat('+s.id+')">Delete</button>'}</div></div></div></div>`;});cards.innerHTML=h;}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
 
     async function ptFromStrat(id,force){try{
         try{const _mk=isMarketOpenIST();if(!_mk.open){alert(_mk.reason+'\n\nOrder market open par hi lagega (Mon-Fri 9:15-3:30 IST).');return;}}catch(e){}
@@ -2379,13 +2380,13 @@ let _lastOpenTrdHTML = null;
         try{const r=await A('/api/email-alerts/risk');
         if(r.daily_pnl!==undefined)document.getElementById('rs-pnl').textContent='₹'+r.daily_pnl.toLocaleString('en-IN');
         if(r.trades_today!==undefined)document.getElementById('rs-trades').textContent=r.trades_today;
-        if(r.daily_limit!==undefined)document.getElementById('rs-limit').textContent='₹'+r.daily_limit.toLocaleString('en-IN');
+        if(r.daily_limit!==undefined)document.getElementById('rs-limit').textContent=(r.unlimited||!r.daily_limit)?'Unlimited':('₹'+r.daily_limit.toLocaleString('en-IN'));
         const br=document.getElementById('rs-breaker');
         if(r.circuit_breaker===false){br.textContent='OFF';br.style.color='#dc3545';}else{br.textContent='ON';br.style.color='#198754';}
         }catch(e){}
     }
     async function saveAlertConfig(){
-        const cfg={sl_pct:parseFloat(document.getElementById('alert-sl').value)||2,tp_pct:parseFloat(document.getElementById('alert-tp').value)||4,max_trades:parseInt(document.getElementById('alert-max').value)||5,daily_loss_limit:parseFloat(document.getElementById('alert-dl').value)||5000,trailing:document.getElementById('alert-trail').value,lock_at:parseFloat(document.getElementById('alert-lock').value)||1};
+        const cfg={sl_pct:parseFloat(document.getElementById('alert-sl').value)||2,tp_pct:parseFloat(document.getElementById('alert-tp').value)||4,max_trades:0,daily_loss_limit:0,trailing:document.getElementById('alert-trail').value,lock_at:parseFloat(document.getElementById('alert-lock').value)||1};
         try{await P('/api/email-alerts/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});alert('Config saved!');}catch(e){alert('Error: '+e.message);}
     }
     function whToken(){try{return localStorage.getItem('whToken')||'';}catch(e){return '';}}
@@ -2511,7 +2512,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
             robotCollectIndicators().forEach(iv=>{ if(iv&&iv.id) _seen[iv.id]=iv; });
             Object.keys(_seen).forEach(k=>_saveInds.push(_seen[k]));
         }catch(e){ try{ _saveInds.push(...robotCollectIndicators()); }catch(_){} }
-        const body={id: window._editingStratId||0, name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:slUnit==='rs'?sl:0, daily_take_profit:tpUnit==='rs'?tp:0, daily_stop_loss_pct:slUnit==='pct'?sl:0, daily_take_profit_pct:tpUnit==='pct'?tp:0, max_trades_per_day:parseInt(document.getElementById('r-mtd')?.value)||5, signal_lookback_days:Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0))},
+        const body={id: window._editingStratId||0, name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:slUnit==='rs'?sl:0, daily_take_profit:tpUnit==='rs'?tp:0, daily_stop_loss_pct:slUnit==='pct'?sl:0, daily_take_profit_pct:tpUnit==='pct'?tp:0, max_trades_per_day:-1, signal_lookback_days:Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0))},
             // Abhi-chalaya backtest result bhi save ke saath bhejo - warna card
             // par "Saved BT: —" aata tha (Backtest Detail dabane tak). Backend
             // config match hone par hi attach karta hai.
@@ -2568,7 +2569,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                 if(!pe && !lv) modeH='<span class="badge bg-secondary">OFF</span>';
                 h+=`<tr><td><strong>${s.name}</strong>${s.protected?'<span class="badge bg-info ms-1" title="Default strategy">DEFAULT</span>':''}</td><td>${s.symbol}</td><td><span class="badge ${ord.includes('SELL')?'badge-sell':'badge-buy'}">${ord}</span></td>`+
 `<td><div class="d-flex align-items-center" style="gap:4px"><button class="btn btn-sm btn-outline-secondary px-2" title="Lot ghatayen" onclick="stratLots(${s.id},${curLots-1})">−</button><strong class="mx-1">${curLots}</strong><button class="btn btn-sm btn-outline-secondary px-2" title="Lot badhayen" onclick="stratLots(${s.id},${curLots+1})">+</button></div><small class="sl-qty-hint text-muted" data-sid="${s.id}" style="font-size:10px">qty: …</small></td>`+
-`<td>${(rm.daily_stop_loss_pct?rm.daily_stop_loss_pct+'%':('₹'+(rm.daily_stop_loss||'-')))} / ${(rm.daily_take_profit_pct?rm.daily_take_profit_pct+'%':('₹'+(rm.daily_take_profit||'-')))}</td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td><td>${modeH}</td>`+
+`<td><div class="small"><strong>SL</strong> ${(rm.daily_stop_loss_pct?rm.daily_stop_loss_pct+'%':('₹'+(rm.daily_stop_loss||'-')))} / <strong>TP</strong> ${(rm.daily_take_profit_pct?rm.daily_take_profit_pct+'%':('₹'+(rm.daily_take_profit||'-')))}</div><button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:11px" onclick="stratEditSltp(${s.id})" title="Is strategy ka SL/TP edit karo - agla paper/live order inhi DB values ko use karega">✏ Edit SL/TP</button></td><td class="small">${btH}</td><td><span class="badge ${(s.expired===true||s.display_status==='expired')?'badge-expired':s.status==='active'?'badge-active':'badge-draft'}">${(s.expired===true||s.display_status==='expired')?'expired':(s.status||'active')}</span></td><td>${modeH}</td>`+
 `<td><button class="btn btn-sm ${(pe?'btn-success':'btn-outline-secondary')}" title="Paper ON = auto-paper worker isi strategy par trade lagata hai; OFF = naya auto/paper trade band (open positions chalte rahenge)" onclick="stratPaperToggle(${s.id},${!pe})">${pe?'ON':'OFF'}</button></td>`+
 `<td><button class="btn btn-sm ${(lv?'btn-success':'btn-outline-secondary')}" onclick="stratLiveToggle(${s.id},${!lv})">${lv?'ON':'OFF'}</button></td>`+
 `<td style="white-space:nowrap">${onH}<button class="btn btn-sm btn-outline-primary" onclick="backtestFromRobot(${s.id},false,this)">Backtest</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')">History</button> <button class="btn btn-sm btn-outline-info" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button> <button class="btn btn-sm btn-outline-dark" onclick="delRobotSaved(${s.id})">Delete</button></td></tr>`;
@@ -2582,6 +2583,49 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                 });
             }catch(e){}
         }catch(e){ ['dash-robot-saved','tc-robot-saved'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='<p class="text-danger p-2 small">Failed to load: '+e.message+'</p>';}); console.error(e); }
+    }
+    async function stratEditSltp(id){
+        try{
+            const s=await A('/api/strategies/'+id);
+            if(!s||s.error){alert((s&&s.error)||'Strategy load nahi hui');return;}
+            const rm=_parseJsonField(s.risk_management,{});
+            const slVal=rm.daily_stop_loss_pct?rm.daily_stop_loss_pct:(rm.daily_stop_loss||'');
+            const slUnit=rm.daily_stop_loss_pct?'pct':'rs';
+            const tpVal=rm.daily_take_profit_pct?rm.daily_take_profit_pct:(rm.daily_take_profit||'');
+            const tpUnit=rm.daily_take_profit_pct?'pct':'rs';
+            let m=document.getElementById('sltpModal'); if(m)m.remove();
+            m=document.createElement('div'); m.id='sltpModal';
+            m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center';
+            m.innerHTML='<div style="background:#fff;border-radius:10px;width:94%;max-width:480px;padding:16px">'
+              +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><strong>SL / TP — '+(s.name||('#'+id))+'</strong><button class="btn btn-sm btn-outline-dark" onclick="document.getElementById(\'sltpModal\').remove()">Close</button></div>'
+              +'<div class="small text-muted mb-3">Yeh values is strategy ke DB me save hongi. Agla paper/Fyers order inhi values ko use karega (koi hardcoded SL/TP nahi).</div>'
+              +'<div class="row g-2">'
+              +'<div class="col-7"><label class="form-label small">Stop Loss</label><input type="number" step="0.01" min="0.01" class="form-control form-control-sm" id="sltp-sl" value="'+slVal+'"></div>'
+              +'<div class="col-5"><label class="form-label small">Unit</label><select class="form-select form-select-sm" id="sltp-sl-u"><option value="pct"'+(slUnit==='pct'?' selected':'')+'>% (premium)</option><option value="rs"'+(slUnit==='rs'?' selected':'')+'>₹ / points</option></select></div>'
+              +'<div class="col-7"><label class="form-label small">Target (TP)</label><input type="number" step="0.01" min="0.01" class="form-control form-control-sm" id="sltp-tp" value="'+tpVal+'"></div>'
+              +'<div class="col-5"><label class="form-label small">Unit</label><select class="form-select form-select-sm" id="sltp-tp-u"><option value="pct"'+(tpUnit==='pct'?' selected':'')+'>% (premium)</option><option value="rs"'+(tpUnit==='rs'?' selected':'')+'>₹ / points</option></select></div>'
+              +'</div>'
+              +'<div class="small text-muted mt-2">Tip: option BUY ke liye 30% SL / 70% TP common hai. % = entry premium ka percent.</div>'
+              +'<button class="btn btn-primary w-100 mt-3" onclick="saveStratSltp('+id+')">Save SL/TP (DB me)</button>'
+              +'</div>';
+            m.onclick=e=>{if(e.target===m)m.remove();};
+            document.body.appendChild(m);
+        }catch(e){alert('Error: '+(e.message||e));}
+    }
+    async function saveStratSltp(id){
+        try{
+            const sl=parseFloat(document.getElementById('sltp-sl').value);
+            const tp=parseFloat(document.getElementById('sltp-tp').value);
+            const slu=document.getElementById('sltp-sl-u').value;
+            const tpu=document.getElementById('sltp-tp-u').value;
+            if(!(sl>0)||!(tp>0)){alert('SL aur TP dono 0 se bade hone chahiye');return;}
+            const r=await P('/api/strategies/'+id+'/sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sl:sl,sl_unit:slu,tp:tp,tp_unit:tpu})});
+            if(r.error){alert('Error: '+r.error);return;}
+            document.getElementById('sltpModal')?.remove();
+            showToast('Strategy #'+id+' SL/TP save ho gaya - execution ab inhi DB values ko use karega','success');
+            try{await loadRobotSaved();}catch(e){}
+            try{await loadStrats();}catch(e){}
+        }catch(e){alert('Error: '+(e.message||e));}
     }
     async function stratLots(id, lots){
         lots=Math.max(1,parseInt(lots)||1);

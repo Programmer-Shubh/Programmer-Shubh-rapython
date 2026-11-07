@@ -507,19 +507,37 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
     except Exception:
         rm = {}
     from utils.helpers import sltp_amount as _sltp_am
-    _sl_amt, sl_u = (_sltp_am(rm.get("daily_stop_loss_pct"), "pct")
-                     if rm.get("daily_stop_loss_pct") is not None
-                     else _sltp_am(rm.get("daily_stop_loss"), "rs"))
-    _tp_amt, tp_u = (_sltp_am(rm.get("daily_take_profit_pct"), "pct")
-                     if rm.get("daily_take_profit_pct") is not None
-                     else _sltp_am(rm.get("daily_take_profit"), "rs"))
-    # Purane strategies ki default (rupees) same rahegi
-    sl = _sl_amt if _sl_amt > 0 else 1500
-    if _sl_amt <= 0:
-        sl_u = "rs"
-    tp = _tp_amt if _tp_amt > 0 else 3000
-    if _tp_amt <= 0:
-        tp_u = "rs"
+
+    def _pick_sltp(pairs):
+        """First positive saved value wins. Priority: strategy DB percent ->
+        strategy DB rupees -> leg-level value -> smart option-buy default.
+        No silent hardcoded 1500/3000 when the user has saved SL/TP."""
+        for _val, _unit in pairs:
+            try:
+                if _val is None or str(_val).strip() in ("", "0", "0.0"):
+                    continue
+                _amt, _u = _sltp_am(_val, _unit)
+                if _amt and _amt > 0:
+                    return float(_amt), _u
+            except Exception:
+                continue
+        return 0.0, "pct"
+
+    _leg0 = legs[0] if legs else {}
+    sl, sl_u = _pick_sltp([
+        (rm.get("daily_stop_loss_pct"), "pct"),
+        (rm.get("daily_stop_loss"), "rs"),
+        (_leg0.get("stop_loss"), rm.get("sl_unit") or "rs"),
+        # Only if a legacy strategy saved nothing at all: premium % default
+        # (same smart default the builder uses for option BUY).
+        (30.0, "pct"),
+    ])
+    tp, tp_u = _pick_sltp([
+        (rm.get("daily_take_profit_pct"), "pct"),
+        (rm.get("daily_take_profit"), "rs"),
+        (_leg0.get("take_profit"), rm.get("tp_unit") or "rs"),
+        (70.0, "pct"),
+    ])
     sym = str(s.get("symbol") or "").upper()
     if not sym:
         return placed, ["no symbol - skipped"]
@@ -743,12 +761,10 @@ def place_for_strategy(sid, signal_check="daily"):
             rm0 = _js.loads(s.get("risk_management") or "{}")
         except Exception:
             rm0 = {}
-        try:
-            max_day = 8  # user rule: always 8 trades/day regardless of strategy config
-        except Exception:
-            max_day = 3
-        # Continuous running: re-enter while nothing open, up to max/day.
-        # (SL/TP exit ke baad dobara lagana nahi padta - worker khud lagata hai.)
+        # User rule (2026-11): NO daily trade-count cap. The worker keeps
+        # re-entering all day whenever no position is open, so every valid
+        # signal fires on Fyers without a "max N/day" stop.
+        # (Only the one-open-position-per-strategy duplicate guard remains.)
         n_today_count = 0
         try:
             has_open = db.fetch_one(
@@ -758,8 +774,6 @@ def place_for_strategy(sid, signal_check="daily"):
             n_today = db.fetch_one(
                 "SELECT COUNT(*) as c FROM paper_trades WHERE strategy_id=? AND entry_date=?", [sid, today])
             n_today_count = int((n_today or {}).get("c", 0) or 0)
-            if n_today_count >= max_day:
-                return {"placed": placed, "notes": [f"{s.get('name')}: max {max_day}/day reached - skipped"]}
         except Exception:
             pass
         try:
@@ -874,23 +888,22 @@ def dry_run_status():
                         out.append({"id": sid, "name": s.get("name"), "decision": "wait",
                                     "reason": f"open position #{has_open['id']} running"})
                         continue
+                    # Daily trade-count cap removed (user rule 2026-11):
+                    # count is informational only, never blocks.
                     try:
-                        _rmd = _js.loads(s.get("risk_management") or "{}")
-                        _mx = max(1, int((_rmd or {}).get("max_trades_per_day") or 3))
+                        _nt = db.fetch_one(
+                            "SELECT COUNT(*) as c FROM paper_trades WHERE strategy_id=? AND entry_date=?", [sid, today])
+                        _done_today = int((_nt or {}).get("c", 0) or 0)
                     except Exception:
-                        _mx = 3
-                    _nt = db.fetch_one(
-                        "SELECT COUNT(*) as c FROM paper_trades WHERE strategy_id=? AND entry_date=?", [sid, today])
-                    if _nt and int(_nt.get("c", 0) or 0) >= _mx:
-                        out.append({"id": sid, "name": s.get("name"), "decision": "wait",
-                                    "reason": f"max {_mx}/day reached"})
-                        continue
+                        _done_today = 0
                 except Exception as e:
                     out.append({"id": sid, "name": s.get("name"), "decision": "skip",
                                 "reason": f"db check failed: {e}"[:120]})
                     continue
                 out.append({"id": sid, "name": s.get("name"), "decision": "DUE",
-                            "reason": f"{len(legs)} leg(s): guards pass, signal worker-pass par check hoga"})
+                            "trades_today": _done_today,
+                            "reason": f"{len(legs)} leg(s): guards pass, signal worker-pass par check hoga"
+                                      " (koi daily trade cap nahi)"})
             except Exception:
                 continue
         return {"today": today, "strategies": out}
