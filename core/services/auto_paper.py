@@ -510,8 +510,12 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
 
     def _pick_sltp(pairs):
         """First positive saved value wins. Priority: strategy DB percent ->
-        strategy DB rupees -> leg-level value -> smart option-buy default.
-        No silent hardcoded 1500/3000 when the user has saved SL/TP."""
+        strategy DB rupees -> legacy rupee default.
+
+        User rule (2026-11-07): worker must stay EXACTLY as before the
+        SL/TP feature - DB values same, fallback same (Rs 1500 / Rs 3000).
+        Only the source changed (DB instead of hardcoded), never the numbers.
+        """
         for _val, _unit in pairs:
             try:
                 if _val is None or str(_val).strip() in ("", "0", "0.0"):
@@ -523,20 +527,15 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
                 continue
         return 0.0, "pct"
 
-    _leg0 = legs[0] if legs else {}
     sl, sl_u = _pick_sltp([
         (rm.get("daily_stop_loss_pct"), "pct"),
         (rm.get("daily_stop_loss"), "rs"),
-        (_leg0.get("stop_loss"), rm.get("sl_unit") or "rs"),
-        # Only if a legacy strategy saved nothing at all: premium % default
-        # (same smart default the builder uses for option BUY).
-        (30.0, "pct"),
+        (1500.0, "rs"),
     ])
     tp, tp_u = _pick_sltp([
         (rm.get("daily_take_profit_pct"), "pct"),
         (rm.get("daily_take_profit"), "rs"),
-        (_leg0.get("take_profit"), rm.get("tp_unit") or "rs"),
-        (70.0, "pct"),
+        (3000.0, "rs"),
     ])
     sym = str(s.get("symbol") or "").upper()
     if not sym:
