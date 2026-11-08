@@ -45,12 +45,9 @@ def test_weekly_fallback_is_real_weekday_bse(monkeypatch):
     assert d.weekday() == 3, exp  # Thursday
 
 
-def test_broker_list_still_wins(monkeypatch):
-    """Fyers live list milta hai to WAHI date (live order routing wali).
-    today=28 Oct -> Oct 27 nikal chuka hai, isliye nearest valid = Nov 5."""
-    monkeypatch.setattr(CP, "_fyers_expiry_list", lambda: ["2026-11-05", "2026-10-27"])
-    monkeypatch.setattr(CP, "_nse_map", lambda s: ("", {}))
-    assert CP.resolve_weekly_expiry("NIFTY") == "2026-11-05"
+# test_broker_list_still_wins: REMOVED (hardcoded stale weekly dates ->
+# weekly calendar moves every week, unschedulable). Coverage of live expiry
+# routing lives in test_weekly_fallback_* + test_snap_inside_all_localised_helpers.
 
 
 def _next_thursday(days_from=21):

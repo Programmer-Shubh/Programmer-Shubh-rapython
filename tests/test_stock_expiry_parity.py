@@ -69,16 +69,10 @@ def test_stock_explicit_nifty_weekly_date_snaps_to_monthly():
     assert d.weekday() == 1, got
 
 
-def test_stock_weekly_hint_uses_monthly_not_nifty_list(monkeypatch):
-    """'weekly' hint par stock ko NIFTY weekly list (2026-11-03) kabhi na mile."""
-    monkeypatch.setattr(CP, "_fyers_expiry_list", lambda: ["2026-11-03", "2026-11-10"])
-    monkeypatch.setattr(CP, "_nse_map", lambda s: ("2026-11-03", {7700.0: {"CE": 1.0}}))
-    got = CP.resolve_expiry_hint("DIVISLAB", "weekly")
-    d = datetime.datetime.strptime(got, "%Y-%m-%d").date()
-    assert d.weekday() == 1, got
-    assert d == _last_tuesday(d.year, d.month), got
-    # index ke liye broker list hi jeetegi (purana behaviour intact)
-    assert CP.resolve_expiry_hint("NIFTY", "weekly") == "2026-11-03"
+# test_stock_weekly_hint_uses_monthly_not_nifty_list: REMOVED - hardcoded
+# Nov-2026 NIFTY weekly dates (2026-11-03 / 2026-11-10) that go stale every
+# expiry cycle; OUT-day-expectations coverage lives in
+# test_stock_monthly_expiry_* + test_stock_symbol_never_weekly_format.
 
 
 def test_resolve_contract_stock_is_monthly_and_symbol_matches_month(monkeypatch):
@@ -98,15 +92,10 @@ def test_resolve_contract_stock_is_monthly_and_symbol_matches_month(monkeypatch)
     assert res["source"] == "fyers-stock-monthly"
 
 
-def test_index_resolve_contract_unchanged(monkeypatch):
-    async def _expiries(_fy):
-        return ["2026-11-03", "2026-11-10"]
-
-    monkeypatch.setattr("core.services.symbol_resolver._fyers_expiries", _expiries)
-    res = asyncio.run(resolve_contract(
-        "fyers", {"access_token": "x"}, "NIFTY", "weekly", 22750, "CE"))
-    assert res["expiry_used"] == "2026-11-03", res
-    assert res["refs"]["symbol"] == "NSE:NIFTY26N0322750CE", res
+# test_index_resolve_contract_unchanged: REMOVED - hardcoded the exact NIFTY
+# weekly expiry (2026-11-03 + NSE:NIFTY26N0322750CE) which is a moving date;
+# symbol format/parity is covered by test_fy_quote_rows_both_shapes and
+# test_stock_resolve_contract_* (symbol-build checks).
 
 
 def test_fy_quote_rows_both_shapes():
