@@ -295,6 +295,9 @@
         <span class="badge bg-primary">Paper + Live Trading</span>
         <span class="badge bg-light text-dark border" title="Technology-only platform - koi tip ya recommendation nahi">Non-Advisory • Technology Only</span>
     </div>
+    <div style="margin:8px 0 0;padding:12px 18px;border:2px solid #f0c14b;background:#fff9ec;border-radius:10px;font-size:15px;font-weight:600;color:#6b4f00;line-height:1.65">
+        <strong style="font-size:17px;color:#8a5a00"><i class="bi bi-exclamation-triangle"></i> Disclaimer:</strong> RaTrade is solely a technology and data analysis platform. We are not a SEBI-registered Investment Advisor (IA) or Research Analyst (RA). All insights, technical setups, and scores displayed are strictly for analytical and educational purposes. No direct trading tips or buy/sell recommendations are provided. All strategies are configured and executed by the user at their own discretion and sole risk. Analytical backtest and paper results do not guarantee future live returns.
+    </div>
     <div class="nav">
         <button class="active" onclick="go('dashboard',this)"><i class="bi bi-speedometer2"></i> Dashboard</button>
         <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
@@ -900,15 +903,15 @@
             if(!bull.length) h+='<p class="text-muted small">No data - refresh or try later</p>';
             bull.forEach(s=>{
                 const opt=s.option_suggestion||{}; const chg=s.change_pct>=0?`+${s.change_pct}%`: `${s.change_pct}%`;
-                const btns = singleBtn(s.symbol,'SELL','PE',opt.strike||0,opt.expiry||'','Sell Put','btn-sell');
-                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol}</span><span style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${btns}<span class="badge badge-buy">${chg}</span></span></div><div class="meta">Spot ₹${(s.spot||0).toLocaleString()} | Prev ₹${(s.prev_close||0).toLocaleString()} | ${s.signal_type} ${opt.strike||''}</div></div>`;
+                // User rule (SEBI-safe): yahan koi call/put button ya buy/sell
+                // suggestion nahi - sirf executed analytical data (spot/prev/%).
+                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol}</span><span style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"><span class="badge badge-buy">${chg}</span></span></div><div class="meta">Spot ₹${(s.spot||0).toLocaleString()} | Prev ₹${(s.prev_close||0).toLocaleString()}</div></div>`;
             });
             h+=`</div><div class="sig-box bear"><h5 class="price-down">Top 5 Bearish Today (Future & Option)</h5>`;
             if(!bear.length) h+='<p class="text-muted small">No data</p>';
             bear.forEach(s=>{
                 const opt=s.option_suggestion||{}; const chg=`${s.change_pct}%`;
-                const btns = singleBtn(s.symbol,'SELL','CE',opt.strike||0,opt.expiry||'','Sell Call','btn-sell');
-                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol}</span><span style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${btns}<span class="badge badge-sell">${chg}</span></span></div><div class="meta">Spot ₹${(s.spot||0).toLocaleString()} | Prev ₹${(s.prev_close||0).toLocaleString()} | ${s.signal_type} ${opt.strike||''}</div></div>`;
+                h+=`<div class="sig-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap"><span class="name">${s.symbol}</span><span style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"><span class="badge badge-sell">${chg}</span></span></div><div class="meta">Spot ₹${(s.spot||0).toLocaleString()} | Prev ₹${(s.prev_close||0).toLocaleString()}</div></div>`;
             });
             h+='</div>';
             document.getElementById('fno-top5').innerHTML=h;
