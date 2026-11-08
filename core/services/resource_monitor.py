@@ -37,14 +37,17 @@ except Exception:  # pragma: no cover - exercised only when psutil missing
 logger = logging.getLogger("ratrade.resources")
 
 _SAMPLE_SEC = max(15, int(os.environ.get("RESOURCE_LOG_INTERVAL", "60") or 60))
-_SOFT_LIMIT_MB = float(os.environ.get("RSS_SOFT_LIMIT_MB", "400") or 400)
+# User rule (2026-11): app 312-512MB box par stable rahe. Soft limit pehle se
+# kam (330MB) - gc/trim OOM spike se pehle ho jaye.
+_SOFT_LIMIT_MB = float(os.environ.get("RSS_SOFT_LIMIT_MB", "330") or 330)
 _TRIM_ENABLED = str(os.environ.get("MEM_TRIM_ENABLED", "1")).lower() not in (
     "0", "false", "no", "off",
 )
 
 _HISTORY = deque(maxlen=180)  # ~3 hours at 60s
 _LAST = {"rss_mb": None, "cpu_pct": None, "ts": 0.0}
-_STATE = {"started": False, "thread": None, "trims": 0, "last_trim": 0.0}
+_STATE = {"started": False, "thread": None, "trims": 0, "last_trim": 0.0,
+          "last_lb": 0.0}  # last_lb = leak-buster (growth-triggered trim)
 _LOCK = threading.Lock()
 
 # (module, attribute, keep-at-most) - bounded dicts/OrderedDicts that can
@@ -233,6 +236,38 @@ def _loop(interval_s: int):
                         )
                     except Exception:
                         pass
+                # Leak-buster: soft-limit ke NEECHE bhi agar RSS 5 samples
+                # (~10 min) me 50MB+ seal chadha hai to gc + trim - slow leak
+                # ko OOM restart se pehle pakdo. Max 1x per 15 min.
+                try:
+                    if (_TRIM_ENABLED and rec.get("rss_mb") is not None
+                            and time.time() - _STATE.get("last_lb", 0) >= 900):
+                        with _LOCK:
+                            hist5 = [_h.get("rss_mb") for _h in list(_HISTORY)[-5:]]
+                        _first = next((_v for _v in hist5 if _v is not None), None)
+                        if (_first is not None
+                                and float(rec["rss_mb"]) - float(_first) >= 50):
+                            try:
+                                evicted = trim_caches(force_gc=True)
+                                with _LOCK:
+                                    _STATE["last_lb"] = time.time()
+                                    _STATE["trims"] += 1
+                                    _STATE["last_trim"] = time.time()
+                                logger.warning(
+                                    "[resources] LEAK-BUSTER: RSS grew %.1fMB in ~10min "
+                                    "(%.1f -> %.1f) - gc + trim %s",
+                                    float(rec["rss_mb"]) - float(_first), _first,
+                                    rec["rss_mb"], evicted,
+                                )
+                                print(
+                                    f"[resources] LEAK-BUSTER gc+trim "
+                                    f"({float(rec['rss_mb']) - float(_first):.0f}MB growth)",
+                                    flush=True,
+                                )
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
             else:
                 # psutil unavailable: still log thread count, no RSS.
                 try:
