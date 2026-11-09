@@ -196,7 +196,7 @@ def lot_source(symbol: str) -> str:
         return "default"
 
 
-OPTION_INDICES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX"}
+OPTION_INDICES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
 
 # Canonical NSE F&O stock list (options exist ONLY on these + indices).
 # ETFs like GOLDBEES/SILVERBEES have NO options - option backtests/orders

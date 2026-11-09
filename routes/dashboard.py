@@ -38,7 +38,7 @@ def get_spots(symbols: str = ""):
     if symbols:
         syms = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     else:
-        syms = ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "HDFCBANK", "TCS", "INFY"]
+        syms = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "HDFCBANK", "TCS", "INFY"]
     live = LiveMarketData()
     try:
         found = live.get_live_spots_parallel(syms, max_workers=8) or {}
@@ -98,7 +98,11 @@ def get_market_watch():
         except Exception:
             syms = []
     if not syms:
-        syms = ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "TCS", "INFY", "HDFCBANK"]
+        syms = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "RELIANCE", "TCS", "INFY", "HDFCBANK"]
+    # User rule (09-11-2026): MIDCPNIFTY (Nifty Midcap Select) ka live price
+    # dashboard par hamesha dikhe - saved watchlist me missing ho to append.
+    if "MIDCPNIFTY" not in syms:
+        syms.append("MIDCPNIFTY")
     # Fetch prices server-side (not blocked by Cloudflare)
     live = LiveMarketData()
     prices = {}
