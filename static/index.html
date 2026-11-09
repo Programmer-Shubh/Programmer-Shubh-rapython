@@ -296,7 +296,7 @@
         <span class="badge bg-light text-dark border" title="Technology-only platform - koi tip ya recommendation nahi">Non-Advisory • Technology Only</span>
     </div>
     <div style="margin:8px 0 0;padding:12px 18px;border:2px solid #f0c14b;background:#fff9ec;border-radius:10px;font-size:15px;font-weight:600;color:#6b4f00;line-height:1.65">
-        <strong style="font-size:17px;color:#8a5a00"><i class="bi bi-exclamation-triangle"></i> Disclaimer:</strong> RaTrade is solely a technology and data analysis platform. We are not a SEBI-registered Investment Advisor (IA) or Research Analyst (RA). All insights, technical setups, and scores displayed are strictly for analytical and educational purposes. No direct trading tips or buy/sell recommendations are provided. All strategies are configured and executed by the user at their own discretion and sole risk. Analytical backtest and paper results do not guarantee future live returns.
+        <strong style="font-size:17px;color:#8a5a00"><i class="bi bi-exclamation-triangle"></i> डिस्क्लेमर:</strong> RaTrade पूरी तरह एक टेक्नोलॉजी और डेटा विश्लेषण प्लेटफ़ॉर्म है। हम SEBI-रजिस्टर्ड इन्वेस्टमेंट एडवाइज़र (IA) या रिसर्च एनालिस्ट (RA) नहीं हैं। दिखाए गए सभी इनसाइट्स, टेक्निकल सेटअप्स और स्कोर केवल विश्लेषण एवं शैक्षिक उद्देश्यों के लिए हैं। कोई सीधे ट्रेडिंग टिप्स या खरीदें/बेचें की सिफ़ारिश नहीं दी जाती। सभी स्ट्रेटेजी यूज़र अपने विवेक और पूर्ण रिस्क पर कॉन्फ़िगर और निष्पादित करते हैं। एनालिटिकल बैकटेस्ट और पेपर परिणाम भविष्य के लाइव रिटर्न की गारंटी नहीं देते।
     </div>
     <div class="nav">
         <button class="active" onclick="go('dashboard',this)"><i class="bi bi-speedometer2"></i> Dashboard</button>
@@ -311,10 +311,6 @@
     <div class="wrap">
         <!-- DASHBOARD -->
         <div id="pg-dashboard" class="pg">
-            <div class="alert alert-warning alert-dismissible fade show mb-2" role="alert" style="font-size:12px; border-left:4px solid #ffc107; background:#fff8e1; color:#664d03;">
-                <i class="bi bi-exclamation-triangle-fill me-1"></i><strong>डिस्क्लेमर:</strong> हम केवल एक तकनीकी (Technology) प्लेटफॉर्म हैं। हम SEBI Registered Investment Advisor (IA) या Research Analyst (RA) नहीं हैं। हम कोई ट्रेडिंग सिग्नल, टिप्स या निवेश सलाह प्रदान नहीं करते हैं। इस प्लेटफॉर्म पर उपलब्ध सभी टूल्स यूज़र के खुद के रिस्क और स्ट्रेटेजी पर काम करते हैं। पिछले परिणाम भविष्य के मुनाफे की गारंटी नहीं हैं।
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" style="font-size:10px"></button>
-            </div>
             <div class="card mb-2" style="overflow:hidden;background:linear-gradient(90deg,#7ec8f7,#1e6fd9,#7ec8f7)"><img src="/static/dashboard-banner.jpg" alt="Stock Exchange" style="width:100%;height:110px;object-fit:contain;display:block"></div>
             <div class="card mb-2" style="border-left:4px solid #0d6efd"><div class="card-body p-2 d-flex flex-wrap gap-2 align-items-center justify-content-between"><div class="d-flex gap-2 align-items-center"><label class="small fw-bold mb-0">Regime/Sentiment:</label><select id="regime-sym" class="form-select form-select-sm" style="width:160px" onchange="loadRegime()"></select><button class="btn btn-sm btn-outline-primary" onclick="loadRegime()"><i class="bi bi-arrow-clockwise"></i></button></div><small class="text-muted">Option chain wale symbols me se kisi ko bhi select karo</small></div></div>
             <div class="row g-2 mb-2 flex-nowrap" id="regime-row" style="overflow-x:auto">
@@ -2018,7 +2014,7 @@ let _lastOpenTrdHTML = null;
         else if(t==='butterfly'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='calendar'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'monthly',offset:0}); renderLegs(); }
         updatePayoff();
-        // Smart Default Rule (Rule 2): templates me BUY legs ho to SL/TP % pre-fill.
+        // Rule 2 REMOVED (2026-11-09): templates me SL/TP % pre-fill band.
         try{_applyOptionBuyDefaults(false);}catch(e){}
     }
     async function updatePayoff(){
@@ -2117,26 +2113,13 @@ let _lastOpenTrdHTML = null;
     async function _refreshDualMirror(){
         try{ if(!window._entryPrem){ window._entryPrem=await _entryPremEst(); } _dualMirror('s-sl','s-sl-mirror'); _dualMirror('s-tp','s-tp-mirror'); }catch(e){}
     }
-    // ═══ Smart Default for Option Buying (Rule 2) ═══
-    // CE/PE BUY order select hote hi SL/TP % unit par pre-fill: SL 30% / TP 70%
-    // (premium-based), fixed ₹ default hata ke.
-    function _isOptionBuy(){
-        try{
-            if(typeof stratLegs!=='undefined'&&stratLegs.length){ const l=stratLegs[0]; const op=(l.option_type||'').toUpperCase(); const tx=(l.transaction||'').toLowerCase(); return op!=='EQ'&&tx==='buy'; }
-            const ro=(document.getElementById('r-order')||{}).value||''; const pp=ro.split('-'); return (pp[0]||'').toUpperCase()!=='EQ'&&String(pp[1]||'').toUpperCase()==='BUY';
-        }catch(e){ return false; }
-    }
+    // ═══ Smart Default for Option Buying (Rule 2 - REMOVED) ═══
+    // User request (2026-11-09): CE/PE BUY select hote hi SL/TP 30%/70%
+    // auto-prefill BAND. SL/TP input defaults ab hamesha legacy ₹1500 SL /
+    // ₹3000 TP (auto-paper worker fallback parity) rehte hain. Function
+    // no-op rakha hai taaki saare purane call-sites safe chalein.
     function _applyOptionBuyDefaults(force){
-        try{
-            const slEl=document.getElementById('s-sl'), tpEl=document.getElementById('s-tp');
-            if(!slEl||!tpEl)return;
-            if(_isOptionBuy()){
-                const s=String(slEl.value||''), t=String(tpEl.value||'');
-                if(force||!/%$/.test(s.trim())) slEl.value='30%';
-                if(force||!/%$/.test(t.trim())) tpEl.value='70%';
-            }
-            _refreshDualMirror();
-        }catch(e){}
+        try{ _refreshDualMirror(); }catch(e){}
     }
     // Option BUY select hote hi smart default + mirror updates
     document.getElementById('r-order')?.addEventListener('change',()=>_applyOptionBuyDefaults(false));
@@ -2422,7 +2405,7 @@ let _lastOpenTrdHTML = null;
             const inds=robotCollectIndicators().length;
             el.innerHTML='Chalega: <strong>'+symTxt+'</strong> | '+legTxt+' | '+inds+' indicator(s) | <span class="badge bg-success">Multi-symbol ON</span>';
             try{if(typeof refreshAutoBadge==='function')refreshAutoBadge();}catch(e){}
-            // Smart Default Rule (Rule 2) + Dual-Unit mirror update on every UI tick.
+            // Rule 2 REMOVED (2026-11-09): ab sirf Dual-Unit mirror update har UI tick par.
             try{_applyOptionBuyDefaults(false);}catch(e){}
             try{_refreshDualMirror();}catch(e){}
         }catch(e){}}
@@ -2476,7 +2459,7 @@ let _lastOpenTrdHTML = null;
         try{const em=document.getElementById('r-exitmode');if(em)em.value=t;}catch(e){}
         if(t==='intraday'){ex.disabled=false;ex.value='15:15';document.getElementById('r-exit-note').textContent='Intraday square-off 3:15 PM (3:00 PM ke baad nayi entry nahi)';}
         else{ex.disabled=true;document.getElementById('r-exit-note').textContent='Positional: overnight carry, no EOD exit';}
-        // Smart Default Rule (Rule 2): Option BUY par SL/TP % unit pre-fill.
+        // Rule 2 REMOVED (2026-11-09): Option BUY par SL/TP 30%/70% pre-fill band.
         try{_applyOptionBuyDefaults(false);}catch(e){}
     }
     function robotCollectIndicators(){
