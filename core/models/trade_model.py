@@ -397,13 +397,18 @@ class TradeModel:
                 continue
         return n
 
-    def get_closed_trades(self, user_id=1) -> list:
+    def get_closed_trades(self, user_id=1, limit=None) -> list:
         # NULL-safe ordering: exit_date khaali ho to bhi row dikhe (nayi sabse upar).
-        return self.db.fetch_all(
-            "SELECT * FROM paper_trades WHERE user_id=? AND status='closed'"
-            " ORDER BY COALESCE(exit_date,'') DESC, id DESC",
-            [user_id],
-        )
+        query = ("SELECT * FROM paper_trades WHERE user_id=? AND status='closed'"
+                 " ORDER BY COALESCE(exit_date,'') DESC, id DESC")
+        params = [user_id]
+        if limit is not None:
+            try:
+                query += " LIMIT ?"
+                params.append(max(0, int(limit)))
+            except Exception:
+                pass
+        return self.db.fetch_all(query, params)
 
 
     def get_open_positions_cached(self, user_id=1) -> list:

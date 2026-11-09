@@ -4,6 +4,7 @@ from typing import Optional, List
 from core.models.database import Database
 
 router = APIRouter()
+_ROLL_LAST = 0.0
 
 
 class StrategyRequest(BaseModel):
@@ -447,9 +448,15 @@ def _apply_expiry_status(r):
 
 @router.get("/list")
 def list_strategies():
+    global _ROLL_LAST
     db = Database.get_instance()
+    # Rollover is background-only: it may touch NSE expiry resolution and must
+    # not stall the saved-strategy list. An hourly worker also covers it.
     try:
-        auto_rollover_expired()  # self-heal on every view
+        import time as _time, threading as _th
+        if _time.time() - _ROLL_LAST > 600:
+            _ROLL_LAST = _time.time()
+            _th.Thread(target=auto_rollover_expired, name="strat-rollover", daemon=True).start()
     except Exception:
         pass
     try:
@@ -472,6 +479,19 @@ def list_strategies():
     rows = db.fetch_all(
         "SELECT * FROM strategies WHERE user_id=1 ORDER BY updated_at DESC"
     )
+    try:
+        _live_rows = db.fetch_all(
+            "SELECT setting_key, setting_value FROM settings WHERE setting_key LIKE 'strat_live_enabled_%'"
+        )
+        _live_map = {}
+        for _lr in _live_rows or []:
+            try:
+                _sid = int(str(_lr.get("setting_key") or "").rsplit("_", 1)[-1])
+                _live_map[_sid] = str(_lr.get("setting_value") or "") == "1"
+            except Exception:
+                continue
+    except Exception:
+        _live_map = {}
     for r in rows:
         import json
         r["indicators"] = json.loads(r.get("indicators") or "[]")
@@ -492,7 +512,7 @@ def list_strategies():
         except Exception:
             pass
         _apply_expiry_status(r)
-        r["live_enabled"] = _strat_live_enabled(db, r.get("id"))
+        r["live_enabled"] = bool(_live_map.get(int(r.get("id") or 0), False))
     return {"strategies": rows, "count": len(rows)}
 
 

@@ -378,6 +378,128 @@ def get_portfolio():
     }
 
 
+
+@router.get("/trade-history/fast")
+def get_trade_history_fast():
+    """Instant Recent Trades: DB + cached spot only (no live quote lookups)."""
+    trade_model = TradeModel()
+    closed = trade_model.get_closed_trades(limit=50)
+    try:
+        agg = Database.get_instance().fetch_one(
+            "SELECT COUNT(*) as c, COALESCE(SUM(pnl), 0) as total_pnl FROM paper_trades WHERE user_id=1 AND status='closed'"
+        ) or {}
+        all_count = int(agg.get("c") or 0)
+        total_pnl = float(agg.get("total_pnl") or 0)
+    except Exception:
+        all_count = len(closed)
+        total_pnl = sum(float(t.get("pnl") or 0) for t in closed)
+    try:
+        _srows = trade_model.db.fetch_all("SELECT id, name FROM strategies") or []
+        _smap = {int(r.get("id") or 0): str(r.get("name") or "") for r in _srows}
+    except Exception:
+        _smap = {}
+    _shown = closed[:50]
+    _w = sum(1 for t in _shown if float(t.get("pnl") or 0) > 0)
+    try:
+        from core.services.live_market_data import _live_cache_get as _cached_spot
+        _spot_map = {}
+        for _t in _shown:
+            _sym = str(_t.get("symbol") or "").upper()
+            if _sym and _sym not in _spot_map:
+                _d = _cached_spot(_sym) or {}
+                _spot_map[_sym] = float(_d.get("spot") or 0)
+    except Exception:
+        _spot_map = {}
+    _strat_summary = {}
+    for _t in _shown:
+        _sid = int(_t.get("strategy_id") or 0)
+        _sname = _smap.get(_sid) or (f"Strategy #{_sid}" if _sid else "No Strategy")
+        _pnl = float(_t.get("pnl") or 0)
+        _ed = str(_t.get("entry_date") or "")[:10] or "Unknown"
+        if _sid not in _strat_summary:
+            _strat_summary[_sid] = {
+                "strategy_id": _sid,
+                "strategy_name": _sname,
+                "total_trades": 0,
+                "winning_trades": 0,
+                "losing_trades": 0,
+                "total_pnl": 0.0,
+                "dates": {},
+            }
+        _s = _strat_summary[_sid]
+        _s["total_trades"] += 1
+        _s["total_pnl"] += _pnl
+        if _pnl > 0:
+            _s["winning_trades"] += 1
+        else:
+            _s["losing_trades"] += 1
+        if _ed not in _s["dates"]:
+            _s["dates"][_ed] = {"trades": 0, "winning": 0, "losing": 0, "pnl": 0.0}
+        _d = _s["dates"][_ed]
+        _d["trades"] += 1
+        _d["pnl"] += _pnl
+        if _pnl > 0:
+            _d["winning"] += 1
+        else:
+            _d["losing"] += 1
+    for _s in _strat_summary.values():
+        _s["total_pnl"] = round(_s["total_pnl"], 2)
+        _s["win_rate"] = round(_s["winning_trades"] / _s["total_trades"] * 100, 1) if _s["total_trades"] else 0
+        for _d in _s["dates"].values():
+            _d["pnl"] = round(_d["pnl"], 2)
+            _d["win_rate"] = round(_d["winning"] / _d["trades"] * 100, 1) if _d["trades"] else 0
+    _strat_summary = sorted(_strat_summary.values(), key=lambda x: x["total_pnl"], reverse=True)
+    trades = []
+    for _t in _shown:
+        _sp = float(_spot_map.get(str(_t.get("symbol") or "").upper()) or 0)
+        try:
+            _otm = round(abs(float(_t.get("strike_price") or 0) - _sp) / _sp * 100, 1) if _sp > 0 else None
+        except Exception:
+            _otm = None
+        trades.append({
+            "id": _t["id"],
+            "entry_date": _t["entry_date"],
+            "entry_time": TradeModel.ist_hhmm(_t.get("created_at", "")),
+            "exit_date": _t.get("exit_date", ""),
+            "exit_time": TradeModel.ist_hhmm(_t.get("updated_at", "")),
+            "symbol": _t["symbol"],
+            "option_type": _t["option_type"],
+            "strike": _t["strike_price"],
+            "transaction_type": _t["transaction_type"],
+            "entry": _t["entry_price"],
+            "exit": _t.get("exit_price", 0),
+            "expiry_date": _t.get("expiry_date", ""),
+            "pnl": _t["pnl"],
+            "pnl_formatted": format_currency(_t["pnl"]),
+            "entry_cost": _t.get("total_cost", 0),
+            "exit_cost": _t.get("exit_cost", 0),
+            "status": _t.get("exit_status", "closed"),
+            "exit_reason": _t.get("exit_status", ""),
+            "stop_loss": _t.get("stop_loss", 0),
+            "target": _t.get("target", 0),
+            "sl_unit": _t.get("sl_unit", "rs"),
+            "tp_unit": _t.get("tp_unit", "rs"),
+            "qty": _t.get("quantity", 1),
+            "lot_size": _t.get("lot_size", 0),
+            "signal_time": _t.get("signal_time", ""),
+            "strategy_id": int(_t.get("strategy_id") or 0),
+            "strategy_name": _smap.get(int(_t.get("strategy_id") or 0)),
+            "spot": _sp if _sp > 0 else None,
+            "otm_pct": _otm,
+        })
+    return {
+        "count": all_count,
+        "total_pnl": round(total_pnl, 2),
+        "total_pnl_formatted": format_currency(total_pnl),
+        "winning_trades": _w,
+        "losing_trades": len(_shown) - _w,
+        "win_rate": round(_w / len(_shown) * 100, 1) if _shown else 0,
+        "strategy_summary": _strat_summary,
+        "price_source": "cached",
+        "trades": trades,
+    }
+
+
 @router.get("/trade-history")
 def get_trade_history():
     trade_model = TradeModel()

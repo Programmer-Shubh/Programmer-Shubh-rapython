@@ -45,6 +45,71 @@ class TradeModeRequest(BaseModel):
     trade_mode: str
 
 
+
+@router.get("/open/fast")
+def get_open_trades_fast():
+    trade_model = TradeModel()
+    positions = trade_model.get_open_positions_cached()
+    try:
+        _srows = trade_model.db.fetch_all("SELECT id, name FROM strategies") or []
+        _smap = {int(r.get("id") or 0): str(r.get("name") or "") for r in _srows}
+    except Exception:
+        _smap = {}
+    total_pnl = sum(p["unrealized_pnl"] for p in positions)
+    try:
+        total_net = round(sum(float(p.get("unrealized_net", p["unrealized_pnl"])) for p in positions), 2)
+    except Exception:
+        total_net = round(total_pnl, 2)
+    _lots = {}
+    for t in positions:
+        sym = str(t["trade"].get("symbol") or "")
+        if sym not in _lots:
+            try:
+                _lots[sym] = effective_lot_size(sym, t["trade"].get("lot_size"))
+            except Exception:
+                try:
+                    _lots[sym] = int(t["trade"].get("lot_size") or 50)
+                except Exception:
+                    _lots[sym] = 50
+    return {
+        "count": len(positions),
+        "total_pnl": round(total_pnl, 2),
+        "total_pnl_formatted": format_currency(total_pnl),
+        "total_net": total_net,
+        "total_net_formatted": format_currency(total_net),
+        "price_source": "cached",
+        "positions": [
+            {
+                "id": t["trade"]["id"],
+                "symbol": t["trade"]["symbol"],
+                "option_type": t["trade"]["option_type"],
+                "strike": t["trade"]["strike_price"],
+                "transaction_type": t["trade"]["transaction_type"],
+                "quantity": t["trade"]["quantity"],
+                "lot_size": _lots.get(str(t["trade"].get("symbol") or ""), t["trade"].get("lot_size", 50)),
+                "entry_price": t["trade"]["entry_price"],
+                "current_price": t["current_price"],
+                "pnl": t["unrealized_pnl"],
+                "pnl_net": t.get("unrealized_net", t["unrealized_pnl"]),
+                "est_exit_costs": t.get("est_exit_costs", 0),
+                "sl": t["trade"]["stop_loss"],
+                "tp": t["trade"]["target"],
+                "sl_unit": t["trade"].get("sl_unit", "rs"),
+                "tp_unit": t["trade"].get("tp_unit", "rs"),
+                "trade_mode": t["trade"].get("trade_mode", "paper"),
+                "broker_order_id": t["trade"].get("broker_order_id", ""),
+                "trade_type": t["trade"].get("trade_type", "intraday"),
+                "entry_date": t["trade"].get("entry_date", ""),
+                "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
+                "expiry_date": t["trade"].get("expiry_date", ""),
+                "strategy_id": t["trade"].get("strategy_id", 0) or 0,
+                "strategy_name": _smap.get(int(t["trade"].get("strategy_id") or 0), ""),
+            }
+            for t in positions
+        ],
+    }
+
+
 @router.get("/open")
 def get_open_trades():
     trade_model = TradeModel()

@@ -395,6 +395,8 @@ class Database:
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
                 CREATE INDEX IF NOT EXISTS idx_stratres_sid ON strategy_results(strategy_id);
+                CREATE INDEX IF NOT EXISTS idx_strategies_user_updated
+                    ON strategies(user_id, updated_at);
             """
             try:
                 with self._conn() as conn:
@@ -571,6 +573,8 @@ class Database:
                     created_at TEXT DEFAULT (datetime('now'))
                 );
                 CREATE INDEX IF NOT EXISTS idx_stratres_sid ON strategy_results(strategy_id);
+                CREATE INDEX IF NOT EXISTS idx_strategies_user_updated
+                    ON strategies(user_id, updated_at);
             """)
         try:
             _sconn.close()

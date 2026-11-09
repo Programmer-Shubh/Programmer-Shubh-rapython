@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from core.models.database import Database
 
 try:  # lightweight stdlib+psutil module; optional so a missing wheel never breaks boot
@@ -67,6 +67,18 @@ async def lifespan(app: FastAPI):
 
 async def _startup_background():
     """Fire-and-forget boot of every background system (never blocks health)."""
+    try:
+        # Schema/index creation no longer blocks process startup (Render
+        # 5-second health checks can time out during cold Postgres init).
+        # It still runs immediately after boot, in a worker thread.
+        def _init_db():
+            try:
+                Database.get_instance().init_schema()
+            except Exception:
+                pass
+        asyncio.get_running_loop().create_task(asyncio.to_thread(_init_db))
+    except Exception:
+        pass
     # Process resource monitor (psutil): periodic RSS/CPU log + soft memory
     # ceiling that gc's and trims caches before Render's 512MB OOM killer.
     try:
@@ -271,6 +283,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # Cache static assets 1h + instant preloader (fixes browser open me bahut samay lag raha)
 @app.middleware("http")
 async def add_cache_header(request, call_next):
+    if request.url.path in ("/health", "/healthz"):
+        return await call_next(request)
     response = await call_next(request)
     try:
         # Cheap resource observability: cached sample only (no psutil call on
@@ -294,8 +308,6 @@ async def add_cache_header(request, call_next):
         pass
     return response
 
-db = Database.get_instance()
-db.init_schema()
 
 from routes import dashboard, option_chain, paper_trade, strategy_builder, scanner, broker, webhook, websocket, email_alerts, strategies, custom_code, keepalive, tvchart
 
@@ -325,7 +337,7 @@ app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__
 @app.get("/health")
 async def health():
     # Async instant - never block event loop, never touch DB for Render 5s timeout
-    return {"status": "healthy", "timestamp": __import__("time").time()}
+    return PlainTextResponse("ok")
 
 
 @app.head("/health")
@@ -337,7 +349,7 @@ async def health_head():
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok"}
+    return PlainTextResponse("ok")
 
 
 @app.get("/api/version")
