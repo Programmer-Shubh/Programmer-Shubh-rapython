@@ -35,6 +35,14 @@ def test_disabled_and_floor():
     assert lvl(5, 100000, 1, 50, "SELL", False) == 0.05
 
 
+def test_full_loss_sl_and_tp_floor():
+    # User 27-11-2026: SL 100%/150% must be ACTIVE (floor 5 paise), not disabled.
+    assert lvl(100, 100, 1, 1, "BUY", True, "pct") == pytest.approx(0.05)
+    assert lvl(100, 150, 1, 1, "BUY", True, "pct") == pytest.approx(0.05)
+    # SELL TP 100% (price to zero) also floored, not negative/disabled.
+    assert lvl(100, 100, 1, 1, "SELL", False, "pct") == pytest.approx(0.05)
+
+
 def test_matches_backtest_and_monitor_math():
     # Old backtest inline: pts=amt/units; buy SL=entry-pts ...
     # Old monitor inline: identical. Helper must reproduce exactly.

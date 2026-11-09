@@ -533,9 +533,14 @@ def sltp_premium_level(entry_price: float, amount: float, quantity: int,
             else:
                 lvl = (entry + pts) if is_sl else (entry - pts)
             return max(0.05, lvl)
+        eff = min(amt, 100)  # >=100% SL/TP = premium wipe-out, cap at 100%
         if is_buy:
-            return entry * (1 - amt / 100) if is_sl else entry * (1 + amt / 100)
-        return entry * (1 + amt / 100) if is_sl else entry * (1 - amt / 100)
+            if is_sl:
+                return max(0.05, entry * (1 - eff / 100))
+            return entry * (1 + amt / 100)
+        if is_sl:
+            return entry * (1 + amt / 100)
+        return max(0.05, entry * (1 - eff / 100))
     except Exception:
         return 0.0
 
