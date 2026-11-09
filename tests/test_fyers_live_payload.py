@@ -72,6 +72,22 @@ def test_payload_limit_and_sell(monkeypatch):
     assert p["limitPrice"] == 189.5
 
 
+def test_payload_includes_broker_side_tpsl(monkeypatch):
+    fy, cap = _mock_fy(monkeypatch)
+    import asyncio
+    asyncio.run(fy.place_order("NSE:NIFTY26OCT22450PE", "BUY", 75, "LIMIT",
+                               price=189.5, stop_loss=170.25, take_profit=210.75))
+    p = cap["data"]
+    assert p["type"] == 1
+    assert p["stopLoss"] == 170.25
+    assert p["takeProfit"] == 210.75
+    # Default/no TPSL remains zero and workable.
+    fy, cap = _mock_fy(monkeypatch)
+    asyncio.run(fy.place_order("NSE:NIFTY26OCT22450PE", "BUY", 75, "MARKET"))
+    assert cap["data"]["stopLoss"] == 0
+    assert cap["data"]["takeProfit"] == 0
+
+
 def test_payload_rejects_bad_qty_and_limit_zero_price(monkeypatch):
     fy, cap = _mock_fy(monkeypatch)
     import asyncio

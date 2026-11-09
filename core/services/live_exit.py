@@ -20,6 +20,7 @@ Rules (user ke real-money lifecycle):
   broker tak position ke liye Fyers ka MIS auto-square-off last backstop
   hai. Fail ko log_exit_skip me note karte hain.
 """
+import json
 import logging
 import threading
 
@@ -43,6 +44,14 @@ def _seeded_exit(trade: dict) -> bool:
         tok = str((trade or {}).get("broker_order_id") or "")
         if tok.startswith(("SIM-", "ANG-")):
             return False  # simulated token = demo, kuch bhi na bhejo
+        try:
+            aa = (trade or {}).get("auto_action")
+            if isinstance(aa, str):
+                aa = json.loads(aa) if aa else {}
+            if isinstance(aa, dict) and aa.get("native_sltp"):
+                return False  # Fyers TPSL already broker-side attached hai
+        except Exception:
+            pass
         _exp = str((trade or {}).get("expiry_date") or "")
         if len(_exp) < 10:
             return False

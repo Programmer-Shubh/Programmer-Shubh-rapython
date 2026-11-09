@@ -367,6 +367,13 @@ class FyersV3:
 
         return {"success": False, "data": {}, "error": "Max retries exceeded"}
 
+    @staticmethod
+    def _round_tick(px: float) -> float:
+        try:
+            return round(round(float(px) / 0.05) * 0.05, 2)
+        except Exception:
+            return 0.0
+
     async def place_order(
         self,
         symbol: str,
@@ -376,6 +383,8 @@ class FyersV3:
         price: float = 0,
         exchange: str = "NSE",
         validity: str = "DAY",
+        stop_loss: float = 0,
+        take_profit: float = 0,
     ) -> dict:
         """REAL order to Fyers v3. STRICT spec (user-confirmed):
         - type: 1 = LIMIT, 2 = MARKET, 3 = SL, 4 = SL-M (pehle INVERTED tha -
@@ -400,6 +409,14 @@ class FyersV3:
         _ot = str(order_type or "MARKET").upper()
         _txn = str(transaction_type or "BUY").upper()
         _px = float(price or 0)
+        try:
+            _sl = float(stop_loss or 0)
+        except Exception:
+            _sl = 0.0
+        try:
+            _tp = float(take_profit or 0)
+        except Exception:
+            _tp = 0.0
         if _ot == "LIMIT" and _px <= 0:
             return {"success": False, "data": {}, "error": "LIMIT order ke liye price>0 chahiye (market-order bhejo ya price do)"}
         payload = {
@@ -411,6 +428,8 @@ class FyersV3:
             "limitPrice": _px if _ot == "LIMIT" else 0,
             "stopPrice": 0,
             "validity": str(validity or "DAY").upper(),
+            "stopLoss": self._round_tick(_sl) if _sl > 0 else 0,
+            "takeProfit": self._round_tick(_tp) if _tp > 0 else 0,
             "disclosedQty": 0,
             "offlineOrder": False,
         }

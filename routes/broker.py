@@ -1839,6 +1839,39 @@ async def place_live_order(req: LiveOrderRequest):
             _ltp_source = "limit-price"
         preview["ltp"] = _round_tick(_ltp_price) if _ltp_price > 0 else 0
         preview["price_source"] = _ltp_source
+        _tpsl_sl = 0.0
+        _tpsl_tp = 0.0
+        _tpsl_native = False
+        try:
+            from utils.helpers import sltp_premium_level as _sltp_level
+            _ref_px = _ltp_price or _limit_px or float(preview.get("ltp") or 0)
+            if _ref_px and float(_ref_px) > 0:
+                _tpsl_sl = float(_sltp_level(
+                    _ref_px, float(req.stop_loss or 0), lots, lot, txn, True,
+                    unit=req.sl_unit or None) or 0)
+                _tpsl_tp = float(_sltp_level(
+                    _ref_px, float(req.take_profit or 0), lots, lot, txn, False,
+                    unit=req.tp_unit or None) or 0)
+                if txn == "BUY" and _tpsl_sl >= float(_ref_px):
+                    _tpsl_sl = 0.0
+                if txn == "BUY" and _tpsl_tp <= float(_ref_px):
+                    _tpsl_tp = 0.0
+                if txn == "SELL" and _tpsl_sl <= float(_ref_px):
+                    _tpsl_sl = 0.0
+                if txn == "SELL" and _tpsl_tp >= float(_ref_px):
+                    _tpsl_tp = 0.0
+                if _tpsl_sl > 0:
+                    _tpsl_sl = _round_tick(_tpsl_sl)
+                if _tpsl_tp > 0:
+                    _tpsl_tp = _round_tick(_tpsl_tp)
+        except Exception:
+            pass
+        if _tpsl_sl > 0:
+            preview["stop_loss"] = _tpsl_sl
+        if _tpsl_tp > 0:
+            preview["take_profit"] = _tpsl_tp
+        if _tpsl_sl > 0 or _tpsl_tp > 0:
+            preview["tpsl_attached"] = True
         if not _limit_px and _ltp_source in ("model", "db-close", "none"):
             # Safety (user bug 27-10): model/DB price par LIMIT nahi bhejte -
             # stock option par Rs 1.65 LIMIT vs asli Rs 40 premium jaisa
@@ -1959,11 +1992,14 @@ async def place_live_order(req: LiveOrderRequest):
                     res = await fy.place_order(preview["symbol"], txn, broker_qty,
                                                order_type="LIMIT",
                                                price=max(0.05, _round_tick(_px_i)),
-                                               validity="IOC")
+                                               validity="IOC",
+                                               stop_loss=_tpsl_sl,
+                                               take_profit=_tpsl_tp)
                     if not res.get("success"):
                         return {"error": f"Fyers rejected order: {res.get('error') or res.get('data')}",
                                 "preview": preview, "broker_response": res.get("data", {})}
                     order_id = str((res.get("data") or {}).get("order_id", ""))
+                    _tpsl_native = bool((_tpsl_sl > 0 or _tpsl_tp > 0) and order_id)
                     broker_ref = preview["symbol"]
                     _order_attempts.append({"order_id": order_id, "limit_price": _round_tick(_px_i),
                                             "attempt": f"{'cross-touch' if _cross else 'buffer'}x{_mult or 1}",
@@ -1994,7 +2030,8 @@ async def place_live_order(req: LiveOrderRequest):
             if _lp0 <= 0:
                 # LTP/model dono fail (na mili) -> fail-open purana MARKET:
                 # order entry ko block karna worse hai. Marked in attempts.
-                res = await fy.place_order(preview["symbol"], txn, broker_qty, order_type="MARKET")
+                res = await fy.place_order(preview["symbol"], txn, broker_qty, order_type="MARKET",
+                                           stop_loss=_tpsl_sl, take_profit=_tpsl_tp)
                 if not res.get("success"):
                     return {"error": f"Fyers rejected order: {res.get('error') or res.get('data')}",
                             "preview": preview, "broker_response": res.get("data", {})}
@@ -2125,6 +2162,11 @@ async def place_live_order(req: LiveOrderRequest):
             "entry_date": _dt.datetime.now().strftime("%Y-%m-%d"),
             "trade_mode": "live", "broker_order_id": order_id,
             "strategy_id": req.strategy_id,
+            "auto_action": __import__("json").dumps({
+                "native_sltp": bool(_tpsl_native),
+                "broker_tpsl_stop": _tpsl_sl,
+                "broker_tpsl_target": _tpsl_tp,
+            }),
         })
         # Mirror: strategy me Paper ON bhi hai to ek PAPER COPY bhi dalo
         # (user rule: dono ON to ek hi signal par DONO orders dikhen/lagen).
