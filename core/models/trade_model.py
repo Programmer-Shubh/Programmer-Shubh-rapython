@@ -405,6 +405,83 @@ class TradeModel:
             [user_id],
         )
 
+
+    def get_open_positions_cached(self, user_id=1) -> list:
+        # Instant dashboard snapshot. This deliberately avoids every network
+        # hop and every auto-exit side effect: broker/NSE calls stay in the
+        # full detailed route and background SL monitor. Prices use the class
+        # premium cache (updated by the monitor); a brand-new contract falls
+        # back to its recorded entry price so the row can render immediately.
+        trades = self.get_open_trades(user_id)
+        _lots = {}
+        out = []
+        for t in trades:
+            try:
+                entry = float(t.get("entry_price") or 0)
+            except Exception:
+                entry = 0.0
+            try:
+                qty = int(t.get("quantity") or 1)
+            except Exception:
+                qty = 1
+            if qty <= 0:
+                qty = 1
+            sym = str(t.get("symbol") or "")
+            if sym not in _lots:
+                try:
+                    from utils.helpers import effective_lot_size as _el
+                    _lots[sym] = _el(sym, t.get("lot_size"))
+                except Exception:
+                    try:
+                        _lots[sym] = int(t.get("lot_size") or 50)
+                    except Exception:
+                        _lots[sym] = 50
+            lot = _lots[sym]
+            try:
+                _strike_key = float(t.get("strike_price"))
+            except Exception:
+                _strike_key = t.get("strike_price")
+            ck = f"{t['symbol']}_{t['option_type']}_{_strike_key}_{t.get('expiry_date', '')}"
+            current = self._last_premiums.get(ck, entry if entry > 0 else 0)
+            try:
+                current = float(current or 0)
+            except Exception:
+                current = 0.0
+            if current <= 0:
+                current = entry if entry > 0 else 0.0
+            try:
+                if entry > 0 and t.get("entry_date") == self._ist_today():
+                    current = min(max(current, entry * 0.4), entry * 1.6)
+            except Exception:
+                pass
+            if t["transaction_type"] == "BUY":
+                pnl = (current - entry) * qty * lot
+            else:
+                pnl = (entry - current) * qty * lot
+            try:
+                from core.services.transaction_costs import TransactionCosts as _TC
+                _exit_side = "SELL" if t["transaction_type"] == "BUY" else "BUY"
+                _slip_exit = _TC.apply_fill_slippage(float(current or 0), _exit_side, is_live=True)
+                _exit_costs = _TC.calculate(float(_slip_exit or 0) * qty * lot,
+                                            t["transaction_type"] == "BUY", is_live=True)["total"]
+                _entry_costs = float(t.get("total_cost") or 0)
+                if t["transaction_type"] == "BUY":
+                    _net = (float(_slip_exit or 0) - entry) * qty * lot - _entry_costs - float(_exit_costs or 0)
+                else:
+                    _net = (entry - float(_slip_exit or 0)) * qty * lot - _entry_costs - float(_exit_costs or 0)
+            except Exception:
+                _net, _exit_costs = pnl, 0.0
+            out.append({
+                "trade": t,
+                "current_price": round(current, 2),
+                "unrealized_pnl": round(pnl, 2),
+                "unrealized_net": round(_net, 2),
+                "est_exit_costs": round(_exit_costs, 2),
+                "unrealized_pct": round((pnl / (entry * qty * lot)) * 100, 2) if entry > 0 else 0,
+                "invalid": False,
+            })
+        return out
+
     def get_open_positions_with_pnl(self, user_id=1, auto_exit: bool = False) -> list:
         # auto_exit False = no flicker: positions never auto-disappear on poll
         trades = self.get_open_trades(user_id)

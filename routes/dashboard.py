@@ -240,6 +240,74 @@ def get_option_chain(symbol: str):
     return {"symbol": symbol, "date": latest, "expiry": expiries[0], "ce": ce, "pe": pe}
 
 
+
+@router.get("/portfolio/fast")
+def get_portfolio_fast():
+    trade_model = TradeModel()
+    positions = trade_model.get_open_positions_cached()
+    total_pnl = sum(p["unrealized_pnl"] for p in positions)
+    try:
+        _srows = trade_model.db.fetch_all("SELECT id, name FROM strategies") or []
+        _smap = {int(r.get("id") or 0): str(r.get("name") or "") for r in _srows}
+    except Exception:
+        _smap = {}
+    try:
+        from core.services.live_market_data import _live_cache_get as _cached_spot
+        _spot_map = {}
+        for _p in positions:
+            _sym = str(_p["trade"].get("symbol") or "").upper()
+            if _sym and _sym not in _spot_map:
+                _d = _cached_spot(_sym) or {}
+                _spot_map[_sym] = float(_d.get("spot") or 0)
+    except Exception:
+        _spot_map = {}
+    payload = {
+        "open_count": len(positions),
+        "total_pnl": round(total_pnl, 2),
+        "total_pnl_formatted": format_currency(total_pnl),
+        "price_source": "cached",
+        "positions": [
+            {
+                "id": t["trade"]["id"],
+                "symbol": t["trade"]["symbol"],
+                "option_type": t["trade"]["option_type"],
+                "strike": t["trade"]["strike_price"],
+                "transaction_type": t["trade"]["transaction_type"],
+                "entry_price": t["trade"]["entry_price"],
+                "current_price": t["current_price"] if t.get("current_price") is not None else t["trade"]["entry_price"],
+                "pnl": t.get("unrealized_pnl", 0),
+                "pnl_pct": t.get("unrealized_pct", 0),
+                "sl": t["trade"]["stop_loss"],
+                "tp": t["trade"]["target"],
+                "sl_unit": t["trade"].get("sl_unit", "rs"),
+                "tp_unit": t["trade"].get("tp_unit", "rs"),
+                "status": t["trade"]["status"],
+                "trade_mode": t["trade"].get("trade_mode", "paper"),
+                "broker_order_id": t["trade"].get("broker_order_id", ""),
+                "trade_type": t["trade"].get("trade_type", "intraday"),
+                "qty": t["trade"].get("quantity", 1),
+                "lot_size": effective_lot_size(t["trade"].get("symbol"), t["trade"].get("lot_size")),
+                "entry_date": t["trade"].get("entry_date", ""),
+                "entry_time": TradeModel.ist_hhmm(t["trade"].get("created_at", "")),
+                "expiry_date": t["trade"].get("expiry_date", ""),
+                "strategy_id": t["trade"].get("strategy_id", 0) or 0,
+                "strategy_name": _smap.get(int(t["trade"].get("strategy_id") or 0), "") or (f"Strategy #{int(t['trade'].get('strategy_id') or 0)}" if int(t["trade"].get("strategy_id") or 0) else ""),
+                "spot": None,
+                "otm_pct": None,
+            }
+            for t in positions
+        ],
+    }
+    for _row in payload["positions"]:
+        _sp = float(_spot_map.get(str(_row.get("symbol") or "").upper()) or 0)
+        _row["spot"] = _sp if _sp > 0 else None
+        try:
+            _row["otm_pct"] = round(abs(float(_row.get("strike") or 0) - _sp) / _sp * 100, 1) if _sp > 0 else None
+        except Exception:
+            _row["otm_pct"] = None
+    return payload
+
+
 @router.get("/portfolio")
 def get_portfolio():
     trade_model = TradeModel()

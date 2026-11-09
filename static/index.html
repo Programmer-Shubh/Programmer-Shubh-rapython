@@ -1274,7 +1274,7 @@
             if(_cached&&(_cached.positions||[]).length){ _renderPosTbl(_cached); }
         }catch(e){}
         try{
-            const _fresh=await A('/api/dashboard/portfolio');
+            const _fresh=await A('/api/dashboard/portfolio/fast');
             try{localStorage.setItem('dashPosCache',JSON.stringify(_fresh));}catch(e){}
             _renderPosTbl(_fresh);
         }catch(e){

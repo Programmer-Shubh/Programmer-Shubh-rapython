@@ -335,6 +335,10 @@ class Database:
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 );
+                CREATE INDEX IF NOT EXISTS idx_paper_user_status_created
+                    ON paper_trades(user_id, status, created_at);
+                CREATE INDEX IF NOT EXISTS idx_paper_user_status_entry
+                    ON paper_trades(user_id, status, entry_date, created_at);
 
                 CREATE TABLE IF NOT EXISTS strategies (
                     id SERIAL PRIMARY KEY,
@@ -507,6 +511,10 @@ class Database:
                     created_at TEXT DEFAULT (datetime('now')),
                     updated_at TEXT DEFAULT (datetime('now'))
                 );
+                CREATE INDEX IF NOT EXISTS idx_paper_user_status_created
+                    ON paper_trades(user_id, status, created_at);
+                CREATE INDEX IF NOT EXISTS idx_paper_user_status_entry
+                    ON paper_trades(user_id, status, entry_date, created_at);
 
                 CREATE TABLE IF NOT EXISTS strategies (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
