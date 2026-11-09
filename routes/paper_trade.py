@@ -60,9 +60,10 @@ def get_open_trades():
     except Exception:
         pass
     try:
-        # SL/TP auto-exit (throttled 20s) before listing
+        # SL/TP auto-exit (throttled 20s) before listing - background thread
+        # (page load stall na ho; speed fix 11-11-2026)
         from core.services.sl_monitor import run_once as _sl_once
-        _sl_once()
+        _sl_once(block=False)
     except Exception:
         pass
     positions = trade_model.get_open_positions_with_pnl(auto_exit=False)

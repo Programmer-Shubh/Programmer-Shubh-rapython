@@ -1266,8 +1266,28 @@
     function otmBadge(v){if(v==null||!isFinite(v))return '<small class="text-muted">No BT yet — click Backtest</small>';const c=otmVal();const bad=c>0&&v>c;return '<span class="badge '+(bad?'bg-danger':'bg-success')+'" style="font-size:10px" title="Strike spot se door (live swap) '+(bad?('- '+c+'% cap se bahar'):'(within cap)')+'">'+v+'%</span>';}
     function otmInitSel(){try{const el=document.getElementById('otm-filter');if(el)el.value=String(otmVal());}catch(e){}}
     async function loadDashPositions(){
+        // Instant render (speed fix 11-11-2026): last portfolio payload
+        // localStorage se PEHLE paint, network refresh peeche.
+        let _cached=null;
+        try{_cached=JSON.parse(localStorage.getItem('dashPosCache')||'null');}catch(e){}
         try{
-            const p=await A('/api/dashboard/portfolio');
+            if(_cached&&(_cached.positions||[]).length){ _renderPosTbl(_cached); }
+        }catch(e){}
+        try{
+            const _fresh=await A('/api/dashboard/portfolio');
+            try{localStorage.setItem('dashPosCache',JSON.stringify(_fresh));}catch(e){}
+            _renderPosTbl(_fresh);
+        }catch(e){
+            console.error('loadDashPositions failed',e);
+            // Do not clear table on error - keep last known trades visible.
+            // Cold-start race (server waking): retry once after 5s when empty.
+            if(!document.getElementById('dash-pos').innerHTML.trim() || document.getElementById('dash-pos').innerHTML.includes('No open')){
+                if(!window._posRetry){window._posRetry=true;setTimeout(()=>{window._posRetry=false;try{loadDashPositions();loadDashHistory();}catch(_){}},5000);}
+            }
+        }
+    }
+    function _renderPosTbl(p){
+        try{
             otmInitSel();
             const _all=(p.positions||[]);
             const _shownP=_all.filter(t=>otmPass(t.otm_pct));
@@ -1308,14 +1328,7 @@
                     document.getElementById('dash-pos').innerHTML='<div class="text-center p-4"><i class="bi bi-inbox" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No open positions yet</p><small class="text-muted">Trades will appear here once you place an order</small></div>';
                 }
             }
-        }catch(e){
-            console.error('loadDashPositions failed',e);
-            // Do not clear table on error - keep last known trades visible.
-            // Cold-start race (server waking): retry once after 5s when empty.
-            if(!document.getElementById('dash-pos').innerHTML.trim() || document.getElementById('dash-pos').innerHTML.includes('No open')){
-                if(!window._posRetry){window._posRetry=true;setTimeout(()=>{window._posRetry=false;try{loadDashPositions();loadDashHistory();}catch(_){}},5000);}
-            }
-        }
+        }catch(e){ /* render failure: last table ke saath raho */ }
     }
     function exitStatusLabel(s){s=String(s||'').toLowerCase();
         if(/stoploss/.test(s))return 'Stoploss Hit';

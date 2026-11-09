@@ -267,6 +267,36 @@ class TradeModel:
         except Exception:
             return []
         hit = []
+        # Speed fix (11-11-2026): overnight open positions ke premiums parallel
+        # (4-thread) - purana serial loop page ko N x network call rukta tha.
+        _gapPrem = {}
+        if len(opens) > 1:
+            try:
+                from core.services.live_market_data import _get_executor as _ge
+                _ex = _ge(4)
+
+                def _fetch_gap(_t):
+                    try:
+                        _v = self.get_option_premium(
+                            _t["symbol"], _t["option_type"], _t["strike_price"], _t.get("expiry_date"),
+                            iv=_t.get("entry_iv"),
+                        )
+                    except Exception:
+                        _v = None
+                    return _t.get("id"), _v
+                for _tid, _v in _ex.map(_fetch_gap, list(opens)):
+                    _gapPrem[_tid] = _v
+            except Exception:
+                _gapPrem = {}
+        if not _gapPrem and len(opens) == 1:
+            try:
+                _t0 = opens[0]
+                _gapPrem[_t0.get("id")] = self.get_option_premium(
+                    _t0["symbol"], _t0["option_type"], _t0["strike_price"], _t0.get("expiry_date"),
+                    iv=_t0.get("entry_iv"),
+                )
+            except Exception:
+                pass
         for t in opens:
             try:
                 entry = float(t.get("entry_price") or 0)
@@ -278,10 +308,7 @@ class TradeModel:
                     lot = int(t.get("lot_size") or 50)
                 if entry <= 0:
                     continue
-                cur = self.get_option_premium(
-                    t["symbol"], t["option_type"], t["strike_price"], t.get("expiry_date"),
-                    iv=t.get("entry_iv"),
-                )
+                cur = _gapPrem.get(t.get("id"))
                 if not cur or cur <= 0:
                     try:
                         from utils.helpers import log_exit_skip as _log
@@ -381,6 +408,51 @@ class TradeModel:
     def get_open_positions_with_pnl(self, user_id=1, auto_exit: bool = False) -> list:
         # auto_exit False = no flicker: positions never auto-disappear on poll
         trades = self.get_open_trades(user_id)
+        # Speed fix (11-11-2026): premium fetch PARALLEL (4-thread shared pool).
+        # Purana loop har position ka live premium serially mangta tha - N
+        # positions par N x network-slow call = dashboard seconds tak block.
+        # Prefetch sare premiums pehle, phir purana serial (SL/TP auto-exit)
+        # logic waisa hi chalta hai - sirf lookup ab instant hai.
+        _premiums = {}
+        _htodos = []
+        if len(trades) > 1:
+            try:
+                from core.services.live_market_data import _get_executor as _ge
+                _ex = _ge(4)
+
+                def _fetch_prem(_t):
+                    try:
+                        _ks = float(_t["strike_price"])
+                    except Exception:
+                        _ks = _t["strike_price"]
+                    _k = f"{_t['symbol']}_{_t['option_type']}_{_ks}_{_t.get('expiry_date','')}"
+                    try:
+                        _v = self.get_option_premium(
+                            _t["symbol"], _t["option_type"], _t["strike_price"], _t.get("expiry_date"),
+                            iv=_t.get("entry_iv"),
+                        )
+                    except Exception:
+                        _v = None
+                    return _k, _v
+                for _k, _v in _ex.map(_fetch_prem, list(trades)):
+                    _premiums[_k] = _v
+            except Exception:
+                _premiums = {}
+        if not _premiums:
+            # Serial fallback (1 position ya pool issue) - wahi purana path
+            for _t in trades:
+                try:
+                    _ks = float(_t["strike_price"])
+                except Exception:
+                    _ks = _t["strike_price"]
+                _k = f"{_t['symbol']}_{_t['option_type']}_{_ks}_{_t.get('expiry_date','')}"
+                try:
+                    _premiums[_k] = self.get_option_premium(
+                        _t["symbol"], _t["option_type"], _t["strike_price"], _t.get("expiry_date"),
+                        iv=_t.get("entry_iv"),
+                    )
+                except Exception:
+                    _premiums[_k] = None
         result = []
         for t in trades:
             # Per-trade cache key WITH expiry, strike normalized to float so it matches
@@ -394,10 +466,7 @@ class TradeModel:
             # cache, so prev must be captured here (else the 80% clamp below reads
             # the just-written raw value and never fires)
             prev = self._last_premiums.get(ck)
-            current_price = self.get_option_premium(
-                t["symbol"], t["option_type"], t["strike_price"], t["expiry_date"],
-                iv=t.get("entry_iv"),
-            )
+            current_price = _premiums.get(ck)
             entry = t["entry_price"]
             qty = t["quantity"]
             try:

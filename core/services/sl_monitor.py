@@ -88,20 +88,33 @@ def entry_block_reason():
             "lagao (exit/SL/Target hamesha chalu rahenge, 3:15 PM tak square-off hota hai)")
 
 
-def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
+def run_once(min_interval=_MIN_INTERVAL, market_hours=True, block=True):
     """Scan + close breached trades. Returns {closed, skipped, skipped_trades}.
     Strategy exit_time EOD exit market gate se PEHLE chalta hai (market band
-    hone ke baad bhi - wahi kal ka 15:29-entry bug tha)."""
+    hone ke baad bhi - wahi kal ka 15:29-entry bug tha).
+    block=False: dashboard load ko stall na kare - scan background daemon
+    thread me schedule hota hai aur function turant return karta hai."""
     global _LAST_RUN
     try:
         with _LOCK:
             if time.time() - _LAST_RUN < min_interval:
                 return {"closed": [], "skipped": "throttled", "skipped_trades": []}
             _LAST_RUN = time.time()
-        # (b) Strategy exit_time exit: market hours se independent (EOD exit
-        # market band ke baad bhi hona chahiye).
-        # (c) 15:15 intraday square-off: background thread se (page khole
-        # bina) - positional KEVAL lage rahe hain. Dono gate se pehle.
+        if not block:
+            try:
+                threading.Thread(target=run_once, daemon=True,
+                                 kwargs={"min_interval": _MIN_INTERVAL, "block": True}).start()
+            except Exception:
+                pass
+            return {"closed": [], "skipped": "async", "skipped_trades": []}
+        return _run_scan(market_hours)
+    except Exception as e:
+        return {"closed": [], "skipped": f"error: {e}"[:150]}
+
+
+def _run_scan(market_hours=True):
+    """Actual scan body (block=True path + background thread)."""
+    try:
         _strat_closed = []
         _eod_closed = []
         try:

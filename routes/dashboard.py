@@ -252,10 +252,11 @@ def get_portfolio():
     except Exception:
         pass
     try:
-        # SL/TP auto-exit (throttled 20s): breached trades close BEFORE the
-        # list is built, so the dashboard never shows a dead TP/SL trade.
+        # SL/TP auto-exit (throttled 20s): breach check page ko stall na kare -
+        # scan background thread me chalega (speed fix 11-11-2026). Listing
+        # ke turant baad agle polls par breached trades closed dikhte hain.
         from core.services.sl_monitor import run_once as _sl_once
-        _sl_once()
+        _sl_once(block=False)
     except Exception:
         pass
     positions = trade_model.get_open_positions_with_pnl()
