@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Default NIFTY strategies - always present, protected (not deletable).
-Seeded on app startup. User can click to place paper/live orders."""
+"""Default NIFTY strategy - always present, protected (not deletable).
+Seeded on app startup. User can click to place paper/live orders.
+(SENSEX/MIDCPNIFTY BUY defaults chahe gaye the 11-11-2026 - user DELETE
+request ke baad ab yahan sirf NIFTY default hai; cleanup bhi chalata hai.)"""
 
 DEFAULT_STRATEGIES = [
     {
@@ -35,147 +37,43 @@ DEFAULT_STRATEGIES = [
         "status": "active",
         "protected": 1,
     },
-    # --- User request (09-11-2026): SENSEX + MIDCPNIFTY BUY-option strategies
-    # backtest karke save. Direction-aware BUY legs (transaction='auto'):
-    # bullish par CE BUY, bearish par PE BUY. Har config 13-Aug..06-Nov-2026
-    # 5m data par sweep karke best-balanced (WR x profit) chuna gaya.
-    {
-        "name": "SENSEX Buy Option (Auto CE/PE) - Tight TP",
-        "symbol": "SENSEX",
-        "start_date": "2026-08-13",
-        "end_date": "2026-11-06",
-        "timeframe": "5m",
-        "description": ("Direction-aware BUY (CE on bullish, PE on bearish) via Supertrend+RSI 5m. "
-                        "Analytical backtest 13-Aug..06-Nov-2026: 31 trades, WR 77.42%, net +7,349, PF 1.58 "
-                        "(SL 30% / TP 15% of premium, 0.5% slippage). User-configured; no buy/sell "
-                        "recommendation; past results do not guarantee future live returns."),
-        "indicators": [
-            {"id": "supertrend", "params": {"period": 10, "multiplier": 3}},
-            {"id": "rsi", "params": {"period": 14}},
-        ],
-        "entry_conditions": [],
-        "exit_conditions": [],
-        "legs": [
-            {"option_type": "CE", "transaction": "auto", "lots": 1,
-             "strike_selection": "atm", "otm_distance": 0, "expiry": "weekly"}
-        ],
-        "advanced_options": {
-            "trade_mode": "intraday", "timeframe": "5m",
-            "entry_time": "09:35", "exit_time": "15:15",
-            "slippage_pct": 0.5, "strike_selection": "atm", "otm_distance": 0,
-            "max_holding_bars": 1000000,
-        },
-        "risk_management": {
-            "daily_stop_loss_pct": 30, "daily_take_profit_pct": 15,
-            "max_trades_per_day": -1, "daily_loss_limit": 0,
-            "signal_lookback_days": 0,
-        },
-        "status": "active",
-        "protected": 1,
-    },
-    {
-        "name": "SENSEX Buy Option (Auto CE/PE) - High Profit",
-        "symbol": "SENSEX",
-        "start_date": "2026-08-13",
-        "end_date": "2026-11-06",
-        "timeframe": "5m",
-        "description": ("Direction-aware BUY (CE on bullish, PE on bearish) via Supertrend+RSI 5m. "
-                        "Analytical backtest 13-Aug..06-Nov-2026: 25 trades, WR 56.00%, net +27,652, PF 2.44 "
-                        "(SL 30% / TP 70% of premium, 0.5% slippage). User-configured; no buy/sell "
-                        "recommendation; past results do not guarantee future live returns."),
-        "indicators": [
-            {"id": "supertrend", "params": {"period": 10, "multiplier": 3}},
-            {"id": "rsi", "params": {"period": 14}},
-        ],
-        "entry_conditions": [],
-        "exit_conditions": [],
-        "legs": [
-            {"option_type": "CE", "transaction": "auto", "lots": 1,
-             "strike_selection": "atm", "otm_distance": 0, "expiry": "weekly"}
-        ],
-        "advanced_options": {
-            "trade_mode": "intraday", "timeframe": "5m",
-            "entry_time": "09:35", "exit_time": "15:15",
-            "slippage_pct": 0.5, "strike_selection": "atm", "otm_distance": 0,
-            "max_holding_bars": 1000000,
-        },
-        "risk_management": {
-            "daily_stop_loss_pct": 30, "daily_take_profit_pct": 70,
-            "max_trades_per_day": -1, "daily_loss_limit": 0,
-            "signal_lookback_days": 0,
-        },
-        "status": "active",
-        "protected": 1,
-    },
-    {
-        "name": "MIDCPNIFTY Buy Option (Auto CE/PE) - Tight TP",
-        "symbol": "MIDCPNIFTY",
-        "start_date": "2026-08-13",
-        "end_date": "2026-11-06",
-        "timeframe": "5m",
-        "description": ("Direction-aware BUY (CE on bullish, PE on bearish) via Supertrend+RSI 5m, OTM-1. "
-                        "Analytical backtest 13-Aug..06-Nov-2026: 36 trades, WR 66.67%, net +1,971, PF 1.11 "
-                        "(SL 20% / TP 10% of premium, 0.5% slippage). User-configured; no buy/sell "
-                        "recommendation; past results do not guarantee future live returns."),
-        "indicators": [
-            {"id": "supertrend", "params": {"period": 10, "multiplier": 3}},
-            {"id": "rsi", "params": {"period": 14}},
-        ],
-        "entry_conditions": [],
-        "exit_conditions": [],
-        "legs": [
-            {"option_type": "CE", "transaction": "auto", "lots": 1,
-             "strike_selection": "otm", "otm_distance": 1, "expiry": "weekly"}
-        ],
-        "advanced_options": {
-            "trade_mode": "intraday", "timeframe": "5m",
-            "entry_time": "09:35", "exit_time": "15:15",
-            "slippage_pct": 0.5, "strike_selection": "otm", "otm_distance": 1,
-            "max_holding_bars": 1000000,
-        },
-        "risk_management": {
-            "daily_stop_loss_pct": 20, "daily_take_profit_pct": 10,
-            "max_trades_per_day": -1, "daily_loss_limit": 0,
-            "signal_lookback_days": 0,
-        },
-        "status": "active",
-        "protected": 1,
-    },
-    {
-        "name": "MIDCPNIFTY Buy Option (Auto CE/PE) - Balanced",
-        "symbol": "MIDCPNIFTY",
-        "start_date": "2026-08-13",
-        "end_date": "2026-11-06",
-        "timeframe": "5m",
-        "description": ("Direction-aware BUY (CE on bullish, PE on bearish) via Supertrend+RSI 5m, ATM. "
-                        "Analytical backtest 13-Aug..06-Nov-2026: 29 trades, WR 58.62%, net +10,238, PF 1.71 "
-                        "(SL 10% / TP 25% of premium, 0.5% slippage). User-configured; no buy/sell "
-                        "recommendation; past results do not guarantee future live returns."),
-        "indicators": [
-            {"id": "supertrend", "params": {"period": 10, "multiplier": 3}},
-            {"id": "rsi", "params": {"period": 14}},
-        ],
-        "entry_conditions": [],
-        "exit_conditions": [],
-        "legs": [
-            {"option_type": "CE", "transaction": "auto", "lots": 1,
-             "strike_selection": "atm", "otm_distance": 0, "expiry": "weekly"}
-        ],
-        "advanced_options": {
-            "trade_mode": "intraday", "timeframe": "5m",
-            "entry_time": "09:35", "exit_time": "15:15",
-            "slippage_pct": 0.5, "strike_selection": "atm", "otm_distance": 0,
-            "max_holding_bars": 1000000,
-        },
-        "risk_management": {
-            "daily_stop_loss_pct": 10, "daily_take_profit_pct": 25,
-            "max_trades_per_day": -1, "daily_loss_limit": 0,
-            "signal_lookback_days": 0,
-        },
-        "status": "active",
-        "protected": 1,
-    },
 ]
+
+# User request (11-11-2026): aaj ke SENSEX/MIDCPNIFTY BUY strategies DELETE -
+# 95% win-rate target data par nahi mila, isliye inhe save nahi rakhna.
+# Ye names seed se hata diye; startup par ye entries DB se bhi clean hoti hain.
+REMOVED_DEFAULT_STRATEGIES = [
+    "SENSEX Buy Option (Auto CE/PE) - Tight TP",
+    "SENSEX Buy Option (Auto CE/PE) - High Profit",
+    "MIDCPNIFTY Buy Option (Auto CE/PE) - Tight TP",
+    "MIDCPNIFTY Buy Option (Auto CE/PE) - Balanced",
+]
+
+
+def cleanup_removed_defaults(db=None):
+    """Removed defaults ko strategies + strategy_results se delete karo.
+    Sirf EXACT name match; user ki khud ki entries kabhi nahi chhooti. Idempotent."""
+    if db is None:
+        from core.models.database import Database
+        db = Database.get_instance()
+    deleted = 0
+    for name in REMOVED_DEFAULT_STRATEGIES:
+        try:
+            rows = db.fetch_all("SELECT id FROM strategies WHERE name=? ORDER BY id", [name])
+            for _row in (rows or []):
+                try:
+                    sid = int(_row["id"])
+                except Exception:
+                    continue
+                try:
+                    db.execute("DELETE FROM strategy_results WHERE strategy_id=?", [sid])
+                except Exception:
+                    pass
+                db.execute("DELETE FROM strategies WHERE id=?", [sid])
+                deleted += 1
+        except Exception:
+            continue
+    return deleted
 
 
 def _run_backtest_and_save(db, strat_id, _sc):
@@ -265,8 +163,13 @@ def seed_default_strategies():
                 print(f"[seed] {_sc['name']}: {e}", file=_sys.stderr, flush=True)
             except Exception:
                 pass
+    # One-time data cleanup: removed default strategies (user 11-11-2026)
+    try:
+        cleanup_removed_defaults(db)
+    except Exception:
+        pass
     # One-time data migration: existing saved strategies carried legacy caps
-    # (max 5 trades/day, ₹5000 daily loss). Normalize them to unlimited so
+    # (max 5 trades/day, 5000 daily loss). Normalize them to unlimited so
     # Fyers keeps taking every valid signal all day.
     try:
         normalize_daily_limits(db)
