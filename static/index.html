@@ -2014,7 +2014,7 @@ let _lastOpenTrdHTML = null;
         else if(t==='butterfly'){ stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'otm',otm_distance:1,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'otm',otm_distance:2,lots:lots,expiry:'weekly',offset:0}); renderLegs(); }
         else if(t==='calendar'){ stratLegs.push({option_type:'CE',transaction:'sell',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'weekly',offset:0}); stratLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:lots,expiry:'monthly',offset:0}); renderLegs(); }
         updatePayoff();
-        // Rule 2 REMOVED (2026-11-09): templates me SL/TP % pre-fill band.
+        // Smart Default Rule (Rule 2): templates me BUY legs ho to SL/TP % pre-fill.
         try{_applyOptionBuyDefaults(false);}catch(e){}
     }
     async function updatePayoff(){
@@ -2113,13 +2113,28 @@ let _lastOpenTrdHTML = null;
     async function _refreshDualMirror(){
         try{ if(!window._entryPrem){ window._entryPrem=await _entryPremEst(); } _dualMirror('s-sl','s-sl-mirror'); _dualMirror('s-tp','s-tp-mirror'); }catch(e){}
     }
-    // ═══ Smart Default for Option Buying (Rule 2 - REMOVED) ═══
-    // User request (2026-11-09): CE/PE BUY select hote hi SL/TP 30%/70%
-    // auto-prefill BAND. SL/TP input defaults ab hamesha legacy ₹1500 SL /
-    // ₹3000 TP (auto-paper worker fallback parity) rehte hain. Function
-    // no-op rakha hai taaki saare purane call-sites safe chalein.
+    // ═══ Smart Default for Option Buying (Rule 2 - RESTORED) ═══
+    // User rule (09-11-2026): default inputs 1500/3000 dikhe, LEKIN jab koi
+    // CE/PE BUY strategy/order select ho (backtest ya template) to SL/TP
+    // apne-aap 30% SL / 70% TP (premium-based) par switch ho jaye. Non-BUY
+    // (EQ/SELL) par 1500/3000 hi rehta hai.
+    function _isOptionBuy(){
+        try{
+            if(typeof stratLegs!=='undefined'&&stratLegs.length){ const l=stratLegs[0]; const op=(l.option_type||'').toUpperCase(); const tx=(l.transaction||'').toLowerCase(); return op!=='EQ'&&tx==='buy'; }
+            const ro=(document.getElementById('r-order')||{}).value||''; const pp=ro.split('-'); return (pp[0]||'').toUpperCase()!=='EQ'&&String(pp[1]||'').toUpperCase()==='BUY';
+        }catch(e){ return false; }
+    }
     function _applyOptionBuyDefaults(force){
-        try{ _refreshDualMirror(); }catch(e){}
+        try{
+            const slEl=document.getElementById('s-sl'), tpEl=document.getElementById('s-tp');
+            if(!slEl||!tpEl)return;
+            if(_isOptionBuy()){
+                const s=String(slEl.value||''), t=String(tpEl.value||'');
+                if(force||!/%$/.test(s.trim())) slEl.value='30%';
+                if(force||!/%$/.test(t.trim())) tpEl.value='70%';
+            }
+            _refreshDualMirror();
+        }catch(e){}
     }
     // Option BUY select hote hi smart default + mirror updates
     document.getElementById('r-order')?.addEventListener('change',()=>_applyOptionBuyDefaults(false));
@@ -2405,7 +2420,7 @@ let _lastOpenTrdHTML = null;
             const inds=robotCollectIndicators().length;
             el.innerHTML='Chalega: <strong>'+symTxt+'</strong> | '+legTxt+' | '+inds+' indicator(s) | <span class="badge bg-success">Multi-symbol ON</span>';
             try{if(typeof refreshAutoBadge==='function')refreshAutoBadge();}catch(e){}
-            // Rule 2 REMOVED (2026-11-09): ab sirf Dual-Unit mirror update har UI tick par.
+            // Smart Default Rule (Rule 2) + Dual-Unit mirror update on every UI tick.
             try{_applyOptionBuyDefaults(false);}catch(e){}
             try{_refreshDualMirror();}catch(e){}
         }catch(e){}}
@@ -2459,7 +2474,7 @@ let _lastOpenTrdHTML = null;
         try{const em=document.getElementById('r-exitmode');if(em)em.value=t;}catch(e){}
         if(t==='intraday'){ex.disabled=false;ex.value='15:15';document.getElementById('r-exit-note').textContent='Intraday square-off 3:15 PM (3:00 PM ke baad nayi entry nahi)';}
         else{ex.disabled=true;document.getElementById('r-exit-note').textContent='Positional: overnight carry, no EOD exit';}
-        // Rule 2 REMOVED (2026-11-09): Option BUY par SL/TP 30%/70% pre-fill band.
+        // Smart Default Rule (Rule 2): Option BUY par SL/TP % unit pre-fill.
         try{_applyOptionBuyDefaults(false);}catch(e){}
     }
     function robotCollectIndicators(){
