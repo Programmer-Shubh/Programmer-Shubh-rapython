@@ -480,9 +480,16 @@ def list_strategies():
         "SELECT * FROM strategies WHERE user_id=1 ORDER BY updated_at DESC"
     )
     try:
-        _live_rows = db.fetch_all(
-            "SELECT setting_key, setting_value FROM settings WHERE setting_key LIKE 'strat_live_enabled_%'"
-        )
+        _key_ids = [int(r.get("id") or 0) for r in rows or [] if r.get("id") is not None]
+        if _key_ids:
+            _keys = [_strat_live_key(_sid) for _sid in _key_ids]
+            _placeholders = ", ".join("?" for _ in _keys)
+            _live_rows = db.fetch_all(
+                f"SELECT setting_key, setting_value FROM settings WHERE setting_key IN ({_placeholders})",
+                _keys,
+            )
+        else:
+            _live_rows = []
         _live_map = {}
         for _lr in _live_rows or []:
             try:

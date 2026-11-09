@@ -175,6 +175,13 @@ def seed_default_strategies():
         normalize_daily_limits(db)
     except Exception:
         pass
+    # Tight-target saved strategies ki 100%/150% SL -> active 20%/30% SL.
+    # Pehle 100%+ math monitor par disabled level banata tha; current
+    # open positions bhi isi naye level par katne lagti hain.
+    try:
+        normalize_aggressive_sl(db)
+    except Exception:
+        pass
 
 
 def normalize_daily_limits(db=None):
@@ -219,6 +226,71 @@ def normalize_daily_limits(db=None):
                 db.execute("UPDATE strategies SET risk_management=? WHERE id=?",
                            [_js.dumps(rm), r.get("id")])
                 changed += 1
+        except Exception:
+            continue
+    return changed
+
+
+def normalize_aggressive_sl(db=None):
+    """Activate very high percent SLs (>=100%) at an executable stop.
+
+    User rule (2026-11-27): previously saved BUY strategies carry SL 100% or
+    150% with TP only 5-8%. With the premium math, those stopped at ~zero, so
+    positions could stay open in heavy loss. Cap them to a conservative
+    premium stop instead: TP <= 10% -> 20%, otherwise 30%. The value and
+    trade copies are updated in place, so the existing open positions use it
+    on the next monitor scan. Idempotent: only writes values >=100.
+    """
+    import json as _js
+    if db is None:
+        from core.models.database import Database
+        db = Database.get_instance()
+    try:
+        rows = db.fetch_all("SELECT id, risk_management, legs FROM strategies")
+    except Exception:
+        return 0
+    changed = 0
+    for r in rows or []:
+        try:
+            sid = int(r.get("id") or 0)
+            if not sid:
+                continue
+            rm = _js.loads(r.get("risk_management") or "{}")
+            if not isinstance(rm, dict):
+                continue
+            try:
+                sl_pct = float(rm.get("daily_stop_loss_pct") or 0)
+            except Exception:
+                continue
+            if sl_pct < 100:
+                continue
+            try:
+                tp_pct = float(rm.get("daily_take_profit_pct") or 0)
+            except Exception:
+                tp_pct = 0.0
+            cap = 20.0 if tp_pct <= 10 else 30.0
+            rm["daily_stop_loss_pct"] = cap
+            rm["daily_stop_loss"] = 0
+            rm["sl_unit"] = "pct"
+            try:
+                legs = _js.loads(r.get("legs") or "[]")
+            except Exception:
+                legs = []
+            if isinstance(legs, list):
+                for leg in legs:
+                    if isinstance(leg, dict):
+                        leg["stop_loss"] = f"{cap:g}%"
+            db.execute(
+                "UPDATE strategies SET risk_management=?, legs=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                [_js.dumps(rm), _js.dumps(legs), sid],
+            )
+            # Strategy se kati copy par nahi - already-open position ke row
+            # par bhi naya stop lagao, warna monitor purana 100% level padhega.
+            db.execute(
+                "UPDATE paper_trades SET stop_loss=?, sl_unit='pct', updated_at=CURRENT_TIMESTAMP WHERE strategy_id=? AND status='open'",
+                [cap, sid],
+            )
+            changed += 1
         except Exception:
             continue
     return changed
