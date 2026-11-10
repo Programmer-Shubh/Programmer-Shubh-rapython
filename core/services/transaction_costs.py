@@ -22,6 +22,13 @@ class TransactionCosts:
     # Latency simulation (milliseconds) - only used in backtest
     LATENCY_MS = 50  # 50ms typical broker API latency
 
+    # FIXED tick-offset floor on every fill (options sidebar of the model):
+    # 3 exchange ticks x 0.05 = 0.15. Live LIMIT-IOC entry uses the SAME
+    # floor (routes.broker._broker_limit_price: buffer = max(3 ticks,
+    # LTP*0.5%)) - so backtest, paper and live now pay at least 3 ticks of
+    # spread/impact on EVERY fill, regardless of how small the premium is.
+    MIN_FILL_TICK_OFFSET = 0.15
+
     @classmethod
     def apply_fill_slippage(cls, price: float, side: str, is_live: bool = False, slippage_pct: float = None) -> float:
         """Apply slippage - SAME rate paper/live/backtest (spec: align execution
@@ -37,12 +44,29 @@ class TransactionCosts:
             slippage = (float(slippage_pct) if slippage_pct is not None else cls.SLIPPAGE_PCT) / 100
         except Exception:
             slippage = cls.SLIPPAGE_PCT / 100
-        # Apply slippage: price moves against the order
-        # For BUY: price increases (we pay more); for SELL: price decreases (we receive less)
-        if side == "BUY":
-            return price * (1 + slippage)
-        else:  # SELL
-            return price * (1 - slippage)
+        # Apply slippage: price moves against the order.
+        # Uniform three-way fill model (user spec 10-11): percentage slippage
+        # WITH a fixed tick-offset floor = max(0.5% of price, 3 ticks 0.15).
+        # Old model was pct-only, so a 5-rupee paper premium filled with
+        # ~0.025 friction while live paid the 3-tick spread floor - the
+        # backtest-vs-live divergence. High-premium fills (> ~30 restore) are
+        # numerically unchanged. One floor, applied ONCE per fill: backtest
+        # ((entry/exit), paper (entry_price/close_trade) and the live LIMIT
+        # buffer floor share it, so the three never drift apart. Live can
+        # still fill BETTER than this model (its LIMIT buffer is capped at
+        # 2.0) - never worse on entries.
+        # For BUY: price increases (we pay more); for SELL: price decreases
+        # (we receive less, floored at one tick 0.05 so a 0.10 premium can't
+        # slip negative).
+        try:
+            slip_amt = float(price) * slippage
+        except Exception:
+            slip_amt = float(price) * cls.SLIPPAGE_PCT / 100
+        if slip_amt < cls.MIN_FILL_TICK_OFFSET:
+            slip_amt = cls.MIN_FILL_TICK_OFFSET
+        if str(side or "").upper() == "BUY":
+            return round(float(price) + slip_amt, 2)
+        return round(max(float(price) - slip_amt, 0.05), 2)
 
     @classmethod
     def calculate(cls, turnover: float, is_sell: bool, is_live: bool = False) -> dict:
