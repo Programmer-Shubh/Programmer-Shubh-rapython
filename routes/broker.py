@@ -313,6 +313,14 @@ async def broker_funds():
             out["available_margin"] = res.get("available_margin")
             out["total_balance"] = res.get("total_balance")
             out["ok"] = bool(res.get("ok"))
+            if res.get("error"):
+                out["error"] = res.get("error")
+            try:
+                import json as _js
+                _raw = res.get("raw") or {}
+                out["raw"] = _js.dumps(_raw, default=str)[:1800]
+            except Exception:
+                out["raw"] = str(res.get("raw"))[:800]
     except Exception as e:
         out["error"] = str(e)[:180]
     return out
