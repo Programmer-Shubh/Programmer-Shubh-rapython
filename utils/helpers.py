@@ -496,6 +496,38 @@ def sltp_amount(value, default_unit: str = "rs"):
         return 0.0, str(default_unit or "rs")
 
 
+def trailing_lock_level(entry: float, best_px: float, is_buy: bool,
+                        lock_at_pct: float, lock_amt_pct: float = 0.0) -> float:
+    """Trailing-LOCK level (single source for backtest + paper monitor).
+
+    User rule: "jab trade 10-15% profit me aaye, SL ko breakeven (cost
+    price) par trail karo" + "profitable trades lock karo".
+
+    - lock_at_pct : profit % jiske baad SL trigger hona chahiye
+                    (e.g. 10 = +10% par SL move)
+    - lock_amt_pct: kitna profit LOCK karna hai (0 = sirf breakeven,
+                    e.g. 1 = +1% profit lock kar do)
+
+    Returns the new SL level (0.0 = lock not armed).
+    BUY  : SL upar jaata hai (entry + lock%)  - SELL: SL neeche (entry - lock%)
+    """
+    try:
+        entry = float(entry or 0)
+        best = float(best_px or 0)
+        lock_at = float(lock_at_pct or 0)
+        lock_amt = float(lock_amt_pct or 0)
+    except Exception:
+        return 0.0
+    if entry <= 0 or best <= 0 or lock_at <= 0:
+        return 0.0
+    profit_pct = ((best - entry) / entry * 100.0) if is_buy else ((entry - best) / entry * 100.0)
+    if profit_pct < lock_at:
+        return 0.0
+    if is_buy:
+        return entry * (1 + (lock_amt / 100.0 if lock_amt > 0 else 0.0))
+    return entry * (1 - (lock_amt / 100.0 if lock_amt > 0 else 0.0))
+
+
 def sltp_premium_level(entry_price: float, amount: float, quantity: int,
                        lot_size: int, transaction_type: str, is_sl: bool,
                        unit: str = None) -> float:

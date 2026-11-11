@@ -330,8 +330,13 @@ class TradeModel:
                     elif tp_level > 0 and cur <= tp_level:
                         reason = "auto_gap_target"
                 if reason:
-                    self.close_trade(t["id"], float(cur), today, exit_status=reason)
-                    hit.append({"id": t["id"], "reason": reason, "exit_price": round(float(cur), 2)})
+                    # TP par LEVEL par exit (backtest parity) - current quote
+                    # par exit karne se gap-up me fake bada profit book hota tha.
+                    _exit_px = float(cur)
+                    if reason.endswith("target") and tp_level > 0:
+                        _exit_px = float(tp_level)
+                    self.close_trade(t["id"], _exit_px, today, exit_status=reason)
+                    hit.append({"id": t["id"], "reason": reason, "exit_price": round(_exit_px, 2)})
             except Exception:
                 continue
         return hit

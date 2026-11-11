@@ -1924,6 +1924,34 @@ class BacktestEngine:
         # stop, then the same bar's opposite extreme was tested against the
         # raised stop = within-bar look-ahead; plus trailing="Lock" hit an
         # undefined trail_dist -> NameError -> whole backtest errored.)
+        # ---- TRAILING LOCK % (user rule): profit >= lock_profit_at% par SL
+        # cost-price (breakeven) par; lock_profit% diya ho to us profit ko
+        # LOCK (SL = entry + lock%). Ye pehle UI se bheja jaata tha par
+        # engine IGNORE karta tha (trailing kaam hi nahi karta tha).
+        _lock_at = 0.0
+        _lock_amt = 0.0
+        try:
+            _adv_t = getattr(self, "_advanced", {}) or {}
+            _lock_at = float(_adv_t.get("lock_profit_at", 0) or 0)
+            _lock_amt = float(_adv_t.get("lock_profit", 0) or 0)
+        except Exception:
+            _lock_at = 0.0
+            _lock_amt = 0.0
+        if _lock_at > 0 and entry_idx is not None and entry_price > 0:
+            try:
+                from utils.helpers import trailing_lock_level as _tll
+                _prevL = self._trailing_best.get(entry_idx)
+                _newL = _tll(entry_price, float(_prevL or 0),
+                             (txn_type or "buy") == "buy", _lock_at, _lock_amt)
+                if _newL > 0:
+                    if (txn_type or "buy") == "buy":
+                        if _newL > sl_level:
+                            sl_level = _newL
+                    else:
+                        if sl_level == 0 or _newL < sl_level:
+                            sl_level = _newL
+            except Exception:
+                pass
         trailing = str(getattr(self, "_advanced", {}).get("trailing", "") or "").strip()
         if trailing and trailing.lower() not in ("off", "none", "0", "false", "lock") and entry_idx is not None:
             try:
