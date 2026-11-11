@@ -10,7 +10,9 @@
       "Loss side ka asli source: (a) 15:15 tak hold karne par last-hour theta decay, (b) gap-through SL fills. Isliye quality entry gate + early time exit + wide (90% = practical wipe-out) SL.",
       "SL 90% ka matlab: premium ka 90% ghata tabhi cut - intraday me rare. No-SL vs SL 90% backtest numbers identical aaye.",
       "Paper/live me wahi SL/TP DB values use hote hain; Edit SL/TP se turant change hota hai.",
-      "BANKNIFTY #53 bhi 11-Nov ko honest engine par re-backtest hua: SL 20% config loss-making tha (-Rs32,723, 67.91% WR) - 20% SL par gap-through fills. SL 90% (user ka original 'no leg stop-loss' intent) par: 124 trades, 73.39% WR, +Rs15,220, PF 1.15. Saved result ab stale_engine=False."
+      "BANKNIFTY #53 bhi 11-Nov ko honest engine par re-backtest hua: SL 20% config loss-making tha (-Rs32,723, 67.91% WR) - 20% SL par gap-through fills. SL 90% (user ka original 'no leg stop-loss' intent) par: 124 trades, 73.39% WR, +Rs15,220, PF 1.15. Saved result ab stale_engine=False.",
+      "11-Nov late-evening: SL 90% revert karke user ke kehne par SL 20% / TP 7% wapas lagaya (user: 'kal tak jaisa profit de rahi thi'). Honest backtest (engine v5 + real fills): 180 trades, 67.22% WR, -Rs35,587 (gap-through SL fills avg loss 2,902). Paper (corrected): 11 trades, 81.8% WR, +Rs1,283 (9W/2L) - sample chhota hai. Saved BT ab 67.2% WR / -Rs35,587 dikhata hai; SL 90% wala config (+Rs15,220 / 73.4% WR) docs me bhi record hai.",
+      "PAPER fix ke baad: target exits ab LEVEL par hote hain (pehle current quote par - fake +42% target). Stale broker quote (prev_close par entry) guard bhi add hua. Dono parity RULE-LEVEL par hain; paper WR ka backtest se 100% match isliye abhi bhi data-source (historical vs live) se limited hai - lekin rules/fill-model/exit ab identical hain, aur parity endpoint (id/parity) parity proof deta hai."
     ]
   },
   "saved_strategies": [
