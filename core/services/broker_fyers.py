@@ -492,33 +492,52 @@ class FyersV3:
                 return data.get(k)
         return None
 
-    async def get_available_margin(self) -> dict:
-        """Funds + available margin (REAL MONEY pre-flight ke liye).
+    @staticmethod
+    def _parse_funds(res) -> dict:
+        """Fyers v3 /api/v3/funds payload -> {available_margin, total_balance}.
 
-        Fyers v3 /api/v3/funds ka shape account/segment ke hisaab se badalta
-        hai (dict of fields YA list of {title,value}). Dono parse karta hai.
-        Returns {available_margin, total_balance, ok, raw}.
+        ACTUAL shape (verified live 11-Nov-2026):
+            data.fund_limit = [{id, title, equityAmount, commodityAmount}]
+            titles: "Total Balance", "Utilized Amount", "Clear Balance",
+                    "Available Balance", "Limit at start of the day", ...
+        Older/other shapes bhi handle hote hain (dict of numeric fields, ya
+        list of {title, value}).
         """
-        out = {"available_margin": None, "total_balance": None,
-               "ok": False, "raw": {}}
-        try:
-            res = await self.get_funds()
-        except Exception as e:
-            out["error"] = str(e)[:180]
-            return out
-        out["raw"] = res if isinstance(res, dict) else {}
+        out = {"available_margin": None, "total_balance": None}
         data = (res or {}).get("data") if isinstance(res, dict) else None
         if data is None:
             data = res if isinstance(res, dict) else {}
         # Case 1: dict of numeric fields
         if isinstance(data, dict):
-            out["available_margin"] = self._pick_fund(
+            out["available_margin"] = FyersV3._pick_fund(
                 data, "avail_margin", "available_margin", "availMargin",
-                "margin_available", "available")
-            out["total_balance"] = self._pick_fund(
+                "margin_available", "available_balance", "available")
+            out["total_balance"] = FyersV3._pick_fund(
                 data, "total_balance", "totalBalance", "balance",
                 "net_balance", "total")
-        # Case 2: list of {title, value}
+        # Case 2: Fyers v3 ACTUAL shape - data.fund_limit = [{id,title,
+        #        equityAmount, commodityAmount}].
+        _fl = data.get("fund_limit") if isinstance(data, dict) else None
+        if isinstance(_fl, list):
+            for item in _fl:
+                try:
+                    title = str(item.get("title") or "").strip().lower()
+                    if not title:
+                        continue
+                    _val = 0.0
+                    for _v in (item.get("equityAmount"), item.get("commodityAmount")):
+                        try:
+                            if _v is not None:
+                                _val += float(_v)
+                        except Exception:
+                            continue
+                    if "available" in title and ("balance" in title or "margin" in title):
+                        out["available_margin"] = _val
+                    elif "total balance" in title or title == "total":
+                        out["total_balance"] = _val
+                except Exception:
+                    continue
+        # Case 3: list of {title, value}
         if isinstance(data, list):
             for item in data:
                 try:
@@ -540,6 +559,24 @@ class FyersV3:
                     out[_f] = float(out[_f])
             except Exception:
                 out[_f] = None
+        return out
+
+    async def get_available_margin(self) -> dict:
+        """Funds + available margin (REAL MONEY pre-flight ke liye).
+
+        Returns {available_margin, total_balance, ok, raw}.
+        """
+        out = {"available_margin": None, "total_balance": None,
+               "ok": False, "raw": {}}
+        try:
+            res = await self.get_funds()
+        except Exception as e:
+            out["error"] = str(e)[:180]
+            return out
+        out["raw"] = res if isinstance(res, dict) else {}
+        parsed = self._parse_funds(out["raw"])
+        out["available_margin"] = parsed.get("available_margin")
+        out["total_balance"] = parsed.get("total_balance")
         out["ok"] = out["available_margin"] is not None
         return out
 

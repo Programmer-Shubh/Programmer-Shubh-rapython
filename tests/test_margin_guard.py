@@ -67,6 +67,29 @@ def test_margin_rejection_counts_and_halts_after_three(monkeypatch):
     assert store.get("strat_live_enabled_999") == "0"
 
 
+def test_funds_parser_reads_fyers_fund_limit_shape():
+    """Fyers v3 /api/v3/funds ACTUAL shape: data.fund_limit = [{title,
+    equityAmount, commodityAmount}] - 'Available Balance' 0 hona chahiye
+    detect ho (yaad: available=0 par live orders reject hoti hain)."""
+    from core.services.broker_fyers import FyersV3
+    raw = {"success": True, "data": {"code": 200, "s": "ok", "fund_limit": [
+        {"id": 1, "title": "Total Balance", "equityAmount": 0, "commodityAmount": 0},
+        {"id": 2, "title": "Utilized Amount", "equityAmount": 0, "commodityAmount": 0},
+        {"id": 10, "title": "Available Balance", "equityAmount": 0, "commodityAmount": 0},
+    ]}}
+    parsed = FyersV3._parse_funds(raw)
+    assert parsed["available_margin"] == 0.0
+    assert parsed["total_balance"] == 0.0
+    # Non-zero balance parse hona chahiye
+    raw2 = {"data": {"fund_limit": [
+        {"id": 1, "title": "Total Balance", "equityAmount": 50000.0},
+        {"id": 10, "title": "Available Balance", "equityAmount": 32000.0},
+    ]}}
+    p2 = FyersV3._parse_funds(raw2)
+    assert p2["available_margin"] == 32000.0
+    assert p2["total_balance"] == 50000.0
+
+
 def test_halt_reason_survives_as_text():
     msg = _friendly_margin_error("Margin Shortfall:INR 1,000.00 Available:INR 0.00")
     assert "1,000" in msg
