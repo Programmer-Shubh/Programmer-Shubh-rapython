@@ -1490,6 +1490,111 @@ def _should_overwrite_saved(stored_raw, fresh_res) -> bool:
         return True
 
 
+@router.get("/{strat_id}/parity")
+def strategy_parity(strat_id: int, days: int = 60):
+    """BACKTEST vs PAPER vs LIVE ka side-by-side parity report.
+
+    Teenon ka RULE ek hi hai (engine + shared SL/TP + shared fill model +
+    level-par exit) - ye endpoint proof deta hai:
+      - rules echo (entry gate, entry/exit time, TP/SL, timeframe)
+      - backtest (saved result): trades / WR / PnL
+      - paper (realized paper trades): trades / WR / PnL
+      - live (realized live-broker trades): trades / WR / PnL
+    """
+    import json as _js
+    db = Database.get_instance()
+    row = db.fetch_one("SELECT * FROM strategies WHERE id=?", [int(strat_id)])
+    if not row:
+        return {"error": "Strategy not found"}
+    try:
+        adv = _js.loads(row.get("advanced_options") or "{}")
+    except Exception:
+        adv = {}
+    try:
+        risk = _js.loads(row.get("risk_management") or "{}")
+    except Exception:
+        risk = {}
+    try:
+        legs = _js.loads(row.get("legs") or "[]")
+    except Exception:
+        legs = []
+    try:
+        inds = _js.loads(row.get("indicators") or "[]")
+    except Exception:
+        inds = []
+    bt = _bt_summary(row)
+    try:
+        from core.services.backtest_engine import ENGINE_VERSION as _ev
+    except Exception:
+        _ev = "?"
+    try:
+        from core.services.transaction_costs import TransactionCosts as _TC
+        _fill = f"slippage {_TC.SLIPPAGE_PCT}% + min {_TC.MIN_FILL_TICK_OFFSET} tick floor"
+    except Exception:
+        _fill = "n/a"
+
+    def _stats(rows):
+        rows = list(rows or [])
+        n = len(rows)
+        w = sum(1 for r in rows if float(r.get("pnl") or 0) > 0)
+        pnl = round(sum(float(r.get("pnl") or 0) for r in rows), 2)
+        return {"trades": n, "wins": w, "losses": n - w,
+                "win_rate": round(w / n * 100, 2) if n else 0.0,
+                "net_pnl": pnl}
+
+    cutoff = ""
+    try:
+        import datetime as _dt
+        cutoff = (_dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))
+                  - _dt.timedelta(days=int(days or 60))).strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    try:
+        trades = db.fetch_all(
+            "SELECT id, entry_date, exit_status, pnl, trade_mode, broker_order_id, "
+            "entry_price, exit_price FROM paper_trades "
+            "WHERE strategy_id=? AND status='closed' AND COALESCE(entry_date,'')>=? "
+            "ORDER BY id DESC", [int(strat_id), cutoff])
+    except Exception:
+        trades = []
+    paper_rows, live_rows = [], []
+    for t in trades or []:
+        _live = (str(t.get("trade_mode") or "").lower() == "live"
+                 or str(t.get("broker_order_id") or "").strip())
+        (live_rows if _live else paper_rows).append(t)
+    return {
+        "strategy_id": int(strat_id),
+        "strategy_name": row.get("name"),
+        "rules": {
+            "entry_gate": inds,
+            "legs": legs,
+            "entry_time": adv.get("entry_time"),
+            "exit_time": adv.get("exit_time"),
+            "timeframe": adv.get("timeframe") or row.get("timeframe"),
+            "trade_mode": adv.get("trade_mode"),
+            "sl_pct": risk.get("daily_stop_loss_pct"),
+            "tp_pct": risk.get("daily_take_profit_pct"),
+            "sl_rs": risk.get("daily_stop_loss"),
+            "tp_rs": risk.get("daily_take_profit"),
+            "sl_unit": risk.get("sl_unit"),
+            "tp_unit": risk.get("tp_unit"),
+            "max_trades_per_day": risk.get("max_trades_per_day"),
+            "trailing_lock": {"lock_profit_at": adv.get("lock_profit_at"),
+                              "lock_profit": adv.get("lock_profit")},
+            "engine_version": _ev,
+            "fill_model": _fill,
+            "exit_rule": "TP = LEVEL par fill (backtest parity), SL = observed quote (gap-aware)",
+            "stale_quote_guard": True,
+        },
+        "backtest": {"trades": bt.get("trades"), "win_rate": bt.get("win_rate"),
+                     "net_pnl": bt.get("net_pnl"), "stored_at": bt.get("stored_at"),
+                     "run_id": bt.get("run_id"), "stale_engine": bt.get("stale_engine")},
+        "paper": _stats(paper_rows),
+        "live": _stats(live_rows),
+        "window_days": int(days or 60),
+    }
+
+
 @router.get("/{strat_id}/saved-result")
 def strategy_saved_result(strat_id: int):
     """Backtest Detail ka INSTANT path: strategy banate samay wali poori trade

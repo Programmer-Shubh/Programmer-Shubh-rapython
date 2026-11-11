@@ -1342,10 +1342,11 @@
         // Strategy-wise summary section
         let summHtml='';
         if(c.strategy_summary&&c.strategy_summary.length){
-            summHtml='<div class="card mb-3"><div class="card-header bg-light"><strong>Strategy-wise Profit/Loss</strong> <span class="float-end text-muted small">Date-wise trades per saved strategy</span></div><div class="card-body p-2"><table class="table table-sm table-bordered"><thead><tr><th>Strategy</th><th>Trades</th><th>Profit</th><th>Loss</th><th>Win %</th><th>Total P&L</th></tr></thead><tbody>';
+            summHtml='<div class="card mb-3"><div class="card-header bg-light"><strong>Strategy-wise Profit/Loss</strong> <span class="float-end text-muted small">Date-wise trades per saved strategy</span></div><div class="card-body p-2"><table class="table table-sm table-bordered"><thead><tr><th>Strategy</th><th>Trades</th><th>Profit</th><th>Loss</th><th>Win %</th><th>Total P&L</th><th title="Saved backtest (same strategy config) ka win rate - paper ke saath compare karne ke liye">BT Win %</th><th title="Saved backtest ka net PnL">BT P&L</th><th title="Paper vs Backtest ka difference (same rules hone par ye paas hona chahiye)">Paper-BT Δ</th></tr></thead><tbody>';
             c.strategy_summary.forEach(s=>{
                 const pnlCls=s.total_pnl>=0?'text-success':'text-danger';
-                summHtml+=`<tr><td>${s.strategy_name}</td><td>${s.total_trades}</td><td class="text-success">${s.winning_trades}</td><td class="text-danger">${s.losing_trades}</td><td>${s.win_rate}%</td><td class="${pnlCls}">${F(s.total_pnl||0)}</td></tr>`;
+                const _btWr=(s.bt_win_rate!=null)?s.bt_win_rate:null;const _btPnl=(s.bt_net_pnl!=null)?s.bt_net_pnl:null;const _dlt=(_btWr!=null)?Math.round(((s.win_rate||0)-_btWr)*10)/10:null;
+                summHtml+=`<tr><td>${s.strategy_name}</td><td>${s.total_trades}</td><td class="text-success">${s.winning_trades}</td><td class="text-danger">${s.losing_trades}</td><td>${s.win_rate}%</td><td class="${pnlCls}">${F(s.total_pnl||0)}</td><td>${_btWr!=null?(_btWr+'%'):'-'}</td><td class="${(_btPnl!=null&&_btPnl>=0)?'text-success':'text-danger'}">${_btPnl!=null?F(_btPnl):'-'}</td><td class="${(_dlt!=null&&Math.abs(_dlt)<=10)?'text-muted':'text-warning'}">${_dlt!=null?(_dlt>0?'+':'')+_dlt+'%':'-'}</td></tr>`;
             });
             summHtml+='</tbody></table></div></div>';
         }

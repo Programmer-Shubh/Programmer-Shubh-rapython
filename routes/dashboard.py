@@ -442,6 +442,29 @@ def get_trade_history_fast():
             _d["winning"] += 1
         else:
             _d["losing"] += 1
+    # Saved-BT numbers (backtest side) - taaki paper WR ke saath side-by-side
+    # dikhe (backtest vs paper parity check).
+    try:
+        from routes.strategies import _bt_summary as _bts
+        _srows2 = trade_model.db.fetch_all(
+            "SELECT * FROM strategies WHERE user_id=1") or []
+        for _sr in _srows2:
+            _sid2 = int(_sr.get("id") or 0)
+            if not _sid2:
+                continue
+            _bt2 = _bts(_sr) or {}
+            if not _bt2:
+                continue
+            _tgt = _strat_summary.get(_sid2)
+            if _tgt is None:
+                continue
+            _tgt["bt_trades"] = _bt2.get("trades")
+            _tgt["bt_win_rate"] = _bt2.get("win_rate")
+            _tgt["bt_net_pnl"] = _bt2.get("net_pnl")
+            _tgt["bt_stored_at"] = _bt2.get("stored_at")
+            _tgt["bt_stale_engine"] = _bt2.get("stale_engine")
+    except Exception:
+        pass
     for _s in _strat_summary.values():
         _s["total_pnl"] = round(_s["total_pnl"], 2)
         _s["win_rate"] = round(_s["winning_trades"] / _s["total_trades"] * 100, 1) if _s["total_trades"] else 0
