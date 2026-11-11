@@ -1971,7 +1971,7 @@ class BacktestEngine:
                         _td = _prev + _trail_dist
                         if sl_level == 0 or _td < sl_level:
                             sl_level = _td
-        elif trailing and trailing.lower() == "lock" and entry_idx is not None:
+        elif (not _lock_at) and trailing and trailing.lower() == "lock" and entry_idx is not None:
             # Break-even lock once any prior bar closed in profit.
             _prev = self._trailing_best.get(entry_idx)
             if _prev and _prev > 0:

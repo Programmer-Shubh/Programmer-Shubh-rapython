@@ -46,6 +46,78 @@ class TradeModeRequest(BaseModel):
 
 
 
+@router.post("/fix-target-exits")
+def fix_target_exits(user_id: int = 1, dry_run: bool = True):
+    """Historical paper trades ka TARGET-exit correction (11-Nov-2026 bug).
+
+    Paper monitor pehle TP hit par CURRENT QUOTE par exit karta tha, level
+    par nahi - jisse NIFTY CE me 175.02 entry par 249.50 ka "target" exit
+    (+42%) book hota tha jabki TP sirf 7% tha. Is endpoint se:
+      - exit price = TP LEVEL (backtest parity) + exit slippage
+      - exit cost + P&L + P&L% recompute
+      - exit_status = 'target_fixed' (audit trail)
+
+    Returns {scanned, fixed, items:[...]}. Default dry_run=True (preview).
+    """
+    import json as _js
+    from core.models.database import Database
+    from core.models.trade_model import TradeModel
+    from core.services.transaction_costs import TransactionCosts
+    db = Database.get_instance()
+    tm = TradeModel()
+    try:
+        rows = db.fetch_all(
+            "SELECT * FROM paper_trades WHERE user_id=? AND status='closed' "
+            "AND exit_status IN ('target','auto_gap_target')", [user_id])
+    except Exception as e:
+        return {"error": str(e)[:200]}
+    scanned = len(rows or [])
+    fixed, items = 0, []
+    for r in rows or []:
+        try:
+            entry = float(r.get("entry_price") or 0)
+            exitp = float(r.get("exit_price") or 0)
+            if entry <= 0 or exitp <= 0:
+                continue
+            qty = int(r.get("quantity") or 1)
+            lot = int(r.get("lot_size") or 50)
+            units = qty * lot
+            is_buy = str(r.get("transaction_type") or "BUY").upper() == "BUY"
+            sl_level, tp_level = tm._sl_tp_levels(r, entry, qty, lot)
+            if not tp_level or tp_level <= 0:
+                continue
+            # Sirf wahi rows jahan exit LEVEL se aage hai (fake bada profit)
+            beyond = (exitp > tp_level + 0.01) if is_buy else (exitp < tp_level - 0.01)
+            if not beyond:
+                continue
+            closing_side = "SELL" if is_buy else "BUY"
+            new_exit = float(TransactionCosts.apply_fill_slippage(
+                tp_level, closing_side, is_live=True))
+            exit_costs = TransactionCosts.calculate(
+                new_exit * units, is_buy, is_live=True)
+            total_cost = float(r.get("total_cost") or 0)
+            gross = ((new_exit - entry) if is_buy else (entry - new_exit)) * units
+            new_pnl = gross - total_cost - exit_costs["total"]
+            new_pct = (new_pnl / (entry * units) * 100.0) if entry > 0 else 0.0
+            item = {"id": r.get("id"), "symbol": r.get("symbol"),
+                    "old_exit": round(exitp, 2), "new_exit": round(new_exit, 2),
+                    "tp_level": round(float(tp_level), 2),
+                    "old_pnl": round(float(r.get("pnl") or 0), 2),
+                    "new_pnl": round(new_pnl, 2)}
+            if not dry_run:
+                db.execute(
+                    "UPDATE paper_trades SET exit_price=?, exit_cost=?, pnl=?, "
+                    "pnl_percent=?, exit_status='target_fixed', "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    [new_exit, exit_costs["total"], new_pnl, new_pct, r.get("id")])
+            fixed += 1
+            items.append(item)
+        except Exception:
+            continue
+    return {"scanned": scanned, "fixed": fixed, "dry_run": bool(dry_run),
+            "items": items[:200]}
+
+
 @router.get("/open/fast")
 def get_open_trades_fast():
     trade_model = TradeModel()

@@ -165,6 +165,8 @@ def check_stoploss_target(confirm_secs=2):
                 _la = float(_trail_cfg.get("lock_at") or 0)
                 _lp = float(_trail_cfg.get("lock_amt") or 0)
                 _lock_level = _tll(entry, _best_px, is_buy, _la, _lp)
+                # % rule exclusive: agar strategy me lock_profit_at set hai
+                # to wahi chalega (purana "any-profit breakeven lock" nahi).
                 if _lock_level > 0:
                     if is_buy:
                         if _lock_level > sl_level:
