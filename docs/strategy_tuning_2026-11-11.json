@@ -14,13 +14,14 @@
       "11-Nov late-evening: SL 90% revert karke user ke kehne par SL 20% / TP 7% wapas lagaya (user: 'kal tak jaisa profit de rahi thi'). Honest backtest (engine v5 + real fills): 180 trades, 67.22% WR, -Rs35,587 (gap-through SL fills avg loss 2,902). Paper (corrected): 11 trades, 81.8% WR, +Rs1,283 (9W/2L) - sample chhota hai. Saved BT ab 67.2% WR / -Rs35,587 dikhata hai; SL 90% wala config (+Rs15,220 / 73.4% WR) docs me bhi record hai.",
       "PAPER fix ke baad: target exits ab LEVEL par hote hain (pehle current quote par - fake +42% target). Stale broker quote (prev_close par entry) guard bhi add hua. Dono parity RULE-LEVEL par hain; paper WR ka backtest se 100% match isliye abhi bhi data-source (historical vs live) se limited hai - lekin rules/fill-model/exit ab identical hain, aur parity endpoint (id/parity) parity proof deta hai.",
       "11-Nov night: user ne 'net_pnl 65000 se adhik' maanga (1 lot hi rakhna). REALISTIC fills ke saath 1 lot par 65k reachable NAHI hai - TP ladder 3..50 sweep kiya (sweep15): BANKNIFTY max +Rs55,075 (TP50/SL90, 58.7% WR), FINNIFTY +Rs24,359 (TP20, 61.5%), NIFTY Buy +Rs12,884 (TP50, 66.7%), NIFTY Sell +Rs6,851 (TP40, 66.7%). Sabhi 4 strategies ab PnL-max TP par save hain. WR kam hai (59-67%) kyunki bada TP sirf tab hit hota hai jab premium bahut tez move kare. 65k+ ke liye lots badhane padenge (user ne 1 lot ka hi kaha).",
-      "11-Nov late: user ne 'aur achha profit bhi rahe' kaha (high WR + good PnL dono). Fine TP sweep (1..7) + BANKNIFTY quality-gate sweep se har strategy ka best BALANCE config save kiya: #53 BANKNIFTY opp_combo/TP5/exit14:00 -> 87.5% WR +Rs6,954; #56 NIFTY comboA/TP3/exit14:00 -> 92.86% +Rs1,337; #57 FINNIFTY opp_combo/TP3/exit13:45 -> 89.74% +Rs9,378; #68 NIFTY PE sell comboA/TP3/exit14:00 -> 92.86% +Rs1,012. 95% WR realistic fills me abhi bhi nahi mila (max 92.86%)."
+      "11-Nov late: user ne 'aur achha profit bhi rahe' kaha (high WR + good PnL dono). Fine TP sweep (1..7) + BANKNIFTY quality-gate sweep se har strategy ka best BALANCE config save kiya: #53 BANKNIFTY opp_combo/TP5/exit14:00 -> 87.5% WR +Rs6,954; #56 NIFTY comboA/TP3/exit14:00 -> 92.86% +Rs1,337; #57 FINNIFTY opp_combo/TP3/exit13:45 -> 89.74% +Rs9,378; #68 NIFTY PE sell comboA/TP3/exit14:00 -> 92.86% +Rs1,012. 95% WR realistic fills me abhi bhi nahi mila (max 92.86%).",
+      "11-Nov night: user ne 'sabme exit 03:15 PM + WR 95%' maanga. Exit 15:15 par max-WR (positive PnL) configs save kiye: #56 NIFTY TP2 -> 94.44% WR/+Rs234 (sabse zyada WR), #57 FINNIFTY TP2.8 -> 84.31%/+Rs2,679, #68 NIFTY PE sell TP3 -> 83.33%/+Rs246, #53 BANKNIFTY TP3.8 -> 83.72%/+Rs1,731. 95% abhi bhi nahi mila (ceiling ~94.4%). 95% wale TP (1.5-2%) par PnL negative/zero ho jaata hai kyunki round-trip cost har trade ~Rs55-60 hai."
     ]
   },
   "saved_strategies": [
     {
       "strategy_id": 56,
-      "name": "NIFTY Intraday CE Buy - 92.9% WR (Balanced BT)",
+      "name": "NIFTY Intraday CE Buy - 94.4% WR (Exit 15:15)",
       "symbol": "NIFTY",
       "indicators": [
         {
@@ -42,7 +43,7 @@
         "trade_mode": "intraday",
         "timeframe": "5m",
         "entry_time": "09:35",
-        "exit_time": "14:00",
+        "exit_time": "15:15",
         "slippage_pct": 0.5,
         "strike_selection": "atm",
         "otm_distance": 0,
@@ -53,23 +54,23 @@
         "daily_stop_loss": 0,
         "daily_stop_loss_pct": 90,
         "daily_take_profit": 0,
-        "daily_take_profit_pct": 3,
+        "daily_take_profit_pct": 2,
         "max_trades_per_day": -1,
         "signal_lookback_days": 0,
         "sl_unit": "pct"
       },
       "backtest": {
-        "total_trades": 14,
-        "win_rate": 92.86,
-        "net_pnl": 1337.41,
-        "profit_factor": 2.4566,
-        "sharpe": 3.1178
+        "total_trades": 18,
+        "win_rate": 94.44,
+        "net_pnl": 234.21,
+        "profit_factor": 1.2551,
+        "sharpe": 0.6088
       },
-      "why": "High-WR + profit balance (user: 'aur achha profit bhi rahe'). TP 3% / exit 14:00 / SL 90% - WR 92.86%, net Rs1,337, PF 2.4566. 95% WR realistic fills me nahi mila."
+      "why": "Exit 15:15 (user) + max WR jahan PnL positive hai. WR 94.44%, net Rs234, PF 1.2551. 95% realistic fills me nahi mila."
     },
     {
       "strategy_id": 57,
-      "name": "FINNIFTY Intraday CE Buy - 89.7% WR (Balanced BT)",
+      "name": "FINNIFTY Intraday CE Buy - 84.3% WR (Exit 15:15)",
       "symbol": "FINNIFTY",
       "indicators": [
         {
@@ -91,7 +92,7 @@
         "trade_mode": "intraday",
         "timeframe": "5m",
         "entry_time": "09:35",
-        "exit_time": "13:45",
+        "exit_time": "15:15",
         "slippage_pct": 0.5,
         "strike_selection": "atm",
         "otm_distance": 0,
@@ -102,23 +103,23 @@
         "daily_stop_loss": 0,
         "daily_stop_loss_pct": 90,
         "daily_take_profit": 0,
-        "daily_take_profit_pct": 3,
+        "daily_take_profit_pct": 2.8,
         "max_trades_per_day": -1,
         "signal_lookback_days": 0,
         "sl_unit": "pct"
       },
       "backtest": {
-        "total_trades": 39,
-        "win_rate": 89.74,
-        "net_pnl": 9378.24,
-        "profit_factor": 2.7447,
-        "sharpe": 4.4772
+        "total_trades": 50,
+        "win_rate": 84.0,
+        "net_pnl": 2298.31,
+        "profit_factor": 1.1673,
+        "sharpe": 0.8649
       },
-      "why": "High-WR + profit balance (user: 'aur achha profit bhi rahe'). TP 3% / exit 13:45 / SL 90% - WR 89.74%, net Rs9,378, PF 2.7447. 95% WR realistic fills me nahi mila."
+      "why": "Exit 15:15 (user) + max WR jahan PnL positive hai. WR 84.0%, net Rs2,298, PF 1.1673. 95% realistic fills me nahi mila."
     },
     {
       "strategy_id": 68,
-      "name": "NIFTY Option Selling PE - 92.9% WR (Balanced BT)",
+      "name": "NIFTY Option Selling PE - 83.3% WR (Exit 15:15)",
       "symbol": "NIFTY",
       "indicators": [
         {
@@ -140,7 +141,7 @@
         "trade_mode": "intraday",
         "timeframe": "5m",
         "entry_time": "09:35",
-        "exit_time": "14:00",
+        "exit_time": "15:15",
         "slippage_pct": 0.5,
         "strike_selection": "atm",
         "otm_distance": 0,
@@ -157,13 +158,13 @@
         "sl_unit": "pct"
       },
       "backtest": {
-        "total_trades": 14,
-        "win_rate": 92.86,
-        "net_pnl": 1012.23,
-        "profit_factor": 2.2173,
-        "sharpe": 2.6496
+        "total_trades": 18,
+        "win_rate": 83.33,
+        "net_pnl": 246.4,
+        "profit_factor": 1.1481,
+        "sharpe": 0.528
       },
-      "why": "High-WR + profit balance (user: 'aur achha profit bhi rahe'). TP 3% / exit 14:00 / SL 90% - WR 92.86%, net Rs1,012, PF 2.2173. 95% WR realistic fills me nahi mila."
+      "why": "Exit 15:15 (user) + max WR jahan PnL positive hai. WR 83.33%, net Rs246, PF 1.1481. 95% realistic fills me nahi mila."
     }
   ],
   "sweep_evidence": {
