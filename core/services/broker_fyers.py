@@ -484,6 +484,65 @@ class FyersV3:
     async def get_funds(self) -> dict:
         return await self._request("GET", "/api/v3/funds")
 
+    @staticmethod
+    def _pick_fund(data, *keys):
+        """Tolerant fund-field picker (Fyers funds payload shape varies)."""
+        for k in keys:
+            if isinstance(data, dict) and data.get(k) is not None:
+                return data.get(k)
+        return None
+
+    async def get_available_margin(self) -> dict:
+        """Funds + available margin (REAL MONEY pre-flight ke liye).
+
+        Fyers v3 /api/v3/funds ka shape account/segment ke hisaab se badalta
+        hai (dict of fields YA list of {title,value}). Dono parse karta hai.
+        Returns {available_margin, total_balance, ok, raw}.
+        """
+        out = {"available_margin": None, "total_balance": None,
+               "ok": False, "raw": {}}
+        try:
+            res = await self.get_funds()
+        except Exception as e:
+            out["error"] = str(e)[:180]
+            return out
+        out["raw"] = res if isinstance(res, dict) else {}
+        data = (res or {}).get("data") if isinstance(res, dict) else None
+        if data is None:
+            data = res if isinstance(res, dict) else {}
+        # Case 1: dict of numeric fields
+        if isinstance(data, dict):
+            out["available_margin"] = self._pick_fund(
+                data, "avail_margin", "available_margin", "availMargin",
+                "margin_available", "available")
+            out["total_balance"] = self._pick_fund(
+                data, "total_balance", "totalBalance", "balance",
+                "net_balance", "total")
+        # Case 2: list of {title, value}
+        if isinstance(data, list):
+            for item in data:
+                try:
+                    title = str(item.get("title") or item.get("name") or "").lower()
+                    val = item.get("value")
+                    if val is None:
+                        continue
+                    if "margin" in title and "available" in title:
+                        out["available_margin"] = val
+                    elif "available" in title and "margin" not in title:
+                        out["available_margin"] = val
+                    elif "total" in title and ("balance" in title or "value" in title):
+                        out["total_balance"] = val
+                except Exception:
+                    continue
+        for _f in ("available_margin", "total_balance"):
+            try:
+                if out[_f] is not None:
+                    out[_f] = float(out[_f])
+            except Exception:
+                out[_f] = None
+        out["ok"] = out["available_margin"] is not None
+        return out
+
     async def get_profile(self) -> dict:
         """Cheap read-only call used to verify a token for real (readiness
         ping) - a stored token alone does not mean 'connected'."""

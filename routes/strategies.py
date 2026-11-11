@@ -520,6 +520,11 @@ def list_strategies():
             pass
         _apply_expiry_status(r)
         r["live_enabled"] = bool(_live_map.get(int(r.get("id") or 0), False))
+        try:
+            from routes.broker import _live_halt_reason as _hlr
+            r["live_halt_reason"] = _hlr(int(r.get("id") or 0))
+        except Exception:
+            r["live_halt_reason"] = ""
     return {"strategies": rows, "count": len(rows)}
 
 
@@ -909,6 +914,14 @@ def strategy_live_toggle(strat_id: int, req: LiveToggleRequest):
                    [val, key])
     else:
         db.execute("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)", [key, val])
+    # Live ON dabane par margin-halt clear (user ne funds wapas daal diya /
+    # issue solve kar diya - naye signal se live order ja sake).
+    if req.enabled:
+        try:
+            from routes.broker import _clear_live_halt
+            _clear_live_halt(int(strat_id))
+        except Exception:
+            pass
     return {"status": "ok", "id": strat_id, "live_enabled": req.enabled}
 
 

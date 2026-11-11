@@ -295,6 +295,29 @@ def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str)
     return f"NSE:{symbol.upper()}{code}{int(float(strike))}{option_type.upper()}"
 
 
+@router.get("/funds")
+async def broker_funds():
+    """Broker funds + available margin (Fyers). UI me dikhata hai ki live
+    order bhejne layak balance hai ya nahi."""
+    broker = _auto_live_broker() or "fyers"
+    out = {"broker": broker, "available_margin": None, "total_balance": None,
+           "ok": False}
+    try:
+        if broker == "fyers" and _real_token("fyers"):
+            from core.services.broker_fyers import FyersV3
+            cfg = _get_config("fyers") or {}
+            fy = FyersV3(app_id=cfg.get("app_id", ""), secret_key=cfg.get("secret", ""),
+                         redirect_uri=cfg.get("redirect_uri", ""),
+                         access_token=cfg.get("access_token", ""))
+            res = await fy.get_available_margin()
+            out["available_margin"] = res.get("available_margin")
+            out["total_balance"] = res.get("total_balance")
+            out["ok"] = bool(res.get("ok"))
+    except Exception as e:
+        out["error"] = str(e)[:180]
+    return out
+
+
 @router.get("/live-status")
 def live_status():
     real = [b for b in BROKER_ORDER if _real_token(b)]
@@ -1397,6 +1420,150 @@ def _round_tick(px: float, tick: float = 0.05) -> float:
         return 0.0
 
 
+# ---------------------------------------------------------------------------
+# MARGIN GUARD (REAL MONEY): Fyers ne aaj 12 orders "Margin Shortfall:
+# Available INR 0.00" par REJECT kiye - har signal par ek rejected order.
+# Ab: (a) order bhejne se PEHLE available margin check, (b) friendly reason,
+# (c) 3 consecutive margin rejects par us strategy ka LIVE auto-HALT (spam
+# band, user funds deposit karke Live ON dobara kar sakta hai).
+# ---------------------------------------------------------------------------
+_MARGIN_CACHE = {"ts": 0.0, "val": None, "ok": False}
+_MARGIN_TTL = 30.0  # seconds
+
+
+def _margin_halt_key(strat_id: int) -> str:
+    return f"live_margin_halt_{int(strat_id)}"
+
+
+def _margin_fail_key(strat_id: int) -> str:
+    return f"live_margin_fails_{int(strat_id)}"
+
+
+def _setting_get(key: str, default: str = "") -> str:
+    try:
+        from core.models.database import Database
+        row = Database.get_instance().fetch_one(
+            "SELECT setting_value FROM settings WHERE setting_key=?", [key])
+        return str((row or {}).get("setting_value") or default)
+    except Exception:
+        return default
+
+
+def _setting_set(key: str, value: str):
+    try:
+        from core.models.database import Database
+        db = Database.get_instance()
+        row = db.fetch_one("SELECT setting_key FROM settings WHERE setting_key=?", [key])
+        if row:
+            db.execute(
+                "UPDATE settings SET setting_value=?, updated_at=CURRENT_TIMESTAMP WHERE setting_key=?",
+                [value, key])
+        else:
+            db.execute(
+                "INSERT INTO settings (setting_key, setting_value, updated_at) VALUES (?,?,CURRENT_TIMESTAMP)",
+                [key, value])
+    except Exception:
+        pass
+
+
+def _live_halt_reason(strat_id: int) -> str:
+    """Empty string = no halt. Otherwise human-readable reason."""
+    if not strat_id:
+        return ""
+    return _setting_get(_margin_halt_key(int(strat_id)), "").strip()
+
+
+def _clear_live_halt(strat_id: int):
+    if not strat_id:
+        return
+    _setting_set(_margin_halt_key(int(strat_id)), "")
+    _setting_set(_margin_fail_key(int(strat_id)), "0")
+
+
+def _is_margin_rejection(msg: str) -> bool:
+    m = str(msg or "").lower()
+    return ("margin shortfall" in m or "insufficient" in m
+            or "avail:inr 0.00" in m or "avail: inr 0.00" in m
+            or "insufficient funds" in m or "margin blocked" in m
+            or "funds unavailable" in m)
+
+
+def _friendly_margin_error(msg: str) -> str:
+    """Fyers margin-shortfall message ko actionable banao."""
+    need = ""
+    avail = ""
+    raw = str(msg or "")
+    try:
+        import re as _re
+        _m = _re.search(r"shortfall[:\s]*inr\s*([\d,]+)", raw, _re.I)
+        if _m:
+            need = _m.group(1)
+        _m2 = _re.search(r"available[:\s]*inr\s*([\d,.]+)", raw, _re.I)
+        if _m2:
+            avail = _m2.group(1)
+    except Exception:
+        pass
+    parts = ["Fyers margin shortfall - order place nahi hua (broker par koi position nahi)."]
+    if need:
+        parts.append(f"Required margin: INR {need}.")
+    if avail:
+        parts.append(f"Available: INR {avail}.")
+    parts.append("Fyers app/portal me funds deposit karo aur F&O (F&O intraday) segment "
+                 "active karo; phir strategy ka Live ON dobara dabao.")
+    return " ".join(parts)
+
+
+def _note_margin_rejection(strat_id: int, msg: str) -> str:
+    """Margin reject count badhao; 3 consecutive par strategy ka LIVE HALT."""
+    try:
+        sid = int(strat_id or 0)
+    except Exception:
+        sid = 0
+    if not sid:
+        return ""
+    try:
+        n = int(float(_setting_get(_margin_fail_key(sid), "0") or 0)) + 1
+    except Exception:
+        n = 1
+    _setting_set(_margin_fail_key(sid), str(n))
+    reason = _friendly_margin_error(msg)
+    if n >= 3:
+        # Live OFF (fail-safe) + reason persist (UI me dikhega)
+        try:
+            from routes.strategies import _strat_live_key
+            _setting_set(_strat_live_key(sid), "0")
+        except Exception:
+            pass
+        _setting_set(_margin_halt_key(sid), reason)
+        return (reason + " (Live auto-HALT: 3 consecutive margin rejects - "
+                "funds deposit karke Live ON dobara karo.)")
+    return reason + f" (Live auto-HALT par {3 - n} aur reject hote to band ho jayega.)"
+
+
+async def _fyers_available_margin(max_age: float = _MARGIN_TTL):
+    """Fyers available margin (cached) - None = pata nahi chala."""
+    import time as _t
+    try:
+        if (_t.time() - float(_MARGIN_CACHE.get("ts") or 0)) < max_age:
+            return _MARGIN_CACHE.get("val")
+    except Exception:
+        pass
+    val = None
+    try:
+        from core.services.broker_fyers import FyersV3
+        cfg = _get_config("fyers") or {}
+        fy = FyersV3(app_id=cfg.get("app_id", ""), secret_key=cfg.get("secret", ""),
+                     redirect_uri=cfg.get("redirect_uri", ""),
+                     access_token=cfg.get("access_token", ""))
+        res = await fy.get_available_margin()
+        val = res.get("available_margin")
+    except Exception:
+        val = None
+    _MARGIN_CACHE["ts"] = _t.time()
+    _MARGIN_CACHE["val"] = val
+    return val
+
+
 async def _broker_limit_price(symbol: str, opt: str, strike: float, exp_ymd: str, txn: str,
                               buffer_mult: float = 1.0, cross: bool = False):
     """LIMIT price = the SHARED contract LTP (contract_pricer) + SAFE side
@@ -1666,6 +1833,14 @@ async def place_live_order(req: LiveOrderRequest):
                         return {"error": "Is strategy ka Live Trade OFF hai - Trading Center ke saved strategy card par Live ON karo"}
                 except Exception:
                     pass
+            # Live HALT (margin rejects): funds wapas aane tak naye live
+            # orders nahi jayenge (spam + broker risk dono band).
+            if not req.dry_run:
+                _halt = _live_halt_reason(req.strategy_id)
+                if _halt:
+                    return {"error": ("Live HALTED - " + _halt +
+                                      " Funds deposit karke strategy ka Live ON dobara dabao."),
+                            "live_halted": True}
             try:
                 from core.models.database import Database as _DB2
                 from datetime import datetime as _dt2, timedelta as _td2, timezone as _tz2
@@ -1778,6 +1953,20 @@ async def place_live_order(req: LiveOrderRequest):
         exp_ymd = _res.get("expiry_used", "")
         _refs = _res.get("refs", {})
         _tt = str(req.trade_type or "intraday").lower()
+        # ---- PRE-FLIGHT margin check (REAL MONEY, Fyers) ----
+        # Available margin 0 hai to order broker tak bhejna hi nahi - warna
+        # har signal par ek REJECTED order (aaj 12 orders aise hi gaye).
+        if not req.dry_run and broker == "fyers":
+            try:
+                _am = await _fyers_available_margin()
+                if _am is not None and float(_am) <= 0:
+                    return {"error": ("Fyers account me available margin 0 hai - order broker tak "
+                                       "bheja hi nahi (broker par reject hota). Fyers app/portal me "
+                                       "funds deposit karo + F&O segment active karo, phir Live ON "
+                                       "dobara dabao."),
+                            "available_margin": float(_am), "margin_shortfall": True}
+            except Exception:
+                pass
         if broker == "fyers":
             preview = {"broker": "fyers", "symbol": _refs.get("symbol", ""), "underlying": symbol,
                        "strike": strike, "expiry": exp_ymd, "side": txn,
@@ -2010,6 +2199,11 @@ async def place_live_order(req: LiveOrderRequest):
                     if _fy_is_reject(_st):
                         _rsn = str((_row or {}).get("statusMessage") or (_row or {}).get("message")
                                    or (_row or {}).get("remarks") or _st)
+                        if _is_margin_rejection(_rsn):
+                            _merr = _note_margin_rejection(req.strategy_id, _rsn)
+                            return {"error": _merr, "preview": preview,
+                                    "broker_response": _row or {},
+                                    "margin_shortfall": True}
                         return {"error": (f"Fyers order FAILED/REJECTED: {_rsn}. "
                                           f"Open position record NAHI hua (broker verify fail)."),
                                 "preview": preview, "broker_response": _row or {}}
@@ -2043,6 +2237,11 @@ async def place_live_order(req: LiveOrderRequest):
                 if _fy_is_reject(_st):
                     _rsn = str((_row or {}).get("statusMessage") or (_row or {}).get("message")
                                or (_row or {}).get("remarks") or _st)
+                    if _is_margin_rejection(_rsn):
+                        _merr = _note_margin_rejection(req.strategy_id, _rsn)
+                        return {"error": _merr, "preview": preview,
+                                "broker_response": _row or {},
+                                "margin_shortfall": True}
                     return {"error": (f"Fyers order FAILED/REJECTED: {_rsn}. "
                                       f"Open position record NAHI hua (broker verify fail)."),
                             "preview": preview, "broker_response": _row or {}}
