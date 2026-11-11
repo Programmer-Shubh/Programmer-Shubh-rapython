@@ -611,14 +611,53 @@ def _fyers_quote_ltp(symbol, expiry_ymd, contracts):
                 node = quotes.get(fs) or quotes.get(fs.replace("NSE:", "")) or {}
                 if not isinstance(node, dict):
                     continue
+                _lp = 0.0
                 for f in ("lp", "last_price", "lastPrice", "ltp", "LTP"):
                     try:
                         v = float(node.get(f, 0) or 0)
                     except Exception:
                         v = 0
                     if v > 0:
-                        res[key] = v
+                        _lp = v
                         break
+                if _lp <= 0:
+                    continue
+                # ---- STALE-QUOTE GUARD (11-Nov-2026 bug) --------------
+                # Fyers lp "last traded price" hai - thin contract me wo
+                # MINUTE/HOURS purana ho sakta hai (ya pichle din ka close).
+                # Aaj NIFTY 25200 CE: low_price 202.3 tha par app ne entry
+                # 175 par lagai (kabhi trade nahi hua) -> turant "+42% target
+                # profit" fake. Ab: lp aaj ke traded range (low/high) ke
+                # BAHAR ho to stale maankar ignore (next tier par jao);
+                # aur volume 0 + lp == prev_close = "aaj koi trade hi nahi".
+                try:
+                    _lo = float(node.get("low_price", 0) or 0)
+                    _hi = float(node.get("high_price", 0) or 0)
+                    _pc = float(node.get("prev_close_price", 0) or 0)
+                    _vol = float(node.get("volume", 0) or 0)
+                    _atp = float(node.get("atp", 0) or 0)
+                    _stale = False
+                    if _lo > 0 and _lp < _lo - 0.05:
+                        _stale = True
+                    elif _hi > 0 and _lp > _hi + 0.05:
+                        _stale = True
+                    elif _vol <= 0 and _pc > 0 and abs(_lp - _pc) < 0.05:
+                        _stale = True
+                    elif _vol <= 0 and _atp > 0 and abs(_lp - _atp) > 0.05:
+                        _stale = True
+                    if _stale:
+                        # Stale lp = usable price nahi. Agar atp (average
+                        # traded) range ke andar hai to woh use karo, warna
+                        # is contract ko tier se hata do (model/chain par).
+                        _use = 0.0
+                        if _atp > 0 and (_lo <= 0 or _atp >= _lo - 0.05) and (_hi <= 0 or _atp <= _hi + 0.05):
+                            _use = _atp
+                        if _use > 0:
+                            res[key] = _use
+                        continue
+                except Exception:
+                    pass
+                res[key] = _lp
             try:
                 import time as _t3
                 _t3.sleep(0.35)                     # burst protection (Cloudflare 429)
