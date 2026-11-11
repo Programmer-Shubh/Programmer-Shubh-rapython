@@ -12,13 +12,14 @@
       "Paper/live me wahi SL/TP DB values use hote hain; Edit SL/TP se turant change hota hai.",
       "BANKNIFTY #53 bhi 11-Nov ko honest engine par re-backtest hua: SL 20% config loss-making tha (-Rs32,723, 67.91% WR) - 20% SL par gap-through fills. SL 90% (user ka original 'no leg stop-loss' intent) par: 124 trades, 73.39% WR, +Rs15,220, PF 1.15. Saved result ab stale_engine=False.",
       "11-Nov late-evening: SL 90% revert karke user ke kehne par SL 20% / TP 7% wapas lagaya (user: 'kal tak jaisa profit de rahi thi'). Honest backtest (engine v5 + real fills): 180 trades, 67.22% WR, -Rs35,587 (gap-through SL fills avg loss 2,902). Paper (corrected): 11 trades, 81.8% WR, +Rs1,283 (9W/2L) - sample chhota hai. Saved BT ab 67.2% WR / -Rs35,587 dikhata hai; SL 90% wala config (+Rs15,220 / 73.4% WR) docs me bhi record hai.",
-      "PAPER fix ke baad: target exits ab LEVEL par hote hain (pehle current quote par - fake +42% target). Stale broker quote (prev_close par entry) guard bhi add hua. Dono parity RULE-LEVEL par hain; paper WR ka backtest se 100% match isliye abhi bhi data-source (historical vs live) se limited hai - lekin rules/fill-model/exit ab identical hain, aur parity endpoint (id/parity) parity proof deta hai."
+      "PAPER fix ke baad: target exits ab LEVEL par hote hain (pehle current quote par - fake +42% target). Stale broker quote (prev_close par entry) guard bhi add hua. Dono parity RULE-LEVEL par hain; paper WR ka backtest se 100% match isliye abhi bhi data-source (historical vs live) se limited hai - lekin rules/fill-model/exit ab identical hain, aur parity endpoint (id/parity) parity proof deta hai.",
+      "11-Nov night: user ne 'net_pnl 65000 se adhik' maanga (1 lot hi rakhna). REALISTIC fills ke saath 1 lot par 65k reachable NAHI hai - TP ladder 3..50 sweep kiya (sweep15): BANKNIFTY max +Rs55,075 (TP50/SL90, 58.7% WR), FINNIFTY +Rs24,359 (TP20, 61.5%), NIFTY Buy +Rs12,884 (TP50, 66.7%), NIFTY Sell +Rs6,851 (TP40, 66.7%). Sabhi 4 strategies ab PnL-max TP par save hain. WR kam hai (59-67%) kyunki bada TP sirf tab hit hota hai jab premium bahut tez move kare. 65k+ ke liye lots badhane padenge (user ne 1 lot ka hi kaha)."
     ]
   },
   "saved_strategies": [
     {
       "strategy_id": 56,
-      "name": "NIFTY Intraday CE Buy - 92.9% WR (Realistic BT)",
+      "name": "NIFTY Intraday CE Buy - 66.7% WR (PnL-Max BT)",
       "symbol": "NIFTY",
       "indicators": [
         {
@@ -51,26 +52,23 @@
         "daily_stop_loss": 0,
         "daily_stop_loss_pct": 90,
         "daily_take_profit": 0,
-        "daily_take_profit_pct": 3,
+        "daily_take_profit_pct": 50,
         "max_trades_per_day": -1,
         "signal_lookback_days": 0,
         "sl_unit": "pct"
       },
       "backtest": {
-        "run_id": "bt-272092ba271b",
-        "total_trades": 14,
-        "win_rate": 92.86,
-        "net_pnl": 1337.41,
-        "profit_factor": 2.4566,
-        "sharpe": 3.1178,
-        "avg_win": 173.51,
-        "avg_loss": 918.2
+        "total_trades": 12,
+        "win_rate": 66.67,
+        "net_pnl": 12883.8,
+        "profit_factor": 2.4287,
+        "sharpe": 2.4896
       },
-      "why": "Combo A entry (EMA9/21 cross + SuperTrend green + RSI 55-65) = sirf quality intraday entries; 14:00 time exit ne last-hour decay ka loss hata diya."
+      "why": "PnL-max config (user: net_pnl 65k+ chahiye, 1 lot). TP 50% / SL 90% - 1 lot par 65k reachable nahi (max BANKNIFTY ~55k). WR 66.67%."
     },
     {
       "strategy_id": 57,
-      "name": "FINNIFTY Intraday CE Buy - 89.7% WR (Realistic BT)",
+      "name": "FINNIFTY Intraday CE Buy - 61.5% WR (PnL-Max BT)",
       "symbol": "FINNIFTY",
       "indicators": [
         {
@@ -103,26 +101,23 @@
         "daily_stop_loss": 0,
         "daily_stop_loss_pct": 90,
         "daily_take_profit": 0,
-        "daily_take_profit_pct": 3,
+        "daily_take_profit_pct": 20,
         "max_trades_per_day": -1,
         "signal_lookback_days": 0,
         "sl_unit": "pct"
       },
       "backtest": {
-        "run_id": "bt-3676b8035d7d",
-        "total_trades": 39,
-        "win_rate": 89.74,
-        "net_pnl": 9378.24,
-        "profit_factor": 2.7447,
-        "sharpe": 4.4772,
-        "avg_win": 421.53,
-        "avg_loss": 1343.79
+        "total_trades": 26,
+        "win_rate": 61.54,
+        "net_pnl": 24359.49,
+        "profit_factor": 2.0563,
+        "sharpe": 3.2468
       },
-      "why": "Opportunity Combo gate (SuperTrend+MACD+EMA+Volume) par trade count zyada (39) aur profit sabse zyada; CE-buy ke liye comboA se kaam nahi tha."
+      "why": "PnL-max config (user: net_pnl 65k+ chahiye, 1 lot). TP 20% / SL 90% - 1 lot par 65k reachable nahi (max BANKNIFTY ~55k). WR 61.54%."
     },
     {
       "strategy_id": 68,
-      "name": "NIFTY Option Selling PE - 92.9% WR (Realistic BT)",
+      "name": "NIFTY Option Selling PE - 66.7% WR (PnL-Max BT)",
       "symbol": "NIFTY",
       "indicators": [
         {
@@ -155,22 +150,19 @@
         "daily_stop_loss": 0,
         "daily_stop_loss_pct": 90,
         "daily_take_profit": 0,
-        "daily_take_profit_pct": 3,
+        "daily_take_profit_pct": 40,
         "max_trades_per_day": -1,
         "signal_lookback_days": 0,
         "sl_unit": "pct"
       },
       "backtest": {
-        "run_id": "bt-05bc006b6148",
-        "total_trades": 14,
-        "win_rate": 92.86,
-        "net_pnl": 1012.23,
-        "profit_factor": 2.2173,
-        "sharpe": 2.6496,
-        "avg_win": 141.83,
-        "avg_loss": 831.53
+        "total_trades": 12,
+        "win_rate": 66.67,
+        "net_pnl": 6850.77,
+        "profit_factor": 1.7278,
+        "sharpe": 1.6797
       },
-      "why": "Option selling me CE sell ke loss tails bahut bade the (avg_loss 4799); PE (put) selling + bearish Combo A gate + 3% TP ne same WR me profitable banaya (avg_loss 831)."
+      "why": "PnL-max config (user: net_pnl 65k+ chahiye, 1 lot). TP 40% / SL 90% - 1 lot par 65k reachable nahi (max BANKNIFTY ~55k). WR 66.67%."
     }
   ],
   "sweep_evidence": {
