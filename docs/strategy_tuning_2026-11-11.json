@@ -9,7 +9,8 @@
       "Win rate 95% + positive profit dono saath is data par nahi mila - 95% wale configs ka PnL negative tha (PF < 1). Ye profitable configs hain, fake 95% nahi.",
       "Loss side ka asli source: (a) 15:15 tak hold karne par last-hour theta decay, (b) gap-through SL fills. Isliye quality entry gate + early time exit + wide (90% = practical wipe-out) SL.",
       "SL 90% ka matlab: premium ka 90% ghata tabhi cut - intraday me rare. No-SL vs SL 90% backtest numbers identical aaye.",
-      "Paper/live me wahi SL/TP DB values use hote hain; Edit SL/TP se turant change hota hai."
+      "Paper/live me wahi SL/TP DB values use hote hain; Edit SL/TP se turant change hota hai.",
+      "BANKNIFTY #53 bhi 11-Nov ko honest engine par re-backtest hua: SL 20% config loss-making tha (-Rs32,723, 67.91% WR) - 20% SL par gap-through fills. SL 90% (user ka original 'no leg stop-loss' intent) par: 124 trades, 73.39% WR, +Rs15,220, PF 1.15. Saved result ab stale_engine=False."
     ]
   },
   "saved_strategies": [
@@ -17,33 +18,156 @@
       "strategy_id": 56,
       "name": "NIFTY Intraday CE Buy - 92.9% WR (Realistic BT)",
       "symbol": "NIFTY",
-      "indicators": [{"id": "comboA_ema_st_rsi"}],
-      "legs": [{"option_type": "CE", "transaction": "buy", "lots": 1, "strike_selection": "atm", "otm_distance": 0, "expiry": "weekly", "stop_loss": "90%"}],
-      "advanced_options": {"trade_mode": "intraday", "timeframe": "5m", "entry_time": "09:35", "exit_time": "14:00", "slippage_pct": 0.5, "strike_selection": "atm", "otm_distance": 0, "max_holding_bars": 1000000, "auto_exit_on_time": true},
-      "risk_management": {"daily_stop_loss": 0, "daily_stop_loss_pct": 90, "daily_take_profit": 0, "daily_take_profit_pct": 3, "max_trades_per_day": -1, "signal_lookback_days": 0, "sl_unit": "pct"},
-      "backtest": {"run_id": "bt-272092ba271b", "total_trades": 14, "win_rate": 92.86, "net_pnl": 1337.41, "profit_factor": 2.4566, "sharpe": 3.1178, "avg_win": 173.51, "avg_loss": 918.2},
+      "indicators": [
+        {
+          "id": "comboA_ema_st_rsi"
+        }
+      ],
+      "legs": [
+        {
+          "option_type": "CE",
+          "transaction": "buy",
+          "lots": 1,
+          "strike_selection": "atm",
+          "otm_distance": 0,
+          "expiry": "weekly",
+          "stop_loss": "90%"
+        }
+      ],
+      "advanced_options": {
+        "trade_mode": "intraday",
+        "timeframe": "5m",
+        "entry_time": "09:35",
+        "exit_time": "14:00",
+        "slippage_pct": 0.5,
+        "strike_selection": "atm",
+        "otm_distance": 0,
+        "max_holding_bars": 1000000,
+        "auto_exit_on_time": true
+      },
+      "risk_management": {
+        "daily_stop_loss": 0,
+        "daily_stop_loss_pct": 90,
+        "daily_take_profit": 0,
+        "daily_take_profit_pct": 3,
+        "max_trades_per_day": -1,
+        "signal_lookback_days": 0,
+        "sl_unit": "pct"
+      },
+      "backtest": {
+        "run_id": "bt-272092ba271b",
+        "total_trades": 14,
+        "win_rate": 92.86,
+        "net_pnl": 1337.41,
+        "profit_factor": 2.4566,
+        "sharpe": 3.1178,
+        "avg_win": 173.51,
+        "avg_loss": 918.2
+      },
       "why": "Combo A entry (EMA9/21 cross + SuperTrend green + RSI 55-65) = sirf quality intraday entries; 14:00 time exit ne last-hour decay ka loss hata diya."
     },
     {
       "strategy_id": 57,
       "name": "FINNIFTY Intraday CE Buy - 89.7% WR (Realistic BT)",
       "symbol": "FINNIFTY",
-      "indicators": [{"id": "opp_combo"}],
-      "legs": [{"option_type": "CE", "transaction": "buy", "lots": 1, "strike_selection": "atm", "otm_distance": 0, "expiry": "weekly", "stop_loss": "90%"}],
-      "advanced_options": {"trade_mode": "intraday", "timeframe": "5m", "entry_time": "09:35", "exit_time": "13:45", "slippage_pct": 0.5, "strike_selection": "atm", "otm_distance": 0, "max_holding_bars": 1000000, "auto_exit_on_time": true},
-      "risk_management": {"daily_stop_loss": 0, "daily_stop_loss_pct": 90, "daily_take_profit": 0, "daily_take_profit_pct": 3, "max_trades_per_day": -1, "signal_lookback_days": 0, "sl_unit": "pct"},
-      "backtest": {"run_id": "bt-3676b8035d7d", "total_trades": 39, "win_rate": 89.74, "net_pnl": 9378.24, "profit_factor": 2.7447, "sharpe": 4.4772, "avg_win": 421.53, "avg_loss": 1343.79},
+      "indicators": [
+        {
+          "id": "opp_combo"
+        }
+      ],
+      "legs": [
+        {
+          "option_type": "CE",
+          "transaction": "buy",
+          "lots": 1,
+          "strike_selection": "atm",
+          "otm_distance": 0,
+          "expiry": "weekly",
+          "stop_loss": "90%"
+        }
+      ],
+      "advanced_options": {
+        "trade_mode": "intraday",
+        "timeframe": "5m",
+        "entry_time": "09:35",
+        "exit_time": "13:45",
+        "slippage_pct": 0.5,
+        "strike_selection": "atm",
+        "otm_distance": 0,
+        "max_holding_bars": 1000000,
+        "auto_exit_on_time": true
+      },
+      "risk_management": {
+        "daily_stop_loss": 0,
+        "daily_stop_loss_pct": 90,
+        "daily_take_profit": 0,
+        "daily_take_profit_pct": 3,
+        "max_trades_per_day": -1,
+        "signal_lookback_days": 0,
+        "sl_unit": "pct"
+      },
+      "backtest": {
+        "run_id": "bt-3676b8035d7d",
+        "total_trades": 39,
+        "win_rate": 89.74,
+        "net_pnl": 9378.24,
+        "profit_factor": 2.7447,
+        "sharpe": 4.4772,
+        "avg_win": 421.53,
+        "avg_loss": 1343.79
+      },
       "why": "Opportunity Combo gate (SuperTrend+MACD+EMA+Volume) par trade count zyada (39) aur profit sabse zyada; CE-buy ke liye comboA se kaam nahi tha."
     },
     {
       "strategy_id": 68,
       "name": "NIFTY Option Selling PE - 92.9% WR (Realistic BT)",
       "symbol": "NIFTY",
-      "indicators": [{"id": "comboA_ema_st_rsi"}],
-      "legs": [{"option_type": "PE", "transaction": "sell", "lots": 1, "strike_selection": "atm", "otm_distance": 0, "expiry": "weekly", "stop_loss": "90%"}],
-      "advanced_options": {"trade_mode": "intraday", "timeframe": "5m", "entry_time": "09:35", "exit_time": "14:00", "slippage_pct": 0.5, "strike_selection": "atm", "otm_distance": 0, "max_holding_bars": 1000000, "auto_exit_on_time": true},
-      "risk_management": {"daily_stop_loss": 0, "daily_stop_loss_pct": 90, "daily_take_profit": 0, "daily_take_profit_pct": 3, "max_trades_per_day": -1, "signal_lookback_days": 0, "sl_unit": "pct"},
-      "backtest": {"run_id": "bt-05bc006b6148", "total_trades": 14, "win_rate": 92.86, "net_pnl": 1012.23, "profit_factor": 2.2173, "sharpe": 2.6496, "avg_win": 141.83, "avg_loss": 831.53},
+      "indicators": [
+        {
+          "id": "comboA_ema_st_rsi"
+        }
+      ],
+      "legs": [
+        {
+          "option_type": "PE",
+          "transaction": "sell",
+          "lots": 1,
+          "strike_selection": "atm",
+          "otm_distance": 0,
+          "expiry": "weekly",
+          "stop_loss": "90%"
+        }
+      ],
+      "advanced_options": {
+        "trade_mode": "intraday",
+        "timeframe": "5m",
+        "entry_time": "09:35",
+        "exit_time": "14:00",
+        "slippage_pct": 0.5,
+        "strike_selection": "atm",
+        "otm_distance": 0,
+        "max_holding_bars": 1000000,
+        "auto_exit_on_time": true
+      },
+      "risk_management": {
+        "daily_stop_loss": 0,
+        "daily_stop_loss_pct": 90,
+        "daily_take_profit": 0,
+        "daily_take_profit_pct": 3,
+        "max_trades_per_day": -1,
+        "signal_lookback_days": 0,
+        "sl_unit": "pct"
+      },
+      "backtest": {
+        "run_id": "bt-05bc006b6148",
+        "total_trades": 14,
+        "win_rate": 92.86,
+        "net_pnl": 1012.23,
+        "profit_factor": 2.2173,
+        "sharpe": 2.6496,
+        "avg_win": 141.83,
+        "avg_loss": 831.53
+      },
       "why": "Option selling me CE sell ke loss tails bahut bade the (avg_loss 4799); PE (put) selling + bearish Combo A gate + 3% TP ne same WR me profitable banaya (avg_loss 831)."
     }
   ],
@@ -56,5 +180,13 @@
       "NIFTY CE sell (option selling) har config me negative tha; sirf PE sell profitable nikla.",
       "SL 20% + gap fills = avg_loss 1700-5000 (catastrophic); SL 90% (wipe-out) + early exit = avg_loss 800-1700."
     ]
+  },
+  "parity_fixes_2026-11-11": {
+    "paper_tp_exit_at_level": "Paper monitor TP hit par LEVEL par exit karta hai (pehle current quote par - fake +42% target profit). Backtest parity.",
+    "stale_quote_guard": "Fyers lp aaj ke traded range (low/high) ke bahar ho to stale maankar reject (pehle stale prev_close par entry lag rahi thi - aaj kabhi trade nahi hua premium).",
+    "soft_spike_guard": "Paper monitor 10s scan me 0.6x/1.6x se bada quote jump skip karta hai.",
+    "trailing_lock": "lock_profit_at/lock_profit (UI ke 'Lock if profit reaches' / 'Lock profit') pehle engine me IGNORE hote the - ab backtest + paper dono me kaam karte hain (shared utils.helpers.trailing_lock_level).",
+    "parity_endpoint": "GET /api/strategies/{id}/parity - backtest vs paper vs live side-by-side (rules echo + trades/WR/PnL each).",
+    "dashboard_bt_columns": "Strategy-wise summary table me BT Win %, BT P&L aur Paper-BT delta columns."
   }
 }
