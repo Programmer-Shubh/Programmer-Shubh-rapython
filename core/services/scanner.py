@@ -25,7 +25,7 @@ def _fresh_prev_close(db, symbol: str, spot: float = 0) -> float:
 
     Pehle Top 5 live spot + DB ka SABSE PURANA close mix kar deta tha ->
     FINNIFTY +13.98%, SENSEX +12% jaise fake numbers. Ab stale row
-    (>10 din purana), aaj ka khud ka row, aur >15% mismatch reject -> 0.
+    (>2 trading din purana), aaj ka khud ka row, aur >15% mismatch reject -> 0.
     """
     try:
         rows = db.fetch_all(
@@ -49,16 +49,26 @@ def _fresh_prev_close(db, symbol: str, spot: float = 0) -> float:
                     continue
             return None
 
+        def _biz_days(d1, d2):
+            if d1 > d2:
+                d1, d2 = d2, d1
+            n, d = 0, d1
+            while d < d2:
+                d += _dt.timedelta(days=1)
+                if d.weekday() < 5:
+                    n += 1
+            return n
+
         today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
         latest_d = _d(rows[0].get("trade_date"))
         if latest_d is not None and latest_d >= today:
             row = rows[1] if len(rows) > 1 else None
             d = _d(row.get("trade_date")) if row else None
-            if row is None or d is None or (today - d).days > 10:
+            if row is None or d is None or _biz_days(d, today) > 2:
                 return 0
         else:
             row = rows[0]
-            if latest_d is None or (today - latest_d).days > 10:
+            if latest_d is None or _biz_days(latest_d, today) > 2:
                 return 0
         prev = float(row.get("close_price") or 0)
         if prev <= 0:
@@ -2292,23 +2302,11 @@ class OptionScanner:
                 except Exception:
                     live_chg = None
                 if spot <= 0:
-                    # Parallel already tried live NSE (4-10s); don't retry per-symbol live -> use DB fast only
-                    try:
-                        row2 = self.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [sym])
-                        if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
-                            spot = float(row2["close_price"])
-                    except Exception:
-                        pass
-                if spot <= 0:
-                    hist = self._get_historical(sym)
-                    if hist and len(hist) > 0:
-                        spot = float(hist[-1].get('close_price', 0))
-                        if spot <= 0:
-                            spot = float(hist[-1].get('close', 0) or 0)
-                if spot <= 0:
+                    # LIVE quote hi nahi mila -> symbol skip. Stale DB close ko
+                    # "today's spot" bana kar 0.00% movers dikhana fake tha.
                     continue
                 # % change: 1) live quote ka apna change (authoritative)
-                #           2) fresh DB prev close (max 10 din purana)
+                #           2) fresh DB prev close (max 2 trading din purana)
                 # Kuch bhi na mile -> symbol skip (fake 2.5%/1.2% NAHI).
                 change_pct = None
                 prev = 0.0
@@ -2324,6 +2322,9 @@ class OptionScanner:
                         change_pct = live_chg
                         prev = spot / (1 + live_chg / 100.0) if live_chg else spot
                 if change_pct is None or prev <= 0:
+                    continue
+                # 0.00% / flat symbol "Top 5 mover" nahi hota - skip
+                if abs(change_pct) < 0.05:
                     continue
                 # Sanity cap: index 10%, stock 20% - isse zyada = data error
                 cap = 10.0 if sym in _INDEX_FNO else 20.0

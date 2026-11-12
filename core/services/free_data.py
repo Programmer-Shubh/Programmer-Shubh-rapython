@@ -161,7 +161,7 @@ def _db_prev_close(symbol: str, spot: float = 0) -> float:
     cloud par kai din/weeks purana ho sakta hai -> fake % change (FINNIFTY
     +13.98%, SENSEX +12% dikh raha tha jab asli move ~5% tha). Ab:
       * latest row aaj ka hai -> usse pehle wala row = prev close
-      * latest row > 10 din purana -> 0 (stale; fake change se better no change)
+      * prev row max 2 trading din purana ho (warna 0)
       * prev vs live spot me > 15% gap -> 0 (corporate action / bad row)
     """
     try:
@@ -189,18 +189,29 @@ def _db_prev_close(symbol: str, spot: float = 0) -> float:
                     continue
             return None
 
+        def _biz_days(d1, d2):
+            """Trading-day distance (weekends skip) - holiday clusters bhi handle."""
+            if d1 > d2:
+                d1, d2 = d2, d1
+            n, d = 0, d1
+            while d < d2:
+                d += _dt.timedelta(days=1)
+                if d.weekday() < 5:
+                    n += 1
+            return n
+
         _today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
         latest_d = _as_date(rows[0].get("trade_date"))
         if latest_d is not None and latest_d >= _today:
             # Aaj ka row DB me hai -> prev session = next row down
             prev_row = rows[1] if len(rows) > 1 else None
             prev_d = _as_date(prev_row.get("trade_date")) if prev_row else None
-            if prev_row is None or prev_d is None or (_today - prev_d).days > 10:
+            if prev_row is None or prev_d is None or _biz_days(prev_d, _today) > 2:
                 return 0
         else:
             # Latest row hi prev session hai - lekin sirf tab jab fresh ho
             prev_row = rows[0]
-            if latest_d is None or (_today - latest_d).days > 10:
+            if latest_d is None or _biz_days(latest_d, _today) > 2:
                 return 0
         if not prev_row.get("close_price"):
             return 0
