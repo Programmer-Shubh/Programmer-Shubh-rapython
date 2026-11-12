@@ -154,19 +154,65 @@ def _yahoo_session():
         return None
 
 
-def _db_prev_close(symbol: str) -> float:
-    """Previous DB close for change% calc (free, local)."""
+def _db_prev_close(symbol: str, spot: float = 0) -> float:
+    """PREVIOUS-SESSION DB close for change% calc (free, local).
+
+    BUG FIX (12-Nov-2026): pehle ye "latest DB close" return karta tha, jo
+    cloud par kai din/weeks purana ho sakta hai -> fake % change (FINNIFTY
+    +13.98%, SENSEX +12% dikh raha tha jab asli move ~5% tha). Ab:
+      * latest row aaj ka hai -> usse pehle wala row = prev close
+      * latest row > 10 din purana -> 0 (stale; fake change se better no change)
+      * prev vs live spot me > 15% gap -> 0 (corporate action / bad row)
+    """
     try:
         from core.models.database import Database
         rows = Database.get_instance().fetch_all(
-            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 2",
+            "SELECT close_price, trade_date FROM bhavcopy_data "
+            "WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 5",
             [symbol.upper()],
         )
-        if rows and len(rows) >= 1 and rows[0]["close_price"]:
-            return float(rows[0]["close_price"])
     except Exception:
-        pass
-    return 0
+        return 0
+    if not rows:
+        return 0
+    try:
+        import datetime as _dt
+
+        def _as_date(v):
+            if v is None:
+                return None
+            s = str(v)[:10]
+            for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"):
+                try:
+                    return _dt.datetime.strptime(s, fmt).date()
+                except ValueError:
+                    continue
+            return None
+
+        _today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
+        latest_d = _as_date(rows[0].get("trade_date"))
+        if latest_d is not None and latest_d >= _today:
+            # Aaj ka row DB me hai -> prev session = next row down
+            prev_row = rows[1] if len(rows) > 1 else None
+            prev_d = _as_date(prev_row.get("trade_date")) if prev_row else None
+            if prev_row is None or prev_d is None or (_today - prev_d).days > 10:
+                return 0
+        else:
+            # Latest row hi prev session hai - lekin sirf tab jab fresh ho
+            prev_row = rows[0]
+            if latest_d is None or (_today - latest_d).days > 10:
+                return 0
+        if not prev_row.get("close_price"):
+            return 0
+        prev = float(prev_row["close_price"])
+        if prev <= 0:
+            return 0
+        if spot and float(spot) > 0:
+            if abs(float(spot) - prev) / prev * 100 > 15:
+                return 0
+        return prev
+    except Exception:
+        return 0
 
 
 def _yahoo_fallback_quote(symbol: str, timeout: float = 5) -> dict:
@@ -295,6 +341,23 @@ def fetch_cloud_spot(symbol: str) -> dict:
                     if _px > 0:
                         spot, source = _px, "fyers"
                         break
+                # Real day change from the SAME quote (chp = % change vs prev
+                # close). Pehle yahan change set nahi hota tha -> neeche DB ka
+                # stale prev close use ho kar fake % (+13.98% FINNIFTY) aata tha.
+                if spot > 0:
+                    try:
+                        _chp = _node.get("chp")
+                        if _chp is not None:
+                            chg = round(float(_chp), 2)
+                    except Exception:
+                        chg = 0.0
+                    if not chg:
+                        try:
+                            _pc = float(_node.get("prev_close_price", 0) or 0)
+                            if _pc > 0:
+                                chg = round((spot - _pc) / _pc * 100, 2)
+                        except Exception:
+                            pass
     except Exception:
         pass
     # 1) NSE direct (free, most accurate; blocked from some cloud IPs)
@@ -356,7 +419,7 @@ def fetch_cloud_spot(symbol: str) -> dict:
     if spot <= 0:
         return {}
     if not chg:
-        prev = _db_prev_close(symbol)
+        prev = _db_prev_close(symbol, spot)
         chg = round((spot - prev) / prev * 100, 2) if prev > 0 else 0.0
     return {"spot": spot, "change": chg, "high": spot, "low": spot, "source": source or "live"}
 

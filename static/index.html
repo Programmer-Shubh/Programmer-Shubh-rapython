@@ -981,7 +981,7 @@
                             if(d&&d.spot){
                                 const prev=mwLast[s];
                                 if(d.source==='db'&&prev&&prev.source!=='db'&&(Date.now()-(prev.ts||0))<30000) return;
-                                mwLast[s]={spot:d.spot,formatted:d.formatted,source:d.source,ts:Date.now()};mwPriceCache[s]=mwLast[s];
+                                mwLast[s]={spot:d.spot,formatted:d.formatted,change:Number(d.change)||0,source:d.source,ts:Date.now()};mwPriceCache[s]=mwLast[s];
                             }
                         });
                         try{localStorage.setItem('mwPriceCache',JSON.stringify(mwPriceCache));}catch(e){}
@@ -1015,7 +1015,7 @@
                             // live price already pushed by the WebSocket.
                             const prev=mwLast[s];
                             if(d.source==='db'&&prev&&prev.source!=='db'&&(Date.now()-(prev.ts||0))<30000) return;
-                            found[s]=d;mwLast[s]={spot:d.spot,formatted:d.formatted,source:d.source,ts:Date.now()};mwPriceCache[s]=mwLast[s];
+                            found[s]=d;mwLast[s]={spot:d.spot,formatted:d.formatted,change:Number(d.change)||0,source:d.source,ts:Date.now()};mwPriceCache[s]=mwLast[s];
                         }
                     });
                     if(Array.isArray(r.symbols)&&r.symbols.length){mwSymbols=r.symbols;try{localStorage.setItem('mwSymbols',JSON.stringify(mwSymbols));}catch(e){}}
@@ -1059,15 +1059,22 @@
     function mwRender(found={}){
         const el=document.getElementById('mw-list');if(!el)return;
         if(!mwSymbols.length){el.innerHTML='<div class="text-muted small p-2">कोई स्टॉक नहीं जोड़ा गया।</div>';return;}
-        let h='<table class="table table-sm mb-0"><thead><tr><th style="width:40%">सिंबल</th><th style="width:30%">लाइव प्राइस</th><th style="width:15%">स्रोत</th><th style="width:15%">कार्रवाई</th></tr></thead><tbody>';
+        let h='<table class="table table-sm mb-0"><thead><tr><th style="width:34%">सिंबल</th><th style="width:36%">लाइव प्राइस</th><th style="width:15%">स्रोत</th><th style="width:15%">कार्रवाई</th></tr></thead><tbody>';
         mwSymbols.forEach(s=>{
             const d=found[s]||{};
             const _cached = mwPriceCache[s];
-            const spot = d.spot || (_cached?_cached.spot:0) || 0;
+            const spot = Number(d.spot || (_cached?_cached.spot:0) || 0);
             const src = d.source || (_cached?_cached.source:'—') || '—';
             const isCached = !d.spot && !!_cached;
-            const cls = spot>0?'price-up':'text-muted';
-            h+=`<tr><td><strong>${s}</strong></td><td class="${cls}">${spot>0?(d.formatted||('₹'+spot.toFixed(2)))+(isCached?' <small class="text-muted">(cached)</small>':''):'—'}</td><td class="text-muted small">${src}</td><td><button class="btn btn-sm btn-danger" onclick="mwRemove('${s}')">× हटाएं</button></td></tr>`;
+            // % change: fresh server dict -> cached value -> 0. Isi se colour + arrow.
+            let chg = (d.spot && d.change!==undefined && d.change!==null) ? Number(d.change) : (_cached?Number(_cached.change):0);
+            if(!isFinite(chg)) chg = 0;
+            const up = chg > 0.005, down = chg < -0.005;
+            const cls = spot>0 ? (up?'price-up':down?'price-down':'text-muted') : 'text-muted';
+            const arrow = spot>0 ? (up?'▲':down?'▼':'') : '';
+            const chgTxt = spot>0 ? `${chg>0?'+':''}${chg.toFixed(2)}%` : '';
+            const price = spot>0 ? (d.formatted || ('₹'+spot.toLocaleString('en-IN',{minimumFractionDigits:2}))) : '—';
+            h+=`<tr><td><strong>${s}</strong></td><td class="${cls}">${spot>0?`<span>${arrow} ${price}</span> <small style="opacity:.85">${chgTxt}</small>`:'—'}${isCached?' <small class="text-muted">(cached)</small>':''}</td><td class="text-muted small">${src}</td><td><button class="btn btn-sm btn-danger" onclick="mwRemove('${s}')">× हटाएं</button></td></tr>`;
         });
         h+='</tbody></table>';
         el.innerHTML=h;

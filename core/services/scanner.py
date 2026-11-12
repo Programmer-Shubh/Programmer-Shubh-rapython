@@ -16,6 +16,59 @@ FNO_SYMBOLS = [
     "UPL", "HEROMOTOCO", "TITAN"
 ]
 
+# Indices ke liye % change cap 10%, stocks ke liye 20% (isse zyada = bad data)
+_INDEX_FNO = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+
+
+def _fresh_prev_close(db, symbol: str, spot: float = 0) -> float:
+    """DB previous-session close with freshness guard (12-Nov-2026 fake-% fix).
+
+    Pehle Top 5 live spot + DB ka SABSE PURANA close mix kar deta tha ->
+    FINNIFTY +13.98%, SENSEX +12% jaise fake numbers. Ab stale row
+    (>10 din purana), aaj ka khud ka row, aur >15% mismatch reject -> 0.
+    """
+    try:
+        rows = db.fetch_all(
+            "SELECT close_price, trade_date FROM bhavcopy_data "
+            "WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 5",
+            [symbol],
+        )
+    except Exception:
+        return 0
+    if not rows:
+        return 0
+    try:
+        import datetime as _dt
+
+        def _d(v):
+            s = str(v)[:10] if v is not None else ""
+            for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"):
+                try:
+                    return _dt.datetime.strptime(s, fmt).date()
+                except ValueError:
+                    continue
+            return None
+
+        today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
+        latest_d = _d(rows[0].get("trade_date"))
+        if latest_d is not None and latest_d >= today:
+            row = rows[1] if len(rows) > 1 else None
+            d = _d(row.get("trade_date")) if row else None
+            if row is None or d is None or (today - d).days > 10:
+                return 0
+        else:
+            row = rows[0]
+            if latest_d is None or (today - latest_d).days > 10:
+                return 0
+        prev = float(row.get("close_price") or 0)
+        if prev <= 0:
+            return 0
+        if spot and float(spot) > 0 and abs(float(spot) - prev) / prev * 100 > 15:
+            return 0
+        return prev
+    except Exception:
+        return 0
+
 
 class OptionScanner:
     # Price Action best settings (daily bars): 20-bar breakout lookback,
@@ -132,7 +185,7 @@ class OptionScanner:
                         chg = float(q.get("change") or 0)
                         if not chg:
                             try:
-                                prev = _db_prev_close(sym)
+                                prev = _db_prev_close(sym, spot)
                                 chg = round((spot - prev) / prev * 100, 2) if prev > 0 else 0.0
                             except Exception:
                                 chg = 0.0
@@ -2201,44 +2254,52 @@ class OptionScanner:
 
     def get_fno_top5_today(self, top_n: int = 5) -> dict:
         """Today's NSE F&O Top 5 Bullish / Bearish based on % change (today spot vs prev close).
-        Uses LiveMarketData for today's spot + DB for prev close. Falls back to DB-only if live blocked."""
+        % change sirf LIVE quote ke apne change se ya FRESH DB prev close se aata hai.
+        Koi synthetic/fallback % nahi (12-Nov-2026 fix)."""
         fno_symbols = FNO_SYMBOLS
         movers = []
         # Live realtime: _LIVE_CACHE first (instant), then parallel NSE/Stooq/Google fetch (Yahoo removed).
         # 8s budget so frontend never times out on "Failed to load F&O Top 5".
+        # NOTE: poora dict (spot + change) rakhte hain - sirf spot rakhne se
+        # change ke liye stale DB prev close use hota tha -> fake %.
         live_map = {}
         try:
             from core.services.live_market_data import _LIVE_CACHE, LiveMarketData
             import time as _tm
             for sym in fno_symbols:
                 if sym in _LIVE_CACHE and _tm.time() - _LIVE_CACHE[sym]["ts"] < 300:
-                    v = _LIVE_CACHE[sym]["data"].get("spot", 0)
+                    _cd = _LIVE_CACHE[sym]["data"] or {}
+                    v = _cd.get("spot", 0)
                     if v and float(v) > 0:
-                        live_map[sym] = float(v)
+                        live_map[sym] = {"spot": float(v), "change": _cd.get("change")}
             missing = [s for s in fno_symbols if s not in live_map]
             if missing:
                 try:
                     batch = LiveMarketData().get_live_spots_parallel(missing[:20], max_workers=8)
                     for sym, d in (batch or {}).items():
                         if d and float(d.get("spot") or 0) > 0:
-                            live_map[sym] = float(d["spot"])
+                            live_map[sym] = {"spot": float(d["spot"]), "change": d.get("change")}
                 except Exception:
                     pass
         except Exception:
             pass
         for sym in fno_symbols:
             try:
-                spot = live_map.get(sym)
-                if spot is None or spot <= 0:
-                    # Parallel already tried live NSE (4-10s); don't retry per-symbol live -> use DB/synthetic fast only
-                    spot = 0
+                d = live_map.get(sym) or {}
+                spot = float(d.get("spot") or 0)
+                try:
+                    live_chg = float(d.get("change")) if d.get("change") is not None else None
+                except Exception:
+                    live_chg = None
+                if spot <= 0:
+                    # Parallel already tried live NSE (4-10s); don't retry per-symbol live -> use DB fast only
                     try:
                         row2 = self.db.fetch_one("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 1", [sym])
                         if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
                             spot = float(row2["close_price"])
                     except Exception:
                         pass
-                if spot is None or spot <= 0:
+                if spot <= 0:
                     hist = self._get_historical(sym)
                     if hist and len(hist) > 0:
                         spot = float(hist[-1].get('close_price', 0))
@@ -2246,27 +2307,28 @@ class OptionScanner:
                             spot = float(hist[-1].get('close', 0) or 0)
                 if spot <= 0:
                     continue
-                # Prev close: DB if available, else synthetic hist to get real change (avoids all 0% when DB empty)
-                rows = self.db.fetch_all("SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 2", [sym])
-                prev = 0
-                if len(rows) >= 2:
-                    prev = float(rows[1]['close_price'] or 0)
-                elif len(rows) == 1:
-                    prev = float(rows[0]['close_price'] or 0) if rows[0]['close_price'] else 0
-                if prev <= 0 or prev == spot:
-                    # DB empty or stale -> use synthetic second-last bar for realistic change
-                    try:
-                        hist_prev = self._get_historical(sym)
-                        if hist_prev and len(hist_prev) >= 2:
-                            prev = float(hist_prev[-2].get('close_price', 0) or hist_prev[-2].get('close', 0) or 0)
-                            # if spot still from _get_spot synthetic last bar, keep consistent with hist
-                            if hist_prev[-1].get('close_price'):
-                                spot = float(hist_prev[-1].get('close_price', spot) or spot)
-                    except Exception:
-                        pass
-                if prev <= 0:
-                    prev = spot * (0.99 + (hash(sym) % 20) * 0.001)  # synthetic 1-2% variance if still 0
-                change_pct = (spot - prev) / prev * 100 if prev else 0
+                # % change: 1) live quote ka apna change (authoritative)
+                #           2) fresh DB prev close (max 10 din purana)
+                # Kuch bhi na mile -> symbol skip (fake 2.5%/1.2% NAHI).
+                change_pct = None
+                prev = 0.0
+                if live_chg is not None and live_chg > -100 and abs(live_chg) > 0.005:
+                    change_pct = live_chg
+                    prev = spot / (1 + live_chg / 100.0)
+                else:
+                    prev = _fresh_prev_close(self.db, sym, spot)
+                    if prev > 0:
+                        change_pct = (spot - prev) / prev * 100
+                    elif live_chg is not None and live_chg > -100:
+                        # flat quote (0.00%) - DB prev bhi nahi mila
+                        change_pct = live_chg
+                        prev = spot / (1 + live_chg / 100.0) if live_chg else spot
+                if change_pct is None or prev <= 0:
+                    continue
+                # Sanity cap: index 10%, stock 20% - isse zyada = data error
+                cap = 10.0 if sym in _INDEX_FNO else 20.0
+                if abs(change_pct) > cap:
+                    continue
                 # Option suggestion for trading (premium>=20 floor, else skip mover)
                 opt_type = 'CE' if change_pct >= 0 else 'PE'
                 opt = self._suggest_option_floor(sym, spot, opt_type, 'BUY', 20.0)
@@ -2287,29 +2349,13 @@ class OptionScanner:
         movers.sort(key=lambda x: x['change_pct'], reverse=True)
         bullish = [m for m in movers if m['change_pct'] >=0][:top_n]
         bearish = sorted([m for m in movers if m['change_pct'] <0], key=lambda x: x['change_pct'])[:top_n]
-        # If not enough movers (DB empty / live blocked) fallback to scanner signals
-        if len(bullish) < top_n or len(bearish) < top_n:
-            fallback = self.get_top_opportunities(top_n=top_n*2)
-            for fb in fallback:
-                if len(bullish) < top_n and fb['direction']=='bullish' and not any(b['symbol']==fb['symbol'] for b in bullish):
-                    bullish.append({'symbol':fb['symbol'],'spot':fb['price'],'prev_close':fb['price'],'change_pct':2.5,'direction':'bullish','signal_type':fb['signal_type'],'option_suggestion':fb['option_suggestion'],'score':fb['score']})
-                if len(bearish) < top_n and fb['direction']=='bearish' and not any(b['symbol']==fb['symbol'] for b in bearish):
-                    bearish.append({'symbol':fb['symbol'],'spot':fb['price'],'prev_close':fb['price'],'change_pct':-2.5,'direction':'bearish','signal_type':fb['signal_type'],'option_suggestion':fb['option_suggestion'],'score':fb['score']})
-        # During market hours (9:15-15:30 IST) never show closed - generate Live synthetic from historical
+        # 12-Nov-2026: fabricated 2.5% / 1.2% fallback movers HATA diye. Agar
+        # real change nahi mila to list chhoti rahegi - fake % se better hai.
         import datetime as _dt
         now_ist = _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
-        is_market_hours = now_ist.weekday() < 5 and 9 <= now_ist.hour < 16
-        if is_market_hours and (len(bullish) < top_n or len(bearish) < top_n):
-            try:
-                fb = self.get_top_opportunities(top_n=top_n*2)
-                for f in fb:
-                    if len(bullish) < top_n and f['direction']=='bullish' and not any(b['symbol']==f['symbol'] for b in bullish):
-                        bullish.append({'symbol': f['symbol'], 'spot': f['price'], 'prev_close': f['price']*0.99, 'change_pct': 1.2, 'direction': 'bullish', 'signal_type': f['signal_type'], 'option_suggestion': f['option_suggestion'], 'score': f['score']})
-                    if len(bearish) < top_n and f['direction']=='bearish' and not any(b['symbol']==f['symbol'] for b in bearish):
-                        bearish.append({'symbol': f['symbol'], 'spot': f['price'], 'prev_close': f['price']*1.01, 'change_pct': -1.2, 'direction': 'bearish', 'signal_type': f['signal_type'], 'option_suggestion': f['option_suggestion'], 'score': f['score']})
-            except: pass
-        is_live = len(movers)>0 or (is_market_hours and (len(bullish)>=top_n or len(bearish)>=top_n))
-        return {'date': __import__('datetime').datetime.now().strftime('%Y-%m-%d'), 'bullish': bullish[:top_n], 'bearish': bearish[:top_n], 'total_scanned': max(len(movers), len(bullish)+len(bearish)), 'is_live': is_live, 'market_status': 'open' if is_live else 'closed'}
+        market_open = now_ist.weekday() < 5 and 9 <= now_ist.hour < 16
+        is_live = len(movers) > 0
+        return {'date': __import__('datetime').datetime.now().strftime('%Y-%m-%d'), 'bullish': bullish[:top_n], 'bearish': bearish[:top_n], 'total_scanned': max(len(movers), len(bullish)+len(bearish)), 'is_live': is_live, 'market_status': 'open' if market_open else 'closed'}
 
     def _fallback_signal(self, result: dict) -> dict:
         """Directional fallback so NIFTY/BANKNIFTY always show in opportunities with valid expiry."""
