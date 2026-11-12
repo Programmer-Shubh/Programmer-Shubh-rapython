@@ -122,6 +122,13 @@ async def _startup_background():
         _th2.Thread(target=_sl_mon, daemon=True).start()
     except: pass
     try:
+        # TICK-BY-TICK fast exit: open option trades ka SL/TP har ~0.75s
+        # ek batched broker quote par check hota hai. Target cross hote hi
+        # usi tick par square-off (candle close / 10s scan ka wait nahi).
+        from core.services.fast_exit import start_background as _fast_exit_bg
+        _fast_exit_bg(0.75)
+    except: pass
+    try:
         # Auto paper-trading: ACTIVE saved strategies place today's paper
         # trades by themselves (the missing executor - backtest never did).
         def _ap_loop():
