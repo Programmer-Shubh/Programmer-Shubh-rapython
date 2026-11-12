@@ -1134,14 +1134,10 @@ class BacktestEngine:
             bl = oc.get("buy", []) if isinstance(oc, dict) else []
             if modes.get("opp_combo", "both") != "bearish" and effective_idx < len(bl) and bl[effective_idx]:
                 return True
-        # Market Regime: auto bullish/bearish standalone gate.
-        if "market_regime" in pre_calc:
-            mr = pre_calc["market_regime"]
-            if isinstance(mr, dict):
-                _rg = mr.get("regime", [])
-                if effective_idx < len(_rg) and _rg[effective_idx] == "bullish":
-                    if modes.get("market_regime", "both") != "bearish":
-                        return True
+        # Market Regime FILTER (not a signal): run() me bullish/bearish gate
+        # entry_sig ko block karta hai. Yahan vote/standalone trigger nahi -
+        # warna filter select karne par trades BADH jate hain (majority math
+        # badal jata tha).
         # RSI+VWAP+ST+PCR combo: standalone gate (paancho shartein calc me).
         if "combo_rvp" in pre_calc:
             rc = pre_calc["combo_rvp"]
@@ -1205,12 +1201,7 @@ class BacktestEngine:
                 if _avv is not None and _pdv is not None and _mdv is not None:
                     _cv.append(modes.get("adx", "both") != "bearish"
                                and _avv >= _thr and _pdv > _mdv)
-            # Market Regime vote: bullish -> True (buy), bearish -> False
-            if "market_regime" in pre_calc:
-                _mr = pre_calc["market_regime"]
-                _rg = _mr.get("regime", []) if isinstance(_mr, dict) else []
-                if effective_idx < len(_rg):
-                    _cv.append(_rg[effective_idx] == "bullish")
+            # Market Regime vote NAHI (pure filter - upar run() gate dekho)
             # Extended votes: har supported indicator vote deta hai (abstain =
             # no vote). Pehle ye 13 ids _cv me the hi nahi aur neeche score
             # gate (score<30 -> False) unhe akela select karne par kabhi fire
@@ -1463,14 +1454,8 @@ class BacktestEngine:
             sl2 = oc.get("sell", []) if isinstance(oc, dict) else []
             if modes.get("opp_combo", "both") != "bullish" and effective_idx < len(sl2) and sl2[effective_idx]:
                 return True
-        # Market Regime: auto bullish/bearish standalone gate (sell side).
-        if "market_regime" in pre_calc:
-            mr = pre_calc["market_regime"]
-            if isinstance(mr, dict):
-                _rg = mr.get("regime", [])
-                if effective_idx < len(_rg) and _rg[effective_idx] == "bearish":
-                    if modes.get("market_regime", "both") != "bullish":
-                        return True
+        # Market Regime FILTER (sell side): standalone trigger nahi (upar run()
+        # gate bearish/bullish mismatch par entry block karta hai).
         # RSI+VWAP+ST+PCR combo: standalone gate (mirror).
         if "combo_rvp" in pre_calc:
             rc = pre_calc["combo_rvp"]
@@ -1529,12 +1514,7 @@ class BacktestEngine:
                 if _avv is not None and _pdv is not None and _mdv is not None:
                     _cv.append(modes.get("adx", "both") != "bullish"
                                and _avv >= _thr and _mdv > _pdv)
-            # Market Regime vote (sell side): bearish -> True (sell)
-            if "market_regime" in pre_calc:
-                _mr = pre_calc["market_regime"]
-                _rg = _mr.get("regime", []) if isinstance(_mr, dict) else []
-                if effective_idx < len(_rg):
-                    _cv.append(_rg[effective_idx] == "bearish")
+            # Market Regime vote NAHI (sell side bhi pure filter - run() gate)
             # Extended votes (buy-side mirror): single-select ye ids bhi fire
             # karein. Pehle sell-side me ye votes missing the (score gate ke
             # neeche standalone tak pahunchte hi nahi the) -> PE legs par ye
