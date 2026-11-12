@@ -196,16 +196,12 @@ def _free_latest_spot(symbol: str, fresh: bool = False):
 
 
 def _free_change_pct(symbol: str, spot: float) -> float:
+    """% change vs fresh prev close (stale DB rows rejected - 12-Nov-2026 fix)."""
     try:
-        db = Database.get_instance()
-        rows = db.fetch_all(
-            "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL ORDER BY trade_date DESC LIMIT 2",
-            [symbol],
-        )
-        if len(rows) >= 2 and rows[1]["close_price"]:
-            prev = float(rows[1]["close_price"])
-            if prev > 0:
-                return (spot - prev) / prev * 100
+        from core.services.free_data import _db_prev_close
+        prev = _db_prev_close(symbol, spot)
+        if prev > 0:
+            return (spot - prev) / prev * 100
     except Exception:
         pass
     return 0

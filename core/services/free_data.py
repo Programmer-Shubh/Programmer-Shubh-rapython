@@ -249,7 +249,26 @@ def _yahoo_fallback_quote(symbol: str, timeout: float = 5) -> dict:
                 pass
             if px <= 0:
                 return {}
-            prev = float(meta.get("previousClose") or meta.get("chartPreviousClose") or 0)
+            # Prev close: daily series ke closes se lo - meta.chartPreviousClose
+            # par bharosa mat karo. BUG (12-Nov-2026): chartPreviousClose kai
+            # baar 5-din range ka PEHLA close hota hai (NIFTY: 5-Nov 24,536
+            # vs asli prev 11-Nov 25,255) -> fake +3.35% "live" change.
+            q1 = (res.get("indicators", {}).get("quote") or [{}])[0]
+            closes1 = [float(c) for c in (q1.get("close") or []) if c is not None]
+            prev = 0.0
+            if len(closes1) >= 2:
+                last_close = closes1[-1]
+                # px == last daily close -> wo completed session hai, prev = usse pehle wala
+                if last_close > 0 and abs(px - last_close) / last_close * 100 <= 0.1:
+                    prev = closes1[-2]
+                else:
+                    prev = last_close
+            elif closes1:
+                prev = closes1[-1]
+            if prev <= 0:
+                prev = float(meta.get("previousClose") or meta.get("chartPreviousClose") or 0)
+            if prev > 0 and abs(px - prev) / prev * 100 > 25:
+                prev = 0.0  # stale/wrong prev -> 0% (fake % se better)
             chg = round((px - prev) / prev * 100, 2) if prev > 0 else 0.0
             return {"spot": px, "change": chg, "high": float(meta.get("regularMarketDayHigh") or px), "low": float(meta.get("regularMarketDayLow") or px), "source": "live"}
     except Exception:
