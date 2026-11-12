@@ -353,6 +353,15 @@ def last_scan():
     return dict(_LAST_SCAN)
 
 
+def is_started():
+    """Watcher thread zinda hai? (/api/version diagnostics)"""
+    try:
+        return bool(_STARTED) and any(
+            t.name == "fast-exit" and t.is_alive() for t in threading.enumerate())
+    except Exception:
+        return bool(_STARTED)
+
+
 def start_background(interval_s=_POLL_S):
     """Daemon thread: tick-by-tick SL/TP exit watcher (idempotent)."""
     global _STARTED

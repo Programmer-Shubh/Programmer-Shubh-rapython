@@ -365,11 +365,17 @@ def version():
     # forever). Render auto-sets RENDER_GIT_COMMIT on every deploy.
     import os as _os
     _sha = _os.environ.get("RENDER_GIT_COMMIT") or "local-dev"
-    return {
+    out = {
         "commit": _sha[:12],
         "service": _os.environ.get("RENDER_SERVICE_NAME", ""),
         "branch": _os.environ.get("RENDER_GIT_BRANCH", ""),
     }
+    try:
+        from core.services import fast_exit as _fe
+        out["fast_exit"] = {"started": _fe.is_started(), "last_scan": _fe.last_scan()}
+    except Exception as _e:
+        out["fast_exit"] = {"started": False, "error": str(_e)[:120]}
+    return out
 
 
 @app.get("/api/health/resources")
