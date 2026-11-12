@@ -2268,8 +2268,8 @@ class OptionScanner:
         Koi synthetic/fallback % nahi (12-Nov-2026 fix)."""
         fno_symbols = FNO_SYMBOLS
         movers = []
-        # Live realtime: _LIVE_CACHE first (instant), then parallel NSE/Stooq/Google fetch (Yahoo removed).
-        # 8s budget so frontend never times out on "Failed to load F&O Top 5".
+        # Live realtime: _LIVE_CACHE (instant) -> Fyers batch (ek call, 50+ symbols)
+        # -> parallel NSE/Stooq/Google (Yahoo removed).
         # NOTE: poora dict (spot + change) rakhte hain - sirf spot rakhne se
         # change ke liye stale DB prev close use hota tha -> fake %.
         live_map = {}
@@ -2282,6 +2282,29 @@ class OptionScanner:
                     v = _cd.get("spot", 0)
                     if v and float(v) > 0:
                         live_map[sym] = {"spot": float(v), "change": _cd.get("change")}
+            # 1) Fyers batch - ek hi quote call me sab symbols ka real spot + chp
+            #    (per-symbol fetch 25s+ leta tha aur sirf 7-10 symbols aate the)
+            try:
+                from core.services.free_data import fyers_batch_spots
+                _need = [s for s in fno_symbols if s not in live_map]
+                if _need:
+                    _fq = fyers_batch_spots(_need) or {}
+                    for _s, _q in _fq.items():
+                        live_map[_s] = {"spot": float(_q["spot"]), "change": _q.get("change")}
+                        try:
+                            from core.services.live_market_data import _live_cache_set
+                            _live_cache_set(_s, {
+                                "spot": float(_q["spot"]),
+                                "formatted": f"INR {float(_q['spot']):,.2f}",
+                                "change": float(_q.get("change") or 0),
+                                "high": float(_q.get("high") or _q["spot"]),
+                                "low": float(_q.get("low") or _q["spot"]),
+                                "source": "fyers",
+                            })
+                        except Exception:
+                            pass
+            except Exception:
+                pass
             missing = [s for s in fno_symbols if s not in live_map]
             if missing:
                 try:

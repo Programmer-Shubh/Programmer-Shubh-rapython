@@ -454,6 +454,75 @@ def fetch_cloud_spot(symbol: str) -> dict:
     return {"spot": spot, "change": chg, "high": spot, "low": spot, "source": source or "live"}
 
 
+def fyers_batch_spots(symbols) -> dict:
+    """ONE Fyers quotes call -> {SYMBOL: {spot, change, high, low, source}}.
+
+    F&O Top 5 ke liye: 50+ symbols ka real NSE spot + day % change ek hi API
+    call me (per-symbol Yahoo/Stooq fetch 25s+ leta tha aur sirf 7-10 symbols
+    aate the). change = `chp` (broker ka day %) ya prev_close_price se.
+    Broker connected na ho / call fail ho to {} - caller apne fallbacks rakhe.
+    """
+    out = {}
+    try:
+        from core.services.contract_pricer import (
+            _fyers_auth, _fyers_underlying, _fyers_quotes_raw, _fy_quote_rows,
+        )
+        app_id, tok = _fyers_auth()
+        if not app_id or not tok:
+            return out
+        mapping = {}
+        for s in (symbols or []):
+            up = str(s or "").upper()
+            u = _fyers_underlying(up)
+            if u:
+                mapping[u] = up
+        if not mapping:
+            return out
+        keys = list(mapping)
+        for i in range(0, len(keys), 40):
+            body = _fyers_quotes_raw(",".join(keys[i:i + 40]), app_id, tok)
+            for k, node in (_fy_quote_rows(body) or {}).items():
+                sym = mapping.get(str(k))
+                if not sym or not isinstance(node, dict):
+                    continue
+                px = 0.0
+                for f in ("lp", "last_price", "lastPrice", "ltp"):
+                    try:
+                        px = float(node.get(f, 0) or 0)
+                    except Exception:
+                        px = 0
+                    if px > 0:
+                        break
+                if px <= 0:
+                    continue
+                chg = None
+                try:
+                    if node.get("chp") is not None:
+                        chg = round(float(node.get("chp")), 2)
+                except Exception:
+                    chg = None
+                if not chg:
+                    try:
+                        pc = float(node.get("prev_close_price", 0) or 0)
+                        if pc > 0:
+                            chg = round((px - pc) / pc * 100, 2)
+                    except Exception:
+                        pass
+                try:
+                    hi = float(node.get("high_price") or px)
+                except Exception:
+                    hi = px
+                try:
+                    lo = float(node.get("low_price") or px)
+                except Exception:
+                    lo = px
+                out[sym] = {"spot": px, "change": chg if chg is not None else 0.0,
+                            "high": hi, "low": lo, "source": "fyers"}
+    except Exception:
+        return out
+    return out
+
+
 def fetch_yahoo_daily(symbol: str, start_date: str, end_date: str, timeout: float = 10):
     """Yahoo daily OHLC history (most reliable cloud source - same endpoint
     as the working spot quotes). Split-adjusted via adjclose factor so
