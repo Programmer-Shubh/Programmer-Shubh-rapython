@@ -372,7 +372,8 @@ def version():
     }
     try:
         from core.services import fast_exit as _fe
-        out["fast_exit"] = {"started": _fe.is_started(), "last_scan": _fe.last_scan()}
+        out["fast_exit"] = {"started": _fe.is_started(), "last_scan": _fe.last_scan(),
+                            "tick_stream": _fe.ws_status()}
     except Exception as _e:
         out["fast_exit"] = {"started": False, "error": str(_e)[:120]}
     return out

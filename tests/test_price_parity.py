@@ -72,10 +72,14 @@ def test_price_source_detail(monkeypatch):
 def test_expiry_hint_weekly_resolves_to_a_date(monkeypatch):
     """"weekly" must resolve to a concrete expiry - never priced as the
     literal string 'weekly' (that was the paper/live price drift)."""
-    # dates > 2 days se door taaki 2-day roll trigger na ho
-    monkeypatch.setattr(CP, "_fyers_expiry_list", lambda: ["2026-11-15", "2026-11-22"])
+    # dates aaj se 2-din se DOOR (2-day roll tabhi trigger hota hai) - hardcoded
+    # date time-dependent test ban jata tha (aaj 13-Nov par 15-Nov roll ho gaya).
+    import datetime as _dt
+    _d1 = (_dt.datetime.utcnow() + _dt.timedelta(days=10)).strftime("%Y-%m-%d")
+    _d2 = (_dt.datetime.utcnow() + _dt.timedelta(days=17)).strftime("%Y-%m-%d")
+    monkeypatch.setattr(CP, "_fyers_expiry_list", lambda: [_d1, _d2])
     exp = CP.resolve_expiry_hint("NIFTY", "weekly")
-    assert exp == "2026-11-15", exp
+    assert exp == _d1, exp
     assert len(exp) == 10 and "-" in exp
 
     monkeypatch.setattr(CP, "_fyers_expiry_list", lambda: [])
@@ -92,6 +96,9 @@ def test_expiry_hint_explicit_date_kept(monkeypatch):
 
 
 def test_resolve_weekly_expiry_prefers_broker_list(monkeypatch):
-    # dates > 2 days se door taaki 2-day roll trigger na ho
-    monkeypatch.setattr(CP, "_fyers_expiry_list", lambda: ["2026-11-15", "2026-11-22"])
-    assert CP.resolve_weekly_expiry("NIFTY") == "2026-11-15"
+    # aaj se 2-din se door (2-day roll trigger na ho)
+    import datetime as _dt
+    _d1 = (_dt.datetime.utcnow() + _dt.timedelta(days=10)).strftime("%Y-%m-%d")
+    _d2 = (_dt.datetime.utcnow() + _dt.timedelta(days=17)).strftime("%Y-%m-%d")
+    monkeypatch.setattr(CP, "_fyers_expiry_list", lambda: [_d1, _d2])
+    assert CP.resolve_weekly_expiry("NIFTY") == _d1

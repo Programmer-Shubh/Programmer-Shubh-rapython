@@ -22,7 +22,23 @@ from utils.helpers import get_strike_step, get_lot_size, black_scholes, align_st
 #     stop (prior-bar best), "Lock" NameError fixed, merged metrics now keep
 #     option-selling risk metrics, daily-marks Sharpe, unrounded Profit
 #     Factor. Any saved v4 result does NOT carry in (fresh re-run by design).
-ENGINE_VERSION = "v5"
+# v6 (REALITY / paper-parity): (1) sirf COMPLETED candles - chal rahi candle
+#     (forming bar) signal+exit se hat gayi; (2) SHARED SL/TP resolver
+#     (backtest == paper == live: pct -> rs -> leg -> Rs1500/3000 default);
+#     (3) intrabar option band DELTA-based (vega-free) - pehle BS re-price
+#     se range 3-8x bada tha (unreal target hits); (4) us-din ka REAL
+#     implied IV DB prints se (model IV se premium/SL/TP levels real market
+#     ke qareeb); (5) latency cost entry par + global SLIPPAGE_PCT mutation
+#     hata (paper/live fills beech me badal rahe the); (6) strike selection
+#     LEG se (paper jaisa) - pehle engine "otm/2" default tha.
+# v7 (STRICT FILLS - 80% BT vs 30% paper gap): (1) target sirf COMPLETED
+#     candle ke CLOSE par book hota hai - wick/high-low touch par nahi
+#     (paper monitor bhi bad-tick/spike touch par exit nahi karta); SL
+#     worst-case extreme par hi rehta hai (koi optimism nahi);
+#     (2) EXIT-side latency cost (stop/market/EOD exits, TP limit exempt);
+#     (3) audit counters metrics.realism me (tp_wick_touches_ignored etc).
+#     advanced.tp_fill_mode="touch" se purana v6 fill behavior wapas.
+ENGINE_VERSION = "v7"
 
 
 class BacktestEngine:
@@ -39,12 +55,46 @@ class BacktestEngine:
         self._skip_db = False  # True => synthetic-only fast path, no DB roundtrips
         self._cur_close = 0.0
         self._slippage_pct = 0.5  # Default dynamic slippage % for option selling
+        # ---- v7 realism knobs (default = strict / real-market) ----
+        # TP fill mode: "close" = target tabhi book hota hai jab COMPLETED
+        # candle ka close level ke paar ho (wick/high-low touch par nahi).
+        # Paper/live ka monitor bhi bad-tick/spike touch par exit nahi karta
+        # (scripts.auto_trade confirm_secs re-quote) - isliye default strict.
+        # "touch" = legacy v6 behavior (wick par target book).
+        self._tp_fill_mode = "close"
+        # Exit-side latency: stop/market exits trigger ke baad broker tak
+        # pahunchne me jo drift hota hai. Default 0.0 = paper parity (paper
+        # observed quote par close karta hai, koi extra drift nahi). Explicit
+        # `advanced.latency_slippage_exit_pct` set karo to charge ho. TP ek
+        # resting LIMIT hai (level par fill) - uspar latency kabhi nahi.
+        self._latency_pct_exit = 0.0
+        # Audit counters (metrics.realism me jaate hain).
+        self._n_tp_confirmed = 0
+        self._n_tp_unconfirmed = 0
+        self._n_exit_latency = 0
 
     def run(self, historical, symbol, start_date, end_date, ind_list, entry_conditions,
             exit_conditions, legs, advanced_options, risk_management, is_live: bool = None) -> dict:
         if is_live is not None:
             self.is_live = is_live
         self._reset()
+        # ---- REALITY: chal rahi (running) candle IGNORE ----
+        # Intraday feed ka aakhri bar abhi bhi ban raha hota hai (Yahoo/Fyers
+        # current candle). Us par signal = live candle par trade = look-ahead
+        # (backtest me aapne bhi nahi hona chahiye). Sirf COMPLETED candles
+        # par signal/exit evaluate hota hai - paper worker bhi wahi rule.
+        try:
+            from utils.helpers import drop_forming_bars as _dfb
+            _tf_bars = str((advanced_options or {}).get("timeframe") or "5m")
+            _hist2 = _dfb(historical, _tf_bars)
+            if len(_hist2) != len(historical):
+                try:
+                    self._dropped_forming = len(historical) - len(_hist2)
+                except Exception:
+                    self._dropped_forming = 0
+                historical = _hist2
+        except Exception:
+            pass
         self.premium_cache = {}
         self.bt_symbol = symbol
         # Execution-resolution diagnostics (added to metrics): intraday bars
@@ -63,16 +113,17 @@ class BacktestEngine:
         # (NIFTY 0.13, stocks 0.30); explicit advanced value ho to wahi.
         self.implied_volatility = advanced_options.get("implied_volatility") or None
         # Quantman: slippage override (user enters estimated slippage % like 0.05, 0.1)
-        _orig_slip = TransactionCosts.SLIPPAGE_PCT
+        # NOTE: class attribute TransactionCosts.SLIPPAGE_PCT ko AB mutate NAHI
+        # karte - backtest ka global slippage paper/live ke fills ko bhi badal
+        # deta tha (race: backtest chalte hue paper me 10x tighter fills).
+        # Har backtest call site apna slippage_pct explicitly pass karta hai.
         if advanced_options.get("slippage_pct") is not None:
             try:
-                TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage_pct"))
                 self._slippage_pct = float(advanced_options.get("slippage_pct"))
             except Exception:
                 self._slippage_pct = 0.5
         elif advanced_options.get("slippage") is not None:
             try:
-                TransactionCosts.SLIPPAGE_PCT = float(advanced_options.get("slippage"))
                 self._slippage_pct = float(advanced_options.get("slippage"))
             except Exception:
                 self._slippage_pct = 0.5
@@ -219,6 +270,33 @@ class BacktestEngine:
         signal_delay = int(advanced_options.get("signal_delay_bars", 0) or 0)
         # Latency in seconds (only in backtest mode) - unified is_live switch
         latency = TransactionCosts.latency_delay(self.is_live)
+        # Latency COST: signal -> broker -> fill ke beech ka price drift.
+        # Signal NEXT bar ke open par fill hota hai (1-bar delay pehle se
+        # hai), par us window me jo hota hai uska cost backtest me count
+        # nahi hota tha (live me broker latency + spread dono lagte hain).
+        # advanced.latency_slippage_pct (default 0.05% per entry).
+        try:
+            self._latency_pct = float(advanced_options.get("latency_slippage_pct", 0.05) or 0)
+        except Exception:
+            self._latency_pct = 0.05
+        # Exit-side latency % (default 0.0 = paper parity; explicit set karo
+        # to stop/market exits slip karte hain). TP limit level par hi fill.
+        try:
+            _lx = advanced_options.get("latency_slippage_exit_pct", None)
+            self._latency_pct_exit = 0.0 if _lx is None else float(_lx or 0)
+        except Exception:
+            self._latency_pct_exit = 0.0
+        # Strict target confirmation (v7 default). "touch" = legacy.
+        try:
+            _tpm = str(advanced_options.get("tp_fill_mode") or "close").lower()
+        except Exception:
+            _tpm = "close"
+        self._tp_fill_mode = _tpm if _tpm in ("close", "touch") else "close"
+        # Purane counters reset (engine instance reuse ho sakta hai).
+        self._n_tp_confirmed = 0
+        self._n_tp_unconfirmed = 0
+        self._n_exit_latency = 0
+        self._latency_s = float(latency or 0)
         leg = legs[0] if legs else {"option_type": "CE", "lots": 1, "transaction": "buy"}
         option_type = leg.get("option_type", "CE")
         # EQ legs: qty = share count (lots field), NOT lots x F&O lot-size.
@@ -231,9 +309,25 @@ class BacktestEngine:
         leg_sl, leg_tp, sl_unit, tp_unit = self._resolve_sltp(leg, risk_management)
         self._sl_unit = sl_unit
         self._tp_unit = tp_unit
-        strike_sel = advanced_options.get("strike_selection", "otm")
+        self._sl_amt = leg_sl
+        self._tp_amt = leg_tp
+        # Strike selection: LEG first (paper/live bhi leg se hi strike choose
+        # karte hain), advanced_options fallback. Pehle engine default
+        # "otm/2" tha jabki paper "atm/0" use karta tha - dono ALAG strikes
+        # par trade karte the (same strategy, different trade set = different
+        # win rate).
+        _leg0 = leg if isinstance(leg, dict) else {}
+        strike_sel = str((_leg0.get("strike_selection")
+                          or advanced_options.get("strike_selection")
+                          or "atm")).lower()
+        if strike_sel not in ("atm", "otm", "itm", "delta"):
+            strike_sel = "atm"
         delta_target = advanced_options.get("delta_target")
-        otm_dist = int(advanced_options.get("otm_distance", 2))
+        try:
+            otm_dist = int(_leg0.get("otm_distance",
+                                     advanced_options.get("otm_distance", 0)) or 0)
+        except Exception:
+            otm_dist = 0
         # trade_mode set above (intraday/positional/btst); reused here
 
         closes = [h["close_price"] for h in historical]
@@ -683,11 +777,7 @@ class BacktestEngine:
                 self._close_position(entries, exits, entry, exit_prem, "end_of_period", last["trade_date"], qty, txn_type,
                                      trigger="end_of_period")
 
-        # Quantman: restore slippage
-        try:
-            TransactionCosts.SLIPPAGE_PCT = _orig_slip
-        except Exception:
-            pass
+        # Quantman: restore slippage (global mutation removed - see run())
         # Coverage proof (spec §1/§13): requested vs actual data window.
         try:
             _present = sorted({str(h.get("trade_date", ""))[:10] for h in (historical or []) if h.get("trade_date")})
@@ -1716,6 +1806,7 @@ class BacktestEngine:
             qty = max(1, lots)
             premium = TransactionCosts.apply_fill_slippage(float(spot or 0), "BUY" if txn_type == "buy" else "SELL", self.is_live,
                                                            slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
+            premium = self._apply_latency(premium, "BUY" if txn_type == "buy" else "SELL")
             costs = TransactionCosts.calculate_equity(premium * qty, txn_type == "sell", getattr(self, "_eq_intraday", True))
             entry_time = getattr(self, '_entry_time', '09:35')
             entry_clock = getattr(self, '_cur_bar_time', '') or entry_time
@@ -1737,6 +1828,7 @@ class BacktestEngine:
         # apply_fill_slippage -> backtest sells filled 2x worse than paper.
         premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live,
                                                        slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
+        premium = self._apply_latency(premium, "BUY" if txn_type == "buy" else "SELL")
         premium = max(premium, 1.5)
         costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
         entry_time = getattr(self, '_entry_time', '09:35')
@@ -1843,34 +1935,75 @@ class BacktestEngine:
     def _resolve_sltp(self, leg: dict, risk_management: dict):
         """SL/TP rupees YA percent-of-premium ('2%' / *_pct key) - ek jagah
         parse, `_check_sl_tp` ko unit milti hai (paper SL monitor wahi unit
-        trade par store karta hai). Returns (sl_amt, tp_amt, sl_unit, tp_unit)."""
-        from utils.helpers import sltp_amount as _am
-        # Strategy DB value WINS over any stale leg-level value (user rule:
-        # execution/backtest must use the SL/TP saved on the strategy card).
-        # IMPORTANT: an explicit 0 means "disabled" and must NOT fall through
-        # to a different source (only a missing key does).
-        _rm_sl = risk_management.get("daily_stop_loss")
-        _rm_tp = risk_management.get("daily_take_profit")
-        _leg_sl = leg.get("stop_loss")
-        _leg_tp = leg.get("take_profit")
-        _sl_src = _rm_sl if _rm_sl not in (None, "") else (
-            _leg_sl if _leg_sl not in (None, "") else 500)
-        _tp_src = _rm_tp if _rm_tp not in (None, "") else (
-            _leg_tp if _leg_tp not in (None, "") else 1000)
-        sl_amt, sl_unit = _am(_sl_src)
-        tp_amt, tp_unit = _am(_tp_src)
-        # Explicit *_pct keys win (UI "%" suffix unme bhejta hai)
+        trade par store karta hai). Returns (sl_amt, tp_amt, sl_unit, tp_unit).
+
+        REALITY FIX: ab SINGLE shared resolver (utils.helpers.resolve_strategy_
+        sltp) use hota hai - backtest aur paper worker dono EXACT same rule
+        chalate hain (pct -> rs -> leg -> default Rs1500/3000). Pehle backtest
+        me '0 = disabled' + default Rs500/1000 tha jabki paper me '0 = unset'
+        + Rs1500/3000 - matlab backtest ka target kabhi hit nahi hota tha
+        jabki paper me target tha (exit distribution alag = win-rate alag)."""
         try:
-            if float(risk_management.get("daily_stop_loss_pct", 0) or 0) > 0:
-                sl_amt, sl_unit = float(risk_management["daily_stop_loss_pct"]), "pct"
+            from utils.helpers import resolve_strategy_sltp as _res
+            sl_amt, sl_unit, tp_amt, tp_unit = _res(risk_management, leg)
+            return sl_amt, tp_amt, sl_unit, tp_unit
         except Exception:
-            pass
+            return 0.0, 0.0, "rs", "rs"
+
+    def _apply_latency(self, price, side, pct=None):
+        """Signal -> order -> fill latency ka price cost.
+
+        Live me signal ke baad broker tak jaane, order ack aur fill tak
+        me jo hota hai uska cost backtest me count nahi hota tha - wahi gap
+        backtest ko paper se better dikhata tha.
+
+        pct=None -> entry latency (`_latency_pct`). Exit call sites apna
+        `_latency_pct_exit` pass karte hain."""
         try:
-            if float(risk_management.get("daily_take_profit_pct", 0) or 0) > 0:
-                tp_amt, tp_unit = float(risk_management["daily_take_profit_pct"]), "pct"
+            pct = float(getattr(self, "_latency_pct", 0) if pct is None else pct) or 0
+            p = float(price or 0)
+            if pct <= 0 or p <= 0:
+                return p
+            amt = p * pct / 100.0
+            return (p + amt) if str(side or "BUY").upper() == "BUY" else max(p - amt, 0.05)
         except Exception:
-            pass
-        return sl_amt, tp_amt, sl_unit, tp_unit
+            return price
+
+    def _confirm_tp(self, hit, txn_type, tp_level, opt_close):
+        """Strict target confirmation (v7).
+
+        v6 tak target tabhi book hota tha jab candle ka high/low level ko
+        CHHOo jaye (wick touch). Real paper monitor aise touch par exit nahi
+        karta (bad-tick/spike guard + confirm re-quote), aur wick-based
+        booking hi 80% backtest win-rate ka bada source thi: liquid option me
+        ek 5-min wick target cross karke wapas aa jata hai.
+
+        Ab default: TP sirf tab jab COMPLETED candle ka CLOSE level ke paar
+        ho (jis disha me profit hai). SL waisa hi rehta hai - extreme par
+        worst-case fill (koi optimism nahi).
+
+        `advanced.tp_fill_mode="touch"` se purana behavior wapas milta hai."""
+        try:
+            if not hit or str(hit.get("reason") or "") != "target":
+                return hit
+            if str(getattr(self, "_tp_fill_mode", "close") or "close") != "close":
+                self._n_tp_confirmed += 1
+                return hit
+            try:
+                oc = float(opt_close or 0)
+                lvl = float(tp_level or 0)
+            except Exception:
+                oc, lvl = 0.0, 0.0
+            ok = False
+            if oc > 0 and lvl > 0:
+                ok = (oc >= lvl) if str(txn_type or "buy").lower() == "buy" else (oc <= lvl)
+            if ok:
+                self._n_tp_confirmed += 1
+                return hit
+            self._n_tp_unconfirmed += 1
+            return None
+        except Exception:
+            return hit
 
     def _trail_update(self, entry_idx, bar_high, bar_low, txn_type):
         """Record the bar's extreme for NEXT-bar trailing. Called at the END of
@@ -1988,7 +2121,11 @@ class BacktestEngine:
                 if _hs and _ls:
                     _eh, _el = max(_hs, _ls), min(_hs, _ls)
                     self._trail_update(entry_idx, _eh, _el, txn_type)
-                    return self._check_sl_tp_levels(txn_type, sl_level, tp_level, _eh, _el)
+                    # v7: EQ ka bhi close-confirmed target (wick par nahi).
+                    _hit = self._check_sl_tp_levels(txn_type, sl_level, tp_level, _eh, _el)
+                    return self._confirm_tp(
+                        _hit, txn_type, tp_level,
+                        float(current.get("close_price", 0) or 0))
             except Exception:
                 pass
         # SL/TP is on OPTION PREMIUM, not spot. Prefer the option's OWN
@@ -2003,16 +2140,21 @@ class BacktestEngine:
         try:
             if not self._intraday_bar():
                 _bd = str(current.get("trade_date", ""))[:10]
-                _oh, _ol = 0, 0
+                _oh, _ol, _oc = 0, 0, 0
                 for _sp in (str(strike), str(int(strike)) if float(strike) == int(float(strike)) else str(strike)):
                     _oh = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_h", 0) or 0)
                     _ol = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_l", 0) or 0)
+                    _oc = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_c", 0) or 0)
                     if _oh > 0 and _ol > 0:
                         break
                 if _oh > 0 and _ol > 0:
                     _eh, _el = max(_oh, _ol), min(_oh, _ol)
                     self._trail_update(entry_idx, _eh, _el, txn_type)
-                    return self._check_sl_tp_levels(txn_type, sl_level, tp_level, _eh, _el)
+                    # v7: target = day ke OPTION CLOSE par confirmed (wick
+                    # high/low par nahi) - paper monitor bhi spike touch par
+                    # exit nahi karta. SL worst-case extreme par hi rehta hai.
+                    _hit = self._check_sl_tp_levels(txn_type, sl_level, tp_level, _eh, _el)
+                    return self._confirm_tp(_hit, txn_type, tp_level, _oc)
         except Exception:
             pass
         try:
@@ -2023,11 +2165,12 @@ class BacktestEngine:
         low_spot = float(current.get("low_price", 0) or current["close_price"])
         if high_spot < low_spot:
             high_spot, low_spot = low_spot, high_spot
+        mid_spot = (high_spot + low_spot) / 2.0
+        cur_d = str(current.get("trade_date", ""))
         strike = float(entry.get("strike", 0) or 0)
         t = 5 / 365
         try:
             exp = getattr(self, "bt_expiry", "") or ""
-            cur_d = str(current.get("trade_date", ""))
             if not exp and cur_d:
                 # bt_expiry khali (koi fixed contract nahi): bar date ke
                 # exchange expiry se compute karo. Held-into-expiry stale
@@ -2044,23 +2187,138 @@ class BacktestEngine:
         except Exception:
             pass
         # Unified IV: explicit advanced value else per-symbol model_iv (paper parity)
+        # ---- REALITY: us din ka REAL implied IV (DB ke actual prints se) ----
+        # Model IV (NIFTY 13%) aksar market se door hota hai. Agar IV galat
+        # hai to premium, SL aur TP levels SAB galat hote hain (paper me
+        # broker quote par hote hain) - yahi backtest-vs-paper ka bada gap
+        # tha. Ek query me poore din ke option rows la kar ATM strike ka
+        # IV nikaalte hain (per-day flat IV) - realistic + sasta.
+        iv = self._pricing_iv(cur_d, strike, option_type, mid_spot)
+        # ---- STRICT intrabar option band (vega-free / delta based) ----
+        # Purana: option high/low = Black-Scholes RE-PRICE at underlying ke
+        # high/low. Isme gamma/vega exaggeration hota hai - option ka range
+        # 3-8x bada, jisse ek normal 5-min wiggle bhi target/SL touch kar
+        # deti thi (unreal hits -> 80% backtest win-rate).
+        # Ab: DELTA-based band (anchor = bar ka mid) - real premium bar ke
+        # andar delta x underlying-move jitna hi hota hai.
+        # Knob: advanced.option_band_scale (default 1.0).
         try:
-            from utils.helpers import model_iv as _miv2
-            iv = float(getattr(self, "implied_volatility", None) or _miv2(getattr(self, "bt_symbol", "")) or 0.25)
+            _band_scale = float((getattr(self, "_advanced", {}) or {}).get("option_band_scale", 1.0) or 1.0)
         except Exception:
-            iv = float(getattr(self, "implied_volatility", None) or 0.25)
-        if _bs and strike > 0:
+            _band_scale = 1.0
+        prem_mid = 0.0
+        try:
+            prem_mid = self._entry_premium(cur_d, mid_spot, strike, option_type)
+        except Exception:
+            prem_mid = 0.0
+        delta = 0.0
+        if prem_mid and float(prem_mid) > 0 and strike > 0:
+            try:
+                from utils.helpers import bs_delta as _bdelta
+                delta = _bdelta(mid_spot, strike, t, iv, option_type)
+            except Exception:
+                delta = 0.0
+        if delta:
+            prem_high = float(prem_mid) + delta * (high_spot - mid_spot) * _band_scale
+            prem_low = float(prem_mid) + delta * (low_spot - mid_spot) * _band_scale
+            # v7: bar ka CLOSE premium (target confirmation ke liye). Same
+            # delta mapping - close bhi bar ke andar ka ek real point hai.
+            prem_close = float(prem_mid) + delta * (
+                float(current.get("close_price", 0) or mid_spot) - mid_spot) * _band_scale
+        elif _bs and strike > 0:
             try:
                 prem_high = _bs(high_spot, strike, t, iv, option_type.upper()[:2])
                 prem_low = _bs(low_spot, strike, t, iv, option_type.upper()[:2])
+                prem_close = _bs(float(current.get("close_price", 0) or mid_spot),
+                                 strike, t, iv, option_type.upper()[:2])
             except Exception:
-                prem_high, prem_low = 9999, 0
+                prem_high, prem_low, prem_close = 9999, 0, 0
         else:
-            prem_high, prem_low = float("inf"), 0
+            prem_high, prem_low, prem_close = float("inf"), 0, 0
         opt_high = max(prem_high, prem_low)
         opt_low = min(prem_high, prem_low)
         self._trail_update(entry_idx, opt_high, opt_low, txn_type)
-        return self._check_sl_tp_levels(txn_type, sl_level, tp_level, opt_high, opt_low)
+        _hit = self._check_sl_tp_levels(txn_type, sl_level, tp_level, opt_high, opt_low)
+        return self._confirm_tp(_hit, txn_type, tp_level, prem_close)
+
+    def _day_iv(self, date, spot=0.0):
+        """Us din ka REAL implied volatility (DB ke actual option prints se).
+
+        Ek query: us din ke saare option rows (strike/type/expiry/close) +
+        us din ka underlying close. ATM ke closest strike ka IV nikaalte
+        hain. Zero = data nahi mila (model IV use hoga)."""
+        try:
+            d = str(date or "")[:10]
+            if not d:
+                return 0.0
+            memo = getattr(self, "_day_iv_cache", None)
+            if not isinstance(memo, dict):
+                memo = {}
+            if d in memo:
+                return float(memo.get(d) or 0)
+            memo[d] = 0.0
+            self._day_iv_cache = memo
+            if getattr(self, "_skip_db", False):
+                return 0.0
+            from core.models.database import Database as _DB
+            db = _DB.get_instance()
+            sym = getattr(self, "bt_symbol", "")
+            urow = db.fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? "
+                "AND option_type IS NULL LIMIT 1", [sym, d])
+            uclose = float((urow or {}).get("close_price") or 0) or float(spot or 0)
+            if uclose <= 0:
+                return 0.0
+            rows = db.fetch_all(
+                "SELECT strike_price, option_type, close_price, expiry_date FROM bhavcopy_data "
+                "WHERE symbol=? AND trade_date=? AND option_type IN ('CE','PE')",
+                [sym, d])
+            if not rows:
+                return 0.0
+            from utils.helpers import implied_volatility as _iv_solver
+            best_iv, best_dist = 0.0, 1e12
+            for r in rows:
+                try:
+                    k = float(r.get("strike_price") or 0)
+                    px = float(r.get("close_price") or 0)
+                    if k <= 0 or px <= 0:
+                        continue
+                    exp = str(r.get("expiry_date") or "")[:10]
+                    if not exp:
+                        continue
+                    import datetime as _dt
+                    d1 = _dt.datetime.strptime(d, "%Y-%m-%d")
+                    d2 = _dt.datetime.strptime(exp, "%Y-%m-%d")
+                    yrs = max((d2 - d1).days, 0) / 365.0
+                    if yrs <= 0:
+                        continue
+                    dist = abs(k - uclose)
+                    if dist >= best_dist:
+                        continue
+                    iv = _iv_solver(px, uclose, k, yrs, str(r.get("option_type") or "CE"))
+                    if iv and iv > 0:
+                        best_iv, best_dist = float(iv), dist
+                except Exception:
+                    continue
+            memo[d] = best_iv
+            return best_iv
+        except Exception:
+            return 0.0
+
+    def _pricing_iv(self, date, strike, option_type, spot=0.0):
+        """Pricing ke liye IV: explicit advanced -> us din ka REAL IV ->
+        per-symbol model IV."""
+        try:
+            _exp = getattr(self, "implied_volatility", None)
+            if _exp:
+                return float(_exp)
+            _real = self._day_iv(date, spot)
+            if _real and _real > 0:
+                return float(_real)
+            from utils.helpers import model_iv as _miv
+            return float(_miv(getattr(self, "bt_symbol", "")) or 0.25)
+        except Exception:
+            return 0.25
 
     def _prem_source(self, date, strike, option_type) -> str:
         """Premium kahan se aaya: db / db_near / live / model / spot (EQ).
@@ -2365,8 +2623,15 @@ class BacktestEngine:
                 return self.premium_cache[_mkey]
             try:
                 from utils.helpers import model_premium as _mp
+                _iv_use = self.implied_volatility or None
+                if not _iv_use:
+                    # REAL us-din ka IV (DB prints se) - model IV se premium,
+                    # SL aur TP levels real market ke qareeb aate hain.
+                    _real = self._day_iv(date, float(spot))
+                    if _real and _real > 0:
+                        _iv_use = _real
                 val = _mp(float(spot), float(strike), dte_days, option_type,
-                           symbol=self.bt_symbol, iv=(self.implied_volatility or None))
+                           symbol=self.bt_symbol, iv=_iv_use)
             except Exception:
                 val = 0
             if val and float(val) > 0:
@@ -2480,8 +2745,13 @@ class BacktestEngine:
                 return self.premium_cache[_mkey]
             try:
                 from utils.helpers import model_premium as _mp2
+                _iv_use2 = self.implied_volatility or None
+                if not _iv_use2:
+                    _real2 = self._day_iv(date, float(spot))
+                    if _real2 and _real2 > 0:
+                        _iv_use2 = _real2
                 val = _mp2(float(spot), float(strike), dte_days, option_type,
-                            symbol=self.bt_symbol, iv=(self.implied_volatility or None))
+                            symbol=self.bt_symbol, iv=_iv_use2)
             except Exception:
                 val = 0
             if val and float(val) > 0:
@@ -2582,6 +2852,19 @@ class BacktestEngine:
         # SL/TP exits (e.g. 9.30 on a far-OTM option) must execute exactly,
         # else a spot*1.5% floor (~42) silently destroys every stop-loss.
         exit_prem = max(float(exit_prem or 0), 0.05)
+        # v7: EXIT-side latency. Stop/market/EOD exits trigger hone ke baad
+        # order broker tak jaata hai - fill level se thoda worse hota hai.
+        # TP ek resting LIMIT hai (level par fill, paper bhi level book karta
+        # hai) - uspar latency nahi.
+        if str(reason or "").lower() != "target":
+            try:
+                _lp = float(getattr(self, "_latency_pct_exit", 0) or 0)
+            except Exception:
+                _lp = 0.0
+            if _lp > 0:
+                exit_prem = self._apply_latency(
+                    exit_prem, "SELL" if txn_type == "buy" else "BUY", pct=_lp)
+                self._n_exit_latency += 1
         try:
             _eq_exit = str((entry.get("legs", [{}])[0] or {}).get("option_type", "")) == "EQ"
         except Exception:
@@ -2624,6 +2907,16 @@ class BacktestEngine:
             prem = self._close_premium(exit_date, spot, strike, option_type)
             prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY", self.is_live,
                                                         slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
+            # v7 exit latency (spread legs bhi market exit hain, TP nahi)
+            if str(reason or "").lower() != "target":
+                try:
+                    _lp = float(getattr(self, "_latency_pct_exit", 0) or 0)
+                except Exception:
+                    _lp = 0.0
+                if _lp > 0:
+                    prem = self._apply_latency(
+                        prem, "SELL" if leg["type"] == "buy" else "BUY", pct=_lp)
+                    self._n_exit_latency += 1
             costs = TransactionCosts.calculate(prem * lqty, leg["type"] == "buy", self.is_live)
             exit_costs_total += costs["total"]
             if leg["type"] == "buy":
@@ -2972,6 +3265,24 @@ class BacktestEngine:
                     "exit_src_counts": _src_x,
                     "exit_reason_counts": _reasons,
                     "zero_hold_trades": _zero_hold,
+                    # ---- v6/v7 realism audit (backtest == paper ka proof) ----
+                    "closed_candles_only": True,
+                    "forming_bars_dropped": int(getattr(self, "_dropped_forming", 0) or 0),
+                    "option_band_model": "delta-vega-free" if self._used_intraday_bars else "db-range",
+                    "option_band_scale": float((getattr(self, "_advanced", {}) or {}).get("option_band_scale", 1.0) or 1.0),
+                    "latency_slippage_pct": float(getattr(self, "_latency_pct", 0) or 0),
+                    "latency_slippage_exit_pct": float(getattr(self, "_latency_pct_exit", 0) or 0),
+                    "latency_s": float(getattr(self, "_latency_s", 0) or 0),
+                    "fill_slippage_pct": float(getattr(self, "_slippage_pct", 0.5) or 0.5),
+                    "sltp_source": f"sl={getattr(self, '_sl_unit', 'rs')}/{round(float(getattr(self, '_sl_amt', 0) or 0), 2)}"
+                                   f" tp={getattr(self, '_tp_unit', 'rs')}/{round(float(getattr(self, '_tp_amt', 0) or 0), 2)}",
+                    "real_iv_days": len(getattr(self, "_day_iv_cache", {}) or {}),
+                    # ---- v7 strict-fill audit ----
+                    # TP sirf candle CLOSE confirmation par (wick par nahi).
+                    "tp_fill_mode": str(getattr(self, "_tp_fill_mode", "close")),
+                    "tp_confirmed_by_close": int(getattr(self, "_n_tp_confirmed", 0) or 0),
+                    "tp_wick_touches_ignored": int(getattr(self, "_n_tp_unconfirmed", 0) or 0),
+                    "exit_latency_fills": int(getattr(self, "_n_exit_latency", 0) or 0),
                     "warnings": _warn,
                 },
                 "equity_curve": equity,

@@ -5,8 +5,14 @@ Ek tez option spike target cross karke wapas aa jata tha -> target "miss ho
 gaya" (agle scan me price level ke neeche). User rule: LTP target cross kare
 to candle-close / poll ka intezaar nahi - usi tick par square-off.
 
-How: every ~0.75s in market hours, ONE batched Fyers quote call (latest tick)
-for every open option contract. Decision usi tick par:
+How (v7 - TRUE tick-by-tick):
+  1. PRIMARY: Fyers WebSocket (`FyersDataSocket`, litemode) subscribed to
+     every open option contract. Har EXCHANGE TICK par decision - koi 0.75s/
+     1.5s poll wait nahi. Naye/closed contracts ki subscription har 5s me
+     reconcile hoti hai.
+  2. SAFETY NET: agar token/WS na chale to har ~0.75s ek batched Fyers REST
+     quote call (same decision function) - exits kabhi rukte nahi.
+  Decision usi tick par:
   - TP hit -> exit AT the target level (backtest parity: target book hota hai,
               overshoot ka fake profit nahi).
   - SL hit -> exit at current LTP (gap-aware).
@@ -28,11 +34,12 @@ Safety (same guards as scripts/auto_trade.check_stoploss_target):
 import threading
 import time
 
-_POLL_S = 0.75          # tick poll (Fyers quote call latency ke saath ~1s)
+_POLL_S = 0.75          # REST fallback poll (WS up ho to sirf safety net)
 _TRADES_TTL = 2.0       # open-trade list cache (DB read har tick nahi)
 _FALLBACK_EVERY = 2.0   # broker quote missing -> shared pricer at most 1/2s
 _SKIP_LOG_EVERY = 30.0  # same skip reason ko har 30s me ek baar log karo
 _CLAIM_TTL = 180.0
+_SUB_RECONCILE_S = 5.0  # naye/closed contracts ki WS subscription sync
 
 _LOCK = threading.Lock()
 _CLAIMS = {}            # trade_id -> claim ts
@@ -42,6 +49,26 @@ _LEVEL_CACHE = {}       # trade_id -> (signature, levels)
 _TRADES_CACHE = (0.0, [])
 _STARTED = False
 _LAST_SCAN = {"ts": "", "closed": [], "skipped": []}
+
+# ---- True tick-by-tick stream state (Fyers WebSocket) ----
+# REST poll (0.75s) sirf safety net hai. Jab WS connected hota hai to har
+# EXCHANGE TICK par SL/TP evaluate hota hai - 1.5s/0.75s poll ka wait nahi.
+_WS = {
+    "enabled": True,
+    "started": False,
+    "connected": False,
+    "subscribed": [],       # fyers symbols
+    "ticks": 0,
+    "exits": 0,
+    "last_tick": "",
+    "last_error": "",
+    "connected_at": "",
+}
+_WS_SOCKET = None          # live FyersDataSocket (subscribe/unsubscribe ke liye)
+_SYM_MAP = {}              # fyers symbol -> trade id
+_SYM_MAP_TS = 0.0
+_LAST_RECONCILE = 0.0
+_WS_BACKOFF = 5.0
 
 
 def _now_ts():
@@ -228,14 +255,87 @@ def _fallback_price(trade, trade_id):
         return None
 
 
+def _evaluate_and_exit(t, price, source="broker"):
+    """Ek quote/tick -> turant decision (poll aur WS dono yahi use karte hain).
+
+    Returns ("closed", row) | ("skip", {id, symbol, reason}) | (None, None).
+    Guards: wrong-contract/spike ratio, model-price TP ban, SL priority,
+    atomic claim + DB open re-check (double-close impossible)."""
+    tid = int((t or {}).get("id") or 0)
+    if not tid:
+        return None, None
+    lv = _levels(t)
+    sl_level, tp_level = lv["sl"], lv["tp"]
+    if sl_level <= 0 and tp_level <= 0:
+        return None, None
+    try:
+        price = float(price or 0)
+    except Exception:
+        price = 0.0
+    if price <= 0:
+        return None, {"id": tid, "symbol": t.get("symbol"), "reason": "quote 0"}
+    entry = lv["entry"]
+    # wrong-contract / hard spike guard (same as auto_trade)
+    try:
+        ratio = (price / entry) if entry > 0 else 0.0
+        if (not lv["is_buy"] and ratio >= 3.0) or (lv["is_buy"] and ratio <= 0.3333):
+            reason = (f"price {price:.2f} entry {entry:.2f} se {ratio:.2f}x - "
+                      "bad contract/spike, tick skip")
+            _log_skip(t, reason)
+            return None, {"id": tid, "symbol": t.get("symbol"), "reason": reason}
+    except Exception:
+        pass
+    is_buy = lv["is_buy"]
+    hit_sl = (price <= sl_level) if is_buy else (price >= sl_level) if sl_level > 0 else False
+    hit_tp = (price >= tp_level) if is_buy else (price <= tp_level) if tp_level > 0 else False
+    # Model/fallback price target book nahi karega (sirf risk exit).
+    if hit_tp and source != "broker":
+        hit_tp = False
+    if hit_sl and hit_tp:
+        hit_tp = False       # SL priority (worst case), backtest parity
+    if not (hit_sl or hit_tp):
+        return None, None
+    reason = "stoploss" if hit_sl else "target"
+    exit_px = tp_level if (hit_tp and tp_level > 0) else price
+    if not _claim(tid):
+        return None, None
+    try:
+        from core.models.trade_model import TradeModel
+        rc = TradeModel().close_trade(tid, float(exit_px), _ist_now_str()[:10], reason)
+    except Exception as e:
+        _release(tid)
+        return None, {"id": tid, "symbol": t.get("symbol"),
+                      "reason": f"close fail: {e}"[:150]}
+    if not rc:
+        _release(tid)
+        return None, None
+    row = {"id": tid, "reason": reason,
+           "exit_price": round(float(exit_px), 2),
+           "ltp": round(float(price), 2), "src": source,
+           "symbol": t.get("symbol"), "option_type": t.get("option_type"),
+           "strike": t.get("strike_price"), "mode": t.get("trade_mode")}
+    try:
+        print(f"[fast-exit] {reason} closed #{tid} {t.get('symbol')} "
+              f"{t.get('option_type')}{t.get('strike_price')} "
+              f"@ {exit_px:.2f} (ltp {price:.2f}, {source})", flush=True)
+    except Exception:
+        pass
+    return "closed", row
+
+
 def check_once():
-    """One tick pass. Returns {closed, skipped, checked}."""
+    """One REST poll pass (WS ka safety net). Returns {closed, skipped, checked}."""
     global _TRADES_CACHE, _LAST_SCAN
     closed, skipped = [], []
     try:
         from core.services.sl_monitor import market_open_ist
         if not market_open_ist():
             return {"closed": [], "skipped": "market-closed", "checked": 0}
+    except Exception:
+        pass
+    # Naye/closed contracts ki WS subscription sync (throttled internally).
+    try:
+        _reconcile_subscriptions()
     except Exception:
         pass
     trades = []
@@ -273,10 +373,6 @@ def check_once():
         tid = int(t.get("id") or 0)
         if not tid:
             continue
-        lv = _levels(t)
-        sl_level, tp_level = lv["sl"], lv["tp"]
-        if sl_level <= 0 and tp_level <= 0:
-            continue
         price = float(quotes.get(tid) or 0)
         source = "broker"
         if price <= 0:
@@ -287,55 +383,11 @@ def check_once():
                 continue
             price = float(fb)
             source = "fallback"
-        entry = lv["entry"]
-        # wrong-contract / hard spike guard (same as auto_trade)
-        try:
-            ratio = (price / entry) if entry > 0 else 0.0
-            if (not lv["is_buy"] and ratio >= 3.0) or (lv["is_buy"] and ratio <= 0.3333):
-                reason = (f"price {price:.2f} entry {entry:.2f} se {ratio:.2f}x - "
-                          "bad contract/spike, tick skip")
-                skipped.append({"id": tid, "symbol": t.get("symbol"), "reason": reason})
-                _log_skip(t, reason)
-                continue
-        except Exception:
-            pass
-        is_buy = lv["is_buy"]
-        hit_sl = (price <= sl_level) if is_buy else (price >= sl_level) if sl_level > 0 else False
-        hit_tp = (price >= tp_level) if is_buy else (price <= tp_level) if tp_level > 0 else False
-        # Model/fallback price target book nahi karega (sirf risk exit).
-        if hit_tp and source != "broker":
-            hit_tp = False
-        if hit_sl and hit_tp:
-            hit_tp = False       # SL priority (worst case), backtest parity
-        if not (hit_sl or hit_tp):
-            continue
-        reason = "stoploss" if hit_sl else "target"
-        exit_px = tp_level if (hit_tp and tp_level > 0) else price
-        if not _claim(tid):
-            continue
-        try:
-            from core.models.trade_model import TradeModel
-            rc = TradeModel().close_trade(tid, float(exit_px), _ist_now_str()[:10], reason)
-        except Exception as e:
-            _release(tid)
-            skipped.append({"id": tid, "symbol": t.get("symbol"),
-                            "reason": f"close fail: {e}"[:150]})
-            continue
-        if not rc:
-            _release(tid)
-            continue
-        row = {"id": tid, "reason": reason,
-               "exit_price": round(float(exit_px), 2),
-               "ltp": round(float(price), 2), "src": source,
-               "symbol": t.get("symbol"), "option_type": t.get("option_type"),
-               "strike": t.get("strike_price"), "mode": t.get("trade_mode")}
-        closed.append(row)
-        try:
-            print(f"[fast-exit] {reason} closed #{tid} {t.get('symbol')} "
-                  f"{t.get('option_type')}{t.get('strike_price')} "
-                  f"@ {exit_px:.2f} (ltp {price:.2f}, {source})", flush=True)
-        except Exception:
-            pass
+        kind, payload = _evaluate_and_exit(t, price, source)
+        if kind == "closed":
+            closed.append(payload)
+        elif kind == "skip" and payload:
+            skipped.append(payload)
     # cache cleanup: sirf live trades ke levels rakho
     live_ids = {int(t.get("id") or 0) for t in trades}
     for k in list(_LEVEL_CACHE.keys()):
@@ -347,6 +399,212 @@ def check_once():
     _LAST_SCAN = {"ts": _ist_now_str(), "closed": closed, "skipped": skipped,
                   "checked": len(trades)}
     return {"closed": closed, "skipped": skipped, "checked": len(trades)}
+
+
+# ------------------------------------------------------------------ tick stream
+def _refresh_symbol_map(force=False):
+    """fyers symbol -> trade id map (WS subscription + tick routing)."""
+    global _SYM_MAP, _SYM_MAP_TS
+    now = _now_ts()
+    if not force and now - _SYM_MAP_TS < _TRADES_TTL:
+        return _SYM_MAP
+    m = {}
+    try:
+        from core.services.symbol_resolver import _fyers_symbol as _fsym
+        for t in _open_trades():
+            if str(t.get("option_type") or "").upper() not in ("CE", "PE"):
+                continue
+            try:
+                fs = _fsym(t.get("symbol"), t.get("expiry_date"),
+                           float(t.get("strike_price") or 0), t.get("option_type"))
+            except Exception:
+                fs = ""
+            if fs:
+                m[fs] = int(t.get("id") or 0)
+    except Exception:
+        m = {}
+    _SYM_MAP = m
+    _SYM_MAP_TS = now
+    return m
+
+
+def _trade_by_id(tid):
+    for t in _open_trades():
+        try:
+            if int(t.get("id") or 0) == int(tid):
+                return t
+        except Exception:
+            continue
+    # cache stale ho sakta hai (trade abhi close hua) - force refresh ek baar
+    global _TRADES_CACHE
+    _TRADES_CACHE = (0.0, [])
+    for t in _open_trades():
+        try:
+            if int(t.get("id") or 0) == int(tid):
+                return t
+        except Exception:
+            continue
+    return None
+
+
+def _on_message(message):
+    """Fyers WS tick -> usi tick par SL/TP decision (koi candle close wait nahi)."""
+    try:
+        msgs = message if isinstance(message, list) else [message]
+        for m in msgs:
+            if not isinstance(m, dict):
+                continue
+            sym = str(m.get("symbol") or m.get("fySymbol") or "")
+            if not sym:
+                continue
+            v = _node_ltp(m)
+            if v <= 0:
+                continue
+            _WS["ticks"] = int(_WS.get("ticks") or 0) + 1
+            _WS["last_tick"] = _ist_now_str()
+            tid = _SYM_MAP.get(sym)
+            if not tid:
+                continue
+            t = _trade_by_id(tid)
+            if not t:
+                continue
+            kind, payload = _evaluate_and_exit(t, v, "broker")
+            if kind == "closed" and payload:
+                _WS["exits"] = int(_WS.get("exits") or 0) + 1
+                _LAST_SCAN.setdefault("closed", []).append(payload)
+                try:
+                    from core.services.auto_paper import _beat
+                    _beat("fast-exit-tick")
+                except Exception:
+                    pass
+    except Exception as e:
+        _WS["last_error"] = f"tick: {e}"[:160]
+
+
+def _ws_on_connect():
+    global _WS_SOCKET
+    _WS["connected"] = True
+    _WS["connected_at"] = _ist_now_str()
+    _WS["last_error"] = ""
+    try:
+        syms = list(_refresh_symbol_map(force=True).keys())
+        if syms and _WS_SOCKET is not None:
+            _WS_SOCKET.subscribe(symbols=syms, data_type="SymbolUpdate")
+            _WS["subscribed"] = syms
+    except Exception as e:
+        _WS["last_error"] = f"subscribe: {e}"[:160]
+
+
+def _ws_on_close(*_args):
+    _WS["connected"] = False
+    _WS["subscribed"] = []
+
+
+def _ws_on_error(err):
+    _WS["last_error"] = str(err)[:160]
+
+
+def _reconcile_subscriptions():
+    """Naye khule contract subscribe, band ho gaye unsubscribe (throttled)."""
+    global _LAST_RECONCILE
+    now = _now_ts()
+    if now - _LAST_RECONCILE < _SUB_RECONCILE_S:
+        return
+    _LAST_RECONCILE = now
+    want = set(_refresh_symbol_map(force=True).keys())
+    if not _WS.get("connected") or _WS_SOCKET is None:
+        return
+    have = set(_WS.get("subscribed") or [])
+    add, rem = want - have, have - want
+    try:
+        if rem:
+            _WS_SOCKET.unsubscribe(symbols=list(rem), data_type="SymbolUpdate")
+        if add:
+            _WS_SOCKET.subscribe(symbols=list(add), data_type="SymbolUpdate")
+        _WS["subscribed"] = sorted(want)
+    except Exception as e:
+        _WS["last_error"] = f"reconcile: {e}"[:160]
+
+
+def start_tick_stream():
+    """True tick-by-tick exit stream (Fyers WebSocket), fail-open.
+
+    WS unavailable/token missing -> 0.75s REST poll hi chalta rehta hai, isliye
+    exits kabhi ruk nahi sakte."""
+    global _WS_SOCKET, _WS_BACKOFF
+    if not _WS.get("enabled", True):
+        return False
+    with _LOCK:
+        if _WS.get("started"):
+            return True
+        _WS["started"] = True
+
+    def _run():
+        global _WS_SOCKET, _WS_BACKOFF
+        while True:
+            try:
+                from core.services.contract_pricer import _fyers_auth
+                app_id, token = _fyers_auth()
+                if not app_id or not token:
+                    _WS["connected"] = False
+                    _WS["last_error"] = "broker token nahi (WS off, REST poll on)"
+                    time.sleep(30)
+                    continue
+                from fyers_apiv3.FyersWebsocket.data_ws import FyersDataSocket
+                sock = FyersDataSocket(
+                    f"{app_id}:{token}",
+                    litemode=True, write_to_file=False, reconnect=True,
+                    on_connect=_ws_on_connect, on_message=_on_message,
+                    on_error=_ws_on_error, on_close=_ws_on_close,
+                )
+                try:
+                    sock.background_flag = True   # daemon thread (clean shutdown)
+                except Exception:
+                    pass
+                _WS_SOCKET = sock
+                _WS_BACKOFF = 5.0
+                sock.connect()          # returns immediately, thread start karta hai
+                # socket thread zinda hai jab tak - wait karo (busy loop nahi)
+                for _ in range(24 * 3600):
+                    th = getattr(sock, "ws_thread", None)
+                    if th is None or not th.is_alive():
+                        break
+                    time.sleep(5)
+            except Exception as e:
+                _WS["last_error"] = f"ws: {e}"[:160]
+            finally:
+                _WS["connected"] = False
+                _WS_SOCKET = None
+            time.sleep(_WS_BACKOFF)
+            _WS_BACKOFF = min(_WS_BACKOFF * 2, 120.0)
+
+    try:
+        th = threading.Thread(target=_run, name="fast-exit-ws", daemon=True)
+        th.start()
+        return True
+    except Exception:
+        with _LOCK:
+            _WS["started"] = False
+        return False
+
+
+def ws_status():
+    """Diagnostics for /api/version: WS zinda hai ya REST fallback."""
+    try:
+        return {
+            "started": bool(_WS.get("started")),
+            "connected": bool(_WS.get("connected")),
+            "ticks": int(_WS.get("ticks") or 0),
+            "tick_exits": int(_WS.get("exits") or 0),
+            "subscribed": len(_WS.get("subscribed") or []),
+            "last_tick": _WS.get("last_tick") or "",
+            "connected_at": _WS.get("connected_at") or "",
+            "last_error": _WS.get("last_error") or "",
+            "rest_fallback_s": float(_POLL_S),
+        }
+    except Exception:
+        return {"started": False, "connected": False}
+
 
 
 def last_scan():
@@ -363,12 +621,19 @@ def is_started():
 
 
 def start_background(interval_s=_POLL_S):
-    """Daemon thread: tick-by-tick SL/TP exit watcher (idempotent)."""
+    """Daemon threads: (1) true tick stream (WS), (2) REST poll safety net."""
     global _STARTED
     with _LOCK:
         if _STARTED:
             return True
         _STARTED = True
+
+    # True tick-by-tick (Fyers WebSocket) - har exchange tick par decision.
+    # Fail-open: token/WS na ho to neeche wala REST poll hi chalta rehta hai.
+    try:
+        start_tick_stream()
+    except Exception:
+        pass
 
     def _loop():
         while True:

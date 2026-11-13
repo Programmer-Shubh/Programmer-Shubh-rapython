@@ -577,6 +577,198 @@ def sltp_premium_level(entry_price: float, amount: float, quantity: int,
         return 0.0
 
 
+# ---------------- Shared strategy SL/TP resolver (backtest == paper == live) ------------
+def resolve_strategy_sltp(risk_management: dict, leg: dict = None,
+                          default_sl: float = 1500.0, default_tp: float = 3000.0):
+    """SINGLE SL/TP rule - backtest, paper worker aur live order TEENON ka.
+
+    Pehle DONO alag the (isi se backtest ka exit-distribution paper se alag
+    tha - 80% vs 30% jaisa gap):
+      - backtest: explicit '0' = DISABLED, default Rs500/1000, leg-level
+        'stop_loss' ("30%") USE hota tha.
+      - paper   : '0' = 'set nahi' (next source pe fall-through), default
+        Rs1500/3000, leg-level stop_loss IGNORE hota tha.
+    Ab dono ek hi rule use karte hain (paper wala order, kyunki paper me
+    real paisa lagta hai):
+
+      SL: risk.daily_stop_loss_pct -> risk.daily_stop_loss -> leg.stop_loss
+          -> default_sl (Rs1500)
+      TP: risk.daily_take_profit_pct -> risk.daily_take_profit -> leg.take_profit
+          -> default_tp (Rs3000)
+
+    '0' / '' / None / negative = 'set nahi hai' (fall through).
+    Returns (sl_amt, sl_unit, tp_amt, tp_unit)."""
+    try:
+        rm = risk_management if isinstance(risk_management, dict) else {}
+        lg = leg if isinstance(leg, dict) else {}
+
+        def _pick(pairs):
+            for val, unit in pairs:
+                if val is None:
+                    continue
+                if isinstance(val, str) and val.strip() in ("", "0", "0.0"):
+                    continue
+                try:
+                    if isinstance(val, (int, float)) and float(val) <= 0:
+                        continue
+                except Exception:
+                    continue
+                amt, u = sltp_amount(val, unit)
+                if amt and float(amt) > 0:
+                    return float(amt), u
+            return 0.0, "rs"
+
+        sl_amt, sl_unit = _pick([
+            (rm.get("daily_stop_loss_pct"), "pct"),
+            (rm.get("daily_stop_loss"), "rs"),
+            (lg.get("stop_loss"), "rs"),
+            (default_sl, "rs"),
+        ])
+        tp_amt, tp_unit = _pick([
+            (rm.get("daily_take_profit_pct"), "pct"),
+            (rm.get("daily_take_proprofit"), "rs"),
+            (rm.get("daily_take_profit"), "rs"),
+            (lg.get("take_profit"), "rs"),
+            (default_tp, "rs"),
+        ])
+        return sl_amt, sl_unit, tp_amt, tp_unit
+    except Exception:
+        return 0.0, "rs", 0.0, "rs"
+
+
+# ---------------- Forming (running) candle filter ----------------
+_TF_MINUTES = {"1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30,
+               "45m": 45, "1h": 60, "60m": 60, "1d": 0}
+
+
+def tf_minutes(timeframe) -> int:
+    try:
+        return int(_TF_MINUTES.get(str(timeframe or "5m").lower(), 5))
+    except Exception:
+        return 5
+
+
+def drop_forming_bars(bars, timeframe="5m", now_ist=None):
+    """Chal rahi (running) candle hata do - sirf COMPLETED candles evaluate karo.
+
+    Intraday data me aakhri bar abhi bhi ban raha hota hai (Yahoo/Fyers ka
+    current candle). Us par signal bana kar trade lagana = LIVE candle par
+    trade = look-ahead (backtest me aapne bhi nahi hona chahiye). Paper
+    worker bhi wahi rule use karta hai (auto_paper._live_signal_check).
+
+    Daily bars me 'forming' concept nahi hota - unhe chheda nahi jaata.
+    """
+    try:
+        from datetime import datetime, timedelta, timezone
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now = now_ist or datetime.now(ist)
+        out = list(bars or [])
+        if not out:
+            return out
+        last = out[-1]
+        if not isinstance(last, dict):
+            return out
+        bt = str(last.get("bar_time") or "")
+        d = str(last.get("trade_date") or "")[:10]
+        if not bt:
+            return out                      # daily bar - complete by definition
+        today = now.strftime("%Y-%m-%d")
+        if d > today:
+            return out[:-1]                 # future bar (impossible data)
+        if d != today:
+            return out                      # pichle din ka last bar complete hai
+        mins = tf_minutes(timeframe)
+        if mins <= 0:
+            return out
+        try:
+            hh, mm = bt[:5].split(":")
+            bar_end = now.replace(hour=int(hh), minute=int(mm), second=0,
+                                  microsecond=0) + timedelta(minutes=mins)
+        except Exception:
+            return out
+        if now < bar_end:
+            return out[:-1]
+        return out
+    except Exception:
+        return list(bars or [])
+
+
+# ---------------- BS extras: implied vol + delta (entry realism) ----------------
+def bs_price(spot: float, strike: float, years: float, iv: float, option_type: str) -> float:
+    """Raw Black-Scholes price (NO floor) - implied-vol solver + delta ke liye."""
+    try:
+        s = float(spot or 0)
+        k = float(strike or 0)
+        t = float(years or 0)
+        v = float(iv or 0)
+        if s <= 0 or k <= 0:
+            return 0.0
+        if t <= 0:
+            t = 0.003
+        if v <= 0:
+            v = 0.14
+        r = 0.065
+        sv = v * math.sqrt(t)
+        d1 = (math.log(s / k) + (r + 0.5 * v * v) * t) / sv
+        d2 = d1 - sv
+        if str(option_type or "CE").upper().startswith("C"):
+            return s * normal_cdf(d1) - k * math.exp(-r * t) * normal_cdf(d2)
+        return k * math.exp(-r * t) * normal_cdf(-d2) - s * normal_cdf(-d1)
+    except Exception:
+        return 0.0
+
+
+def implied_volatility(price: float, spot: float, strike: float, years: float,
+                       option_type: str, lo: float = 0.02, hi: float = 3.0,
+                       iters: int = 48) -> float:
+    """Market print se implied IV (bisection on BS). 0 = nahi nikal paya."""
+    try:
+        p = float(price or 0)
+        if p <= 0 or float(spot or 0) <= 0 or float(strike or 0) <= 0:
+            return 0.0
+        t = max(float(years or 0), 0.002)
+        if bs_price(spot, strike, t, hi, option_type) < p:
+            return 0.0            # price is beyond BS range -> unreliable
+        for _ in range(iters):
+            mid = (lo + hi) / 2.0
+            if bs_price(spot, strike, t, mid, option_type) < p:
+                lo = mid
+            else:
+                hi = mid
+        return round((lo + hi) / 2.0, 4)
+    except Exception:
+        return 0.0
+
+
+def bs_delta(spot: float, strike: float, years: float, iv: float, option_type: str) -> float:
+    """Option delta (CE: N(d1), PE: N(d1)-1).
+
+    Intrabar option range BANANE ke liye: real option premium bar ke
+    underlying high/low par Black-Scholes RE-PRICE se nahi, balki DELTA
+    (vega-free) se move karta hai. BS re-price gamma/vega exaggeration de
+    deta tha - option ka range 3-8x bada, jisse unreal target hits aate the.
+    """
+    try:
+        s = float(spot or 0)
+        k = float(strike or 0)
+        t = float(years or 0)
+        v = float(iv or 0)
+        if s <= 0 or k <= 0:
+            return 0.0
+        if t <= 0:
+            t = 0.003
+        if v <= 0:
+            v = 0.14
+        r = 0.065
+        d1 = (math.log(s / k) + (r + 0.5 * v * v) * t) / (v * math.sqrt(t))
+        d = normal_cdf(d1)
+        if str(option_type or "CE").upper().startswith("C"):
+            return d
+        return d - 1.0
+    except Exception:
+        return 0.0
+
+
 def log_trade_delete(trade: dict, where: str = "") -> None:
     """Har paper_trades DELETE ka snapshot JSONL me (never raises).
     File: data/logs/trade_deletes_YYYYMMDD.jsonl. Closed/open trade gayab

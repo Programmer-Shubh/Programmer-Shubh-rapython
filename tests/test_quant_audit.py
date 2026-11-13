@@ -42,10 +42,16 @@ def _run_hold_to_expiry(exp="2026-08-20", mode="positional", exp_hint="weekly"):
     inds = [{"id": "supertrend", "params": {"period": 2, "multiplier": 1.0}}]
     eng = BacktestEngine(is_live=False)
     eng._skip_db = True
+    # v6 (paper parity): SL/TP ka source SHARED resolver hai - '0' ka matlab
+    # 'set nahi' (next source pe fall-through) aur default Rs1500/3000 lagta
+    # hai (paper worker bilkul yahi karta hai). Isliye hold-to-expiry test me
+    # SL/TP ko door ka rakha hai (kabhi hit nahi hoga) taaki position expiry
+    # tak hi ruke - test ka maqsad (single-leg expiry close crash-free) wahi rehta hai.
     return eng.run(list(bars), "NIFTY", bars[0]["trade_date"], bars[-1]["trade_date"],
                    inds, [], [], legs,
                    {"trade_mode": mode, "timeframe": "1d", "expiry": exp_hint},
-                   {"max_trades_per_day": 5, "daily_stop_loss": 0, "daily_take_profit": 0},
+                   {"max_trades_per_day": 5, "daily_stop_loss": 100000,
+                    "daily_take_profit": 100000},
                    is_live=False)
 
 

@@ -380,13 +380,19 @@ def _intraday_signal(sid, s, today, need_more_than=0):
             bars = []
         if not bars or len(bars) < 25:
             return None, "no fresh 15m bars (25+ chahiye)"
-        # No forming-bar signals: aakhri (adhuri) candle hatao - backtest bhi
-        # sirf closed bars par signal banata hai. Iske bina phantom-signal par
-        # live entry hoti jo backtest me kabhi nahi hoti (divergence ka kaaran).
+        # No forming-bar signals: CHAL RAHI candle hatao - backtest bhi sirf
+        # closed (completed) bars par signal banata hai. Shared helper
+        # (utils.helpers.drop_forming_bars) exact check karta hai (candle
+        # sach me abhi ban rahi hai ya complete ho chuki).
         try:
-            bars = list(bars[:-1]) if len(bars) > 26 else list(bars)
+            from utils.helpers import drop_forming_bars as _dfb
+            _tf_bars = str((_adv0 or {}).get("timeframe") or _tf0 or "15m")
+            bars = _dfb(bars, _tf_bars)
         except Exception:
-            pass
+            try:
+                bars = list(bars[:-1]) if len(bars) > 26 else list(bars)
+            except Exception:
+                pass
         if not bars or len(bars) < 25:
             return None, "no fresh 15m bars (25+ chahiye)"
         try:
@@ -506,37 +512,19 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
         rm = _js.loads(s.get("risk_management") or "{}")
     except Exception:
         rm = {}
-    from utils.helpers import sltp_amount as _sltp_am
-
-    def _pick_sltp(pairs):
-        """First positive saved value wins. Priority: strategy DB percent ->
-        strategy DB rupees -> legacy rupee default.
-
-        User rule (2026-11-07): worker must stay EXACTLY as before the
-        SL/TP feature - DB values same, fallback same (Rs 1500 / Rs 3000).
-        Only the source changed (DB instead of hardcoded), never the numbers.
-        """
-        for _val, _unit in pairs:
-            try:
-                if _val is None or str(_val).strip() in ("", "0", "0.0"):
-                    continue
-                _amt, _u = _sltp_am(_val, _unit)
-                if _amt and _amt > 0:
-                    return float(_amt), _u
-            except Exception:
-                continue
-        return 0.0, "pct"
-
-    sl, sl_u = _pick_sltp([
-        (rm.get("daily_stop_loss_pct"), "pct"),
-        (rm.get("daily_stop_loss"), "rs"),
-        (1500.0, "rs"),
-    ])
-    tp, tp_u = _pick_sltp([
-        (rm.get("daily_take_profit_pct"), "pct"),
-        (rm.get("daily_take_profit"), "rs"),
-        (3000.0, "rs"),
-    ])
+    # SINGLE shared SL/TP resolver (backtest + paper + live same rule):
+    # pct -> rs -> leg -> default Rs1500/3000. Pehle backtest alag rule
+    # chala raha tha (0 = disabled, Rs500/1000) - isi se backtest ka exit
+    # distribution paper se alag tha (win-rate gap).
+    try:
+        _legs0 = _js.loads(s.get("legs") or "[]")
+    except Exception:
+        _legs0 = []
+    try:
+        from utils.helpers import resolve_strategy_sltp as _res_sltp
+        sl, sl_u, tp, tp_u = _res_sltp(rm, (_legs0[0] if _legs0 else {}))
+    except Exception:
+        sl, sl_u, tp, tp_u = 1500.0, "rs", 3000.0, "rs"
     sym = str(s.get("symbol") or "").upper()
     if not sym:
         return placed, ["no symbol - skipped"]

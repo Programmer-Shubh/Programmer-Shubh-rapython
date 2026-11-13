@@ -131,6 +131,19 @@ class HistoricalReplayEngine:
             self.bt_engine._entry_time = self.advanced_options.get("entry_time", "09:35")
             self.bt_engine._exit_time = self.advanced_options.get("exit_time", "15:14")
             self.bt_engine._early_exit_time = self.advanced_options.get("early_exit_time", "15:10")
+            # v6 parity mirrors: advanced (band scale / lock), slippage,
+            # latency - replay aur backtest EXACT same fill math karte hain.
+            self.bt_engine._advanced = self.advanced_options or {}
+            try:
+                self.bt_engine._slippage_pct = float(self.advanced_options.get(
+                    "slippage_pct", self.advanced_options.get("slippage", 0.5)) or 0.5)
+            except Exception:
+                self.bt_engine._slippage_pct = 0.5
+            try:
+                self.bt_engine._latency_pct = float(self.advanced_options.get(
+                    "latency_slippage_pct", 0.05) or 0)
+            except Exception:
+                self.bt_engine._latency_pct = 0.05
             _tm = str(self.advanced_options.get("trade_mode", self.advanced_options.get("trade_type", "positional")) or "positional").lower()
             self.bt_engine._eq_intraday = (_tm == "intraday")
         except Exception:
@@ -142,9 +155,21 @@ class HistoricalReplayEngine:
         option_type = leg.get("option_type", "CE")
         qty = int(leg.get("lots", 1)) * get_lot_size(self.symbol)
         txn_type = leg.get("transaction", "buy").lower()
-        strike_sel = self.advanced_options.get("strike_selection", "otm")
+        # Strike selection: LEG first (engine v6 = paper parity), advanced
+        # fallback. Pehle replay 'otm/2' default use karta tha jabki engine
+        # leg 'atm/0' follow karta tha - dono alag strike par trade karte the.
+        _leg0 = leg if isinstance(leg, dict) else {}
+        strike_sel = str((_leg0.get("strike_selection")
+                          or self.advanced_options.get("strike_selection")
+                          or "atm")).lower()
+        if strike_sel not in ("atm", "otm", "itm", "delta"):
+            strike_sel = "atm"
         delta_target = self.advanced_options.get("delta_target")
-        otm_dist = int(self.advanced_options.get("otm_distance", 2))
+        try:
+            otm_dist = int(_leg0.get("otm_distance",
+                                     self.advanced_options.get("otm_distance", 0)) or 0)
+        except Exception:
+            otm_dist = 0
         trade_mode = str(self.advanced_options.get("trade_mode", self.advanced_options.get("trade_type", "positional")) or "positional").lower()
         if trade_mode not in ("intraday", "positional", "btst"):
             trade_mode = "positional"
@@ -317,7 +342,8 @@ class HistoricalReplayEngine:
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
                 exit_prem = self.bt_engine._exit_premium(cur_date, spot, float(entry["strike"]), option_type)
                 exit_prem = TransactionCosts.apply_fill_slippage(exit_prem,
-                    "SELL" if txn_type == "buy" else "BUY", False)
+                    "SELL" if txn_type == "buy" else "BUY", False,
+                    slippage_pct=float(getattr(self.bt_engine, "_slippage_pct", 0.5) or 0.5))
                 self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem,
                     self.pending_exit, cur_date, qty, txn_type)
                 # Engine-computed exit wapas trade par (bina sync pnl hamesha 0)
@@ -366,7 +392,7 @@ class HistoricalReplayEngine:
                             self.bt_engine._close_spread(self.trades, self._exits, entry, "strategy_sl_tp", cur_date)
                         else:
                             exit_prem = self.bt_engine._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
-                            exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", False)
+                            exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", False, slippage_pct=float(getattr(self.bt_engine, "_slippage_pct", 0.5) or 0.5))
                             self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem, "strategy_sl_tp", cur_date, qty, txn_type)
                         self._sync_exit(open_trade_idx)
                         self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
@@ -383,7 +409,8 @@ class HistoricalReplayEngine:
                     exit_prem = self.bt_engine._close_premium(cur_date, float(cur["close_price"]),
                         float(entry["strike"]), option_type)
                     exit_prem = TransactionCosts.apply_fill_slippage(exit_prem,
-                        "SELL" if txn_type == "buy" else "BUY", False)
+                        "SELL" if txn_type == "buy" else "BUY", False,
+                        slippage_pct=float(getattr(self.bt_engine, "_slippage_pct", 0.5) or 0.5))
                     self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem,
                         "expiry_squareoff", cur_date, qty, txn_type)
                 self._sync_exit(open_trade_idx)
@@ -404,7 +431,8 @@ class HistoricalReplayEngine:
                     exit_prem = self.bt_engine._close_premium(cur_date, float(cur["close_price"]), 
                         float(entry["strike"]), option_type)
                     exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, 
-                        "SELL" if txn_type == "buy" else "BUY", False)
+                        "SELL" if txn_type == "buy" else "BUY", False,
+                        slippage_pct=float(getattr(self.bt_engine, "_slippage_pct", 0.5) or 0.5))
                     self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem, 
                         "intraday", cur_date, qty, txn_type)
                 self._sync_exit(open_trade_idx)
