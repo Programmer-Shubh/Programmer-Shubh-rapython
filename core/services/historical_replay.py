@@ -54,6 +54,12 @@ class HistoricalReplayEngine:
         self.legs = legs
         self.advanced_options = advanced_options
         self.risk_management = risk_management
+        # Entry latency bars (paper broker fill delay) - engine parity.
+        try:
+            _lb = int(advanced_options.get("latency_delay_bars", 1) or 1)
+            self.bt_engine._entry_latency_bars = max(0, min(5, _lb))
+        except Exception:
+            self.bt_engine._entry_latency_bars = 1
         
         # Load historical data (same as backtest)
         self.historical_data = self._load_historical(symbol, start_date, end_date)
@@ -146,6 +152,12 @@ class HistoricalReplayEngine:
                 self.bt_engine._latency_pct = 0.05
             _tm = str(self.advanced_options.get("trade_mode", self.advanced_options.get("trade_type", "positional")) or "positional").lower()
             self.bt_engine._eq_intraday = (_tm == "intraday")
+            # v7 entry latency bars (paper broker fill delay) - engine parity
+            try:
+                _lb = int(self.advanced_options.get("latency_delay_bars", 1) or 1)
+                self.bt_engine._entry_latency_bars = max(0, min(5, _lb))
+            except Exception:
+                self.bt_engine._entry_latency_bars = 1
         except Exception:
             pass
         self._exits = []
@@ -283,11 +295,13 @@ class HistoricalReplayEngine:
                         can_enter = False
                 except Exception:
                     pass
-            if (self.pending_entry is not None and self.pending_entry != i - 1):
-                # Pending order valid for exactly one bar; dropped otherwise.
+            if (self.pending_entry is not None
+                    and (i - self.pending_entry) > int(getattr(self.bt_engine, "_entry_latency_bars", 1) or 1)):
+                # Pending order valid only at (pending+N)th bar; dropped after.
                 self.pending_entry = None
                 self.pending_auto_buy = None
-            if self.pending_entry is not None and can_enter:
+            if (self.pending_entry is not None and can_enter
+                    and (i - self.pending_entry) >= int(getattr(self.bt_engine, "_entry_latency_bars", 1) or 1)):
                 exec_bar = self.historical_data[i]
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
                 

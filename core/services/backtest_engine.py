@@ -268,6 +268,20 @@ class BacktestEngine:
         # Early mandatory exit: close by 15:00-15:10 instead of 15:14
         early_exit_time = advanced_options.get("early_exit_time", "15:10")
         signal_delay = int(advanced_options.get("signal_delay_bars", 0) or 0)
+        # ---- ENTRY LATENCY (paper fill delay), in BARS ----
+        # Paper order signal ke baad broker tak jaata hai aur ~1-5 min baad
+        # fill hota hai. Backtest me signal bar ke CLOSE par entry hoti hoti
+        # to backtest imaginary fill dikhata hai. Rate:
+        #   advanced.latency_delay_bars (int, default 1, max 5)
+        #     0 = signal bar par hi (NOT paper-realistic)
+        #     1 = next bar = 5m timeframe me ~5 min fill delay (paper parity)
+        #     2+ = slow fill / wide window
+        # Signal bar se N bars baad bar ke open par fill hota hai.
+        try:
+            _lb = int(advanced_options.get("latency_delay_bars", 1) or 1)
+        except Exception:
+            _lb = 1
+        self._entry_latency_bars = max(0, min(5, _lb))
         # Latency in seconds (only in backtest mode) - unified is_live switch
         latency = TransactionCosts.latency_delay(self.is_live)
         # Latency COST: signal -> broker -> fill ke beech ka price drift.
@@ -445,17 +459,18 @@ class BacktestEngine:
                 except Exception:
                     pass
 
-            # Execute pending entry from PREVIOUS bar's signal (no look-ahead).
-            # A pending order is valid for exactly ONE bar (the bar after the
-            # signal bar). If that bar cannot trade (entry clock over, warmup
-            # bar outside start_date, position already open) the order is DROPPED
-            # - it must never linger and fill days later at a different price.
+            # Execute pending entry from N bars after the signal bar's signal
+            # (entry latency = paper's broker fill delay; no look-ahead).
+            # A pending order is VALID ONLY at the (pending+N)th bar - after
+            # that it is dropped forever (never lingers into another session).
+            _elb = int(getattr(self, "_entry_latency_bars", 1) or 1)
             if (pending_entry is not None
-                    and pending_entry != i - 1):
+                    and (i - pending_entry) > _elb):
                 pending_entry = None
                 pending_auto_buy = None
                 pending_entry_signal_time = None
-            if pending_entry is not None and can_enter:
+            if (pending_entry is not None and can_enter
+                    and (i - pending_entry) >= _elb):
                 exec_idx = i
                 exec_bar = historical[exec_idx] if exec_idx < len(historical) else cur
                 spot = float(exec_bar.get("open_price", 0) or exec_bar.get("close_price", 0))
@@ -3277,6 +3292,12 @@ class BacktestEngine:
                     "sltp_source": f"sl={getattr(self, '_sl_unit', 'rs')}/{round(float(getattr(self, '_sl_amt', 0) or 0), 2)}"
                                    f" tp={getattr(self, '_tp_unit', 'rs')}/{round(float(getattr(self, '_tp_amt', 0) or 0), 2)}",
                     "real_iv_days": len(getattr(self, "_day_iv_cache", {}) or {}),
+                    "premium_source_parity": ("broker-quote-first (is_live)" if bool(getattr(self, "is_live", False))
+                                              else "model real-IV anchored (historical broker quotes DB me nahi hain)"),
+                    "recommended_timeframe": "5m" if self._trade_mode == "intraday" else ("1d" if self._trade_mode == "positional" else "1d"),
+                    # ---- v7 ENTRY-LATENCY audit (paper fill delay in bars) ----
+                    "entry_latency_bars": int(getattr(self, "_entry_latency_bars", 1) or 1),
+                    "entry_latency_note": "signal bar se N bars baad entry (paper broker fill delay; 5m TF me 1 bar = ~5 min)",
                     # ---- v7 strict-fill audit ----
                     # TP sirf candle CLOSE confirmation par (wick par nahi).
                     "tp_fill_mode": str(getattr(self, "_tp_fill_mode", "close")),
