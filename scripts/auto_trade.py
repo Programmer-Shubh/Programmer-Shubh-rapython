@@ -102,7 +102,7 @@ def check_stoploss_target(confirm_secs=2):
         # entry Rs 43) lag gaya -> SL ne 904 par kaat diya (fake -25,894).
         # Ab agar price entry se 3x se zyada (SELL) / 1/3 se kam (BUY) ho to
         # is scan me exit SKIP - agle scan par asli price par SL/TP check
-        # hoga; 3:15 square-off to hamesha chalta hai (position atki nahi).
+        # hoga; SL/TP hi exit hai (user rule 2026-11-15 - time square-off removed).
         try:
             _ratio = (float(current) / entry) if entry > 0 else 0.0
             if (not is_buy and _ratio >= 3.0) or (is_buy and _ratio <= 0.3333):

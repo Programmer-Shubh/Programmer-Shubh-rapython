@@ -242,7 +242,9 @@ def test_equity_backtest():
     assert tl, "EQ must trade"
     for t in tl:
         assert t.get("option_type") == "EQ", t
-        assert t.get("exit_date") == t.get("entry_date"), t
+        # USER RULE (2026-11-15): time square-off removed - intraday position
+        # ab overnight carry ho sakta hai (SL/TP hi exit hai)
+        assert str(t.get("exit_date") or "") >= str(t.get("entry_date") or ""), t
         assert t.get("quantity") == 10, t
         ep, xp = float(t["entry_price"]), float(t["exit_price"])
         assert abs(ep - xp) / ep < 0.5, t

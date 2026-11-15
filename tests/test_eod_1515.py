@@ -1,7 +1,7 @@
-"""3:15 PM intraday square-off (background se), positional carry.
-SL/TP monitor 15:15 tak (aur 15:45 tak) chalta hai - gate sirf ENTRY rokta hai.
-Rule: 3:00 PM ke baad nayi entry nahi; 3:00 PM se pehle khule intraday
-trades 3:15 PM par square-off hote hain.
+"""3:15 PM intraday square-off REMOVED — user rule (2026-11-15):
+trades sirf SL/TP par close hoti hain. Yeh file ab assert karti hai ki
+even 15:15 par bhi koi time-based force-close nahi hoti (intraday
+carries overnight) — SL/TP/manual hi exit path hai.
 """
 import os
 import sys
@@ -39,7 +39,9 @@ def _cleanup(tm):
         pass
 
 
-def test_intraday_exits_at_1515_positional_carries(monkeypatch):
+def test_no_time_exit_at_1515_or_before(monkeypatch):
+    """USER RULE REMOVAL: 15:15 EOD square-off hata diya - intraday position
+    overnight carry hoti hai (SL/TP hi exit hai)."""
     from core.models.trade_model import TradeModel
     monkeypatch.setattr(TradeModel, "get_option_premium", lambda *a, **k: 90.0)
     tm = TradeModel()
@@ -48,32 +50,18 @@ def test_intraday_exits_at_1515_positional_carries(monkeypatch):
         t_intra = _mk(tm, "intraday")
         t_pos = _mk(tm, "positional")
         hit = tm.close_intraday_trades(user_id=UID, _now=_now(15, 15))
-        assert [h["id"] for h in hit] == [int(t_intra)], hit
-        assert hit[0]["reason"] == "intraday_auto"
-        assert tm.db.fetch_one(
-            "SELECT status FROM paper_trades WHERE id=?", [int(t_pos)])["status"] == "open"
-        assert tm.db.fetch_one(
-            "SELECT status, exit_status FROM paper_trades WHERE id=?",
-            [int(t_intra)])["exit_status"] == "intraday_auto"
-    finally:
-        _cleanup(tm)
-
-
-def test_no_exit_before_1515(monkeypatch):
-    from core.models.trade_model import TradeModel
-    tm = TradeModel()
-    _cleanup(tm)
-    try:
-        t_intra = _mk(tm, "intraday")
+        assert hit == [], hit
         assert tm.close_intraday_trades(user_id=UID, _now=_now(15, 14)) == []
-        assert tm.db.fetch_one(
-            "SELECT status FROM paper_trades WHERE id=?", [int(t_intra)])["status"] == "open"
+        assert tm.db.fetch_one("SELECT status FROM paper_trades WHERE id=?",
+                               [int(t_intra)])["status"] == "open"
+        assert tm.db.fetch_one("SELECT status FROM paper_trades WHERE id=?",
+                               [int(t_pos)])["status"] == "open"
     finally:
         _cleanup(tm)
 
 
-def test_monitor_runs_eod_scan_without_page_view(monkeypatch):
-    """Background run_once me intraday scan chalta hai (market khula ho ya band)."""
+def test_monitor_still_runs_eod_scan_path(monkeypatch):
+    """Background run_once ka intraday scan path chalta rahta hai."""
     import core.services.sl_monitor as slm
     from core.models.trade_model import TradeModel
     calls = []

@@ -156,107 +156,16 @@ class TradeModel:
         return sl_level, tp_level
 
     def close_intraday_trades(self, user_id=1, _now=None) -> list:
-        """15:15 IST forced square-off for INTRADAY trades only (user rule:
-        3:00 PM se pehle khule trades 3:15 PM tak hold + 3:15 PM par hi
-        square-off). Positional trades (trade_type='positional') carry
-        overnight - unhe kabhi nahi chhedta. Cash/EQ never held overnight -
-        short-delivery auction safety.
-        _now: test hook (IST datetime).
-        Returns [{id, reason, exit_price}]."""
-        hit = []
-        try:
-            now = _now or self._ist_now()
-            if now.time() < __import__("datetime").time(15, 15):
-                return hit
-            today = now.strftime("%Y-%m-%d")
-            opens = self.db.fetch_all(
-                "SELECT * FROM paper_trades WHERE user_id=? AND status='open'"
-                " AND COALESCE(trade_type,'intraday')='intraday'", [user_id]
-            )
-        except Exception:
-            return hit
-        for t in opens or []:
-            try:
-                cur, _src = self._forced_exit_price(t)
-                self.close_trade(t["id"], float(cur), today, exit_status="intraday_auto")
-                hit.append({"id": t["id"], "reason": "intraday_auto",
-                            "exit_price": round(float(cur), 2)})
-            except Exception:
-                continue
-        return hit
+        """REMOVED (user rule 2026-11-15): 3:15 PM time square-off hataya gya -
+        ab trades sirf Stop-Loss / Target / manual par close hoti hain.
+        Function kept as a no-op so monitor paths remain stable.
+        Returns [] always."""
+        return []
 
     def close_strategy_exit_time_trades(self, user_id=1, now_hhmm: str = "") -> list:
-        """Strategy ke exit_time (15:05 jaisa) par paper trade ka EOD exit.
-        Sirf INTRADAY trades (strategy trade_mode intraday + trade_type
-        intraday) — positional overnight carry hota hai, use nahi chhedte.
-        Market band hone ke BAAD bhi chalta hai (yahi kal ka bug tha:
-        15:29 entry, exit_time 15:05 guzar chuka, koi square-off nahi chala).
-        Premium na mile to entry price par close (trade kabhi carry nahi).
-        Returns [{id, reason, exit_price, exit_time}]."""
-        import json as _js
-        hit = []
-        try:
-            _now = self._ist_now()
-            today = _now.strftime("%Y-%m-%d")
-            hhmm = str(now_hhmm or _now.strftime("%H:%M"))
-        except Exception:
-            return hit
-        try:
-            opens = self.db.fetch_all(
-                "SELECT * FROM paper_trades WHERE user_id=? AND status='open'"
-                " AND COALESCE(strategy_id,0)>0", [user_id]
-            )
-        except Exception:
-            return hit
-        for t in opens or []:
-            try:
-                if self._trade_type(t) != "intraday":
-                    continue
-                try:
-                    s = self.db.fetch_one("SELECT advanced_options FROM strategies WHERE id=?",
-                                          [t.get("strategy_id")])
-                except Exception:
-                    s = None
-                if not s:
-                    continue
-                try:
-                    adv = _js.loads(s.get("advanced_options") or "{}")
-                except Exception:
-                    adv = {}
-                if not isinstance(adv, dict):
-                    adv = {}
-                # User rule: trades exit ONLY at SL/TP by default.
-                # Strategy exit_time auto-close is OFF unless explicitly enabled.
-                if str(adv.get("auto_exit_on_time") or "false").lower() != "true":
-                    continue  # exit_time auto-close disabled - trade exits only at SL/TP/manual
-                if str(adv.get("trade_mode") or "intraday").lower() != "intraday":
-                    continue  # positional strategy: overnight carry allowed
-                _et = str(adv.get("exit_time") or "15:15").strip()[:5]
-                try:
-                    _eh, _em = _et.split(":")
-                    _exit_mins = int(_eh) * 60 + int(_em)
-                    _nh, _nm = hhmm[:5].split(":")
-                    _now_mins = int(_nh) * 60 + int(_nm)
-                except Exception:
-                    continue
-                _entry_d = str(t.get("entry_date") or "")[:10]
-                _carried = bool(_entry_d and _entry_d < today)
-                if not _carried and _now_mins < _exit_mins:
-                    continue  # exit time abhi aaya nahi
-                cur, _src = self._forced_exit_price(t)
-                if _src != "live":
-                    try:
-                        from utils.helpers import log_exit_skip as _log
-                        _log("strategy_exit", t.get("id"), t.get("symbol"),
-                             f"live premium nahi mila - {_src} par EOD exit")
-                    except Exception:
-                        pass
-                self.close_trade(t["id"], float(cur), today, exit_status="strategy_exit")
-                hit.append({"id": t["id"], "reason": "strategy_exit",
-                            "exit_price": round(float(cur), 2), "exit_time": _et})
-            except Exception:
-                continue
-        return hit
+        """REMOVED (user rule 2026-11-15): strategy exit_time par EOD force-close
+        hataya gya. Trades sirf SL/Target par close hoti hain. Kept as a no-op."""
+        return []
 
     def check_overnight_gap(self, user_id=1) -> list:
         """Morning gap check: positions carried overnight (entry_date < today)
