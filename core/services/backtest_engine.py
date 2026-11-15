@@ -1164,6 +1164,18 @@ class BacktestEngine:
             val = float(historical[i].get("high_price", close))
         elif indicator == "low":
             val = float(historical[i].get("low_price", close))
+        elif indicator == "rsi" and "rsi" in pre_calc:
+            _v = pre_calc["rsi"][i] if i < len(pre_calc["rsi"]) else None
+            if _v is not None:
+                val = float(_v)
+        elif indicator == "ema" and "ema" in pre_calc:
+            _v = pre_calc["ema"][i] if i < len(pre_calc["ema"]) else None
+            if _v is not None:
+                val = float(_v)
+        elif indicator == "kama" and "kama" in pre_calc:
+            _v = pre_calc["kama"][i] if i < len(pre_calc["kama"]) else None
+            if _v is not None:
+                val = float(_v)
         elif indicator == "predicted_moving_average" and "pma" in pre_calc:
             val = pre_calc["pma"].get("pma", {}).get(i, close)
         elif indicator == "ai_sentiment" and "ai_sentiment" in pre_calc:

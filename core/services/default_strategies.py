@@ -37,6 +37,45 @@ DEFAULT_STRATEGIES = [
         "status": "active",
         "protected": 1,
     },
+    {
+        "name": "NIFTY Intraday Sell PE + VIX Filter (v2)",
+        "symbol": "NIFTY",
+        "start_date": "2026-08-01",
+        "end_date": "2026-10-30",
+        "timeframe": "5m",
+        "description": ("Improved v2: Supertrend(10/3) standalone (v1 parity). "
+                        "VIX filter wired as v1 claimed: skip high-vol days "
+                        "(vix_max=20). Tested peer confirmations (RSI>50/40/45, "
+                        "crosses_above) - all reduced backtest win rate on real "
+                        "5m data, so NOT used. Sell PE OTM4 weekly, 1 lot, 5m intraday."),
+        "indicators": [
+            {"id": "supertrend", "params": {"period": 10, "multiplier": 3}},
+            {"id": "rsi", "params": {"period": 14}},
+        ],
+        # Peer confirmation tested and rejected on real data (underperformed v1).
+        "entry_conditions": [],
+        "exit_conditions": [],
+        "legs": [
+            {"option_type": "PE", "transaction": "sell", "lots": 1,
+             "strike_selection": "otm", "otm_distance": 4, "expiry": "weekly"}
+        ],
+        "advanced_options": {
+            "trade_mode": "intraday", "timeframe": "5m",
+            "entry_time": "09:35", "exit_time": "15:15",
+            "slippage_pct": 0.5, "strike_selection": "otm", "otm_distance": 4,
+            "max_holding_bars": 1000000,
+        },
+        "risk_management": {
+            "daily_stop_loss": 6000, "daily_take_profit": 0,
+            # -1 = unlimited (daily limits removed, user rule 2026-11)
+            "max_trades_per_day": -1, "daily_loss_limit": 0,
+            "signal_lookback_days": 0,
+            # VIX filter (claimed in v1 name but never wired): skip high-vol days
+            "vix_max": 20,
+        },
+        "status": "paused",
+        "protected": 1,
+    },
 ]
 
 # User request (11-11-2026): aaj ke SENSEX/MIDCPNIFTY BUY strategies DELETE -
