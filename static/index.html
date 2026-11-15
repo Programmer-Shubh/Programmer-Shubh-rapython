@@ -2099,9 +2099,9 @@ let _lastOpenTrdHTML = null;
     // Indicator inputs auto
     document.addEventListener('change',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-ind-')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
     document.addEventListener('input',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
-    // SL/TP = POINTS (premium move). Legacy ₹/% suffix pichle versions me
-    // tha; ab backtest/save/edit ke liye kewal points hi.
-    function _amtVal(el,dflt){const s=String((document.getElementById(el)||{}).value||'').trim().replace(/[\u20b9,\s]/g,'');if(!s)return{v:(dflt||0),u:'pt'};const low=s.toLowerCase().replace(/pts?|point(s)?$/g,'');const v=parseFloat(low);return{v:(v||0),u:'pt'};}
+    // Saved-load par unit SAFE-flow: input me unit suffix likhna zaroori.
+    // Bare number = points (manual input default). "30%" pct, "1500rs" = legacy ₹.
+    function _amtVal(el,dflt){const s=String((document.getElementById(el)||{}).value||'').trim().replace(/[\u20b9,\s]/g,'');if(!s)return{v:(dflt||0),u:'pt'};const low=s.toLowerCase();if(/%|pct|percent/.test(low))return{v:(parseFloat(low.replace(/[^0-9.\-]/g,''))||0),u:'pct'};if(/rs$/.test(low))return{v:(parseFloat(low.replace(/[^0-9.\-]/g,''))||0),u:'rs'};return{v:(parseFloat(low.replace(/[^0-9.\-]/g,''))||0),u:'pt'};}
     // ═══ Dual-Unit Auto-Conversion (Rule 1) ═══
     // SL/TP input ke side me auto mirror: ₹ → % aur % → ₹, est. entry premium
     // (ATM premium) ke basis par. Premium live chain se; naive ho to ~ spot
@@ -2127,7 +2127,11 @@ let _lastOpenTrdHTML = null;
         try{
             const a=_amtVal(el,0); const out=document.getElementById(inEl);
             if(!out)return;
-            out.textContent=(a.v>0?(a.v+' points - direct entry premium move'):'SL/TP points me likho (e.g. 30 = 30 points)');
+            // Points manual input (suffix ignored); saved strategies may show
+            // legacy "%" / "rs" units.
+            if(a.u==='pct')out.textContent=a.v>0?(a.v+'% of premium (saved strategy unit)'):'EX: 30%';
+            else if(a.u==='rs')out.textContent=a.v>0?('₹'+a.v.toLocaleString('en-IN')+' (rupees, saved strategy unit)'):'EX: ₹1500';
+            else out.textContent=(a.v>0?(a.v+' points - direct entry premium move'):'SL/TP points me likho (e.g. 30)');
         }catch(e){}
     }
     async function _refreshDualMirror(){
@@ -2203,10 +2207,17 @@ let _lastOpenTrdHTML = null;
             }catch(e){}
             try{
                 _rm=(typeof s.risk_management==='string')?JSON.parse(s.risk_management||'{}'):(s.risk_management||{});
+                // Saved unit ke hisaab se input me professional suffix: pt/%/rs.
+                // Legacy rs (1500) ko pts (6000 points) me nahi badalna - warna
+                // saved strategies silently halke-se SL par trade karengi.
+                const _slSuffix=(_rm.sl_unit==='pt')?'':(_rm.daily_stop_loss_pct?'%':(_rm.sl_unit==='rs'||!_rm.sl_unit)?'rs':'');
+                const _tpSuffix=(_rm.tp_unit==='pt')?'':(_rm.daily_take_profit_pct?'%':(_rm.tp_unit==='rs'||!_rm.tp_unit)?'rs':'');
+                const _slVal =_rm.sl_unit==='pt'?_rm.daily_stop_loss:(_rm.daily_stop_loss_pct?_rm.daily_stop_loss_pct:(_rm.daily_stop_loss??''));
+                const _tpVal =_rm.tp_unit==='pt'?_rm.daily_take_profit:(_rm.daily_take_profit_pct?_rm.daily_take_profit_pct:(_rm.daily_take_profit??''));
                 if(_rm.daily_stop_loss_pct)document.getElementById('s-sl').value=_rm.daily_stop_loss_pct+'%';
-                else if(_rm.daily_stop_loss)document.getElementById('s-sl').value=_rm.daily_stop_loss;
+                else if(_rm.daily_stop_loss)document.getElementById('s-sl').value=String(_slVal===undefined?'':_slVal)+_slSuffix;
                 if(_rm.daily_take_profit_pct)document.getElementById('s-tp').value=_rm.daily_take_profit_pct+'%';
-                else if(_rm.daily_take_profit)document.getElementById('s-tp').value=_rm.daily_take_profit;
+                else if(_rm.daily_take_profit)document.getElementById('s-tp').value=String(_tpVal===undefined?'':_tpVal)+_tpSuffix;
                 try{document.getElementById('s-mtd').value='Unlimited';}catch(e){}
                 try{if(_rm.signal_lookback_days!=null)document.getElementById('r-slb').value=_rm.signal_lookback_days;}catch(e){}
                 try{const _vx=parseFloat(_rm.vix_max);if(isFinite(_vx)&&document.getElementById('s-vix-max'))document.getElementById('s-vix-max').value=Math.max(0,_vx);}catch(e){}
