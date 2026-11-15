@@ -59,7 +59,12 @@ class TradeModel:
             try:
                 if v is None:
                     return "rs"
-                u = str(data.get(key) or ("pct" if (isinstance(v, str) and ("%" in v or v.lower().endswith(("pct", "percent")))) else "rs")).lower()
+                u0 = str(data.get(key) or "").lower().strip()
+                if u0 in ("pt", "pts", "point", "points"):
+                    return "pt"
+                u = u0 or ("pct" if (isinstance(v, str) and ("%" in v or v.lower().endswith(("pct", "percent")) or v.lower().endswith(("pt", "pts")))) else "rs")
+                if u in ("pt", "pts", "point", "points"):
+                    return "pt"
                 return u if u in ("rs", "pct") else "rs"
             except Exception:
                 return "rs"
@@ -923,7 +928,7 @@ class TradeModel:
         def _nu(u):
             try:
                 u = str(u or "").lower()
-                return u if u in ("rs", "pct") else None
+                return u if u in ("rs", "pct", "pt") else None
             except Exception:
                 return None
         sets, vals = [], []

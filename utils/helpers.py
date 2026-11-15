@@ -449,12 +449,13 @@ def sltp_unit(value) -> str:
 
 
 def sltp_amount(value, default_unit: str = "rs"):
-    """SL/TP value ko (amount, unit) me parse karo - unit 'rs' | 'pct'.
+    """SL/TP value ko (amount, unit) me parse karo - unit 'rs' | 'pct' | 'pt'.
     Har jagah (backtest risk, paper trade, live orders, sliders) yehi parser
-    chalta hai taaki '% of premium' entry har input se same samjhe jaye:
+    chalta hai:
       - Number            -> (value, default_unit)
       - String '2%'/'2pct'/'2percent' -> (2.0, 'pct')
       - String '1500'/'Rs1500'/'1500rs' -> (1500.0, 'rs')
+      - String '30pt'/'30pts'/'30 points' -> (30.0, 'pt')
     Purani rupee entries mera-purana behavior: number jo UI me 1500 jaisa bhar
     jaata hai wahi rupees hai (default_unit='rs')."""
     try:
@@ -482,12 +483,20 @@ def sltp_amount(value, default_unit: str = "rs"):
                     return float(num), "pct"
                 except Exception:
                     return 0.0, "pct"
-        if low.endswith("rs"):
-            num = low[:-2].strip()
-            try:
-                return float(num), "rs"
-            except Exception:
-                return 0.0, "rs"
+        for _suf in ("rs",):
+            if low.endswith(_suf):
+                num = low[:-len(_suf)].strip()
+                try:
+                    return float(num), "rs"
+                except Exception:
+                    return 0.0, "rs"
+        for _suf in ("points", "point", "pts", "pt"):
+            if low.endswith(_suf):
+                num = low[:-len(_suf)].strip()
+                try:
+                    return float(num), "pt"
+                except Exception:
+                    return 0.0, "pt"
         try:
             return float(s), dflt
         except Exception:
@@ -548,16 +557,28 @@ def sltp_premium_level(entry_price: float, amount: float, quantity: int,
     try:
         entry = float(entry_price or 0)
         if isinstance(amount, str):
-            amount, unit = sltp_amount(amount)
+            # String may carry its own unit suffix ("30pt"/"2%"/"1500rs");
+            # plain string keeps the caller's default unit (not "rs").
+            _amt, _u = sltp_amount(amount, unit or "rs")
+            amount, unit = _amt, _u
         amt = float(amount or 0)
         if amt != amt or amt <= 0 or entry <= 0:   # NaN / disabled guard
             return 0.0
         txn = str(transaction_type or "BUY").upper()
         is_buy = txn != "SELL"
         u = str(unit or "").lower()
-        if u not in ("rs", "pct"):
+        if u not in ("rs", "pct", "pt"):
             u = "rs" if amt > 20 else "pct"       # legacy amount-based heuristic
         units = max(int(quantity or 1) * int(lot_size or 0), 1)
+        if u == "pt":
+            # Points: DIRECT premium move (lot-sizese independent). BUY:
+            # SL=entry-pts, TP=entry+pts. SELL: SL=entry+pts, TP=entry-pts.
+            pts = amt
+            if is_buy:
+                lvl = (entry - pts) if is_sl else (entry + pts)
+            else:
+                lvl = (entry + pts) if is_sl else (entry - pts)
+            return max(0.05, lvl)
         if u == "rs":
             pts = amt / units
             if is_buy:
@@ -582,22 +603,15 @@ def resolve_strategy_sltp(risk_management: dict, leg: dict = None,
                           default_sl: float = 1500.0, default_tp: float = 3000.0):
     """SINGLE SL/TP rule - backtest, paper worker aur live order TEENON ka.
 
-    Pehle DONO alag the (isi se backtest ka exit-distribution paper se alag
-    tha - 80% vs 30% jaisa gap):
-      - backtest: explicit '0' = DISABLED, default Rs500/1000, leg-level
-        'stop_loss' ("30%") USE hota tha.
-      - paper   : '0' = 'set nahi' (next source pe fall-through), default
-        Rs1500/3000, leg-level stop_loss IGNORE hota tha.
-    Ab dono ek hi rule use karte hain (paper wala order, kyunki paper me
-    real paisa lagta hai):
+      SL: risk.daily_stop_loss_pct -> risk.daily_stop_loss (unit = rm.sl_unit) -> leg.stop_loss -> default
+      TP: risk.daily_take_profit_pct -> risk.daily_take_profit (unit = rm.tp_unit) -> leg.take_profit -> default
 
-      SL: risk.daily_stop_loss_pct -> risk.daily_stop_loss -> leg.stop_loss
-          -> default_sl (Rs1500)
-      TP: risk.daily_take_profit_pct -> risk.daily_take_profit -> leg.take_profit
-          -> default_tp (Rs3000)
+      Units: 'rs' = rupees total cap (qty*lot_size divide hota hai),
+             'pct' = entry premium ka percent,
+             'pt'  = DIRECT premium movement points (lot-sizese independent).
 
-    '0' / '' / None / negative = 'set nahi hai' (fall through).
-    Returns (sl_amt, sl_unit, tp_amt, tp_unit)."""
+      '0' / '' / None / negative = 'set nahi hai' (fall through).
+      Returns (sl_amt, sl_unit, tp_amt, tp_unit)."""
     try:
         rm = risk_management if isinstance(risk_management, dict) else {}
         lg = leg if isinstance(leg, dict) else {}
@@ -620,21 +634,19 @@ def resolve_strategy_sltp(risk_management: dict, leg: dict = None,
 
         sl_amt, sl_unit = _pick([
             (rm.get("daily_stop_loss_pct"), "pct"),
-            (rm.get("daily_stop_loss"), "rs"),
+            (rm.get("daily_stop_loss"), rm.get("sl_unit") or "rs"),
             (lg.get("stop_loss"), "rs"),
             (default_sl, "rs"),
         ])
         tp_amt, tp_unit = _pick([
             (rm.get("daily_take_profit_pct"), "pct"),
-            (rm.get("daily_take_proprofit"), "rs"),
-            (rm.get("daily_take_profit"), "rs"),
+            (rm.get("daily_take_profit"), rm.get("tp_unit") or "rs"),
             (lg.get("take_profit"), "rs"),
             (default_tp, "rs"),
         ])
         return sl_amt, sl_unit, tp_amt, tp_unit
     except Exception:
         return 0.0, "rs", 0.0, "rs"
-
 
 # ---------------- Forming (running) candle filter ----------------
 _TF_MINUTES = {"1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30,

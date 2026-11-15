@@ -826,8 +826,10 @@ def update_strategy_sltp(strat_id: int, req: SltpUpdateRequest):
         u = str(u or "").strip().lower()
         if u in ("pct", "%", "percent", "percentage"):
             return "pct"
-        if u in ("rs", "inr", "rupee", "rupees", "point", "points", "pt", "pts", "₹"):
+        if u in ("rs", "inr", "rupee", "rupees", "₹"):
             return "rs"
+        if u in ("pt", "pts", "point", "points"):
+            return "pt"
         return fallback
 
     if req.sl is None and req.tp is None:
@@ -848,13 +850,23 @@ def update_strategy_sltp(strat_id: int, req: SltpUpdateRequest):
         if sl_u == "pct":
             rm["daily_stop_loss_pct"] = round(sl_v, 4)
             rm["daily_stop_loss"] = 0
+            for leg in legs:
+                if isinstance(leg, dict):
+                    leg["stop_loss"] = f"{sl_v}%"
+        elif sl_u == "pt":
+            # Direct premium movement points (lot-size independent)
+            rm["daily_stop_loss_pct"] = 0
+            rm["daily_stop_loss"] = round(sl_v, 2)
+            for leg in legs:
+                if isinstance(leg, dict):
+                    leg["stop_loss"] = f"{sl_v}pt"
         else:
             rm["daily_stop_loss"] = round(sl_v, 2)
             rm["daily_stop_loss_pct"] = 0
+            for leg in legs:
+                if isinstance(leg, dict):
+                    leg["stop_loss"] = sl_v
         rm["sl_unit"] = sl_u
-        for leg in legs:
-            if isinstance(leg, dict):
-                leg["stop_loss"] = (f"{sl_v}%" if sl_u == "pct" else sl_v)
         resp.update({"sl": sl_v, "sl_unit": sl_u})
 
     if req.tp is not None:
@@ -870,13 +882,22 @@ def update_strategy_sltp(strat_id: int, req: SltpUpdateRequest):
         if tp_u == "pct":
             rm["daily_take_profit_pct"] = round(tp_v, 4)
             rm["daily_take_profit"] = 0
+            for leg in legs:
+                if isinstance(leg, dict):
+                    leg["take_profit"] = f"{tp_v}%"
+        elif tp_u == "pt":
+            rm["daily_take_profit_pct"] = 0
+            rm["daily_take_profit"] = round(tp_v, 2)
+            for leg in legs:
+                if isinstance(leg, dict):
+                    leg["take_profit"] = f"{tp_v}pt"
         else:
             rm["daily_take_profit"] = round(tp_v, 2)
             rm["daily_take_profit_pct"] = 0
+            for leg in legs:
+                if isinstance(leg, dict):
+                    leg["take_profit"] = tp_v
         rm["tp_unit"] = tp_u
-        for leg in legs:
-            if isinstance(leg, dict):
-                leg["take_profit"] = (f"{tp_v}%" if tp_u == "pct" else tp_v)
         resp.update({"tp": tp_v, "tp_unit": tp_u})
 
     # Daily trade-count cap removed: an edited strategy runs unconstrained.
