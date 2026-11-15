@@ -600,8 +600,37 @@ class BacktestEngine:
                         daily_pnl += exits[-1]["pnl"]
                     kill_switch_on = True
 
-            # NOTE (user rule 2026-11-15): intraday 15:15 EOD square-off removed -
-            # trades SL/TP par hi close hoti hain. Position EOD par carry hoti hai.
+            # Intraday square-off, same SESSION as entry (never next-day):
+            # minute bars -> last bar of the day; daily bars -> the entry
+            # bar's own close (one bar IS one session). Stale multi-day
+            # intraday holds are also flushed (entry_date < today).
+            # NOTE: entry-bar EOD is ALLOWED (no just_entered gate): fill is
+            # at open, exit at close - no lookahead, and paper also force-
+            # closes same evening (intraday_auto/strategy_exit). Gating it
+            # carried last-bar entries overnight (gap risk paper never has).
+            has_open_eod = len(entries) > len(exits)
+            is_early_exit = False
+            if trade_mode == "intraday" and has_open_eod:
+                try:
+                    _ed = str(entries[len(exits)].get("date", "") or "")
+                except Exception:
+                    _ed = ""
+                if cur.get("bar_time"):
+                    is_early_exit = bool(is_last)
+                else:
+                    is_early_exit = bool(is_last and _ed and _ed <= cur_date)
+            if has_open_eod and trade_mode == "intraday" and is_early_exit:
+                entry = entries[len(exits)]
+                if entry.get("is_spread"):
+                    self._close_spread(entries, exits, entry, "intraday", cur_date, trigger="EOD")
+                else:
+                    exit_prem = self._close_premium(cur_date, float(cur["close_price"]), float(entry["strike"]), option_type)
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, "SELL" if txn_type == "buy" else "BUY", self.is_live, slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
+                    self._close_position(entries, exits, entry, exit_prem, "intraday", cur_date, qty, txn_type,
+                                         trigger="EOD")
+                daily_pnl += exits[-1]["pnl"]
+                if (daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and daily_pnl <= -strategy_sl) or (strategy_tp > 0 and daily_pnl >= strategy_tp):
+                    kill_switch_on = True
 
             # Expiry-day square-off for positional carries (NO roll-over):
             # if the open position is held on/after its contract expiry,
@@ -627,9 +656,7 @@ class BacktestEngine:
                 if len(entries) > len(exits):
                     eidx = len(exits)
                     bars_held = i - (entry_bars[eidx] if eidx < len(entry_bars) else i)
-                # NOTE (user rule 2026-11-15): max_holding_bars time-exit bhi HATAYA -
-                # trades SL/TP par hi close hoti hain.
-                time_exit = False
+                time_exit = bars_held >= max_holding
                 # Generate signals using CLOSED bar (i-1) - NO LOOK-AHEAD
                 # Signal generated at bar i-1, execution at bar i
                 buy_sig = self._get_buy_signal(i, pre_calc, historical, entry_conditions)
@@ -661,14 +688,20 @@ class BacktestEngine:
                     if not entry_sig and not pre_calc:
                         entry_sig = True
                     exit_sig = time_exit
-                # NOTE (user rule 2026-11-15): exit_conditions par signal-exit bhi HATAYA -
-                # trades SL/TP par hi close hoti hain
-                if option_type == "PE":
-                    entry_sig = sell_sig if txn_type == "buy" else buy_sig
-                    exit_sig = False
                 else:
-                    entry_sig = buy_sig if txn_type == "buy" else sell_sig
-                    exit_sig = False
+                    # Direction-aware: CE Buy = bullish (buy_sig), PE Buy = bearish (sell_sig)
+                    # CE Sell = bearish, PE Sell = bullish
+                    # Signal-based EXIT only when the user wrote explicit
+                    # exit_conditions. Paper holds until SL/TP/EOD (its monitor
+                    # has no opposite-indicator exit), so an empty conditions
+                    # list must NOT create a backtest-only exit.
+                    _exit_on_signal = bool(exit_conditions)
+                    if option_type == "PE":
+                        entry_sig = sell_sig if txn_type == "buy" else buy_sig
+                        exit_sig = (buy_sig if txn_type == "buy" else sell_sig) if _exit_on_signal else False
+                    else:
+                        entry_sig = buy_sig if txn_type == "buy" else sell_sig
+                        exit_sig = (sell_sig if txn_type == "buy" else buy_sig) if _exit_on_signal else False
                 # Market Regime filter: when selected, only enter in matching regime
                 if "market_regime" in (pre_calc or {}):
                     try:

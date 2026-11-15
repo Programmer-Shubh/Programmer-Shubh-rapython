@@ -434,9 +434,26 @@ class HistoricalReplayEngine:
                 self.bt_engine.bt_expiry = ""
                 _rexp = ""
             
-            # NOTE (user rule 2026-11-15): intraday EOD time square-off bhi HATAYA -
-            # trades sirf SL/TP/expiry/end-of-period par close hoti hain.
-
+            # Intraday forced exit
+            has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
+            if has_open and trade_mode == "intraday" and is_last:
+                open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
+                entry = self.trades[open_trade_idx]
+                if entry.get("is_spread"):
+                    self.bt_engine._close_spread(self.trades, self._exits, entry, "intraday", cur_date)
+                else:
+                    exit_prem = self.bt_engine._close_premium(cur_date, float(cur["close_price"]), 
+                        float(entry["strike"]), option_type)
+                    exit_prem = TransactionCosts.apply_fill_slippage(exit_prem, 
+                        "SELL" if txn_type == "buy" else "BUY", False,
+                        slippage_pct=float(getattr(self.bt_engine, "_slippage_pct", 0.5) or 0.5))
+                    self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem, 
+                        "intraday", cur_date, qty, txn_type)
+                self._sync_exit(open_trade_idx)
+                self.daily_pnl += self.trades[open_trade_idx].get("pnl", 0)
+                if (daily_loss_limit > 0 and self.daily_pnl <= -daily_loss_limit) or (strategy_sl > 0 and self.daily_pnl <= -strategy_sl) or (strategy_tp > 0 and self.daily_pnl >= strategy_tp):
+                    self.kill_switch_on = True
+            
             # Generate signals for next bar (using current bar i - no look-ahead)
             if nxt is not None:
                 bars_held = 0
@@ -444,9 +461,7 @@ class HistoricalReplayEngine:
                     open_idx = len([t for t in self.trades if t.get("exit_date")])
                     if open_idx < len(self.entry_bars):
                         bars_held = i - self.entry_bars[open_idx]
-                # NOTE (user rule 2026-11-15): max_holding_bars time-exit bhi HATAYA -
-                # trades SL/TP par hi close hoti hain.
-                time_exit = False
+                time_exit = bars_held >= max_holding
                 
                 # Signals generated on bar i (closed), execution on bar i+1
                 buy_sig = self.bt_engine._get_buy_signal(i, self.pre_calc, self.historical_data, self.entry_conditions)
@@ -466,14 +481,15 @@ class HistoricalReplayEngine:
                         entry_sig = True
                     exit_sig = time_exit
                 else:
-                    # NOTE (user rule 2026-11-15): signal-based exit bhi HATAYA -
-                    # trades SL/TP par hi close hoti hain
+                    # Parity: explicit exit_conditions par hi signal-exit
+                    # (paper SL/TP/EOD tak hold karta hai).
+                    _r_exit_on_signal = bool(self.exit_conditions)
                     if option_type == "PE":
                         entry_sig = sell_sig if txn_type == "buy" else buy_sig
-                        exit_sig = False
+                        exit_sig = (buy_sig if txn_type == "buy" else sell_sig) if _r_exit_on_signal else False
                     else:
                         entry_sig = buy_sig if txn_type == "buy" else sell_sig
-                        exit_sig = False
+                        exit_sig = (sell_sig if txn_type == "buy" else buy_sig) if _r_exit_on_signal else False
                 
                 has_open = len(self.trades) > len([t for t in self.trades if t.get("exit_date")])
                 can_enter = not has_open and (_unlimited_trades or self.daily_trades < max_trades_day)
