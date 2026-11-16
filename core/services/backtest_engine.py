@@ -348,6 +348,22 @@ class BacktestEngine:
         highs = [h["high_price"] for h in historical]
         lows = [h["low_price"] for h in historical]
         pre_calc = self._pre_calc(historical, closes, highs, lows, ind_list)
+        # ---- STRICT TREND GATE (rulebook 16-11-2026) ----
+        # ADX(14) > 22 + VWAP(20) direction filter. `advanced.strict_trend`
+        # se ON (backtest + paper + live - same engine, same gate).
+        self._strict_gate = None
+        try:
+            _st_on = str(advanced_options.get("strict_trend") or "").lower() in (
+                "1", "true", "yes", "on")
+            if _st_on:
+                _adx = self.indicators.calculate_adx(historical, 14) or {}
+                _vw = self.indicators.calculate_vwap(historical, 20, 2.0) or {}
+                _a_vals = list((_adx or {}).get("adx", []) or [])
+                _v_vals = list((_vw or {}).get("vwap", []) or [])
+                if _a_vals or _v_vals:
+                    self._strict_gate = (_a_vals, _v_vals)
+        except Exception:
+            self._strict_gate = None
         # Store indicator modes for bullish/bearish filtering
         self.ind_modes = {}
         for ind in ind_list:
@@ -716,6 +732,29 @@ class BacktestEngine:
                         if (option_type == "CE" and txn_type == "sell") or (option_type == "PE" and txn_type == "buy"):
                             if _cur_regime == "bullish":
                                 entry_sig = False
+                    except Exception:
+                        pass
+                # ---- STRICT TREND GATE (rulebook 16-11-2026) ----
+                # ADX(14) strictly > 22 (sideways/choppy me entry nahi) +
+                # VWAP direction (CE: close > VWAP, PE: close < VWAP).
+                # `advanced.strict_trend = True` se ON. Signal bar (i) ki
+                # CLOSED values par evaluate - look-ahead nahi (execution
+                # bar i+1 par hoti hai).
+                if entry_sig and self._strict_gate is not None:
+                    try:
+                        from core.services.strategy_rulebook import strict_trend_ok as _stg
+                        _g = self._strict_gate
+                        _adx = _g[0][i] if i < len(_g[0]) else None
+                        _vwap = _g[1][i] if i < len(_g[1]) else None
+                        _close = float(cur.get("close_price", 0) or 0)
+                        if not _stg(_adx, _close, _vwap, option_type,
+                                    "BUY" if txn_type == "buy" else "SELL"):
+                            entry_sig = False
+                            try:
+                                self._rej["strict_trend_adx_vwap"] = (
+                                    self._rej.get("strict_trend_adx_vwap", 0) + 1)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                 has_open = len(entries) > len(exits)
@@ -1857,6 +1896,12 @@ class BacktestEngine:
                                                        slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
         premium = self._apply_latency(premium, "BUY" if txn_type == "buy" else "SELL")
         premium = max(premium, 1.5)
+        # TICK SIZE 0.05 (rulebook): fill price exchange tick par snap.
+        try:
+            from core.services.strategy_rulebook import round_tick as _rtick
+            premium = _rtick(premium)
+        except Exception:
+            pass
         costs = TransactionCosts.calculate(premium * qty, txn_type == "sell", self.is_live)
         entry_time = getattr(self, '_entry_time', '09:35')
         # Real signal-bar time when known (intraday); daily bars honestly
@@ -1972,7 +2017,10 @@ class BacktestEngine:
         jabki paper me target tha (exit distribution alag = win-rate alag)."""
         try:
             from utils.helpers import resolve_strategy_sltp as _res
-            sl_amt, sl_unit, tp_amt, tp_unit = _res(risk_management, leg)
+            # symbol diya - tabhi per-index tight defaults (rulebook) lagte
+            # hain (NIFTY 15/20, FINNIFTY 18/22, BANKNIFTY 25/35 points).
+            sl_amt, sl_unit, tp_amt, tp_unit = _res(
+                risk_management, leg, symbol=getattr(self, "bt_symbol", "") or None)
             return sl_amt, tp_amt, sl_unit, tp_unit
         except Exception:
             return 0.0, 0.0, "rs", "rs"
@@ -2073,6 +2121,14 @@ class BacktestEngine:
 
         sl_level = _to_level(sl_amt, True)
         tp_level = _to_level(tp_amt, False)
+        # TICK SIZE 0.05 (rulebook): SL/TP levels bhi exchange tick par -
+        # paper/live monitor ke tick levels se exactly match karte hain.
+        try:
+            from core.services.strategy_rulebook import round_tick as _rtick_lvl
+            sl_level = _rtick_lvl(sl_level) if sl_level > 0 else sl_level
+            tp_level = _rtick_lvl(tp_level) if tp_level > 0 else tp_level
+        except Exception:
+            pass
 
         # ---- Trailing Stop: lock in profits as price moves in favor ----
         # Causal: the trailed stop for bar i uses the best price reached on
@@ -2879,6 +2935,12 @@ class BacktestEngine:
         # SL/TP exits (e.g. 9.30 on a far-OTM option) must execute exactly,
         # else a spot*1.5% floor (~42) silently destroys every stop-loss.
         exit_prem = max(float(exit_prem or 0), 0.05)
+        # TICK SIZE 0.05 (rulebook): exit fill bhi tick par snap.
+        try:
+            from core.services.strategy_rulebook import round_tick as _rtick_ex
+            exit_prem = _rtick_ex(exit_prem)
+        except Exception:
+            pass
         # v7: EXIT-side latency. Stop/market/EOD exits trigger hone ke baad
         # order broker tak jaata hai - fill level se thoda worse hota hai.
         # TP ek resting LIMIT hai (level par fill, paper bhi level book karta

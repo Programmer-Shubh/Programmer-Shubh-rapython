@@ -213,6 +213,30 @@ def check_stoploss_target(confirm_secs=2):
             _exit_px = current
             if hit_tp and tp_level > 0:
                 _exit_px = tp_level
+            elif hit_sl and sl_level > 0:
+                # BAD-QUOTE CAP (16-11-2026): SL par quote bahut peeche ho to
+                # (stale/wrong contract print) poora loss book hota tha -
+                # FINNIFTY CE 282.20 -> 230.24 (3 min me -18%, jo liquid
+                # option me possible nahi) ek hi trade me -₹3,182. Ab SL
+                # fill SL level se max 2% hi worse ho sakta hai (gap fill
+                # ka realistic cap) - bad tick se loss book nahi hoga.
+                try:
+                    _cap_pct = 2.0
+                    try:
+                        from core.services.sl_monitor import bad_quote_fill_cap_pct as _bcp
+                        _cap_pct = float(_bcp())
+                    except Exception:
+                        _cap_pct = 2.0
+                    if is_buy:
+                        _floor_px = sl_level * (1 - _cap_pct / 100.0)
+                        if _exit_px < _floor_px:
+                            _exit_px = _floor_px
+                    else:
+                        _ceil_px = sl_level * (1 + _cap_pct / 100.0)
+                        if _exit_px > _ceil_px:
+                            _exit_px = _ceil_px
+                except Exception:
+                    pass
             # Pass is_live=True via close_trade slippage (trade_model.py)
             trade_model.close_trade(trade["id"], _exit_px, datetime.now().strftime("%Y-%m-%d"), reason)
             closed.append({"id": trade["id"], "reason": reason, "exit_price": round(float(_exit_px), 2)})

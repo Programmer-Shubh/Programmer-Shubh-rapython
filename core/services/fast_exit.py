@@ -297,6 +297,23 @@ def _evaluate_and_exit(t, price, source="broker"):
         return None, None
     reason = "stoploss" if hit_sl else "target"
     exit_px = tp_level if (hit_tp and tp_level > 0) else price
+    if hit_sl and sl_level > 0:
+        # BAD-QUOTE CAP (16-11-2026): stale/wrong quote par SL fill bahut
+        # door book ho jata tha (FINNIFTY CE 282.20 -> 230.24 = -18% ek 3-min
+        # trade me). Fill SL level se max 2% hi worse ho sakta hai.
+        try:
+            from core.services.sl_monitor import bad_quote_fill_cap_pct as _bcp
+            _cap = float(_bcp()) / 100.0
+        except Exception:
+            _cap = 0.02
+        if is_buy:
+            _floor_px = sl_level * (1 - _cap)
+            if float(exit_px) < _floor_px:
+                exit_px = _floor_px
+        else:
+            _ceil_px = sl_level * (1 + _cap)
+            if float(exit_px) > _ceil_px:
+                exit_px = _ceil_px
     if not _claim(tid):
         return None, None
     try:

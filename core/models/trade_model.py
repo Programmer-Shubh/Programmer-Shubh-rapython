@@ -614,7 +614,26 @@ class TradeModel:
                     # Auto-close with accurate P&L via close_trade
                     try:
                         today = self._ist_today()
-                        self.close_trade(t["id"], current_price, today, exit_status=f"auto_{exit_reason}")
+                        _exit_px = float(current_price or 0)
+                        if exit_reason == "stoploss" and sl_level > 0:
+                            # BAD-QUOTE CAP (16-11-2026): stale/wrong quote par
+                            # SL fill bahut door book ho jata tha (FINNIFTY CE
+                            # 282.20 -> 230.24 = -18% ek 3-min trade me). Ab
+                            # fill SL level se max 2% hi worse ho sakta hai.
+                            try:
+                                from core.services.sl_monitor import bad_quote_fill_cap_pct as _bcp
+                                _cap = float(_bcp()) / 100.0
+                            except Exception:
+                                _cap = 0.02
+                            if str(t.get("transaction_type") or "BUY").upper() == "BUY":
+                                _floor_px = sl_level * (1 - _cap)
+                                if _exit_px < _floor_px:
+                                    _exit_px = _floor_px
+                            else:
+                                _ceil_px = sl_level * (1 + _cap)
+                                if _exit_px > _ceil_px:
+                                    _exit_px = _ceil_px
+                        self.close_trade(t["id"], _exit_px, today, exit_status=f"auto_{exit_reason}")
                         continue  # Don't include in open positions, it's closed
                     except Exception:
                         pass

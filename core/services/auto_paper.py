@@ -520,12 +520,15 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
         _legs0 = _js.loads(s.get("legs") or "[]")
     except Exception:
         _legs0 = []
+    sym = str(s.get("symbol") or "").upper()
     try:
         from utils.helpers import resolve_strategy_sltp as _res_sltp
-        sl, sl_u, tp, tp_u = _res_sltp(rm, (_legs0[0] if _legs0 else {}))
+        # symbol chahiye - per-index tight defaults (rulebook 16-11-2026:
+        # NIFTY 15/20, FINNIFTY 18/22, BANKNIFTY 25/35 points) tab lagte
+        # hain jab strategy me explicit SL/TP nahi hai.
+        sl, sl_u, tp, tp_u = _res_sltp(rm, (_legs0[0] if _legs0 else {}), symbol=sym)
     except Exception:
         sl, sl_u, tp, tp_u = 1500.0, "rs", 3000.0, "rs"
-    sym = str(s.get("symbol") or "").upper()
     if not sym:
         return placed, ["no symbol - skipped"]
     try:

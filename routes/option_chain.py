@@ -655,14 +655,41 @@ def place_trade(req: TradeRequest):
         # baad (bhavcopy EOD par update hoti hai) - paper entry aur live
         # entry dono SAME pricer se price lete hain.
         _today = bool(req.date) and str(req.date)[:10] == _ist
+        _px_source = ""
         if _today or premium <= 0:
             try:
-                live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type,
-                                                  req.expiry, fresh=True)
+                # SOURCE-AWARE pricer: 'broker-quote' (real) vs 'db-close' vs
+                # 'model' (guessed). Paper-BT delta ka asli reason yehi tha -
+                # entry MODEL price par khulti (market se 10-20% upar) aur
+                # exit REAL quote par bandhti -> har trade ko turant fake
+                # 'stoploss' mil jata tha.
+                from core.services.contract_pricer import get_contract_ltps as _gcl
+                _srcs = {}
+                _res = _gcl(req.symbol, [(req.strike, req.option_type)],
+                            req.expiry, fresh=True, sources=_srcs) or {}
+                for _v in _res.values():
+                    if _v and float(_v) > 0:
+                        premium = float(_v)
+                        break
+                for _v in _srcs.values():
+                    _px_source = str(_v or "")
             except Exception:
-                live_premium = 0
-            if live_premium and live_premium > 0:
-                premium = float(live_premium)
+                premium = 0
+                _px_source = ""
+            if not (premium and premium > 0):
+                try:
+                    live_premium = live.get_option_ltp(req.symbol, req.strike, req.option_type,
+                                                      req.expiry, fresh=True)
+                except Exception:
+                    live_premium = 0
+                if live_premium and live_premium > 0:
+                    premium = float(live_premium)
+        # MODEL-priced entry BLOCK (aaj ka paper trade): exit real quote par
+        # hoti hai - model entry par trade khulne se fake loss book hota hai.
+        if _today and _px_source == "model":
+            return {"error": (f"{req.symbol} {int(float(req.strike))}{req.option_type} ka live quote "
+                              f"abhi nahi mila (source=model) - paper trade model price par nahi khulegi "
+                              f"(warna entry/exit ke alag price se fake P&L banta hai). Thodi der me try karo.")}
         # Past date + DB me bhi premium nahi -> live price mix nahi karenge
         if premium <= 0 and req.date and _ist and str(req.date)[:10] < _ist:
             return {"error": f"No {req.option_type} {req.strike} premium on {req.date} for {req.symbol} - pick a strike visible in that date's chain (live rate not applied to past dates)"}
@@ -789,6 +816,13 @@ def place_trade(req: TradeRequest):
         # LIVE path (contract_pricer.entry_price) - so paper and live of the
         # same contract land on the same price.
         adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
+        # TICK SIZE 0.05 (rulebook): paper entry fill bhi tick par snap
+        # (backtest entry ke saath exactly match).
+        try:
+            from core.services.strategy_rulebook import round_tick as _rtick_p
+            adj_premium = _rtick_p(adj_premium)
+        except Exception:
+            pass
         lot_size = get_lot_size(req.symbol)
         costs = TransactionCosts.calculate(adj_premium * req.quantity * lot_size, req.transaction_type == "SELL", is_live=True)
         trade_model = TradeModel()
@@ -816,7 +850,8 @@ def place_trade(req: TradeRequest):
         except ValueError as _de:
             return {"error": str(_de)[:200]}
         _resp = {"trade_id": trade_id, "entry_price": round(adj_premium, 2), "costs": costs,
-                 "ltp": round(float(premium), 2), "price_source": "broker-quote" if premium else "model",
+                 "ltp": round(float(premium), 2),
+                 "price_source": (_px_source or ("broker-quote" if premium else "model")),
                  "expiry": req.expiry, "strike": req.strike}
         try:
             _tqty = int(req.quantity or 1) * int(lot_size or 0)

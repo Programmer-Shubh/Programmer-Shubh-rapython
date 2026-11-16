@@ -612,7 +612,8 @@ def sltp_premium_level(entry_price: float, amount: float, quantity: int,
 
 # ---------------- Shared strategy SL/TP resolver (backtest == paper == live) ------------
 def resolve_strategy_sltp(risk_management: dict, leg: dict = None,
-                          default_sl: float = 1500.0, default_tp: float = 3000.0):
+                          default_sl: float = 1500.0, default_tp: float = 3000.0,
+                          symbol: str = None):
     """SINGLE SL/TP rule - backtest, paper worker aur live order TEENON ka.
 
       SL: risk.daily_stop_loss_pct -> risk.daily_stop_loss (unit = rm.sl_unit) -> leg.stop_loss -> default
@@ -623,7 +624,12 @@ def resolve_strategy_sltp(risk_management: dict, leg: dict = None,
              'pt'  = DIRECT premium movement points (lot-sizese independent).
 
       '0' / '' / None / negative = 'set nahi hai' (fall through).
-      Returns (sl_amt, sl_unit, tp_amt, tp_unit)."""
+      Returns (sl_amt, sl_unit, tp_amt, tp_unit).
+
+    RULEBOOK (16-11-2026): koi explicit SL/TP nahi + symbol index ho to
+    per-index tight defaults (points) - NIFTY 15/20, FINNIFTY 18/22,
+    BANKNIFTY 25/35 (core.services.strategy_rulebook). Rs1500/3000 sirf
+    non-index symbols ke liye."""
     try:
         rm = risk_management if isinstance(risk_management, dict) else {}
         lg = leg if isinstance(leg, dict) else {}
@@ -648,14 +654,30 @@ def resolve_strategy_sltp(risk_management: dict, leg: dict = None,
             (rm.get("daily_stop_loss_pct"), "pct"),
             (rm.get("daily_stop_loss"), rm.get("sl_unit") or "rs"),
             (lg.get("stop_loss"), "rs"),
-            (default_sl, "rs"),
         ])
         tp_amt, tp_unit = _pick([
             (rm.get("daily_take_profit_pct"), "pct"),
             (rm.get("daily_take_profit"), rm.get("tp_unit") or "rs"),
             (lg.get("take_profit"), "rs"),
-            (default_tp, "rs"),
         ])
+        # RULEBOOK (16-11-2026): koi explicit SL/TP nahi hai + symbol index
+        # hai -> per-index tight defaults (points): NIFTY 15/20, FINNIFTY
+        # 18/22, BANKNIFTY 25/35 (core.services.strategy_rulebook).
+        if not sl_amt and not tp_amt:
+            try:
+                from core.services.strategy_rulebook import index_default_sltp as _ids
+                _d = _ids(symbol) if symbol else None
+                if _d:
+                    if not sl_amt:
+                        sl_amt, sl_unit = float(_d[0]), "pt"
+                    if not tp_amt:
+                        tp_amt, tp_unit = float(_d[1]), "pt"
+            except Exception:
+                pass
+        if not sl_amt:
+            sl_amt, sl_unit = float(default_sl or 0), "rs"
+        if not tp_amt:
+            tp_amt, tp_unit = float(default_tp or 0), "rs"
         return sl_amt, sl_unit, tp_amt, tp_unit
     except Exception:
         return 0.0, "rs", 0.0, "rs"

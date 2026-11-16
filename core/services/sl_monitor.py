@@ -21,6 +21,29 @@ _CHECK_FN = None
 _CHECK_FN_TRIED = False
 
 
+def bad_quote_fill_cap_pct() -> float:
+    """SL fill par bad-quote cap (%) - SL level se max itna hi worse fill
+    allowed (default 2%).
+
+    Kyun (16-11-2026): FINNIFTY CE trade 282.20 se 230.24 par 3 min me
+    'stoploss' book hua (-18% premium, -₹3,182) - jo ek liquid option me
+    possible nahi hai (stale/wrong-contract quote). Ab SL fill SL level se
+    max 2% hi peeche ja sakta hai; isse ek bad tick poora trade ka loss
+    book nahi kar sakta.
+
+    Env override: BAD_QUOTE_FILL_CAP_PCT (0 = cap off)."""
+    try:
+        v = os.environ.get("BAD_QUOTE_FILL_CAP_PCT", "")
+        if v != "":
+            try:
+                return max(0.0, float(v))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return 2.0
+
+
 def _check_fn():
     """Load scripts/auto_trade.check_stoploss_target (single math source).
 
