@@ -438,11 +438,23 @@ def model_premium(spot: float, strike: float, expiry_days: float, option_type: s
 
 
 def sltp_unit(value) -> str:
-    """SL/TP unit normalize: 'rs' ya 'pct' (kuch bhi aur = 'rs').
-    Trade rows par default 'rs' - purane trades bilkul purana behavior."""
+    """SL/TP unit normalize: 'rs' | 'pct' | 'pt' (kuch bhi aur = 'rs').
+    Trade rows par default 'rs' - purane trades bilkul purana behavior.
+
+    BUG FIX (16-11-2026): 'pt' (points) unit yahan 'rs' me convert ho jata
+    tha - iska matlab tha ki ek 30-POINT stop-loss ek 30-RUPEES stop-loss
+    ban jata tha. Paper trade row me sl_unit='rs' likha jaata tha, to
+    monitor level = entry ∓ (30 / lots*lot) = 0.6 points par collapse ho
+    jata tha - trade entry ke SAME MINUTE me hi SL/TP par kat jata tha
+    (NIFTY 217.83 -> 214.92 'stoploss', BANKNIFTY 490.64 -> 489.51
+    'target' + LOSS). Ab 'pt' sahi se preserve hota hai."""
     try:
-        if isinstance(value, str) and value.strip().lower() in ("pct", "%", "percent"):
-            return "pct"
+        if isinstance(value, str):
+            u = value.strip().lower()
+            if u in ("pct", "%", "percent"):
+                return "pct"
+            if u in ("pt", "pts", "point", "points"):
+                return "pt"
     except Exception:
         pass
     return "rs"

@@ -87,6 +87,69 @@ def _run_backtest_and_save(db, strat_id, _sc):
     return False
 
 
+def fix_paper_trade_sltp_units(db=None):
+    """OPEN paper trades ka SL/TP unit strategy ke saath SYNC karo.
+
+    BUG (16-11-2026): `sltp_unit()` 'pt' (points) ko 'rs' (rupees) me
+    convert kar deta tha. Iska matlab: ek 30-POINT stop-loss paper trade row
+    me 30-RUPEES stop-loss ban jata tha -> monitor level = entry ∓ (30 /
+    (lots x lot)) = 0.6 points par collapse -> trade ENTRY ke SAME MINUTE me
+    hi SL/TP par kat jata tha (NIFTY 217.83 -> 214.92 'stoploss',
+    BANKNIFTY 490.64 -> 489.51 'target' + LOSS). Har paper trade instant
+    exit + loss dikha raha tha.
+
+    Fix: jis open trade ki strategy points/percent unit use kar rahi hai
+    aur trade row me 'rs' pada hai -> row ko strategy ke sahi SL/TP amount
+    + unit ke saath update karo. Sirf OPEN trades (closed history nahi
+    chhedte - audit trail bacha rahe). Idempotent.
+    """
+    import json as _js
+    if db is None:
+        from core.models.database import Database
+        db = Database.get_instance()
+    try:
+        rows = db.fetch_all(
+            "SELECT t.id, t.stop_loss, t.target, t.sl_unit, t.tp_unit,"
+            " s.risk_management AS rm, s.legs AS lg"
+            " FROM paper_trades t LEFT JOIN strategies s ON s.id = t.strategy_id"
+            " WHERE t.status='open' AND t.strategy_id IS NOT NULL"
+        ) or []
+    except Exception:
+        return 0
+    changed = 0
+    for r in rows or []:
+        try:
+            rm = _js.loads(r.get("rm") or "{}")
+            if not isinstance(rm, dict):
+                continue
+            legs = _js.loads(r.get("lg") or "[]")
+            if not isinstance(legs, list) or not legs:
+                continue
+            from utils.helpers import resolve_strategy_sltp as _res
+            sl, sl_u, tp, tp_u = _res(rm, legs[0])
+            _sl_row = str(r.get("sl_unit") or "rs").lower()
+            _tp_row = str(r.get("tp_unit") or "rs").lower()
+            _sl_set = str(r.get("sl_unit") or "rs")
+            _tp_set = str(r.get("tp_unit") or "rs")
+            dirty = False
+            if sl_u in ("pt", "pct") and _sl_row == "rs":
+                _sl_set = sl_u
+                dirty = True
+            if tp_u in ("pt", "pct") and _tp_row == "rs":
+                _tp_set = tp_u
+                dirty = True
+            if not dirty:
+                continue
+            db.execute(
+                "UPDATE paper_trades SET stop_loss=?, target=?, sl_unit=?,"
+                " tp_unit=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                [float(sl or 0), float(tp or 0), _sl_set, _tp_set, r.get("id")])
+            changed += 1
+        except Exception:
+            continue
+    return changed
+
+
 def seed_default_strategies():
     """Seed default NIFTY strategies (always present, protected). Idempotent."""
     import json as _js
@@ -145,6 +208,13 @@ def seed_default_strategies():
     # Fyers keeps taking every valid signal all day.
     try:
         normalize_daily_limits(db)
+    except Exception:
+        pass
+    # SL/TP unit sync (16-11-2026 bug): 'pt' -> 'rs' convert hone se open
+    # paper trades ka SL/TP 0.5-3 points par collapse ho jata tha aur trade
+    # entry ke same minute me kat jata tha.
+    try:
+        fix_paper_trade_sltp_units(db)
     except Exception:
         pass
     # Tight-target saved strategies ki 100%/150% SL -> active 20%/30% SL.

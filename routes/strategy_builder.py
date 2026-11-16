@@ -1683,6 +1683,87 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 _zero_tips = _zero_tips[:5]
         except Exception:
             pass
+        # ---- CONFIG SANITY WARNINGS (16-11-2026) ----
+        # Backtest ke dauran dikhne wali 3 aam dikkat ab SAHI message deti hain
+        # (user ko pata chale ki configuration galat hai, result nahi):
+        #  (1) SL/TP 'rs' (rupees) unit me bahut chhota -> premium points me
+        #      convert hokar 0.1-1 point par collapse -> har trade entry ke
+        #      hi minute me SL/TP par kat jaati hai (0% win rate, full loss).
+        #  (2) Entry condition LEVEL based (RSI > 55) -> har bar true -> ek
+        #      hi din me 30+ trades (re-entry storm).
+        #  (3) Target % bahut bada -> premium itni jaldi nahi girega -> TP
+        #      kabhi hit hi nahi hota (saare exits EOD/SL).
+        _cfg_tips = []
+        try:
+            _sl_amt = float(risk_in.get("daily_stop_loss", 0) or 0)
+            _tp_amt = float(risk_in.get("daily_take_profit", 0) or 0)
+            _sl_pct = float(risk_in.get("daily_stop_loss_pct", 0) or 0)
+            _tp_pct = float(risk_in.get("daily_take_profit_pct", 0) or 0)
+            _sl_u = str(risk_in.get("sl_unit") or ("pct" if _sl_pct > 0 else "rs")).lower()
+            _tp_u = str(risk_in.get("tp_unit") or ("pct" if _tp_pct > 0 else "rs")).lower()
+            _lots = 1
+            try:
+                _lots = int((legs[0] or {}).get("lots") or 1) if legs else 1
+            except Exception:
+                _lots = 1
+            _lot = 1
+            try:
+                from utils.helpers import get_lot_size as _gls
+                _lot = int(_gls(_syms[0] if _syms else "NIFTY") or 1)
+            except Exception:
+                _lot = 1
+            _units = max(_lots * _lot, 1)
+            for _lbl, _amt, _u in (("Stop-Loss", _sl_amt, _sl_u),
+                                   ("Target", _tp_amt, _tp_u)):
+                if _u != "rs" or _amt <= 0:
+                    continue
+                _pts = _amt / float(_units)
+                if _pts < 1.0:
+                    _cfg_tips.append(
+                        f"{_lbl} ₹{_amt:g} sirf {_pts:.2f} premium-point hai ({_units} units) - "
+                        f"level itna chhota hai ki trade entry ke hi minute me SL/TP par kat jayegi "
+                        f"(0% win-rate + poora loss). SL/TP 'pts' (points) ya '%' me set karo.")
+                elif _pts < 3.0:
+                    _cfg_tips.append(
+                        f"{_lbl} ₹{_amt:g} = {_pts:.2f} premium points bahut tight hai (noise par hi "
+                        f"exit). 'pts' (points) ya '%' unit use karo.")
+            # (2) re-entry storm
+            _n_days = 0
+            try:
+                _n_days = len({str(t.get("entry_date") or "")[:10]
+                               for t in (_all_trades or []) if t.get("entry_date")})
+            except Exception:
+                _n_days = 0
+            _level_ops = ("greater_than", "less_than", ">", "<", ">=", "<=")
+            _has_level_cond = any(
+                str((c or {}).get("operator") or "") in _level_ops
+                for c in (entry_conditions or []) if isinstance(c, dict))
+            _n_trades = int(m.get("total_trades", 0) or 0)
+            if _has_level_cond and _n_days and _n_trades > _n_days * 2:
+                _cfg_tips.append(
+                    f"{_n_trades} trades {_n_days} din me (~{round(_n_trades / float(_n_days), 1)}/din) - "
+                    f"entry condition har bar true hai. 'crosses_above / crosses_below' use karo "
+                    f"(ek hi cross par entry) ya entry time-window chhota karo.")
+            # (3) target kabhi hit nahi hua
+            try:
+                _reasons = {}
+                for _t in (_all_trades or []):
+                    _r = str(_t.get("exit_reason") or "?")
+                    _reasons[_r] = _reasons.get(_r, 0) + 1
+                _tp_hits = _reasons.get("target", 0)
+                if _n_trades >= 8 and _tp_hits == 0 and (_tp_pct >= 25 or _tp_u == "rs" and _tp_amt > 0):
+                    _cfg_tips.append(
+                        "Target kabhi hit nahi hua - premium itni tez nahi girti. "
+                        "Option-selling ke liye Target 25-35% (ya 15-25 points) rakho, "
+                        "Stop-Loss 20-30%.")
+            except Exception:
+                pass
+        except Exception:
+            _cfg_tips = []
+        try:
+            _zero_tips = (_cfg_tips + _zero_tips)[:6]
+        except Exception:
+            pass
     except Exception as e:
         import traceback
         traceback.print_exc()

@@ -15,6 +15,30 @@ os.environ.setdefault("DB_PATH", os.path.join("data", "ratrade.db"))
 from utils.helpers import sltp_amount, sltp_premium_level, resolve_strategy_sltp
 
 
+def test_sltp_unit_keeps_points_unit():
+    """REGRESSION (16-11-2026): 'pt' (points) unit 'rs' me convert ho jata
+    tha - to ek 30-POINT stop-loss paper trade me 30-RUPEES ban jata tha.
+    Level = entry ∓ (30 / (lots x lot)) = 0.5-3 points par collapse -> trade
+    entry ke SAME MINUTE me SL/TP par kat jata tha (NIFTY 217.83 -> 214.92
+    'stoploss', BANKNIFTY 490.64 -> 489.51 'target' + LOSS)."""
+    from utils.helpers import sltp_unit
+    assert sltp_unit("pt") == "pt"
+    assert sltp_unit("pts") == "pt"
+    assert sltp_unit("point") == "pt"
+    assert sltp_unit("points") == "pt"
+    assert sltp_unit("PT") == "pt"
+    assert sltp_unit("pct") == "pct"
+    assert sltp_unit("%") == "pct"
+    assert sltp_unit("rs") == "rs"
+    assert sltp_unit(None) == "rs"
+    assert sltp_unit(30) == "rs"
+    # Points mode: level seedha points me (lot-size independent)
+    assert sltp_premium_level(217.83, 30, 1, 65, "BUY", True, "pt") == 187.83
+    assert sltp_premium_level(217.83, 20, 1, 65, "BUY", False, "pt") == 237.83
+    # Rs mode (sahi divide) - 30 rupees / 65 units = 0.46 points
+    assert round(sltp_premium_level(217.83, 30, 1, 65, "BUY", True, "rs"), 2) == 217.37
+
+
 def test_sltp_amount_parses_point_suffixes():
     assert sltp_amount("30pt")[1] == "pt"
     assert sltp_amount("30 pts")[1] == "pt"
