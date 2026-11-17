@@ -1,4 +1,4 @@
-__pycache__/
+﻿__pycache__/
 *.pyc
 *.pyo
 *.py[cod]
@@ -35,7 +35,6 @@ data/fyers_*.csv
 data/angel_*.json
 data/scrip_master_*.json
 data/scrip_lots.json
-data/dhan_lots.json
 .streamlit/secrets.toml
 # temporary debug/check scripts
 check_*.py

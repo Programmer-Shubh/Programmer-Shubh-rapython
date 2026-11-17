@@ -607,7 +607,8 @@
                     <button class="btn btn-sm btn-outline-danger" id="live-toggle-btn" onclick="liveToggle()">Enable LIVE</button>
                     <button class="btn btn-sm btn-outline-primary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect All</button>
                     <button class="btn btn-sm btn-outline-warning" onclick="refreshTokens()"><i class="bi bi-arrow-repeat"></i> Refresh Tokens</button>
-                    <button class="btn btn-sm btn-outline-success" onclick="syncFyersHistory()" title="Backtest ke liye ASLI option premium data (daily bars) Fyers se laakar DB me save karta hai - IV ancharts real ho jaate hain"><i class="bi bi-database-down"></i> Sync Fyers History</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="syncFyersHistory()" title="Fyers se index daily bars (+active contracts) DB me save karta hai"><i class="bi bi-database-down"></i> Sync Fyers History</button>
+                    <button class="btn btn-sm btn-outline-info" onclick="syncNSEOptions()" title="NSE official F&amp;O bhavcopy se ASLI index-option premiums (ATM±3) DB me save karta hai - backtests real premium IV se anchored ho jayenge"><i class="bi bi-cloud-arrow-down"></i> Sync NSE Options</button>
                 </div>
             </div>
             <div class="row" id="broker-cards">
@@ -3544,11 +3545,33 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
     // Auto-capture callback tokens (Angel)
     setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);const ap='/api/broker/angel-callback';if(q.get('code')&&window.location.pathname.includes('angel-callback')){P(ap,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:q.get('code'),client_code:q.get('client_code')||''})}).then(r=>{if(r.success){showToast('Angel token auto-saved!', 'success');loadBrokers();}else{showToast('Angel callback failed', 'danger');}}).catch(()=>{});}document.history.replaceState({},document.title,window.location.pathname);}catch(e){}},800);
 
+    async function syncNSEOptions(){
+        try{
+            if(!confirm('NSE official F&O bhavcopy se ASLI index-option premiums (NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY, ATM±3 strikes, 2026-01-01..aaj) download karke DB me save karun?\n\n5-15 min lagenge. Backtests REAL premium IV se anchored ho jayenge.')) return;
+            const r=await A('/api/broker/nse-option-sync',{method:'POST'});
+            if(r && r.started){ alert('NSE options sync shuru ho gaya (background). Progress isi page pe dikhega / status: /api/broker/nse-option-sync/status'); _pollNSESyncStatus(); }
+            else { alert('Sync start nahi hua: '+JSON.stringify(r)); }
+        }catch(e){ alert('Sync error: '+e); }
+    }
+    async function _pollNSESyncStatus(){
+        const box=document.getElementById('live-status'); if(!box) return;
+        for(let i=0;i<300;i++){
+            await new Promise(r=>setTimeout(r,5000));
+            try{
+                const s=await A('/api/broker/nse-option-sync/status');
+                box.innerHTML=`<i class="bi bi-cloud-arrow-down"></i> NSE options sync: <strong>${s.stage||s.state||'…'}</strong> · days OK: ${s.days_done||0} · skip: ${s.days_failed||0} · rows: ${s.rows_stored||0}${s.current_date?(' · '+s.current_date):''}`;
+                if(s.state==='done'||s.state==='error'){ alert(s.state==='done'
+                    ? `NSE option premiums sync DONE.\nDays OK: ${s.days_done}\nRows stored: ${s.rows_stored}`
+                    : 'NSE options sync ERROR: '+(s.error||'unknown')); return; }
+            }catch(_){ /* keep polling */ }
+        }
+    }
+
     async function syncFyersHistory(){
         try{
-            if(!confirm('Fyers se ASLI option premium + index daily bars (2026-01-01 se aaj tak) download karke DB me save karun?\n\n5-15 min lagenge (index 4 + contracts ~1000 calls). Backtests REAL premium IV se anchored ho jayenge.')) return;
+            if(!confirm('Fyers se index daily bars + active contracts (2026-01-01 se aaj tak) download karke DB me save karun?\n\nNote: Fyers /data/history expired option contracts serve nahi karta - real option premiums ke liye "Sync NSE Options" button use karo.')) return;
             const r=await A('/api/broker/sync-historical',{method:'POST'});
-            if(r && r.started){ alert('Sync shuru ho gaya (background). Progress Brokers page pe dikhega / status: /api/broker/sync-historical/status'); _pollSyncStatus(); }
+            if(r && r.started){ alert('Sync shuru ho gaya (background). Status: /api/broker/sync-historical/status'); _pollSyncStatus(); }
             else { alert('Sync start nahi hua: '+JSON.stringify(r)); }
         }catch(e){ alert('Sync error: '+e); }
     }

@@ -1089,12 +1089,41 @@ async def sync_historical():
 
     Dashboard/UI: Brokers page -> "Sync Fyers History" button. Idempotent.
     Runs in a background thread (ye request turant return karega; state
-    /api/broker/sync-historical/status se poll karo)."""
+    /api/broker/sync-historical/status se poll karo).
+
+    NOTE: Fyers /data/history serves ACTIVE symbols only - the NIFTY/etc.
+    index daily bars succeed, but EXPIRED option contracts always fail here
+    (Fyers v3 limitation). The REAL option-premium path is
+    POST /api/broker/nse-option-sync (NSE official bhavcopy)."""
     try:
         from core.services.fyers_history_sync import sync_async
         return sync_async(start_date="2026-01-01")
     except Exception as e:
         return {"started": False, "error": str(e)[:200]}
+
+
+@router.post("/nse-option-sync")
+async def nse_option_sync():
+    """NSE official F&O bhavcopy se REAL index-option premiums bhavcopy_data
+    me laao (ATM +/- 3 steps of spot per index, CE/PE, weekly+monthly expiry).
+
+    Fyers ke expired-option limitation ki wajah se ye primary path hai.
+    Background thread; progress: GET /api/broker/nse-option-sync/status"""
+    try:
+        from core.services.nse_option_sync import sync_async
+        return sync_async(start_date="2026-01-01")
+    except Exception as e:
+        return {"started": False, "error": str(e)[:200]}
+
+
+@router.get("/nse-option-sync/status")
+def nse_option_sync_status():
+    """NSE option-premium sync ki progress."""
+    try:
+        from core.services.nse_option_sync import sync_status
+        return sync_status()
+    except Exception as e:
+        return {"state": "error", "error": str(e)[:200]}
 
 
 @router.get("/sync-historical/status")
