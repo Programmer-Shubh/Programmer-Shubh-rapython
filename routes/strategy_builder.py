@@ -317,6 +317,100 @@ def _normalize_legs(raw_legs: list, lots_fallback: int = 1) -> list:
     return out
 
 
+def _fyers_intraday(sym, timeframe, start_date, end_date):
+    """Fyers intraday bars (official source, ~100-day depth) - Yahoo 60-day
+    wall ki jagah ye PRIMARY rahega. Bar dict shape Yahoo wali jaisi hi hai.
+
+    Fyers history epoch ki theek interpretation isse hoti hai: UTC epoch me
+    `fromtimestamp(ts, utc).astimezone(IST)` - duniya ke har broker ke liye
+    sahi IST date/time milta hai (index futures/cash IST open 09:15 IST).
+    Ek hafta ke hisaab se mixed-day guard: agar saare bars 14:30-21:00 ke
+    beech aayein (broker IST-as-UTC bhej raha ho) to -5:30 shift karke fix.
+    """
+    try:
+        _s = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+        _e = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return []
+    under = {"NIFTY": "NSE:NIFTY50-INDEX", "BANKNIFTY": "NSE:NIFTYBANK-INDEX",
+             "FINNIFTY": "NSE:FINNIFTY-INDEX",
+             "MIDCPNIFTY": "NSE:NIFTY_MID_SELECT-INDEX"}.get(str(sym).strip().upper())
+    if not under:
+        return []
+    resolution = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60"}.get(
+        str(timeframe or "15m").lower(), "15")
+    try:
+        from routes.broker import _get_config as _gc
+        cfg = _gc("fyers") or {}
+        app_id, token = str(cfg.get("app_id") or ""), str(cfg.get("access_token") or "")
+    except Exception:
+        return []
+    if not app_id or not token:
+        return []
+    try:
+        from core.services.fyers_data import FyersHistoryData
+        fh = FyersHistoryData(app_id, token)
+    except Exception:
+        return []
+    _ist = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    out = []
+    cur = _s
+    while cur <= _e:
+        chunk_end = min(_e, cur + _dt.timedelta(days=55))
+        try:
+            resp = fh.history(under, str(cur), str(chunk_end), resolution)
+        except Exception:
+            resp = {"s": "error", "message": "fetch failed"}
+        candles = (resp or {}).get("candles") if isinstance(resp, dict) else None
+        if candles:
+            for ts, o, h, l, c, v in candles:
+                try:
+                    ist = _dt.datetime.fromtimestamp(int(ts), _dt.timezone.utc).astimezone(_ist)
+                except Exception:
+                    continue
+                if ist.weekday() >= 5:
+                    continue
+                cc = float(c) if c else 0
+                if cc <= 0:
+                    continue
+                oo = float(o) if o else cc
+                hh = float(h) if h else cc
+                ll = float(l) if l else cc
+                out.append({"symbol": str(sym).upper(),
+                            "trade_date": ist.strftime("%Y-%m-%d"),
+                            "bar_time": ist.strftime("%H:%M"),
+                            "open_price": round(oo, 2), "high_price": round(hh, 2),
+                            "low_price": round(ll, 2), "close_price": round(cc, 2),
+                            "volume": int(float(v or 0))})
+        cur = chunk_end + _dt.timedelta(days=1)
+    if not out:
+        return []
+    # IST-as-UTC guard: agar ek din ke SAARE bars 14:30 ke baad hain to ye
+    # broker timestamps ko IST-as-UTC maanta hai -> -5:30 shift fix karo
+    by_day = {}
+    for b in out:
+        by_day.setdefault(b["trade_date"], []).append(b)
+    for d, bars in by_day.items():
+        times = [b["bar_time"] for b in bars]
+        if times and min(times) >= "14:00":
+            for b in bars:
+                try:
+                    dt0 = _dt.datetime.strptime(d + " " + b["bar_time"], "%Y-%m-%d %H:%M") - _dt.timedelta(hours=5, minutes=30)
+                    b["trade_date"] = dt0.strftime("%Y-%m-%d")
+                    b["bar_time"] = dt0.strftime("%H:%M")
+                except Exception:
+                    pass
+    # Sort + drop aaj ka forming bar (paper engine khud bhi karta hai)
+    out.sort(key=lambda b: (b["trade_date"], b["bar_time"]))
+    try:
+        today_ist = _dt.datetime.now(_ist).strftime("%Y-%m-%d")
+        if out and out[-1]["trade_date"] == today_ist:
+            out = out[:-1]
+    except Exception:
+        pass
+    return out
+
+
 def _intraday_full_range(sym, timeframe, start_date, end_date):
     """Full-range 15m bars (spec §1/§5): Yahoo 60-day windows (TV feed removed).
     NO synthetic fabrication - na mile to ([], reason).
@@ -330,6 +424,20 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
     if _e < _s:
         return [], "bad-range"
     _span = max(1, (_e - _s).days + 1)
+    # Span-aware minimum: ek 15m din me max ~25 bars hote hain, to
+    # single-day request par 40-bar gate kabhi pass nahi hota tha
+    # (hamesha INSUFFICIENT = intraday auto/backtest dead). Engine
+    # min_bars=5 + abstain rule ke saath 15 bars honest hain.
+    _need = 40 if _span > 2 else 15
+    # 0) Fyers intraday (primary, official, ~100-day depth). Yahoo ka 60-day
+    # wall aur cloud-IP 429/timeout yahan nahi aata (token local/DB se hota
+    # hai). Na mile/fail ho to Yahoo fallback.
+    try:
+        _fb = _fyers_intraday(sym, timeframe, start_date, end_date)
+        if len(_fb) >= _need:
+            return _dedup_bars(_fb), "fyers_intraday"
+    except Exception:
+        pass
     # 1) Yahoo 15m (hard 60-day/request limit): single window back from
     # end_date. Older start = honest gap (no fabrication, ever).
     try:
@@ -353,11 +461,6 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
                 _got = _got[:-1]
         except Exception:
             pass
-        # Span-aware minimum: ek 15m din me max ~25 bars hote hain, to
-        # single-day request par 40-bar gate kabhi pass nahi hota tha
-        # (hamesha INSUFFICIENT = intraday auto/backtest dead). Engine
-        # min_bars=5 + abstain rule ke saath 15 bars honest hain.
-        _need = 40 if _span > 2 else 15
         if len(_got) >= _need:
             return _dedup_bars(_got), "yahoo_intraday"
     except Exception:

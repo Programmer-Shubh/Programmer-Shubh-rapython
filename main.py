@@ -151,6 +151,34 @@ async def _startup_background():
         _th5.Thread(target=_tk_loop, daemon=True).start()
     except: pass
     try:
+        # Fyers historical sync (one-time): asli option premiums DB me laao
+        # taaki backtests model-waale BS ki jagah REAL premium use kar sakein
+        # (IV solver ke liye bhi). Sirf tab chalega jab Fyers creds मौजूद हों
+        # aur pehle kabhi nahi hua ho (settings flag). Background thread - boot
+        # fast rehta hai. Manual re-run: Brokers page -> "Sync Fyers History".
+        def _fhsync_loop():
+            try:
+                import time as _t
+                _t.sleep(25)  # creds/token resolution ke liye thoda dhere launch
+                from core.models.database import Database as _DB
+                _row = _DB.get_instance().fetch_one(
+                    "SELECT setting_value FROM settings WHERE setting_key='fyers_history_sync_auto_v1_done'")
+                if _row and str(_row.get("setting_value") or "") == "1":
+                    return
+                from routes.broker import _get_config as _gc
+                _c = _gc("fyers") or {}
+                if not (_c.get("app_id") and _c.get("access_token")):
+                    print("[fyers-sync] no Fyers creds - skip auto-sync (manual button hai)", flush=True)
+                    return
+                from core.services.fyers_history_sync import sync_all
+                print("[fyers-sync] one-time historical import started (background)", flush=True)
+                sync_all(start_date="2026-01-01")
+            except Exception as _e:
+                print("[fyers-sync] auto-sync error:", _e, flush=True)
+        import threading as _th7
+        _th7.Thread(target=_fhsync_loop, daemon=True).start()
+    except: pass
+    try:
         # Live signal worker: ACTIVE strategies evaluated on fresh 15m
         # candles every 60 sec in market hours (ADX/ST/BB live loop).
         # 15-min गैप से intraday entry signal miss होते थे (सिग्नल 10:07 पर

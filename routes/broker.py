@@ -1083,6 +1083,30 @@ async def fyers_selftest():
     return out
 
 
+@router.post("/sync-historical")
+async def sync_historical():
+    """Fyers se real option premiums + index daily bars bhavcopy_data me laao.
+
+    Dashboard/UI: Brokers page -> "Sync Fyers History" button. Idempotent.
+    Runs in a background thread (ye request turant return karega; state
+    /api/broker/sync-historical/status se poll karo)."""
+    try:
+        from core.services.fyers_history_sync import sync_async
+        return sync_async(start_date="2026-01-01")
+    except Exception as e:
+        return {"started": False, "error": str(e)[:200]}
+
+
+@router.get("/sync-historical/status")
+def sync_historical_status():
+    """Fyers history sync ki progress (stage, counts, coverage, errors)."""
+    try:
+        from core.services.fyers_history_sync import sync_status
+        return sync_status()
+    except Exception as e:
+        return {"state": "error", "error": str(e)[:200]}
+
+
 @router.post("/refresh-tokens")
 async def refresh_tokens():
     results = {}

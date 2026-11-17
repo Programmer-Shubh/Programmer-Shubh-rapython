@@ -261,9 +261,26 @@ class BacktestEngine:
                     _vix_latest = float(sorted(vix_data.items())[-1][1])
             except Exception:
                 pass
+        # Past-only VIX lookup table (carry-forward). Backtest ke har date
+        # par us date tak ka LAST KNOWN VIX use hota hai - koi FUTURE value
+        # (jo backtest end ke baad aaye) nahi. Missing data -> filter pass-through
+        # (kabhi fake 15.0 inject nahi karte) + 'vix_no_data' counter.
+        _vix_dates = sorted(vix_data.keys()) if vix_data else []
+        def _vix_asof(d):
+            if not _vix_dates:
+                return 0.0
+            import bisect as _bi
+            try:
+                i = _bi.bisect_right(_vix_dates, str(d)[:10]) - 1
+            except Exception:
+                return 0.0
+            if i < 0:
+                return 0.0
+            return float(vix_data[_vix_dates[i]])
+
         # Neutral default VIX if nothing available (won't trigger filter)
         if _vix_latest is None:
-            _vix_latest = 15.0
+            _vix_latest = 0.0
         # Min entry premium: skip SELL entries cheaper than this (far-OTM lottery
         # tickets like Rs2-3 have tiny max profit but huge adverse-move loss).
         min_premium = float(advanced_options.get("min_entry_premium", 0) or 0)
@@ -819,11 +836,16 @@ class BacktestEngine:
                 if can_enter and vix_max > 0:
                     try:
                         _vix = float(vix_data.get(str(cur_date)[:10], 0) or 0)
-                        # Fallback to latest VIX if date not in static data
-                        if _vix == 0 and _vix_latest:
-                            _vix = _vix_latest
+                        # Fallback: carry-forward last known PAST value (never
+                        # a future-dated number - no look-ahead). Missing
+                        # pura history -> pass-through + count.
+                        if _vix == 0:
+                            _vix = _vix_asof(str(cur_date)[:10])
+                        if _vix == 0:
+                            self._rej["vix_no_data"] = self._rej.get("vix_no_data", 0) + 1
                         if _vix > 0 and _vix > vix_max:
                             can_enter = False
+                            self._rej["vix_filter"] = self._rej.get("vix_filter", 0) + 1
                     except Exception:
                         pass
                 try:

@@ -607,6 +607,7 @@
                     <button class="btn btn-sm btn-outline-danger" id="live-toggle-btn" onclick="liveToggle()">Enable LIVE</button>
                     <button class="btn btn-sm btn-outline-primary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect All</button>
                     <button class="btn btn-sm btn-outline-warning" onclick="refreshTokens()"><i class="bi bi-arrow-repeat"></i> Refresh Tokens</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="syncFyersHistory()" title="Backtest ke liye ASLI option premium data (daily bars) Fyers se laakar DB me save karta hai - IV ancharts real ho jaate hain"><i class="bi bi-database-down"></i> Sync Fyers History</button>
                 </div>
             </div>
             <div class="row" id="broker-cards">
@@ -3542,6 +3543,30 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
     }
     // Auto-capture callback tokens (Angel)
     setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);const ap='/api/broker/angel-callback';if(q.get('code')&&window.location.pathname.includes('angel-callback')){P(ap,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:q.get('code'),client_code:q.get('client_code')||''})}).then(r=>{if(r.success){showToast('Angel token auto-saved!', 'success');loadBrokers();}else{showToast('Angel callback failed', 'danger');}}).catch(()=>{});}document.history.replaceState({},document.title,window.location.pathname);}catch(e){}},800);
+
+    async function syncFyersHistory(){
+        try{
+            if(!confirm('Fyers se ASLI option premium + index daily bars (2026-01-01 se aaj tak) download karke DB me save karun?\n\n5-15 min lagenge (index 4 + contracts ~1000 calls). Backtests REAL premium IV se anchored ho jayenge.')) return;
+            const r=await A('/api/broker/sync-historical',{method:'POST'});
+            if(r && r.started){ alert('Sync shuru ho gaya (background). Progress Brokers page pe dikhega / status: /api/broker/sync-historical/status'); _pollSyncStatus(); }
+            else { alert('Sync start nahi hua: '+JSON.stringify(r)); }
+        }catch(e){ alert('Sync error: '+e); }
+    }
+    async function _pollSyncStatus(){
+        const box=document.getElementById('live-status'); if(!box) return;
+        for(let i=0;i<200;i++){
+            await new Promise(r=>setTimeout(r,6000));
+            try{
+                const s=await A('/api/broker/sync-historical/status');
+                const stage=s.stage||s.state||'…';
+                const cov=s.premium_coverage?Object.entries(s.premium_coverage).map(([k,v])=>k+':'+v).join(' '):'';
+                box.innerHTML=`<i class="bi bi-database"></i> Fyers sync: <strong>${stage}</strong> · contracts OK: ${s.contracts_ok||0} · rows: ${s.rows_stored||0} ${cov?('· '+cov):''}${s.contracts_failed_count?(' · failed: '+s.contracts_failed_count):''}`;
+                if(s.state==='done'||s.state==='error'){ alert(s.state==='done'
+                    ? `Fyers history sync DONE.\nContracts OK: ${s.contracts_ok}\nRows stored: ${s.rows_stored}\nCoverage: ${cov}\nBacktests ab REAL premium IV use karenge.`
+                    : 'Fyers sync ERROR: '+(s.error||'unknown')); return; }
+            }catch(_){ /* keep polling */ }
+        }
+    }
 
     async function refreshTokens(){
         const r=await A('/api/broker/refresh-tokens',{method:'POST'});
