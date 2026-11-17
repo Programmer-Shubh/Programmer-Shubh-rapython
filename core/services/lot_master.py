@@ -1,10 +1,18 @@
-"""Instrument-master lot sizes (dynamic, official).
+"""Instrument-master lot sizes (dynamic, official, FYERS).
 
-Priority: public scrip master CSV (no auth, no broker account needed) ->
-caller falls back to NSE lots / static map (see utils.helpers.get_lot_size).
-
-Master columns used: SEM_EXM_EXCH_ID (NSE), SEM_SEGMENT (D derivatives),
-SEM_INSTRUMENT_NAME / SEM_TRADING_SYMBOL (underlying), SEM_LOT_UNITS.
+The app is Fyers-only now (Dhan was removed from the broker registry).
+Source: Fyers official public symbol master - no auth, no broker account
+needed - regenerated daily by Fyers:
+  https://public.fyers.in/sym_details/NSE_FO.csv
+Format: headerless CSV, 21 columns. Relevant ones:
+  col 2  segment      (11 = futures, 14 = options)
+  col 3  lot_size
+  col 4  tick_size
+  col 8  expiry epoch (unix, IST)
+  col 9  fyers_symbol (NSE:NIFTY26N1717350CE)
+  col 13 underlying   (NIFTY / APOLLOHOSP ...)
+  col 15 strike_price
+  col 16 option_type  (CE / PE / XX for futures)
 
 Caches: memory 24h + disk data/scrip_lots.json (survives restarts within a
 deploy); negative-fail TTL 10 min (no hot-loop hammering on outage).
@@ -17,9 +25,8 @@ import json
 import os
 import time as _time
 
-# Public scrip master CSV (no auth, no broker account) - the only free
-# source with official SEM_LOT_UNITS per underlying.
-_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
+# Fyers official F&O symbol master (public, no auth).
+_MASTER_URL = "https://public.fyers.in/sym_details/NSE_FO.csv"
 _TTL = 24 * 3600
 _FAIL_TTL = 600
 
@@ -39,48 +46,43 @@ def _disk_path():
     return os.path.join("data", "scrip_lots.json")
 
 
-def _norm_underlying(iname: str, tsym: str):
-    """Candidate lookup keys for an underlying (indices + stocks)."""
+def _norm_underlying(u: str):
+    """Normalise the underlying key: 'NIFTY ' -> 'NIFTY', strip spaces."""
     out = []
     try:
-        base = str(iname or "").strip().upper().replace(" ", "")
+        base = str(u or "").strip().upper().replace(" ", "")
         if base:
             out.append(base)
-        t = str(tsym or "").strip().upper().replace(" ", "")
-        if t:
-            out.append(t.split("-")[0])
     except Exception:
         pass
-    seen = []
-    for k in out:
-        if k and k not in seen:
-            seen.append(k)
-    return seen
+    return out
 
 
 def _parse_master_lines(lines):
-    """Pure parser: CSV lines -> {UNDERLYING: lot}. First nonzero lot wins
-    per underlying (lot is contract-family level, same across strikes)."""
+    """Pure parser: Fyers NSE_FO.csv lines -> {UNDERLYING: lot}.
+
+    First nonzero lot wins per underlying (lot is contract-family level,
+    same across strikes/expiries). Stock-option-only or future-only rows are
+    both fine - Fyers publishes both in the same file."""
     lots = {}
     try:
-        reader = csv.DictReader(lines)
+        reader = csv.reader(lines)
         for row in reader:
             try:
-                exch = str(row.get("SEM_EXM_EXCH_ID", "") or "").strip().upper()
-                seg = str(row.get("SEM_SEGMENT", "") or "").strip().upper()
-                itype = str(row.get("SEM_EXCH_INSTRUMENT_TYPE", "") or "").strip().upper()
-                seg_ok = (seg == "D" or "FO" in seg.replace("_", "")
-                          or "FUT" in seg or "OPT" in seg or itype in ("OP", "FUT"))
-                if exch != "NSE" or not seg_ok:
+                if len(row) < 21:
+                    continue
+                seg = str(row[2] or "").strip()
+                # 11=index FUT, 13=stock FUT, 14=index OPT, 15=stock OPT
+                if seg not in ("11", "13", "14", "15"):
                     continue
                 try:
-                    lot = int(float(str(row.get("SEM_LOT_UNITS", 0) or 0)))
+                    lot = int(float(str(row[3] or 0)))
                 except Exception:
                     lot = 0
                 if lot <= 0:
                     continue
-                for key in _norm_underlying(row.get("SEM_INSTRUMENT_NAME", ""),
-                                           row.get("SEM_TRADING_SYMBOL", "")):
+                keys = _norm_underlying(row[13])
+                for key in keys:
                     if key and key not in lots:
                         lots[key] = lot
             except Exception:
