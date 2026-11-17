@@ -592,8 +592,6 @@ def api_broker_list(request):
     broker_defs = [
         {'key': 'shoonya', 'name': 'Shoonya (Finvasia)', 'icon': 'bi-cpu', 'color': 'text-primary',
          'desc': 'Zero brokerage options trading', 'fields': ['uid', 'pwd', 'vc', 'apikey', 'secret_code', 'actid']},
-        {'key': 'dhan', 'name': 'Dhan', 'icon': 'bi-lightning', 'color': 'text-warning',
-         'desc': 'Fast execution, option selling', 'fields': ['client_id', 'access_token', 'refresh_token']},
         {'key': 'fyers', 'name': 'Fyers', 'icon': 'bi-graph-up', 'color': 'text-success',
          'desc': 'Advanced charting + trading', 'fields': ['app_id', 'secret', 'access_token', 'refresh_token']},
         {'key': 'angel', 'name': 'Angel One', 'icon': 'bi-shield', 'color': 'text-danger',
