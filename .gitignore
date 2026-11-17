@@ -70,3 +70,9 @@ static/download.png
 Dockerfile
 .koyeb.yaml
 WEBSITE_HINDI_DOC.md
+
+# research artifacts (not for commit)
+scripts/_sell_grid_*_results*.json
+scripts/_validation_results.json
+scripts/_save_runs.json
+scripts/_winner_style_results_*.json
