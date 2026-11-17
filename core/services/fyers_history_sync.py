@@ -153,13 +153,20 @@ def expiry_dates(symbol: str, start_ymd: str, end_ymd: str):
 
 
 def _nearest_bar_close(bars, ymd):
-    """bars: [{'trade_date','close_price'}...] chrono -> closest bar close on/before ymd."""
+    """bars: [{'trade_date','close_price'}...] -> closest bar close on/before ymd.
+    Bars kis order me hon (source-dependent), pehle date-ascending sort zaroor."""
     ref = ymd[:10]
+    try:
+        seq = sorted(bars or [], key=lambda b: str(b.get("trade_date") or "")[:10])
+    except Exception:
+        seq = list(bars or [])
     best = None
-    for b in bars or []:
+    for b in seq:
         d = str(b.get("trade_date") or "")[:10]
         if d <= ref:
-            best = float(b.get("close_price") or 0) or best
+            c = float(b.get("close_price") or 0)
+            if c > 0:
+                best = c
         else:
             break
     return best
