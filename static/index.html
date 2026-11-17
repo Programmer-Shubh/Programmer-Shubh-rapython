@@ -494,19 +494,20 @@
                     </div>
                     <div class="slab-sec" style="background:linear-gradient(135deg,#fff8e1 0%,#ffffff 100%); border:1px solid #ffe082; padding:6px"><div class="slab-sec-title"><i class="bi bi-sliders"></i> Schedule & Risk</div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Overall Stop Loss (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-sl" value="30"><small class="text-muted" id="s-sl-mirror">points = entry premium se direct move (30 = 30 points girne par exit)</small></div>
+                        <div class="col-md-3"><label class="form-label small">Overall Stop Loss (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-sl" value="12"><small class="text-muted" id="s-sl-mirror">points = entry premium se direct move (12 = 12 points girne par exit)</small></div>
                     </div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Overall Target (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-tp" value="50"><small class="text-muted" id="s-tp-mirror">points = entry premium se direct move (50 = 50 points chamke par exit)</small></div>
-                        <div class="col-md-3"><label class="form-label small">Re-entry on SL</label><select class="form-select form-select-sm" id="s-reentry-sl"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
+                        <div class="col-md-3"><label class="form-label small">Overall Target (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-tp" value="28"><small class="text-muted" id="s-tp-mirror">points = entry premium se direct move (28 = 28 points chamke par exit)</small></div>
+                        <div class="col-md-3"><label class="form-label small">Re-entry on SL</label><select class="form-select form-select-sm" id="s-reentry-sl"><option>RE ASAP</option><option selected>No Re-entry</option><option>RE Next Day</option></select></div>
                         <div class="col-md-3"><label class="form-label small">Re-entry on Tgt</label><select class="form-select form-select-sm" id="s-reentry-tp"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
-                        <div class="col-md-3"><label class="form-label small">Trailing Options</label><select class="form-select form-select-sm" id="s-trail"><option selected>Lock</option><option>Partial</option><option>Complete</option></select></div>
+                        <div class="col-md-3"><label class="form-label small">Trailing Options</label><select class="form-select form-select-sm" id="s-trail"><option selected>Lock</option><option>Partial</option><option>Complete</option><option>Off</option></select></div>
                     </div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Lock if profit reaches</label><input type="number" class="form-control form-control-sm" id="s-lock-profit" value="0" min="0" step="50"></div>
-                        <div class="col-md-3"><label class="form-label small">Lock profit</label><input type="number" class="form-control form-control-sm" id="s-lock-amount" value="1" min="0" step="1"></div>
-                        <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="text" class="form-control form-control-sm" id="s-mtd" value="Unlimited" readonly title="Daily trade-count limit removed - din bhar jitne valid signals aayenge, sab execute honge"></div>
-                        <div class="col-md-3"><label class="form-label small">Slippage (%) <span class="badge bg-warning text-dark">strategy</span></label><input type="number" class="form-control form-control-sm" id="s-slippage" value="0.50" step="0.05" min="0" max="2" title="Add Slippage to make results realistic (market impact + spread)"></div>
+                        <div class="col-md-3"><label class="form-label small">Lock if profit reaches (pts)</label><input type="number" class="form-control form-control-sm" id="s-lock-profit" value="12" min="0" step="1"></div>
+                        <div class="col-md-3"><label class="form-label small">Lock profit (pts)</label><input type="number" class="form-control form-control-sm" id="s-lock-amount" value="6" min="0" step="1"></div>
+                        <div class="col-md-2"><label class="form-label small">Trail step (pts)</label><input type="number" class="form-control form-control-sm" id="s-trail-step" value="5" min="0" step="1" title="Profit badhne par SL kitne points peeche trail kare (0 = off)"></div>
+                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="s-mtd" value="2" min="0" max="50" step="1" title="Rulebook default: Buy 2/day, Sell 5/day. 0 = unlimited"></div>
+                        <div class="col-md-2"><label class="form-label small">Slippage (%) <span class="badge bg-warning text-dark">strategy</span></label><input type="number" class="form-control form-control-sm" id="s-slippage" value="0.50" step="0.05" min="0" max="2" title="Add Slippage to make results realistic (market impact + spread)"></div>
                     </div>
                     <div class="row g-1 mt-1">
                         <div class="col-md-3"><label class="form-label small">Combined Portfolio</label><select class="form-select form-select-sm" id="s-combine"><option selected>No</option><option>Yes - Merge with previous</option></select></div>
@@ -1504,10 +1505,13 @@ let _lastOpenTrdHTML = null;
         const s=document.getElementById('r-start')?.value||'', e=document.getElementById('r-end')?.value||'';
         if(!s||!e){alert('Select start and end date');return null;}
         const lots=parseInt(document.getElementById('r-lots')?.value)||1;
-        const sA=_amtVal('s-sl',30);const sl=sA.v;const slUnit=sA.u;
-        const tA=_amtVal('s-tp',50);const tp=tA.v;const tpUnit=tA.u;
-        // Daily trade-count cap removed: -1 = unlimited in the engine.
-        const mtd=-1;
+        const sA=_amtVal('s-sl',12);const sl=sA.v;const slUnit=sA.u;
+        const tA=_amtVal('s-tp',18);const tp=tA.v;const tpUnit=tA.u;
+        // Max trades/day: rulebook profile default (Buy 2, Sell 5). 0/blank = unlimited.
+        const _mtdRaw=parseInt(document.getElementById('s-mtd')?.value);const mtd=(isNaN(_mtdRaw)||_mtdRaw<=0)?-1:_mtdRaw;
+        const trailSel=document.getElementById('s-trail')?.value||'Lock';
+        const trailOn=trailSel!=='Off';
+        const _trailStep=parseFloat(document.getElementById('s-trail-step')?.value)||5;
         const slb=Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0));
         const indicators=robotCollectIndicators();
         let legs=(typeof stratLegs!=='undefined'&&stratLegs.length)?JSON.parse(JSON.stringify(stratLegs)):[];
@@ -1529,7 +1533,7 @@ let _lastOpenTrdHTML = null;
         // use karta hai (index 13-15%, stock 30%) - wahi paper/live/scanner
         // use karte hain. Pehle yahan hardcoded 0.14 jata tha (index ka IV)
         // to stock options ka premium 5x chhota dikhta tha.
-        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:document.getElementById('s-trail')?.value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,sl_unit:slUnit,tp_unit:tpUnit,signal_lookback_days:slb}};
+        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:trailOn,trailing:trailOn?String(_trailStep):'Off',max_holding_bars:rType==='intraday'?0:(momentum>0?Math.max(5,20-momentum):20),strict_trend:true,allow_intraday_time_exit:false,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'No Re-entry',reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'RE ASAP',lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,lock_profit_unit:'pt',dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,sl_unit:slUnit,tp_unit:tpUnit,signal_lookback_days:slb}};
     }
     async function runBacktest(opts){
         // opts.direct: saved-strategy endpoint ka ready result - dobara fetch nahi, sidha render.
@@ -1957,13 +1961,17 @@ let _lastOpenTrdHTML = null;
                 slippage_pct:0.5,
                 strike_selection:(legs[0]&&legs[0].strike_selection)||'atm',
                 otm_distance:(legs[0]&&legs[0].otm_distance)||0,
-                max_holding_bars:1000000,
+                max_holding_bars:stratType==='intraday'?0:1000000,
+                allow_intraday_time_exit:false,
+                strict_trend:true,
                 auto_exit_on_time:true,
                 reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'',
                 reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'',
-                trailing:document.getElementById('s-trail')?.value||'',
+                trailing:(document.getElementById('s-trail')?.value||'Lock')==='Off'?'Off':String(parseFloat(document.getElementById('s-trail-step')?.value)||5),
+                trailing_sl:(document.getElementById('s-trail')?.value||'Lock')!=='Off',
                 lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,
                 lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,
+                lock_profit_unit:'pt',
             },
             risk_management:{
                 daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,
@@ -1972,7 +1980,7 @@ let _lastOpenTrdHTML = null;
                 daily_take_profit_pct:tpUnit==='pct'?tp:0,
                 sl_unit:slUnit,
                 tp_unit:tpUnit,
-                max_trades_per_day:-1,
+                max_trades_per_day:(function(){const v=parseInt(document.getElementById('s-mtd')?.value);return (isNaN(v)||v<=0)?-1:v;})(),
                 signal_lookback_days:parseInt(document.getElementById('r-slb')?.value)||0,
             },
             status:'active',
@@ -2093,9 +2101,9 @@ let _lastOpenTrdHTML = null;
         document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
     }
      document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta'); scheduleAutoBT();});
-    document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); scheduleAutoBT(); });
-    ['r-order','r-strike','r-lots','r-type','s-sl','s-tp','r-mtd','r-slb','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
-    document.getElementById('r-syms')?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();});
+    document.getElementById('s-index')?.addEventListener('change', ()=>{ try{_applyOptionBuyDefaults(false);}catch(e){} if(stratLegs.length) updatePayoff(); scheduleAutoBT(); });
+    ['r-order','r-strike','r-lots','r-type','s-sl','s-tp','r-mtd','s-mtd','r-slb','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-trail-step','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
+    document.getElementById('r-syms')?.addEventListener('change',()=>{try{_applyOptionBuyDefaults(false);}catch(e){} try{updateRunSummary();}catch(e){} scheduleAutoBT();});
     // Indicator inputs auto
     document.addEventListener('change',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-ind-')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
     document.addEventListener('input',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
@@ -2137,27 +2145,94 @@ let _lastOpenTrdHTML = null;
     async function _refreshDualMirror(){
         try{ if(!window._entryPrem){ window._entryPrem=await _entryPremEst(); } _dualMirror('s-sl','s-sl-mirror'); _dualMirror('s-tp','s-tp-mirror'); }catch(e){}
     }
-    // ═══ Smart Default for Option Buying (Rule 2 - RESTORED) ═══
-    // User rule (09-11-2026): default inputs 1500/3000 dikhe, LEKIN jab koi
-    // CE/PE BUY strategy/order select ho (backtest ya template) to SL/TP
-    // apne-aap 30% SL / 70% TP (premium-based) par switch ho jaye. Non-BUY
-    // (EQ/SELL) par 1500/3000 hi rehta hai.
-    function _isOptionBuy(){
+    // ═══ Rulebook defaults (Buy vs Sell) - 16-11-2026 ═══
+    // Single source: core/services/strategy_rulebook.py. Yahan sirf UI
+    // pre-fill hota hai; backtest/paper/live backend wahi rules enforce karte
+    // hain. Har field user ke liye editable hai.
+    //   SELL: entry 10:15, SL 12-15 / TP 15-20, lock 10->5 (step 5), 5/day
+    //   BUY : ATM/ITM-1, SL 10-12 / TP 25-30, lock 12->6 (step 5), 2/day
+    //   Index override: NIFTY 15/20, FINNIFTY 18/22, BANKNIFTY 25/35
+    const _RB_INDEX_SLTP={NIFTY:[15,20],FINNIFTY:[18,22],BANKNIFTY:[25,35]};
+    function _rbSide(){
         try{
-            if(typeof stratLegs!=='undefined'&&stratLegs.length){ const l=stratLegs[0]; const op=(l.option_type||'').toUpperCase(); const tx=(l.transaction||'').toLowerCase(); return op!=='EQ'&&tx==='buy'; }
-            const ro=(document.getElementById('r-order')||{}).value||''; const pp=ro.split('-'); return (pp[0]||'').toUpperCase()!=='EQ'&&String(pp[1]||'').toUpperCase()==='BUY';
-        }catch(e){ return false; }
+            if(typeof stratLegs!=='undefined'&&stratLegs.length){
+                const l=stratLegs[0]; const op=(l.option_type||'').toUpperCase();
+                if(op==='EQ') return 'eq';
+                return String(l.transaction||'').toLowerCase()==='sell'?'sell':'buy';
+            }
+            const ro=(document.getElementById('r-order')||{}).value||'CE-BUY';
+            const pp=ro.split('-');
+            if(String(pp[0]||'').toUpperCase()==='EQ') return 'eq';
+            return String(pp[1]||'BUY').toUpperCase()==='SELL'?'sell':'buy';
+        }catch(e){ return 'buy'; }
     }
+    function _rbSymbol(){
+        try{ const s=(typeof rSyms==='function'&&rSyms()[0])||(document.getElementById('s-index')||{}).value||'NIFTY'; return String(s).toUpperCase().trim(); }catch(e){ return 'NIFTY'; }
+    }
+    function _rbDefaults(){
+        const side=_rbSide(); if(side==='eq') return null;
+        const idx=_RB_INDEX_SLTP[_rbSymbol()]||null;
+        const sl=idx?idx[0]:(side==='sell'?12:12);
+        const tp=idx?idx[1]:(side==='sell'?18:28);
+        return side==='sell'
+            ? {sl:sl,tp:tp,entry:'10:15',lockAt:10,lockAmt:5,step:5,mtd:5,reSl:'No Re-entry'}
+            : {sl:sl,tp:tp,entry:'09:35',lockAt:12,lockAmt:6,step:5,mtd:2,reSl:'No Re-entry'};
+    }
+    // ---- Rulebook default vs user-customized visibility ----
+    const _rbCustom=new Set(); const _rbIndCustom=new Set(); let _rbApplying=false;
     function _applyOptionBuyDefaults(force){
         try{
-            const slEl=document.getElementById('s-sl'), tpEl=document.getElementById('s-tp');
-            if(!slEl||!tpEl)return;
-            if(_isOptionBuy()){
-                slEl.value='20'; tpEl.value='40';
+            const d=_rbDefaults(); if(!d) return;
+            _rbApplying=true;
+            const set=(id,v)=>{const el=document.getElementById(id); if(!el||v===undefined||v===null) return;
+                // force=true (reset / order-type switch) => rulebook default.
+                // Warna user ka customized value kabhi overwrite na ho.
+                if(force||!_rbCustom.has(id)){ el.value=v; _rbTag(id,true); }
+                else { _rbTag(id,false); }
+            };
+            set('s-sl',d.sl); set('s-tp',d.tp);
+            set('s-lock-profit',d.lockAt); set('s-lock-amount',d.lockAmt);
+            set('s-trail-step',d.step); set('s-reentry-sl',d.reSl);
+            // Max trades: Sell 5/day, Buy 2/day. Explicit -1/blank = unlimited.
+            const mEl=document.getElementById('s-mtd');
+            if(mEl&&(force||!_rbCustom.has('s-mtd'))){ mEl.value=d.mtd; _rbTag('s-mtd',true); }
+            // Entry time: sirf tab jab user ne khud change na kiya ho.
+            const eEl=document.getElementById('r-entry');
+            if(eEl&&(force||!_rbCustom.has('r-entry'))){ eEl.value=d.entry; _rbTag('r-entry',true); }
+            // BUY rulebook: SuperTrend + VWAP + Market Regime filters ON.
+            if(_rbSide()==='buy'){
+                [['r-ind-supertrend',true],['r-ind-vwap',true],['r-ind-market_regime',true]].forEach(([id,v])=>{
+                    const el=document.getElementById(id);
+                    if(el&&(force||!_rbIndCustom.has(id))){ el.checked=v; }
+                });
             }
+            _rbApplying=false;
             _refreshDualMirror();
+        }catch(e){ _rbApplying=false; }
+    }
+    // ---- Rulebook default vs user-customized visibility ----
+    function _rbTag(id,isDefault){
+        try{
+            const el=document.getElementById(id); if(!el) return;
+            const box=el.closest('.col-md-3,.col-md-2,.col-md-4,.col-6,.col-4,.col-3')||el.parentElement;
+            const lbl=box&&box.querySelector('label'); if(!lbl) return;
+            let b=lbl.querySelector('.rb-flag');
+            if(!b){ b=document.createElement('span'); b.className='rb-flag badge ms-1'; lbl.appendChild(b); }
+            b.textContent=isDefault?'RB':'Custom';
+            b.className='rb-flag badge ms-1 '+(isDefault?'bg-primary':'bg-secondary');
+            b.title=isDefault?'Rulebook default (editable)':'User-customized value';
+            el.dataset.rbDefault=isDefault?'1':'0';
         }catch(e){}
     }
+    ['s-sl','s-tp','s-lock-profit','s-lock-amount','s-trail-step','s-mtd','s-reentry-sl','r-entry'].forEach(id=>{
+        const el=document.getElementById(id); if(!el) return;
+        const mark=()=>{ if(!_rbApplying){ _rbCustom.add(id); _rbTag(id,false); } };
+        el.addEventListener('input',mark); el.addEventListener('change',mark);
+    });
+    ['r-ind-supertrend','r-ind-vwap','r-ind-market_regime'].forEach(id=>{
+        const el=document.getElementById(id); if(!el) return;
+        el.addEventListener('change',()=>{ if(!_rbApplying) _rbIndCustom.add(id); });
+    });
     // Option BUY select hote hi smart default + mirror updates
     document.getElementById('r-order')?.addEventListener('change',()=>_applyOptionBuyDefaults(false));
     document.getElementById('s-sl')?.addEventListener('input',()=>_dualMirror('s-sl','s-sl-mirror'));
@@ -2174,15 +2249,10 @@ let _lastOpenTrdHTML = null;
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
         document.getElementById('r-lots').value=1;
-        document.getElementById('s-sl').value=1500;
-        document.getElementById('s-tp').value=3000;
         try{document.getElementById('r-slb').value=0;}catch(e){}
-        try{document.getElementById('s-sl').value=1500;document.getElementById('s-tp').value=3000;}catch(e){}
-        document.getElementById('s-lock-profit').value=0;
-        document.getElementById('s-lock-amount').value=1;
-        document.getElementById('s-reentry-sl').value='RE ASAP';
-        document.getElementById('s-reentry-tp').value='RE ASAP';
-        document.getElementById('s-trail').value='Lock';
+        // Rulebook default profiles (Buy 2/day, Sell 5/day; trailing 5-pt step).
+        try{_rbCustom.clear();_rbIndCustom.clear();}catch(e){}
+        try{_applyOptionBuyDefaults(true);}catch(e){}
         clearLegs();
         try{if(typeof refreshAutoBadge==='function')refreshAutoBadge();}catch(e){}
     }
@@ -2218,7 +2288,17 @@ let _lastOpenTrdHTML = null;
                 else if(_rm.daily_stop_loss)document.getElementById('s-sl').value=String(_slVal===undefined?'':_slVal)+_slSuffix;
                 if(_rm.daily_take_profit_pct)document.getElementById('s-tp').value=_rm.daily_take_profit_pct+'%';
                 else if(_rm.daily_take_profit)document.getElementById('s-tp').value=String(_tpVal===undefined?'':_tpVal)+_tpSuffix;
-                try{document.getElementById('s-mtd').value='Unlimited';}catch(e){}
+                try{const _mv=parseInt(_rm.max_trades_per_day);document.getElementById('s-mtd').value=(isNaN(_mv)||_mv<0)?0:_mv;}catch(e){}
+                try{
+                    if(_ao.reentry_on_sl)document.getElementById('s-reentry-sl').value=_ao.reentry_on_sl;
+                    if(_ao.reentry_on_tp)document.getElementById('s-reentry-tp').value=_ao.reentry_on_tp;
+                    const _tr=String(_ao.trailing||'');
+                    if(_tr && _tr.toLowerCase()!=='off' && _tr.toLowerCase()!=='lock'){
+                        const _ts=parseFloat(_tr); if(isFinite(_ts)&&_ts>0)document.getElementById('s-trail-step').value=_ts;
+                    } else if(_tr.toLowerCase()==='off') document.getElementById('s-trail').value='Off';
+                    if(_ao.lock_profit_at!=null)document.getElementById('s-lock-profit').value=parseFloat(_ao.lock_profit_at)||0;
+                    if(_ao.lock_profit!=null)document.getElementById('s-lock-amount').value=parseFloat(_ao.lock_profit)||0;
+                }catch(e){}
                 try{if(_rm.signal_lookback_days!=null)document.getElementById('r-slb').value=_rm.signal_lookback_days;}catch(e){}
                 try{const _vx=parseFloat(_rm.vix_max);if(isFinite(_vx)&&document.getElementById('s-vix-max'))document.getElementById('s-vix-max').value=Math.max(0,_vx);}catch(e){}
             }catch(e){}
@@ -2235,6 +2315,14 @@ let _lastOpenTrdHTML = null;
             // Entry/exit conditions form me rakh do taaki dobara Run par same rahe (engine AND-logic use karta hai)
             try{window._stratEntryConds=Array.isArray(s.entry_conditions)?s.entry_conditions:JSON.parse(s.entry_conditions||'[]');}catch(e){window._stratEntryConds=[];}
             try{window._stratExitConds=Array.isArray(s.exit_conditions)?s.exit_conditions:JSON.parse(s.exit_conditions||'[]');}catch(e){window._stratExitConds=[];}
+            // Saved config = user ka apna config: rulebook auto-defaults inhe
+            // overwrite na karein (custom badge dikhao).
+            try{
+                ['s-sl','s-tp','s-lock-profit','s-lock-amount','s-trail-step','s-mtd','s-reentry-sl','r-entry'].forEach(id=>{
+                    _rbCustom.add(id); _rbTag(id,false);
+                });
+                ['r-ind-supertrend','r-ind-vwap','r-ind-market_regime'].forEach(id=>_rbIndCustom.add(id));
+            }catch(e){}
         }catch(e){}
     }
     async function backtestStrat(id, force, el){try{
@@ -3048,7 +3136,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
     }
 
     function setBT(p){const e=new Date(); const s=new Date(e); if(p==='1M') s.setMonth(e.getMonth()-1); else if(p==='3M') s.setMonth(e.getMonth()-3); else if(p==='6M') s.setMonth(e.getMonth()-6); else if(p==='1Y') s.setFullYear(e.getFullYear()-1); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('r-start').value=fmt(s); document.getElementById('r-end').value=fmt(e);}catch(e2){} try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e3){}}
-    function renderQInstruments(){const wrap=document.getElementById('q-instruments'); if(!wrap) return; const syms=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY']; const cur=document.getElementById('s-index')?.value||'NIFTY'; wrap.innerHTML=syms.map(s=>`<button class="btn btn-sm ${cur===s?'btn-primary':'btn-outline-primary'}" onclick="document.getElementById('s-index').value='${s}';renderQInstruments();if(stratLegs.length)updatePayoff();">${s}</button>`).join('')+' <small class="text-muted ms-2">Quick select — or use dropdown below (50 F&O)</small>';}
+    function renderQInstruments(){const wrap=document.getElementById('q-instruments'); if(!wrap) return; const syms=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY']; const cur=document.getElementById('s-index')?.value||'NIFTY'; wrap.innerHTML=syms.map(s=>`<button class="btn btn-sm ${cur===s?'btn-primary':'btn-outline-primary'}" onclick="document.getElementById('s-index').value='${s}';renderQInstruments();try{_applyOptionBuyDefaults(false);}catch(e){} if(stratLegs.length)updatePayoff();">${s}</button>`).join('')+' <small class="text-muted ms-2">Quick select — or use dropdown below (50 F&O)</small>';}
     async function runBacktestMonteCarlo(){const btn=document.getElementById('s-run'); const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Monte Carlo (2000 shuffles)...</p>'; try{const r=await P('/api/backtest/monte-carlo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); document.getElementById('bt-metrics').innerHTML='<div class="alert alert-info"><strong>Monte Carlo</strong> p5:'+r.p5+' p50:'+r.p50+' p95:'+r.p95+' prob_profit:'+(r.prob_profit||'-')+'</div>';}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
     async function runWalkForward(){const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Walk-forward (unseen-data check)...</p>'; try{const r=await P('/api/backtest/walk-forward',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error){document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';return;} const ws=r.windows||[]; let h='<div class="alert alert-info"><strong>Walk-forward</strong> '+ws.length+' windows | avg efficiency: '+(r.avg_efficiency||0)+'% '+(r.avg_efficiency>=70?'(robust - trade layak)':r.avg_efficiency>=30?'(ok-ish, chhota size)':'(overfit - mat chalao)')+'</div>'; if(ws.length){h+='<table class="bt-table"><thead><tr><th>IS period</th><th>OOS period</th><th>IS net</th><th>OOS net</th><th>Eff%</th></tr></thead><tbody>'; ws.forEach(w=>{h+='<tr><td>'+w.is.start+'→'+w.is.end+'</td><td>'+w.oos.start+'→'+w.oos.end+'</td><td>'+((w.is.metrics||{}).net_pnl||0)+'</td><td>'+((w.oos.metrics||{}).net_pnl||0)+'</td><td>'+w.efficiency+'%</td></tr>';}); h+='</tbody></table>';} document.getElementById('bt-metrics').innerHTML=h;}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
     async function runOptimize(){const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Optimizing SL x TP (9 backtests)...</p>'; try{const r=await P('/api/backtest/optimize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error){document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';return;} const rows=r.rows||[]; const b=r.best||{}; let h='<div class="alert alert-success"><strong>Best setting: SL ₹'+(b.sl||'-')+' x TP ₹'+(b.tp||'-')+'</strong> — net ₹'+(b.net||0)+' | PF '+(b.profit_factor||0)+' | Win '+(b.win_rate||0)+'% <button class="btn btn-sm btn-success ms-2" onclick="applyBestSLTP('+b.sl+','+b.tp+')">Apply</button></div>'; if(rows.length){h+='<table class="bt-table"><thead><tr><th>SL ₹</th><th>TP ₹</th><th>Net ₹</th><th>Win%</th><th>Trades</th><th>PF</th><th>MaxDD</th></tr></thead><tbody>'; rows.forEach(x=>{h+='<tr><td>'+x.sl+'</td><td>'+x.tp+'</td><td>'+x.net+'</td><td>'+x.win_rate+'</td><td>'+x.trades+'</td><td>'+x.profit_factor+'</td><td>'+x.max_dd+'</td></tr>';}); h+='</tbody></table>';} document.getElementById('bt-metrics').innerHTML=h;}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}

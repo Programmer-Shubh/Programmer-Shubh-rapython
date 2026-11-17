@@ -165,6 +165,13 @@ class BacktestEngine:
         # BTST holds overnight: increase max_holding for BTST
         if trade_mode == "btst":
             max_holding = max(max_holding, 5)
+        # RULEBOOK (16-11-2026): intraday me koi intermediate candle-completion
+        # time exit nahi - sirf 15:15 square-off. Explicit `max_holding_bars`
+        # (UI default 20) ko intraday me ignore karo, warna theta decay capture
+        # nahi hota aur paper se exit distribution alag ho jata hai.
+        # Opt-in: advanced.allow_intraday_time_exit = true.
+        if trade_mode == "intraday" and not advanced_options.get("allow_intraday_time_exit"):
+            max_holding = 10 ** 9
         # Daily caps (user rule 2026-11 = unconstrained):
         #   -1 / missing  -> UNLIMITED (new default)
         #    0            -> legacy explicit "zero trades" (tests / diagnostics)
@@ -759,6 +766,33 @@ class BacktestEngine:
                         pass
                 has_open = len(entries) > len(exits)
                 can_enter = not has_open and (_unlimited_trades or daily_trades < max_trades_day) and _in_range
+                # ---- RULEBOOK re-entry policy (16-11-2026) ----
+                # "No Re-entry" / "RE Next Day" = SL (ya TP) ke baad SAME DAY
+                # dobara entry nahi. Pehle ye field sirf UI/saved config me
+                # thi - engine ignore karta tha, isliye ek hi din me 5 SL ke
+                # baad 5 naye trades (re-entry churn) ho rahe the.
+                if can_enter and exits:
+                    try:
+                        _pol = getattr(self, "_advanced", {}) or {}
+
+                        def _same_day_blocked(_p):
+                            _p = str(_p or "").strip().lower()
+                            if not _p:
+                                return False
+                            return _p.startswith("no") or ("next day" in _p)
+
+                        _lrsn = str(exits[-1].get("reason") or "").lower()
+                        _ldate = str(exits[-1].get("date") or "")[:10]
+                        if _ldate and _ldate == str(cur_date)[:10]:
+                            if _lrsn == "stoploss" and _same_day_blocked(_pol.get("reentry_on_sl")):
+                                can_enter = False
+                            elif _lrsn == "target" and _same_day_blocked(_pol.get("reentry_on_tp")):
+                                can_enter = False
+                            if not can_enter:
+                                self._rej["reentry_block"] = (
+                                    self._rej.get("reentry_block", 0) + 1)
+                    except Exception:
+                        pass
                 # Entry delay: wait N bars after the SESSION opens (per-day), not
                 # since the start of the whole backtest window.
                 if entry_delay_bars > 0:
@@ -2142,20 +2176,26 @@ class BacktestEngine:
         # engine IGNORE karta tha (trailing kaam hi nahi karta tha).
         _lock_at = 0.0
         _lock_amt = 0.0
+        _lock_unit = "pct"
         try:
             _adv_t = getattr(self, "_advanced", {}) or {}
             _lock_at = float(_adv_t.get("lock_profit_at", 0) or 0)
             _lock_amt = float(_adv_t.get("lock_profit", 0) or 0)
+            _lock_unit = str(_adv_t.get("lock_profit_unit") or "pct")
         except Exception:
             _lock_at = 0.0
             _lock_amt = 0.0
+            _lock_unit = "pct"
+        _lock_armed = False
         if _lock_at > 0 and entry_idx is not None and entry_price > 0:
             try:
                 from utils.helpers import trailing_lock_level as _tll
                 _prevL = self._trailing_best.get(entry_idx)
                 _newL = _tll(entry_price, float(_prevL or 0),
-                             (txn_type or "buy") == "buy", _lock_at, _lock_amt)
+                             (txn_type or "buy") == "buy", _lock_at, _lock_amt,
+                             unit=_lock_unit)
                 if _newL > 0:
+                    _lock_armed = True
                     if (txn_type or "buy") == "buy":
                         if _newL > sl_level:
                             sl_level = _newL
@@ -2170,18 +2210,25 @@ class BacktestEngine:
                 _trail_dist = float(trailing)
             except Exception:
                 _trail_dist = 0.0
-            if _trail_dist > 0:
+            # RULEBOOK: lock_profit_at diya ho to trailing LOCK arm hone ke
+            # baad hi start hota hai (10 pts profit -> 5 lock -> 5-pt trail).
+            # Pehle step-based trail entry bar ke extreme se hi SL ko entry
+            # ke paas kheench leta tha -> winners breakeven-minus-costs par
+            # band ho rahe the (0% win rate).
+            _trail_ok = (_lock_armed or _lock_at <= 0)
+            if _trail_dist > 0 and _trail_ok:
                 # prev_best is updated at the END of each bar (see below).
                 _prev = self._trailing_best.get(entry_idx)
                 if txn_type == "buy":
                     if _prev and _prev > 0:
                         _td = _prev - _trail_dist
-                        if _td > sl_level:
+                        # Sirf profit side me trail (loss-side breakeven lock nahi)
+                        if _td > entry_price and _td > sl_level:
                             sl_level = _td
                 else:  # sell
                     if _prev and _prev > 0:
                         _td = _prev + _trail_dist
-                        if sl_level == 0 or _td < sl_level:
+                        if _td < entry_price and (sl_level == 0 or _td < sl_level):
                             sl_level = _td
         elif (not _lock_at) and trailing and trailing.lower() == "lock" and entry_idx is not None:
             # Break-even lock once any prior bar closed in profit.
@@ -2205,7 +2252,9 @@ class BacktestEngine:
                     _eh, _el = max(_hs, _ls), min(_hs, _ls)
                     self._trail_update(entry_idx, _eh, _el, txn_type)
                     # v7: EQ ka bhi close-confirmed target (wick par nahi).
-                    _hit = self._check_sl_tp_levels(txn_type, sl_level, tp_level, _eh, _el)
+                    _hit = self._check_sl_tp_levels(
+                        txn_type, sl_level, tp_level, _eh, _el,
+                        bar_open=float(current.get("open_price", 0) or 0))
                     return self._confirm_tp(
                         _hit, txn_type, tp_level,
                         float(current.get("close_price", 0) or 0))
@@ -2308,20 +2357,28 @@ class BacktestEngine:
             # delta mapping - close bhi bar ke andar ka ek real point hai.
             prem_close = float(prem_mid) + delta * (
                 float(current.get("close_price", 0) or mid_spot) - mid_spot) * _band_scale
+            # Gap-aware SL fill: bar ka OPEN premium (bar start par known,
+            # look-ahead nahi). Stop order intrabar breach par LEVEL par
+            # fill hota hai, sirf gap-through par open par.
+            prem_open = float(prem_mid) + delta * (
+                float(current.get("open_price", 0) or mid_spot) - mid_spot) * _band_scale
         elif _bs and strike > 0:
             try:
                 prem_high = _bs(high_spot, strike, t, iv, option_type.upper()[:2])
                 prem_low = _bs(low_spot, strike, t, iv, option_type.upper()[:2])
                 prem_close = _bs(float(current.get("close_price", 0) or mid_spot),
                                  strike, t, iv, option_type.upper()[:2])
+                prem_open = _bs(float(current.get("open_price", 0) or mid_spot),
+                                strike, t, iv, option_type.upper()[:2])
             except Exception:
-                prem_high, prem_low, prem_close = 9999, 0, 0
+                prem_high, prem_low, prem_close, prem_open = 9999, 0, 0, 0
         else:
-            prem_high, prem_low, prem_close = float("inf"), 0, 0
+            prem_high, prem_low, prem_close, prem_open = float("inf"), 0, 0, 0
         opt_high = max(prem_high, prem_low)
         opt_low = min(prem_high, prem_low)
         self._trail_update(entry_idx, opt_high, opt_low, txn_type)
-        _hit = self._check_sl_tp_levels(txn_type, sl_level, tp_level, opt_high, opt_low)
+        _hit = self._check_sl_tp_levels(txn_type, sl_level, tp_level, opt_high, opt_low,
+                                        bar_open=prem_open)
         return self._confirm_tp(_hit, txn_type, tp_level, prem_close)
 
     def _day_iv(self, date, spot=0.0):
@@ -2456,16 +2513,18 @@ class BacktestEngine:
             pass
         return _src
 
-    def _check_sl_tp_levels(self, txn_type, sl_level, tp_level, opt_high, opt_low):
+    def _check_sl_tp_levels(self, txn_type, sl_level, tp_level, opt_high, opt_low, bar_open=None):
         """Shared hit comparison for DB-range and model-range callers.
 
         `level` is the trigger (same as paper's sltp_premium_level). `fill`
-        (SAME contract as paper parity tests): a gap through SL fills at the
-        breached extreme (worst realistic case), while TP fills at the level
-        (conservative, never a better-than-level fill the paper monitor may
-        miss). TP is a limit order at the level; SL is treated as a stop-market
-        fill at the worst touched price. Changing this fill model is a separate
-        modeling decision - do not drift it silently with other fixes."""
+        models a real stop-market order:
+          - bar OPEN already beyond SL (gap) -> fill at open (first available
+            price; worst realistic outcome),
+          - intrabar breach -> fill at the SL LEVEL (the stop triggers there;
+            slippage is applied once by the caller),
+          - `bar_open=None` (legacy callers / unit tests) -> breached extreme
+            (max pessimism, old documented behavior).
+        TP is a resting LIMIT at the level (conservative)."""
         try:
             hit_sl, hit_tp = False, False
             if txn_type == "buy":
@@ -2475,7 +2534,19 @@ class BacktestEngine:
                 hit_sl = sl_level > 0 and opt_high >= sl_level
                 hit_tp = tp_level > 0 and opt_low <= tp_level
             if hit_sl:
-                fill = min(sl_level, opt_low) if txn_type == "buy" else max(sl_level, opt_high)
+                _ob = 0.0
+                try:
+                    _ob = float(bar_open or 0)
+                except Exception:
+                    _ob = 0.0
+                if _ob > 0:
+                    # Gap-through fills at the open; else stop triggers at level.
+                    if txn_type == "buy":
+                        fill = _ob if _ob <= sl_level else sl_level
+                    else:
+                        fill = _ob if _ob >= sl_level else sl_level
+                else:
+                    fill = min(sl_level, opt_low) if txn_type == "buy" else max(sl_level, opt_high)
                 return {"reason": "stoploss", "level": sl_level, "fill": fill}
             if hit_tp:
                 return {"reason": "target", "level": tp_level, "fill": tp_level}

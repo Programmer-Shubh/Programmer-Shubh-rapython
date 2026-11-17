@@ -751,10 +751,10 @@ def place_for_strategy(sid, signal_check="daily"):
             rm0 = _js.loads(s.get("risk_management") or "{}")
         except Exception:
             rm0 = {}
-        # User rule (2026-11): NO daily trade-count cap. The worker keeps
-        # re-entering all day whenever no position is open, so every valid
-        # signal fires on Fyers without a "max N/day" stop.
-        # (Only the one-open-position-per-strategy duplicate guard remains.)
+        # User rule (2026-11): NO GLOBAL daily trade-count cap / no global
+        # daily stop-loss circuit. Har strategy ka APNA max_trades_per_day
+        # (rulebook: Sell 5, Buy 2; -1/blank = unlimited) respect hota hai -
+        # backtest engine ke saath parity.
         n_today_count = 0
         try:
             has_open = db.fetch_one(
@@ -764,6 +764,31 @@ def place_for_strategy(sid, signal_check="daily"):
             n_today = db.fetch_one(
                 "SELECT COUNT(*) as c FROM paper_trades WHERE strategy_id=? AND entry_date=?", [sid, today])
             n_today_count = int((n_today or {}).get("c", 0) or 0)
+        except Exception:
+            pass
+        # ---- RULEBOOK (16-11-2026): per-strategy caps + re-entry policy ----
+        # No GLOBAL cutoff/trade-count circuit. Sirf strategy ka apna
+        # max_trades_per_day (Sell default 5, Buy default 2; -1/blank =
+        # unlimited) aur "No Re-entry"/"RE Next Day" SL block - backtest
+        # engine ke EXACT same rules (parity).
+        try:
+            _mtd = (rm0 or {}).get("max_trades_per_day")
+            if _mtd is not None and str(_mtd).strip() != "":
+                _mtd = int(float(_mtd))
+                if _mtd >= 0 and n_today_count >= _mtd:
+                    return {"placed": placed,
+                            "notes": [f"{s.get('name')}: max_trades_per_day {_mtd} reached - skipped"]}
+        except Exception:
+            pass
+        try:
+            _pol_sl = str((adv0 or {}).get("reentry_on_sl") or "").strip().lower()
+            if _pol_sl.startswith("no") or "next day" in _pol_sl:
+                _last_exit = db.fetch_one(
+                    "SELECT exit_status FROM paper_trades WHERE strategy_id=? AND entry_date=? "
+                    "AND status!='open' ORDER BY exit_date DESC, id DESC LIMIT 1", [sid, today])
+                if _last_exit and "stoploss" in str(_last_exit.get("exit_status") or "").lower():
+                    return {"placed": placed,
+                            "notes": [f"{s.get('name')}: No Re-entry after SL (rulebook) - skipped"]}
         except Exception:
             pass
         try:

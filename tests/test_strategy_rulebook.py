@@ -81,3 +81,88 @@ def test_tick_rounding():
     assert round_tick(0) == 0
     assert ADX_MIN == 22.0
     assert INDEX_SLTP_POINTS["FINNIFTY"] == (18.0, 22.0)
+
+
+# ---- Rule 5: Buy/Sell default profiles -------------------------------------
+from core.services.strategy_rulebook import (  # noqa: E402
+    BUY_PROFILE, SELL_PROFILE, apply_profile_defaults, default_profile,
+    legs_side, profile_sltp_points,
+)
+from utils.helpers import trailing_lock_level  # noqa: E402
+
+
+def test_profile_ranges_match_rulebook():
+    assert SELL_PROFILE["entry_time"] == "10:15"
+    assert SELL_PROFILE["sl_points"] == (12.0, 15.0)
+    assert SELL_PROFILE["tp_points"] == (15.0, 20.0)
+    assert SELL_PROFILE["max_trades_per_day"] == 5
+    assert SELL_PROFILE["reentry_on_sl"] == "No Re-entry"
+    assert (SELL_PROFILE["lock_profit_at_pts"], SELL_PROFILE["lock_profit_pts"]) == (10.0, 5.0)
+
+    assert BUY_PROFILE["sl_points"] == (10.0, 12.0)
+    assert BUY_PROFILE["tp_points"] == (25.0, 30.0)
+    assert BUY_PROFILE["max_trades_per_day"] == 2
+    assert BUY_PROFILE["strike_selection"] == "atm"
+    assert (BUY_PROFILE["lock_profit_at_pts"], BUY_PROFILE["lock_profit_pts"]) == (12.0, 6.0)
+    assert BUY_PROFILE["trail_step_pts"] == 5.0
+
+
+def test_legs_side_detection():
+    assert legs_side([{"transaction": "sell"}]) == "sell"
+    assert legs_side([{"transaction": "buy"}, {"transaction": "sell"}]) == "sell"
+    assert legs_side([{"transaction": "buy"}]) == "buy"
+    assert legs_side([]) == "buy"
+    assert default_profile("SELL")["max_trades_per_day"] == 5
+
+
+def test_profile_sltp_index_override_wins_for_both_sides():
+    assert profile_sltp_points("buy", "NIFTY") == (15.0, 20.0)
+    assert profile_sltp_points("sell", "BANKNIFTY") == (25.0, 35.0)
+    # Non-index: profile ranges (SL lower edge, TP midpoint)
+    assert profile_sltp_points("sell", "RELIANCE") == (12.0, 17.5)
+    assert profile_sltp_points("buy", "RELIANCE") == (10.0, 27.5)
+
+
+def test_apply_defaults_sell_profile():
+    risk, adv = apply_profile_defaults(
+        {}, {"trade_mode": "intraday"},
+        [{"option_type": "PE", "transaction": "sell"}], "NIFTY")
+    assert (risk["daily_stop_loss"], risk["sl_unit"]) == (15.0, "pt")
+    assert (risk["daily_take_profit"], risk["tp_unit"]) == (20.0, "pt")
+    assert risk["max_trades_per_day"] == 5
+    assert adv["entry_time"] == "10:15"
+    assert adv["max_holding_bars"] == 0          # no intraday time exit
+    assert adv["trailing"] == "5"
+    assert adv["lock_profit_at"] == 10.0 and adv["lock_profit"] == 5.0
+    assert adv["lock_profit_unit"] == "pt"
+    assert adv["reentry_on_sl"] == "No Re-entry"
+    assert adv["strict_trend"] is True
+
+
+def test_apply_defaults_buy_profile_and_explicit_values_win():
+    legs = [{"option_type": "CE", "transaction": "buy"}]
+    risk, adv = apply_profile_defaults({}, {}, legs, "FINNIFTY")
+    assert (risk["daily_stop_loss"], risk["daily_take_profit"]) == (18.0, 22.0)
+    assert risk["max_trades_per_day"] == 2
+    # explicit user values are never overridden
+    risk2, adv2 = apply_profile_defaults(
+        {"daily_stop_loss": 40, "sl_unit": "pt", "max_trades_per_day": -1},
+        {"entry_time": "11:30", "trailing": "8", "lock_profit_at": 20},
+        legs, "FINNIFTY")
+    assert risk2["daily_stop_loss"] == 40
+    assert risk2["max_trades_per_day"] == -1
+    assert adv2["entry_time"] == "11:30"
+    assert adv2["trailing"] == "8"
+    assert adv2["lock_profit_at"] == 20
+
+
+def test_trailing_lock_points_mode():
+    # BUY: 12 pts profit -> lock 6 pts above entry
+    assert trailing_lock_level(100.0, 112.0, True, 12, 6, unit="pt") == 106.0
+    # not armed below trigger
+    assert trailing_lock_level(100.0, 111.0, True, 12, 6, unit="pt") == 0.0
+    # SELL: 10 pts profit -> lock 5 pts below entry
+    assert trailing_lock_level(200.0, 190.0, False, 10, 5, unit="pt") == 195.0
+    # legacy percent mode still works
+    assert round(trailing_lock_level(100.0, 110.0, True, 10, 5), 2) == 105.0
+

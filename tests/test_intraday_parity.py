@@ -77,6 +77,24 @@ def test_sl_fill_is_gap_aware_tp_stays_at_level():
     assert out3["reason"] == "target" and out3["fill"] == 100.0
 
 
+def test_sl_fill_with_bar_open_level_vs_gap():
+    """Stop-market realism (rulebook 16-11-2026): intrabar breach fills at
+    the SL LEVEL (stop trigger), sirf gap-open beyond SL par open par fill."""
+    eng = _engine()
+    # SELL: bar opens 290 (below SL 300), trades up to 800 -> intrabar breach
+    out = eng._check_sl_tp_levels("sell", 300.0, 100.0, 800.0, 100.0, bar_open=290.0)
+    assert out["reason"] == "stoploss" and out["fill"] == 300.0
+    # SELL gap: bar opens at 340 (already beyond SL) -> fill at open (worst real)
+    out2 = eng._check_sl_tp_levels("sell", 300.0, 100.0, 800.0, 330.0, bar_open=340.0)
+    assert out2["fill"] == 340.0
+    # BUY: opens 105 above SL 100, dips to 50 -> intrabar -> fill at level
+    out3 = eng._check_sl_tp_levels("buy", 100.0, 0.0, 120.0, 50.0, bar_open=105.0)
+    assert out3["fill"] == 100.0
+    # BUY gap: opens 80 below SL 100 -> fill at open
+    out4 = eng._check_sl_tp_levels("buy", 100.0, 0.0, 120.0, 50.0, bar_open=80.0)
+    assert out4["fill"] == 80.0
+
+
 def test_no_double_slippage_on_sell_entry():
     from core.services.transaction_costs import TransactionCosts
     eng = _engine()

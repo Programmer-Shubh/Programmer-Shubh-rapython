@@ -149,10 +149,10 @@ def test_intrabar_band_is_stricter_than_bs_extreme():
     captured = {}
     orig = eng._check_sl_tp_levels
 
-    def spy(txn_type, sl_level, tp_level, opt_high, opt_low):
+    def spy(txn_type, sl_level, tp_level, opt_high, opt_low, bar_open=None):
         captured["high"] = opt_high
         captured["low"] = opt_low
-        return orig(txn_type, sl_level, tp_level, opt_high, opt_low)
+        return orig(txn_type, sl_level, tp_level, opt_high, opt_low, bar_open=bar_open)
 
     eng._check_sl_tp_levels = spy
     eng._check_sl_tp(cur, entry, "CE", "buy", 1500, 3000, 75)

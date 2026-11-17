@@ -1019,8 +1019,9 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         if req.take_profit is not None:
             risk_in["daily_take_profit"] = float(req.take_profit)
         if "max_trades_per_day" not in risk_in:
-            # -1 = unlimited (daily trade-count cap removed, user rule 2026-11)
-            risk_in["max_trades_per_day"] = -1
+            # Rulebook profiles: Buy 2/day, Sell 5/day (default). Explicit
+            # -1 = unlimited bhi allowed hai. (Global circuit breaker nahi.)
+            risk_in["max_trades_per_day"] = None
         # Normalize legs + handle presets (Bear Call, Bull Put, Bear Put, Iron Condor)
         raw_legs = req.legs or []
         preset = (req.strategy_preset or advanced_in.get("preset") or "").lower()
@@ -1059,6 +1060,14 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
                 {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
             ]
+        # RULEBOOK DEFAULTS (Buy vs Sell profile): sirf khaali fields bharte
+        # hain - UI/API ka explicit value override nahi hota.
+        try:
+            from core.services.strategy_rulebook import apply_profile_defaults as _apd
+            risk_in, advanced_in = _apd(risk_in, advanced_in, legs, symbol)
+        except Exception:
+            pass
+
         # OTM premium floor: Rs15 se saste option strikes auto-drop (engine
         # signal + execution dono jagah skip karta hai). Yahan lagana ZAROORI
         # hai (legs normalize/preset-expand ke BAAD) - pehle lagane par NameError
@@ -1844,8 +1853,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                    "exit_time": str(advanced_in.get("exit_time", "") or advanced_in.get("early_exit_time", "")),
                    "sl": float(risk_in.get("daily_stop_loss", 0) or 0),
                    "tp": float(risk_in.get("daily_take_profit", 0) or 0),
-                   "sl_unit": ("pct" if (float(risk_in.get("daily_stop_loss_pct", 0) or 0) > 0) else "rs"),
-                   "tp_unit": ("pct" if (float(risk_in.get("daily_take_profit_pct", 0) or 0) > 0) else "rs"),
+                   # Rulebook units: 'pt' (premium points), 'pct', ya 'rs'.
+                   "sl_unit": ("pct" if (float(risk_in.get("daily_stop_loss_pct", 0) or 0) > 0)
+                               else str(risk_in.get("sl_unit") or "rs").lower()),
+                   "tp_unit": ("pct" if (float(risk_in.get("daily_take_profit_pct", 0) or 0) > 0)
+                               else str(risk_in.get("tp_unit") or "rs").lower()),
                    "max_trades_per_day": int(risk_in.get("max_trades_per_day", 0) or 0)},
         "engine": _engine_name,
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
