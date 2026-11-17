@@ -371,16 +371,26 @@ def sync_all(start_date: str = "2026-01-01", log=print):
                      "premium_coverage": summary["premium_coverage"],
                      "contracts_failed_count": len(summary["contracts_failed"]),
                      "contracts_failed_sample": summary["contracts_failed"][:25]})
-        try:
-            db = _db()
-            db.execute("INSERT INTO settings (setting_key, setting_value, updated_at) VALUES ('fyers_history_sync_auto_v1_done','1',CURRENT_TIMESTAMP) "
-                       "ON CONFLICT(setting_key) DO UPDATE SET setting_value='1', updated_at=CURRENT_TIMESTAMP")
-        except Exception:
+        _rows = int(summary.get("rows_stored") or 0)
+        _cov = sum(v for v in (summary.get("premium_coverage") or {}).values() if isinstance(v, (int, float)))
+        # One-time auto flag SIRF tab set karo jab actual premium rows store
+        # hue ho - warna adhoori sync ko 'done' mark karke agle boot par
+        # real data kabhi nahi aayega. Manual re-run button hamesha available.
+        _auto_done_ok = (_rows > 0 and int(summary.get("contracts_ok") or 0) > 10) or _cov > 0
+        if _auto_done_ok:
             try:
                 db = _db()
-                db.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value, updated_at) VALUES ('fyers_history_sync_auto_v1_done','1',CURRENT_TIMESTAMP)")
+                db.execute("INSERT INTO settings (setting_key, setting_value, updated_at) VALUES ('fyers_history_sync_auto_v1_done','1',CURRENT_TIMESTAMP) "
+                           "ON CONFLICT(setting_key) DO UPDATE SET setting_value='1', updated_at=CURRENT_TIMESTAMP")
             except Exception:
-                pass
+                try:
+                    db = _db()
+                    db.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value, updated_at) VALUES ('fyers_history_sync_auto_v1_done','1',CURRENT_TIMESTAMP)")
+                except Exception:
+                    pass
+        else:
+            sys_log("auto-sync INCOMPLETE (rows=%s contracts_ok=%s) - flag NOT set; next boot retries",
+                    _rows, summary.get("contracts_ok"))
         sys_log("DONE — rows stored:", summary["rows_stored"], "contracts ok:", summary["contracts_ok"],
                 "coverage:", summary["premium_coverage"])
         return summary

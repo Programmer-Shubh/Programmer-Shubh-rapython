@@ -90,12 +90,14 @@ class FyersHistoryData:
 
     # ---------- main ----------
     def _native_history(self, payload: dict) -> dict:
-        """Direct v3 data-host call (GET, Authorization: <app_id>:<token>).
-        SDK-version independent - the old SDK base URL 404s on v3."""
+        """Direct v3 data-host call. NOTE: Render free tier shared IPs ke liye
+        broker ke internal endpoints ko egress proxy (static IP) se bheja
+        jata hai - warna cloud IPs par "Please provide a valid symbol"
+        jaisi misleading rejections / connection resets aate hain."""
         try:
             import requests as _rq
         except Exception:
-            return {"s": "error", "message": "requests not installed"}
+            _rq = None
         if not (self.client_id and self.access_token):
             return {"s": "error", "message": "client id / access token missing"}
         headers = {
@@ -103,22 +105,53 @@ class FyersHistoryData:
             "Content-Type": "application/json",
             "version": "3",
         }
+        # 1) Static-IP proxy (eg. zeroip.snipy.in) - broker-internal endpoint
         try:
-            r = _rq.get(self.HISTORY_URL, params=payload, headers=headers, timeout=30)
+            from core.services import egress_proxy as _eg
+            _r = _eg.sync_request("GET", self.HISTORY_URL, headers=headers,
+                                  params=payload, timeout=30)
+            if _r is not None:
+                if getattr(_r, "status_code", 0) == 200:
+                    try:
+                        body = _r.json() or {}
+                    except Exception:
+                        body = None
+                    if isinstance(body, dict):
+                        if body.get("candles") is not None:
+                            return {"s": "ok", "code": 200, "message": "", **body}
+                        return body
+                    return {"s": "error", "message": "non-JSON response"}
+                return {"s": "error", "code": getattr(_r, "status_code", 0),
+                        "message": (getattr(_r, "text", "") or "")[:200]}
         except Exception as e:
-            return {"s": "error", "message": f"request failed: {str(e)[:150]}"}
-        if r.status_code != 200:
-            return {"s": "error", "code": r.status_code,
-                    "message": (r.text or "")[:200]}
-        try:
-            body = r.json()
-        except Exception:
-            return {"s": "error", "message": "non-JSON response"}
-        if not isinstance(body, dict):
+            try:
+                from core.services import egress_proxy as _eg
+                _l = getattr(_eg, "logger", None)
+                if _l:
+                    _l.warning("fyers history proxy attempt failed: %s", e)
+            except Exception:
+                pass
+        # 2) Direct fallback (todaydirect bhi nahi hua to SDK try karo)
+        r = None
+        if _rq is not None:
+            try:
+                r = _rq.get(self.HISTORY_URL, params=payload, headers=headers, timeout=30)
+            except Exception as e:
+                return {"s": "error", "message": f"request failed: {str(e)[:150]}"}
+        if r is not None and r.status_code == 200:
+            try:
+                body = r.json()
+            except Exception:
+                return {"s": "error", "message": "non-JSON response"}
+            if isinstance(body, dict):
+                if body.get("candles") is not None:
+                    return {"s": "ok", "code": 200, "message": "", **body}
+                return body
             return {"s": "error", "message": f"non-dict response: {str(body)[:120]}"}
-        if body.get("candles") is not None:
-            return {"s": "ok", "code": 200, "message": "", **body}
-        return body
+        if r is not None:
+            return {"s": "error", "code": r.status_code,
+                    "message": (getattr(r, 'text', '') or '')[:200]}
+        return {"s": "error", "message": "no route (proxy+direct failed)"}
 
     def _sdk_history(self, payload: dict) -> dict:
         resp = self.fy.history(data=payload)
