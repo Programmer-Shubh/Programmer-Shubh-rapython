@@ -558,14 +558,18 @@ def get_strategy(strat_id: int):
 @router.post("/save")
 def save_strategy(req: StrategyRequest):
     import json
-    # Daily caps removed (user rule 2026-11): persist unlimited no matter what
-    # an older client sends, so execution never has a max-loss/max-trades stop.
+    # Per-strategy limits are CONFIGURABLE (rulebook 17-11-2026): missing =
+    # unlimited (no global/portfolio cutoff), explicit value = kept as-is.
+    # Kabhi explicit user limit (max trades/day, daily-loss emergency stop)
+    # ko silently overwrite nahi karte.
     try:
         if isinstance(req.risk_management, dict):
-            req.risk_management["max_trades_per_day"] = -1
+            rm = req.risk_management
+            if rm.get("max_trades_per_day") in (None, ""):
+                rm["max_trades_per_day"] = -1
             for _cap_key in ("daily_loss_limit", "daily_max_loss", "max_daily_loss"):
-                if _cap_key in req.risk_management:
-                    req.risk_management[_cap_key] = 0
+                if _cap_key in rm and rm.get(_cap_key) in (None, ""):
+                    rm[_cap_key] = 0
     except Exception:
         pass
     db = Database.get_instance()

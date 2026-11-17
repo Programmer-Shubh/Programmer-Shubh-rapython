@@ -92,7 +92,10 @@ def test_broker_returns_none_when_nothing_saved():
     assert _strategy_sltp_from_db(0) == (None, None, None, None)
 
 
-def test_save_strategy_forces_unlimited_daily_caps():
+def test_save_strategy_keeps_configured_limits():
+    """Rulebook (17-11-2026): per-strategy limits user-configurable hain -
+    save unhe silently overwrite NAHI karta. Missing = unlimited (-1/0),
+    explicit emergency daily-loss limit bhi kabhi strip nahi hoti."""
     sid = _seed({})
     out = save_strategy(StrategyRequest(
         id=sid, name=TAG, symbol="NIFTY",
@@ -101,7 +104,18 @@ def test_save_strategy_forces_unlimited_daily_caps():
                          "daily_stop_loss_pct": 25, "daily_take_profit_pct": 50}))
     assert out.get("id"), out
     rm, _ = _rm(sid)
-    assert rm["max_trades_per_day"] == -1, rm
-    assert rm["daily_loss_limit"] == 0, rm
+    assert rm["max_trades_per_day"] == 5, rm
+    assert rm["daily_loss_limit"] == 5000, rm
     # user SL/TP survives the save untouched
     assert rm["daily_stop_loss_pct"] == 25 and rm["daily_take_profit_pct"] == 50
+
+
+def test_save_strategy_missing_limits_default_unlimited():
+    sid = _seed({})
+    out = save_strategy(StrategyRequest(
+        id=sid, name=TAG, symbol="NIFTY",
+        legs=[{"option_type": "CE", "transaction": "buy", "lots": 1}],
+        risk_management={"daily_stop_loss_pct": 25, "daily_take_profit_pct": 50}))
+    assert out.get("id"), out
+    rm, _ = _rm(sid)
+    assert rm["max_trades_per_day"] == -1, rm
