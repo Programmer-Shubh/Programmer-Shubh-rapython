@@ -361,6 +361,23 @@ def history_debug(symbol: str = "NSE:NIFTY50-INDEX", resolution: str = "5",
         return {"ok": False, "error": str(e)[:300]}
 
 
+@router.get("/fyers-intraday-debug")
+def fyers_intraday_debug(symbol: str = "NIFTY", timeframe: str = "5m",
+                         start_date: str = "2026-01-01", end_date: str = "2026-11-17"):
+    """Temp diagnostic: call the internal _fyers_intraday() directly and
+    report what it returns (bars count, first/last trade_date)."""
+    try:
+        from routes import strategy_builder as sb
+        bars = sb._fyers_intraday(symbol, timeframe, start_date, end_date)
+        n = len(bars) if isinstance(bars, list) else -1
+        return {"bars": n,
+                "first": (bars[0] if bars else None),
+                "last": (bars[-1] if bars else None)}
+    except Exception as e:
+        import traceback
+        return {"bars": -1, "error": str(e)[:300], "trace": traceback.format_exc()[:1800]}
+
+
 @router.get("/quote-debug")
 def quote_debug(symbols: str = "NSE:DIVISLAB26OCT9700CE,NSE:NIFTY26O0322750CE"):
     """Read-only diag: Fyers /quotes ke saare candidate paths ka jawab
