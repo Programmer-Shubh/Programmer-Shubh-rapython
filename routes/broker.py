@@ -335,6 +335,32 @@ def live_status():
             "note": "Fyers is the main broker (priority #1). Dry-run first to verify symbol/token."}
 
 
+@router.get("/history-debug")
+def history_debug(symbol: str = "NSE:NIFTY50-INDEX", resolution: str = "5",
+                  range_from: str = "2026-10-01", range_to: str = "2026-11-17"):
+    """Temp diagnostic: raw Fyers history response for a symbol+range.
+    Returns candles count, first/last candle, or error message."""
+    try:
+        from core.services.fyers_data import FyersHistoryData
+        cfg = _get_config("fyers") or {}
+        app_id = str(cfg.get("app_id") or "")
+        token = str(cfg.get("access_token") or "")
+        if not app_id or not token:
+            return {"ok": False, "error": "no fyers creds (app_id/token missing)"}
+        fh = FyersHistoryData(app_id, token)
+        resp = fh.history(symbol, range_from, range_to, resolution)
+        candles = (resp or {}).get("candles") or []
+        return {"ok": str((resp or {}).get("s") or "").lower() == "ok",
+                "s": (resp or {}).get("s"),
+                "message": (resp or {}).get("message"),
+                "code": (resp or {}).get("code"),
+                "candles": len(candles),
+                "first": candles[0] if candles else None,
+                "last": candles[-1] if candles else None}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300]}
+
+
 @router.get("/quote-debug")
 def quote_debug(symbols: str = "NSE:DIVISLAB26OCT9700CE,NSE:NIFTY26O0322750CE"):
     """Read-only diag: Fyers /quotes ke saare candidate paths ka jawab
