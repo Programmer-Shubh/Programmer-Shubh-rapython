@@ -100,49 +100,41 @@ def sync_status() -> dict:
     return {"sync_running": _RUNNING}
 
 
-def _store_rows(rows, chunk: int = 100):
-    """Delete-then-insert per batch. Chunk=100 keeps Render's PG pooler alive
-    (giant batches were hitting statement-timeout and silently passing)."""
+def _store_rows(rows, chunk: int = 250):
+    """Single multi-VALUES INSERT per ~250 rows (Render PG pooler friendly:
+    one round-trip per chunk instead of one per row). Deletes existing
+    option rows first so re-imports are idempotent (no duplicates)."""
     if not rows:
         return 0
     db = _db()
     n = 0
-    CH = int(chunk) or 100
-    for a in range(0, len(rows), CH):
-        batch = rows[a:a + CH]
+    try:
+        db.execute("DELETE FROM bhavcopy_data WHERE option_type IN ('CE','PE')")
+    except Exception:
+        pass
+    cols = ("symbol, trade_date, expiry_date, strike_price, option_type,"
+            " open_price, high_price, low_price, close_price, volume, oi")
+    for a in range(0, len(rows), chunk):
+        batch = rows[a:a + chunk]
+        tup = []
+        params = []
+        for r in batch:
+            tup.append("(?,?,?,?,?,?,?,?,?,?,?)")
+            params += [r["symbol"], r["trade_date"], r["expiry_date"],
+                       float(r["strike_price"]), r["option_type"],
+                       round(float(r["open_price"]), 2), round(float(r["high_price"]), 2),
+                       round(float(r["low_price"]), 2), round(float(r["close_price"]), 2),
+                       int(float(r["volume"])), int(float(r["oi"]))]
+        q = f"INSERT INTO bhavcopy_data ({cols}) VALUES {','.join(tup)}"
         try:
-            db.executemany(
-                "DELETE FROM bhavcopy_data WHERE symbol=? AND trade_date=? "
-                "AND COALESCE(expiry_date,'')=COALESCE(?,'') "
-                "AND COALESCE(strike_price,0)=COALESCE(?,0) "
-                "AND COALESCE(option_type,'')=COALESCE(?,'')",
-                [(r["symbol"], r["trade_date"], r["expiry_date"],
-                  r["strike_price"], r["option_type"]) for r in batch])
-        except Exception as e:
-            try:
-                db.execute("INSERT INTO settings (setting_key, setting_value, updated_at) "
-                           "VALUES ('nse_option_sync_errors', ?, CURRENT_TIMESTAMP) "
-                           "ON CONFLICT(setting_key) DO UPDATE SET setting_value=?, updated_at=CURRENT_TIMESTAMP",
-                           [f"delete_batch_{a}: {str(e)[:200]}", f"delete_batch_{a}: {str(e)[:200]}"])
-            except Exception:
-                pass
-        try:
-            db.executemany(
-                "INSERT INTO bhavcopy_data (symbol, trade_date, expiry_date, strike_price, option_type,"
-                " open_price, high_price, low_price, close_price, volume, oi)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                [(r["symbol"], r["trade_date"], r["expiry_date"], r["strike_price"],
-                  r["option_type"], round(float(r["open_price"]), 2),
-                  round(float(r["high_price"]), 2), round(float(r["low_price"]), 2),
-                  round(float(r["close_price"]), 2), int(float(r["volume"])), int(float(r["oi"])))
-                 for r in batch])
+            db.execute(q, params)
             n += len(batch)
         except Exception as e:
             try:
                 db.execute("INSERT INTO settings (setting_key, setting_value, updated_at) "
                            "VALUES ('nse_option_sync_errors', ?, CURRENT_TIMESTAMP) "
                            "ON CONFLICT(setting_key) DO UPDATE SET setting_value=?, updated_at=CURRENT_TIMESTAMP",
-                           [f"insert_batch_{a}: {str(e)[:200]}", f"insert_batch_{a}: {str(e)[:200]}"])
+                           [f"batch_{a}: {str(e)[:200]}", f"batch_{a}: {str(e)[:200]}"])
             except Exception:
                 pass
     return n
