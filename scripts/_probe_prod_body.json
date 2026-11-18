@@ -1,0 +1,42 @@
+{
+  "symbol": "NIFTY",
+  "symbols": ["NIFTY"],
+  "start_date": "2026-01-02",
+  "end_date": "2026-11-17",
+  "timeframe": "5m",
+  "indicators": [
+    {"id": "supertrend", "params": {"period": 10, "multiplier": 3}},
+    {"id": "rsi", "params": {"period": 14}}
+  ],
+  "legs": [
+    {"option_type": "PE", "transaction": "sell", "lots": 1,
+     "strike_selection": "otm", "otm_distance": 4, "expiry": "weekly"}
+  ],
+  "advanced": {
+    "trade_mode": "intraday",
+    "timeframe": "5m",
+    "entry_time": "09:35",
+    "exit_time": "15:15",
+    "strict_trend": false,
+    "reentry_on_sl": "No Re-entry",
+    "reentry_on_tp": "RE ASAP",
+    "trailing": "5",
+    "lock_profit_at": 10.0,
+    "lock_profit": 5.0,
+    "lock_profit_unit": "pt",
+    "max_holding_bars": 0,
+    "allow_intraday_time_exit": false
+  },
+  "risk": {
+    "daily_stop_loss": 15.0,
+    "sl_unit": "pt",
+    "daily_take_profit": 20.0,
+    "tp_unit": "pt",
+    "max_trades_per_day": 5,
+    "signal_lookback_days": 0,
+    "vix_max": 0,
+    "daily_loss_limit": 0,
+    "daily_max_loss": 0,
+    "max_daily_loss": 0
+  }
+}

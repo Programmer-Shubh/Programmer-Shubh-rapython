@@ -432,6 +432,7 @@ _NSE_INDEX_NAMES = {
     "NIFTY": "Nifty 50",
     "BANKNIFTY": "Nifty Bank",
     "FINNIFTY": "Nifty Financial Services",
+    "MIDCPNIFTY": "Nifty Midcap Select",
     "INDIAVIX": "India VIX",
 }
 
