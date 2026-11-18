@@ -258,8 +258,7 @@ def sync_from_nse(start_date: str = "2026-01-01", end_date: str | None = None,
         except Exception:
             pass
     try:
-        log("[nse-opt] DONE days_ok=%d days_skip=%d rows=%d",
-            days_done, days_failed, rows_stored)
+        log(f"[nse-opt] DONE days_ok={days_done} days_skip={days_failed} rows={rows_stored}")
     except Exception:
         pass
     _RUNNING = False
@@ -332,15 +331,30 @@ def _worker(start_date):
 
 
 def auto_seed_if_empty(log=print):
-    """Startup one-time guard: if NO option rows exist, import the seed."""
+    """Startup one-time (flag-guarded) import of the committed seed snapshot.
+    Merge import (idempotent delete+insert per row) so a partial/recent-only
+    bhavcopy on the host is topped up with the full 2026 history."""
     try:
         db = _db()
-        row = db.fetch_one("SELECT COUNT(*) AS c FROM bhavcopy_data WHERE option_type IN ('CE','PE')")
-        have = int((row or {}).get("c") or 0)
+        row = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key='nse_option_seed_done'")
+        if row and str(row.get("setting_value") or "") == "1":
+            log("[nse-opt] seed already imported - skip")
+            return {"skipped": True}
     except Exception:
-        have = 0
-    if have > 0:
-        log("[nse-opt] option rows already present: %d - seed skipped", have)
-        return {"skipped": True, "have": have}
-    log("[nse-opt] no option rows - importing seed snapshot")
-    return import_seed(log=log)
+        pass
+    log("[nse-opt] importing seed snapshot (merge)")
+    r = import_seed(log=log)
+    try:
+        db = _db()
+        if r.get("started") or r.get("rows_stored"):
+            db.execute("INSERT INTO settings (setting_key, setting_value, updated_at) "
+                       "VALUES ('nse_option_seed_done','1',CURRENT_TIMESTAMP) "
+                       "ON CONFLICT(setting_key) DO UPDATE SET setting_value='1', updated_at=CURRENT_TIMESTAMP")
+    except Exception:
+        try:
+            db = _db()
+            db.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value, updated_at) "
+                       "VALUES ('nse_option_seed_done','1',CURRENT_TIMESTAMP)")
+        except Exception:
+            pass
+    return r
