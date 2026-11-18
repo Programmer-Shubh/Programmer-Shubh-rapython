@@ -100,15 +100,16 @@ def sync_status() -> dict:
     return {"sync_running": _RUNNING}
 
 
-def _store_rows(rows):
-    """Delete-then-insert per row (bhavcopy_data has no unique index)."""
+def _store_rows(rows, chunk: int = 100):
+    """Delete-then-insert per batch. Chunk=100 keeps Render's PG pooler alive
+    (giant batches were hitting statement-timeout and silently passing)."""
     if not rows:
         return 0
     db = _db()
     n = 0
-    CH = 400
+    CH = int(chunk) or 100
     for a in range(0, len(rows), CH):
-        chunk = rows[a:a + CH]
+        batch = rows[a:a + CH]
         try:
             db.executemany(
                 "DELETE FROM bhavcopy_data WHERE symbol=? AND trade_date=? "
@@ -116,9 +117,15 @@ def _store_rows(rows):
                 "AND COALESCE(strike_price,0)=COALESCE(?,0) "
                 "AND COALESCE(option_type,'')=COALESCE(?,'')",
                 [(r["symbol"], r["trade_date"], r["expiry_date"],
-                  r["strike_price"], r["option_type"]) for r in chunk])
-        except Exception:
-            pass
+                  r["strike_price"], r["option_type"]) for r in batch])
+        except Exception as e:
+            try:
+                db.execute("INSERT INTO settings (setting_key, setting_value, updated_at) "
+                           "VALUES ('nse_option_sync_errors', ?, CURRENT_TIMESTAMP) "
+                           "ON CONFLICT(setting_key) DO UPDATE SET setting_value=?, updated_at=CURRENT_TIMESTAMP",
+                           [f"delete_batch_{a}: {str(e)[:200]}", f"delete_batch_{a}: {str(e)[:200]}"])
+            except Exception:
+                pass
         try:
             db.executemany(
                 "INSERT INTO bhavcopy_data (symbol, trade_date, expiry_date, strike_price, option_type,"
@@ -128,10 +135,16 @@ def _store_rows(rows):
                   r["option_type"], round(float(r["open_price"]), 2),
                   round(float(r["high_price"]), 2), round(float(r["low_price"]), 2),
                   round(float(r["close_price"]), 2), int(float(r["volume"])), int(float(r["oi"])))
-                 for r in chunk])
-            n += len(chunk)
-        except Exception:
-            continue
+                 for r in batch])
+            n += len(batch)
+        except Exception as e:
+            try:
+                db.execute("INSERT INTO settings (setting_key, setting_value, updated_at) "
+                           "VALUES ('nse_option_sync_errors', ?, CURRENT_TIMESTAMP) "
+                           "ON CONFLICT(setting_key) DO UPDATE SET setting_value=?, updated_at=CURRENT_TIMESTAMP",
+                           [f"insert_batch_{a}: {str(e)[:200]}", f"insert_batch_{a}: {str(e)[:200]}"])
+            except Exception:
+                pass
     return n
 
 
@@ -346,7 +359,7 @@ def auto_seed_if_empty(log=print):
     r = import_seed(log=log)
     try:
         db = _db()
-        if r.get("started") or r.get("rows_stored"):
+        if int(r.get("rows_stored") or 0) > 0:
             db.execute("INSERT INTO settings (setting_key, setting_value, updated_at) "
                        "VALUES ('nse_option_seed_done','1',CURRENT_TIMESTAMP) "
                        "ON CONFLICT(setting_key) DO UPDATE SET setting_value='1', updated_at=CURRENT_TIMESTAMP")
