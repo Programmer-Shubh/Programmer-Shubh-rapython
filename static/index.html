@@ -488,25 +488,19 @@
                         <div class="col-md-4"><label class="small" title="RSI: momentum filter (oversold bounce <45 / overbought >55)"><input type="checkbox" id="r-ind-rsi"> <strong>RSI</strong>(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="Market Regime FILTER: VWAP+EMA+ADX composite. CE Buy / PE Sell sirf bullish regime me, PE Buy / CE Sell sirf bearish regime me entry (sideways me bhi entry allowed, opposite regime me block)"><input type="checkbox" id="r-ind-market_regime" checked> <strong>Market Regime</strong>(filter)</div>
                         <div class="col-md-4"><label class="small" title="VWAP: intraday price anchor (upar=bullish, neeche=bearish)"><input type="checkbox" id="r-ind-vwap"> <strong>VWAP</strong>(<input type="number" id="r-p-vwap" value="20" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
-                        <div class="col-md-4"><label class="small" title="Combo: RSI70 cross + SuperTrend + VWAP + PCR>=min + Volume spike (strict, quality entries)"><input type="checkbox" id="r-ind-rvp"> <strong>Combo RVP</strong>(RSI<input type="number" id="r-p-rvpe" value="70" min="50" max="90" step="1" style="width:42px;font-size:11px">,PCR<input type="number" id="r-p-rvpp" value="1.0" min="0.5" max="2" step="0.1" style="width:42px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="Heikin-Ashi candles: smoother trend candles (reduces noise, better for trend following)"><input type="checkbox" id="r-ind-heikin"> <strong>Heikin-Ashi</strong>(<input type="number" id="r-p-ha" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
                     </div>
                     </div>
                     <div class="slab-sec" style="background:linear-gradient(135deg,#fff8e1 0%,#ffffff 100%); border:1px solid #ffe082; padding:6px"><div class="slab-sec-title"><i class="bi bi-sliders"></i> Schedule & Risk</div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Overall Stop Loss (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-sl" value="12"><small class="text-muted" id="s-sl-mirror">points = entry premium se direct move (12 = 12 points girne par exit)</small></div>
+                        <div class="col-md-3"><label class="form-label small">Overall Stop Loss (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-sl" value="" placeholder="0 = no stop loss"><small class="text-muted" id="s-sl-mirror">blank/0 = no SL (user fills own)</small></div>
                     </div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Overall Target (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-tp" value="28"><small class="text-muted" id="s-tp-mirror">points = entry premium se direct move (28 = 28 points chamke par exit)</small></div>
                         <div class="col-md-3"><label class="form-label small">Re-entry on SL</label><select class="form-select form-select-sm" id="s-reentry-sl"><option>RE ASAP</option><option selected>No Re-entry</option><option>RE Next Day</option></select></div>
                         <div class="col-md-3"><label class="form-label small">Re-entry on Tgt</label><select class="form-select form-select-sm" id="s-reentry-tp"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
-                        <div class="col-md-3"><label class="form-label small">Trailing Options</label><select class="form-select form-select-sm" id="s-trail"><option selected>Lock</option><option>Partial</option><option>Complete</option><option>Off</option></select></div>
                     </div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Lock if profit reaches (pts)</label><input type="number" class="form-control form-control-sm" id="s-lock-profit" value="12" min="0" step="1"></div>
-                        <div class="col-md-3"><label class="form-label small">Lock profit (pts)</label><input type="number" class="form-control form-control-sm" id="s-lock-amount" value="6" min="0" step="1"></div>
-                        <div class="col-md-2"><label class="form-label small">Trail step (pts)</label><input type="number" class="form-control form-control-sm" id="s-trail-step" value="5" min="0" step="1" title="Profit badhne par SL kitne points peeche trail kare (0 = off)"></div>
-                        <div class="col-md-2"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="s-mtd" value="2" min="0" max="50" step="1" title="Rulebook default: Buy 2/day, Sell 5/day. 0 = unlimited"></div>
+                        <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="s-mtd" value="2" min="0" max="50" step="1" title="Rulebook default: Buy 2/day, Sell 5/day. 0 = unlimited"></div>
                         <div class="col-md-2"><label class="form-label small">Slippage (%) <span class="badge bg-warning text-dark">strategy</span></label><input type="number" class="form-control form-control-sm" id="s-slippage" value="0.50" step="0.05" min="0" max="2" title="Add Slippage to make results realistic (market impact + spread)"></div>
                     </div>
                     <div class="row g-1 mt-1">
@@ -1506,13 +1500,13 @@ let _lastOpenTrdHTML = null;
         const s=document.getElementById('r-start')?.value||'', e=document.getElementById('r-end')?.value||'';
         if(!s||!e){alert('Select start and end date');return null;}
         const lots=parseInt(document.getElementById('r-lots')?.value)||1;
-        const sA=_amtVal('s-sl',12);const sl=sA.v;const slUnit=sA.u;
-        const tA=_amtVal('s-tp',18);const tp=tA.v;const tpUnit=tA.u;
+        const sA=_amtVal('s-sl',0);const sl=sA.v;const slUnit=sA.u;
+        const tA=_amtVal('s-tp',0);const tp=tA.v;const tpUnit=tA.u;
         // Max trades/day: rulebook profile default (Buy 2, Sell 5). 0/blank = unlimited.
         const _mtdRaw=parseInt(document.getElementById('s-mtd')?.value);const mtd=(isNaN(_mtdRaw)||_mtdRaw<=0)?-1:_mtdRaw;
-        const trailSel=document.getElementById('s-trail')?.value||'Lock';
+        const trailSel=document.getElementById('s-trail')?.value||'Off';
         const trailOn=trailSel!=='Off';
-        const _trailStep=parseFloat(document.getElementById('s-trail-step')?.value)||5;
+        const _trailStep=parseFloat(document.getElementById('s-trail-step')?.value)||0;
         const slb=Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0));
         const indicators=robotCollectIndicators();
         let legs=(typeof stratLegs!=='undefined'&&stratLegs.length)?JSON.parse(JSON.stringify(stratLegs)):[];
@@ -1928,8 +1922,8 @@ let _lastOpenTrdHTML = null;
         const entryTime=document.getElementById('r-entry').value;
         const exitTime=document.getElementById('r-exit').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA2=_amtVal('s-sl',30);const sl=sA2.v;const slUnit=sA2.u;
-        const tA2=_amtVal('s-tp',50);const tp=tA2.v;const tpUnit=tA2.u;
+        const sA2=_amtVal('s-sl',0);const sl=sA2.v;const slUnit=sA2.u;
+        const tA2=_amtVal('s-tp',0);const tp=tA2.v;const tpUnit=tA2.u;
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const startDate=document.getElementById('r-start').value;
         const endDate=document.getElementById('r-end').value;
@@ -1968,8 +1962,8 @@ let _lastOpenTrdHTML = null;
                 auto_exit_on_time:true,
                 reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'',
                 reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'',
-                trailing:(document.getElementById('s-trail')?.value||'Lock')==='Off'?'Off':String(parseFloat(document.getElementById('s-trail-step')?.value)||5),
-                trailing_sl:(document.getElementById('s-trail')?.value||'Lock')!=='Off',
+                trailing:(document.getElementById('s-trail')?.value||'Off')==='Off'?'Off':String(parseFloat(document.getElementById('s-trail-step')?.value)||0),
+                trailing_sl:(document.getElementById('s-trail')?.value||'Off')!=='Off',
                 lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,
                 lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,
                 lock_profit_unit:'pt',
@@ -2191,9 +2185,11 @@ let _lastOpenTrdHTML = null;
                 if(force||!_rbCustom.has(id)){ el.value=v; _rbTag(id,true); }
                 else { _rbTag(id,false); }
             };
-            set('s-sl',d.sl); set('s-tp',d.tp);
-            set('s-lock-profit',d.lockAt); set('s-lock-amount',d.lockAmt);
-            set('s-trail-step',d.step); set('s-reentry-sl',d.reSl);
+            // Default TARGET and TRAILING stop-loss removed per user request:
+            // user fills them manually (0/blank = no target / no trail).
+            // set('s-tp',d.tp); set('s-lock-profit',d.lockAt); set('s-lock-amount',d.lockAmt); set('s-trail-step',d.step);
+            set('s-sl',d.sl);
+            set('s-reentry-sl',d.reSl);
             // Max trades: Sell 5/day, Buy 2/day. Explicit -1/blank = unlimited.
             const mEl=document.getElementById('s-mtd');
             if(mEl&&(force||!_rbCustom.has('s-mtd'))){ mEl.value=d.mtd; _rbTag('s-mtd',true); }
@@ -2287,18 +2283,14 @@ let _lastOpenTrdHTML = null;
                 const _tpVal =_rm.tp_unit==='pt'?_rm.daily_take_profit:(_rm.daily_take_profit_pct?_rm.daily_take_profit_pct:(_rm.daily_take_profit??''));
                 if(_rm.daily_stop_loss_pct)document.getElementById('s-sl').value=_rm.daily_stop_loss_pct+'%';
                 else if(_rm.daily_stop_loss)document.getElementById('s-sl').value=String(_slVal===undefined?'':_slVal)+_slSuffix;
-                if(_rm.daily_take_profit_pct)document.getElementById('s-tp').value=_rm.daily_take_profit_pct+'%';
-                else if(_rm.daily_take_profit)document.getElementById('s-tp').value=String(_tpVal===undefined?'':_tpVal)+_tpSuffix;
+                // Overall Target element removed from Builder - SL stays user-editable
+                // only. Saved strategies ka TP silently ignore nahi hota (server API par save rahega).
                 try{const _mv=parseInt(_rm.max_trades_per_day);document.getElementById('s-mtd').value=(isNaN(_mv)||_mv<0)?0:_mv;}catch(e){}
                 try{
                     if(_ao.reentry_on_sl)document.getElementById('s-reentry-sl').value=_ao.reentry_on_sl;
                     if(_ao.reentry_on_tp)document.getElementById('s-reentry-tp').value=_ao.reentry_on_tp;
-                    const _tr=String(_ao.trailing||'');
-                    if(_tr && _tr.toLowerCase()!=='off' && _tr.toLowerCase()!=='lock'){
-                        const _ts=parseFloat(_tr); if(isFinite(_ts)&&_ts>0)document.getElementById('s-trail-step').value=_ts;
-                    } else if(_tr.toLowerCase()==='off') document.getElementById('s-trail').value='Off';
-                    if(_ao.lock_profit_at!=null)document.getElementById('s-lock-profit').value=parseFloat(_ao.lock_profit_at)||0;
-                    if(_ao.lock_profit!=null)document.getElementById('s-lock-amount').value=parseFloat(_ao.lock_profit)||0;
+                    // Trailing/lock UI was removed (user request). Saved strategy's
+                    // trailing stays server-side on the backend.
                 }catch(e){}
                 try{if(_rm.signal_lookback_days!=null)document.getElementById('r-slb').value=_rm.signal_lookback_days;}catch(e){}
             }catch(e){}
@@ -2568,8 +2560,8 @@ let _lastOpenTrdHTML = null;
         const sym=(rSyms()[0]||'NIFTY');
         let order=document.getElementById('r-order').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA3=_amtVal('s-sl',30);const sl=sA3.v;const slUnit=sA3.u;
-        const tA3=_amtVal('s-tp',50);const tp=tA3.v;const tpUnit=tA3.u;
+        const sA3=_amtVal('s-sl',0);const sl=sA3.v;const slUnit=sA3.u;
+        const tA3=_amtVal('s-tp',0);const tp=tA3.v;const tpUnit=tA3.u;
         const strikeType=document.getElementById('r-strike').value;
         const expiry='weekly';
         let optR, txnR; { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
@@ -2605,7 +2597,6 @@ let _lastOpenTrdHTML = null;
         if(document.getElementById('r-ind-rsi')?.checked) indicators.push({id:'rsi',params:{period:parseInt(document.getElementById('r-p-rsi')?.value)||14}});
         if(document.getElementById('r-ind-vwap')?.checked) indicators.push({id:'vwap',params:{period:parseInt(document.getElementById('r-p-vwap')?.value)||20,multiplier:2.0}});
 if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:'market_regime',params:{vwap_period:20,ema_fast:20,ema_slow:50,adx_period:14,adx_threshold:20}});
-        if(document.getElementById('r-ind-rvp')?.checked) indicators.push({id:'combo_rsi_vwap_pcr',params:{rsi_period:parseInt(document.getElementById('r-p-rsi')?.value)||14,rsi_entry:parseFloat(document.getElementById('r-p-rvpe')?.value)||70,rsi_exit:55,st_period:parseInt(document.getElementById('r-p-st')?.value)||10,st_mult:parseFloat(document.getElementById('r-p-stm')?.value)||3,vwap_period:parseInt(document.getElementById('r-p-vwap')?.value)||20,pcr_min:parseFloat(document.getElementById('r-p-rvpp')?.value)||1.0,vol_mult:1.5}});
         if(document.getElementById('r-ind-heikin')?.checked) indicators.push({id:'heikin_ashi',params:{period:parseInt(document.getElementById('r-p-ha')?.value)||14}});
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         return indicators;
@@ -2616,8 +2607,8 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
         const order=document.getElementById('r-order').value;
         const strikeType=document.getElementById('r-strike').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA4=_amtVal('s-sl',30);const sl=sA4.v;const slUnit=sA4.u;
-        const tA4=_amtVal('s-tp',50);const tp=tA4.v;const tpUnit=tA4.u;
+        const sA4=_amtVal('s-sl',0);const sl=sA4.v;const slUnit=sA4.u;
+        const tA4=_amtVal('s-tp',0);const tp=tA4.v;const tpUnit=tA4.u;
         let legs=[];
         const rOtmSave=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
         const rOtmDist=((strikeType.toLowerCase()==='otm'||strikeType.toLowerCase()==='itm'))?rOtmSave:0;
@@ -2840,7 +2831,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                         if(_rtp&&!_rtp.value) _rtp.value=_savedTp;
                     }
                 }catch(_e0){}
-                const _slA=_amtVal('s-sl',30);const _tpA=_amtVal('s-tp',50);
+                const _slA=_amtVal('s-sl',0);const _tpA=_amtVal('s-tp',0);
                 // IMPORTANT: sl/tp override backend par SAVED result ko bypass
                 // karke FRESH run chalata hai. Plain 'Backtest' (force=false)
                 // saved result dikhana chahiye - isliye override sirf tab bhejo
@@ -2891,8 +2882,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
             const legs=_parseJsonField(s.legs,[]);
             if(legs.length){ try{stratLegs=JSON.parse(JSON.stringify(legs));renderLegs();}catch(e){} }
             const rm=_parseJsonField(s.risk_management,{});
-            if(!document.getElementById('s-sl').value) document.getElementById('s-sl').value=rm.daily_stop_loss||1500;
-            if(!document.getElementById('s-tp').value) document.getElementById('s-tp').value=rm.daily_take_profit||3000;
+            if(!document.getElementById('s-sl').value) document.getElementById('s-sl').value=rm.daily_stop_loss||'';
             try{if(rm.signal_lookback_days!=null)document.getElementById('r-slb').value=rm.signal_lookback_days;}catch(e){}
             const ao=_parseJsonField(s.advanced_options,{});
             if(ao.trade_mode) document.getElementById('r-type').value=ao.trade_mode;
@@ -3085,8 +3075,8 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
         const order=document.getElementById('r-order').value;
         let optR, txnR; { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA4=_amtVal('s-sl',30);const sl=sA4.v;const slUnit=sA4.u;
-        const tA4=_amtVal('s-tp',50);const tp=tA4.v;const tpUnit=tA4.u;
+        const sA4=_amtVal('s-sl',0);const sl=sA4.v;const slUnit=sA4.u;
+        const tA4=_amtVal('s-tp',0);const tp=tA4.v;const tpUnit=tA4.u;
         const expiry='weekly';
         const base={symbol:sym, option_type:optR, transaction_type:txnR, quantity:lots, strike:0, expiry:expiry, stop_loss:sl, sl_unit:slUnit, take_profit:tp, tp_unit:tpUnit, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()};
         try{
@@ -3140,7 +3130,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
     async function runBacktestMonteCarlo(){const btn=document.getElementById('s-run'); const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Monte Carlo (2000 shuffles)...</p>'; try{const r=await P('/api/backtest/monte-carlo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); document.getElementById('bt-metrics').innerHTML='<div class="alert alert-info"><strong>Monte Carlo</strong> p5:'+r.p5+' p50:'+r.p50+' p95:'+r.p95+' prob_profit:'+(r.prob_profit||'-')+'</div>';}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
     async function runWalkForward(){const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Walk-forward (unseen-data check)...</p>'; try{const r=await P('/api/backtest/walk-forward',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error){document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';return;} const ws=r.windows||[]; let h='<div class="alert alert-info"><strong>Walk-forward</strong> '+ws.length+' windows | avg efficiency: '+(r.avg_efficiency||0)+'% '+(r.avg_efficiency>=70?'(robust - trade layak)':r.avg_efficiency>=30?'(ok-ish, chhota size)':'(overfit - mat chalao)')+'</div>'; if(ws.length){h+='<table class="bt-table"><thead><tr><th>IS period</th><th>OOS period</th><th>IS net</th><th>OOS net</th><th>Eff%</th></tr></thead><tbody>'; ws.forEach(w=>{h+='<tr><td>'+w.is.start+'→'+w.is.end+'</td><td>'+w.oos.start+'→'+w.oos.end+'</td><td>'+((w.is.metrics||{}).net_pnl||0)+'</td><td>'+((w.oos.metrics||{}).net_pnl||0)+'</td><td>'+w.efficiency+'%</td></tr>';}); h+='</tbody></table>';} document.getElementById('bt-metrics').innerHTML=h;}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
     async function runOptimize(){const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Optimizing SL x TP (9 backtests)...</p>'; try{const r=await P('/api/backtest/optimize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error){document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';return;} const rows=r.rows||[]; const b=r.best||{}; let h='<div class="alert alert-success"><strong>Best setting: SL ₹'+(b.sl||'-')+' x TP ₹'+(b.tp||'-')+'</strong> — net ₹'+(b.net||0)+' | PF '+(b.profit_factor||0)+' | Win '+(b.win_rate||0)+'% <button class="btn btn-sm btn-success ms-2" onclick="applyBestSLTP('+b.sl+','+b.tp+')">Apply</button></div>'; if(rows.length){h+='<table class="bt-table"><thead><tr><th>SL ₹</th><th>TP ₹</th><th>Net ₹</th><th>Win%</th><th>Trades</th><th>PF</th><th>MaxDD</th></tr></thead><tbody>'; rows.forEach(x=>{h+='<tr><td>'+x.sl+'</td><td>'+x.tp+'</td><td>'+x.net+'</td><td>'+x.win_rate+'</td><td>'+x.trades+'</td><td>'+x.profit_factor+'</td><td>'+x.max_dd+'</td></tr>';}); h+='</tbody></table>';} document.getElementById('bt-metrics').innerHTML=h;}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
-    function applyBestSLTP(sl,tp){try{if(sl){document.getElementById('s-sl').value=sl;document.getElementById('s-sl').value=sl;}if(tp){document.getElementById('s-tp').value=tp;document.getElementById('s-tp').value=tp;}try{updateRunSummary();}catch(e){}alert('Best SL ₹'+sl+' / TP ₹'+tp+' lag gaya - ab Run Backtest dabao');}catch(e){alert('Apply failed: '+e.message);}}
+    function applyBestSLTP(sl,tp){try{if(sl){document.getElementById('s-sl').value=sl;document.getElementById('s-sl').value=sl;}try{updateRunSummary();}catch(e){}alert('Best SL ₹'+sl+' lagaya - ab Run Backtest dabao');}catch(e){alert('Apply failed: '+e.message);}}
     async function downloadReportPDF(){const body=_collectBacktestBody(); if(!body) return; try{const r=await fetch('/api/backtest/report.pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='RaTrade_'+body.symbol+'_'+body.start_date+'.pdf'; a.click();}catch(e){alert(e.message);}}
     function _collectBacktestBody(){return _unifiedBody();}
 
