@@ -251,8 +251,20 @@ def otm4_symbols():
             if prem > 15.0:
                 ok.append(s)
         ok.sort()
-        _out = {"symbols": ok, "count": len(ok), "details": details,
-                "min_premium": 15.0, "otm_steps": 4}
+        # Fail-open when live premium data unavailable (e.g. Fyers rate-limited /
+        # bhavcopy spot rows missing -> spot<=40 for every symbol => ok empty).
+        # Hiding the whole F&O list would leave the user with NOTHING selectable -
+        # exactly the "saved strategy me symbol kum/jayada karne ka vikalp nahi hai"
+        # complaint. Better: show all F&O symbols + honest note (no fake pass).
+        if not ok:
+            _out = {"symbols": sorted(set(syms)), "count": len(set(syms)),
+                    "details": details,
+                    "min_premium": 15.0, "otm_steps": 4,
+                    "all_visible": True,
+                    "reason": "live premium data unavailable (spot/premium fetch failed) - showing all F&O symbols"}
+        else:
+            _out = {"symbols": ok, "count": len(ok), "details": details,
+                    "min_premium": 15.0, "otm_steps": 4}
     except Exception as e:
         _out = {"symbols": [], "count": 0, "details": {}, "error": str(e)[:120]}
     _otm4_cache["ts"] = now

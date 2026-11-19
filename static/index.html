@@ -901,6 +901,8 @@
             const note=document.getElementById('r-otm20-note');
             if(!otm15On()){box.querySelectorAll('label').forEach(l=>l.style.display='');if(note)note.textContent=(window._symCount||'')+' symbols (poori F&O list)';return;}
             const ok=window?._otm4ok?window._otm4ok.set:null;
+            // Fail-open: server returned all_visible/empty ok - sab dikhao + reason
+            if(ok && ok.size===0){box.querySelectorAll('label').forEach(l=>l.style.display='');if(note)note.textContent='OTM-4 filter unavailable (live premium data nahi mila) - poori F&O list dikh rahi hai';return;}
             if(!ok){if(note)note.textContent='OTM-4 list load nahi hui - dobara toggle karo';return;}
             let vis=0;
             box.querySelectorAll('label').forEach(l=>{const v=l.querySelector('input')?.value;const keep=l.querySelector('input:checked');const show=ok.has(v)||keep;l.style.display=show?'':'none';if(show)vis++;});
