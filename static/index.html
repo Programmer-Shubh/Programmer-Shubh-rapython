@@ -1747,14 +1747,15 @@ let _lastOpenTrdHTML = null;
         const _btStart=Date.now();
         const _btSpin=()=>{
             const s=Math.round((Date.now()-_btStart)/1000);
-            const pct=Math.min(95, Math.round((s/60)*100));
             document.getElementById('bt-results').classList.remove('hidden');
             const pb=document.getElementById('bt-progress'); if(pb) pb.classList.remove('hidden');
-            const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width=pct+'%'; bar.textContent=pct+'%'; }
-            const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Backtest chal raha hai... '+s+'s';
+            // Bar sirf real server progress se badhta hai (neeche _pollJob me) -
+            // time-based fake pct (95% cap) hataya: wahi "95% par hang" jaisa
+            // lagta tha. Bar ab bina real data ke chhota rehta hai.
+            const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Backtest shuru ho raha hai... '+s+'s';
             // Honest spinner only: purane run ke numbers ya random dummy KABHI
             // nahi dikhate (wahi summary-vs-list mismatch ka kaaran tha).
-            document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Backtest chal raha hai... '+s+'s (page band mat karo)</p>';
+            document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Backtest shuru ho raha hai... '+s+'s (page band mat karo)</p>';
         };
         _btSpin();
         // HAMESHA async (sync-first hataya): client 8s par abort karta tha
@@ -1775,7 +1776,18 @@ let _lastOpenTrdHTML = null;
                 try{ st=await A('/api/backtest/result/'+sub.job_id); _netFails=0; }
                 catch(pe){ lastErr=pe.message||''; if(++_netFails>30){ lastErr='server se sampark toot gaya (30 fails) — dobara Run dabao'; break; } try{const _pb=document.getElementById('bt-progress-text');if(_pb)_pb.textContent+=' (retry '+_netFails+')';}catch(e){} continue; }
                 if(!st) continue;
-                try{const _pr=st.progress||null;if(_pr&&_pr.total){const _pb2=document.getElementById('bt-progress-text');if(_pb2)_pb2.textContent='Backtest chal raha hai... '+Math.round((Date.now()-_btStart)/1000)+'s (symbol '+_pr.done+'/'+_pr.total+')';}}catch(e){}
+                try{
+                    const _pr=st.progress||null;
+                    if(_pr&&_pr.total){
+                        // Real per-symbol progress (not fake time-based cap) - server
+                        // reports done/total symbols, so 95% hang nahi hota.
+                        const _realPct=Math.min(97, Math.round(((+_pr.done||0)/Math.max(1,+_pr.total))*100));
+                        const _bar2=document.getElementById('bt-progress-bar');
+                        if(_bar2){ _bar2.style.width=_realPct+'%'; _bar2.textContent=_realPct+'%'; }
+                        const _pb2=document.getElementById('bt-progress-text');
+                        if(_pb2)_pb2.textContent='Backtest chal raha hai... '+Math.round((Date.now()-_btStart)/1000)+'s (symbol '+_pr.done+'/'+_pr.total+')';
+                    }
+                }catch(e){}
                 if(st.status==='done'){ r=st.result||null; lastErr=''; try{ const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width='100%'; bar.textContent='100%'; } const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Done!'; setTimeout(()=>{ const pb=document.getElementById('bt-progress'); if(pb) pb.classList.add('hidden'); },2000);}catch(e){} break; }
                 if(st.status==='error'){ lastErr=st.error||'worker failed'; break; }
                 if(st.status==='unknown'){ lastErr='NEEDS_RESUBMIT'; break; }

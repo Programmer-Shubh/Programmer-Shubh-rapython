@@ -1242,7 +1242,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         return _s, _intraday_full_range(_s, timeframe, start_date, end_date)
                     except Exception:
                         return _s, ([], "prefetch-fail")
-                with _TPE(max_workers=4) as _ex:
+                with _TPE(max_workers=6) as _ex:
                     for _s, _r in _ex.map(_one, list(_syms)):
                         try:
                             _pre15[_s] = _r
@@ -1378,7 +1378,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     if len(_BT_CACHE) > 12:
                         _BT_CACHE.pop(next(iter(_BT_CACHE)))
                 else:
-                    _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile - fabricated bars nahi banate", "total_trades": 0,
+                    _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye {timeframe} bars nahi mile - fabricated bars nahi banate", "total_trades": 0,
                                          "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                          "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(_bars15 or [])}}
                     _fire_prog(_sym)

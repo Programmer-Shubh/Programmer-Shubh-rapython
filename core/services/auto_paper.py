@@ -111,13 +111,25 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
             )
         except Exception:
             return {"placed": [], "skipped": "no-strategies-table"}
-        for s in rows or []:
+        # Parallel per-strategy evaluation (history+signal network-bound;
+        # DB writes per-strategy). Pehle serial tha - 5 ON strategies par har
+        # pass minutes lag karta tha ("daily trade late").
+        def _one(_s):
             try:
-                r = place_for_strategy(s.get("id"))
-                placed.extend(r.get("placed", []))
-                notes.extend(r.get("notes", []))
+                return place_for_strategy(_s.get("id"))
             except Exception:
-                continue
+                return {"placed": [], "notes": []}
+        try:
+            import concurrent.futures as _cf_ap
+            with _cf_ap.ThreadPoolExecutor(max_workers=4) as _ex_ap:
+                for r in _ex_ap.map(_one, list(rows or [])):
+                    placed.extend(r.get("placed", []))
+                    notes.extend(r.get("notes", [])[:2])
+        except Exception:
+            for _s in rows or []:
+                r = _one(_s)
+                placed.extend(r.get("placed", []))
+                notes.extend(r.get("notes", [])[:2])
         return {"placed": placed, "skipped": "", "notes": notes[:10]}
     except Exception as e:
         return {"placed": [], "skipped": f"error: {e}"[:150]}
@@ -211,14 +223,20 @@ def _today_signal(sid, s, today, need_more_than=0):
                 sort_keys=True, default=str).encode()).hexdigest()[:12]
             _sck = (int(sid or 0), today, _cfgh, int(need_more_than or 0))
             _shit = _SIGNAL_CACHE.get(_sck)
-            if _shit and time.time() - _shit[0] < _SIGNAL_TTL:
+            if _shit and time.time() - _shit[0] < (_shit[3] if len(_shit) > 3 else _SIGNAL_TTL):
                 return bool(_shit[1]), str(_shit[2])
         except Exception:
             _sck, _cfgh = None, ""
         def _sig_store(_fires, _why):
             try:
                 if _sck:
-                    _SIGNAL_CACHE[_sck] = (time.time(), bool(_fires), str(_why))
+                    # Negative (abhi signal nahi mila) sirf 5 min cache hota hai -
+                    # pehle 30 min cache tha: entry-window ke shuru me False
+                    # cache ho jata tha aur agli 3 passes skip => daily trade
+                    # late/miss ho jati thi. Positive 30 min (heavy backtest na
+                    # dobara chale).
+                    _ttl = _SIGNAL_TTL if _fires else 300
+                    _SIGNAL_CACHE[_sck] = (time.time(), bool(_fires), str(_why), _ttl)
                     if len(_SIGNAL_CACHE) > 60:
                         _SIGNAL_CACHE.pop(next(iter(_SIGNAL_CACHE)))
             except Exception:
@@ -845,13 +863,26 @@ def live_signal_pass(min_interval=240):
         except Exception:
             return {"placed": [], "notes": ["no-strategies-table"]}
         placed, notes = [], []
-        for s in rows or []:
+        # Parallel per-strategy live 15m signal check (intraday gate)
+        def _one_live(_s):
             try:
-                r = place_for_strategy(s.get("id"), signal_check="intraday")
-                placed.extend(r.get("placed", []))
-                notes.extend(r.get("notes", [])[:2])
+                return place_for_strategy(_s.get("id"), signal_check="intraday")
             except Exception:
-                continue
+                return {"placed": [], "notes": []}
+        try:
+            import concurrent.futures as _cf_lv
+            with _cf_lv.ThreadPoolExecutor(max_workers=4) as _ex_lv:
+                for r in _ex_lv.map(_one_live, list(rows or [])):
+                    placed.extend(r.get("placed", []))
+                    notes.extend(r.get("notes", [])[:2])
+        except Exception:
+            for s in rows or []:
+                try:
+                    r = place_for_strategy(s.get("id"), signal_check="intraday")
+                    placed.extend(r.get("placed", []))
+                    notes.extend(r.get("notes", [])[:2])
+                except Exception:
+                    continue
         return {"placed": placed, "notes": notes[:12]}
     except Exception as e:
         return {"placed": [], "notes": [f"error: {e}"[:150]]}
