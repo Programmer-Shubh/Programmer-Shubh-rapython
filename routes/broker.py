@@ -1139,6 +1139,28 @@ async def stock_history_sync():
         return {"started": False, "error": str(e)[:200]}
 
 
+@router.get("/stock-history-sync/debug")
+def stock_history_sync_debug():
+    """Temp diagnostic - _set_status को सीधे call karke error force karta hai."""
+    try:
+        from core.services import stock_history_sync as shs
+        from core.models.database import Database
+        db = Database.get_instance()
+        try:
+            row = db.fetch_one("SELECT setting_key, updated_at FROM settings WHERE setting_key='stock_history_sync_status'")
+            cur = row.get("setting_value") if row else "row MISSING"
+        except Exception as e:
+            cur = f"SELECT FAIL: {e}"
+        try:
+            shs._set_status({"state": "debug_test"})
+            post = shs.sync_status()
+        except Exception as e:
+            post = f"_set_status/sync_status FAIL: {e}"
+        return {"row_before": cur, "post": post, "top_stocks_len": len(shs.TOP_STOCKS)}
+    except Exception as e:
+        return {"error": str(e)[:400]}
+
+
 @router.get("/stock-history-sync/status")
 def stock_history_sync_status():
     """Stock OHLC sync ki progress (stage, counts, symbols_ok/failed, rows_stored)."""
