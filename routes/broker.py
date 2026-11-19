@@ -364,15 +364,34 @@ def history_debug(symbol: str = "NSE:NIFTY50-INDEX", resolution: str = "5",
 @router.get("/fyers-intraday-debug")
 def fyers_intraday_debug(symbol: str = "NIFTY", timeframe: str = "5m",
                          start_date: str = "2026-01-01", end_date: str = "2026-11-17"):
-    """Temp diagnostic: call the internal _fyers_intraday() directly and
-    report what it returns (bars count, first/last trade_date)."""
+    """Temp diagnostic: call the internal Fyers pieces directly and report
+    exactly where it breaks (creds / fh.history / parsing)."""
     try:
+        from routes.broker import _get_config as _gc
+        from core.services.fyers_data import FyersHistoryData
+        cfg = _gc("fyers") or {}
+        app_id = str(cfg.get("app_id") or "")
+        token_present = bool(cfg.get("access_token"))
+        under_map = {"NIFTY": "NSE:NIFTY50-INDEX", "BANKNIFTY": "NSE:NIFTYBANK-INDEX",
+                     "FINNIFTY": "NSE:FINNIFTY-INDEX",
+                     "MIDCPNIFTY": "NSE:NIFTY_MID_SELECT-INDEX"}
+        under = under_map.get(str(symbol).strip().upper())
+        resolution = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60"}.get(
+            str(timeframe or "15m").lower(), "15")
+        out = {"app_id": app_id[:6] + "..." if app_id else "MISSING",
+               "token_present": token_present, "under": under, "resolution": resolution}
+        if app_id and cfg.get("access_token"):
+            fh = FyersHistoryData(app_id, str(cfg.get("access_token") or ""))
+            resp = fh.history(under, start_date, end_date, resolution)
+            out["s"] = (resp or {}).get("s")
+            out["message"] = (resp or {}).get("message")
+            out["code"] = (resp or {}).get("code")
+            candles = (resp or {}).get("candles") or []
+            out["candles_direct"] = len(candles)
         from routes import strategy_builder as sb
         bars = sb._fyers_intraday(symbol, timeframe, start_date, end_date)
-        n = len(bars) if isinstance(bars, list) else -1
-        return {"bars": n,
-                "first": (bars[0] if bars else None),
-                "last": (bars[-1] if bars else None)}
+        out["bars"] = len(bars) if isinstance(bars, list) else -1
+        return out
     except Exception as e:
         import traceback
         return {"bars": -1, "error": str(e)[:300], "trace": traceback.format_exc()[:1800]}
