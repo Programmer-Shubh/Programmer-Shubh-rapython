@@ -442,10 +442,15 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
         _today_ist = ""
     try:
         from core.services.intraday_cache import get_cached_bars
-        if _today_ist and str(end_date)[:10] < _today_ist:
-            _cached = get_cached_bars(sym, timeframe, start_date, end_date)
-            if _cached and len(_cached) >= _need:
-                return _dedup_bars(_cached), "intraday_db_cache"
+        # Cache kabhi bhi padho (end_date=today ho tab bhi) - completed days ke
+        # bars immutable hote hain. Aaj ka forming bar cache me hota hi nahi
+        # (store_bars sirf < today store karta hai), isliye kuch bhi miss hona
+        # theek hai - partial tail ko Fyers top-up karega. Pehle sirf past-end
+        # par cache hit hota tha -> end_date=aaj wale runs HAR BAAR poora fetch
+        # karte the (multi-symbol par 182s ka asli kaaran).
+        _cached = get_cached_bars(sym, timeframe, start_date, end_date)
+        if _cached and len(_cached) >= _need:
+            return _dedup_bars(_cached), "intraday_db_cache"
     except Exception:
         pass
     # 0) Fyers intraday (primary + only intraday source now; ~100-day depth,
@@ -973,7 +978,7 @@ import uuid as _bt_uuid
 _BT_JOBS = {}
 _BT_JOBS_LOCK = _bt_thread.Lock()
 _BT_CACHE = {}
-_BT_RESULT_CACHE = {}  # instant like algotest - keyed by request hash, 10min TTL
+_BT_RESULT_CACHE = {}  # instant like algotest - keyed by request hash, 30min TTL
 
 
 
@@ -1055,7 +1060,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     try:
         _rk = hashlib.md5(json.dumps(req.model_dump() if hasattr(req,'model_dump') else req.dict(), sort_keys=True, default=str).encode()).hexdigest()
         _rc = _BT_RESULT_CACHE.get(_rk)
-        if _rc and _t0 - _rc[0] < 600:
+        if _rc and _t0 - _rc[0] < 1800:
             # return cached instantly with fresh took_ms AND fresh run_id
             # (same params, but a NEW run: stale-guard needs unique ids)
             _cached = dict(_rc[1]); _cached['took_ms']=5; _cached['cached']=True
@@ -1327,7 +1332,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             _ce = _BT_CACHE.get(_ck)
             _cache_ok = False
             try:
-                _cache_ok = bool(_ce and _bt_t.time() - _ce[0] < 300 and len(_ce[1] or []) >= 5)
+                _cache_ok = bool(_ce and _bt_t.time() - _ce[0] < 1800 and len(_ce[1] or []) >= 5)
             except Exception:
                 _cache_ok = False
             if timeframe in ("1m", "5m", "15m", "30m", "1h"):
@@ -2046,7 +2051,7 @@ def run_backtest(req: BacktestRequest):
             req.model_dump() if hasattr(req, "model_dump") else req.dict(),
             sort_keys=True, default=str).encode()).hexdigest()
         _rc0 = _BT_RESULT_CACHE.get(_rk0)
-        if _rc0 and _bt_time.time() - _rc0[0] < 600:
+        if _rc0 and _bt_time.time() - _rc0[0] < 1800:
             _cached0 = dict(_rc0[1])
             _cached0["took_ms"] = 5
             _cached0["cached"] = True
@@ -2157,7 +2162,7 @@ def run_backtest_async(req: BacktestRequest):
     try:
         if _rh:
             _rcA = _BT_RESULT_CACHE.get(_rh)
-            if _rcA and _bt_time.time() - _rcA[0] < 600:
+            if _rcA and _bt_time.time() - _rcA[0] < 1800:
                 _cachedA = dict(_rcA[1])
                 _cachedA["took_ms"] = 5
                 _cachedA["cached"] = True
