@@ -195,11 +195,12 @@ def _fetch_index_daily(idx, start, end):
                 errs.append(f"{under}:{str(resp.get('message'))[:60]}")
         except Exception as e:
             errs.append(f"fyers_exc:{str(e)[:80]}")
-    # Fallback: Yahoo (no token needed; server-side reach ka bharosa nahi)
+    # Fallback: NSE index archive (official ind_close_all CSVs, no token).
+    # Yahoo fallback completely removed (user request).
     try:
-        from core.services.free_data import fetch_yahoo_daily as _yfd
+        from core.services.historical_fetcher import _fetch_nseindex_historical as _fni
         bars = []
-        for b in (_yfd(idx, start, end) or []):
+        for b in (_fni(idx, start, end) or []):
             d = str(b.get("trade_date") or "")[:10]
             if not d:
                 continue
@@ -208,10 +209,10 @@ def _fetch_index_daily(idx, start, end):
                          "low_price": float(b.get("low_price") or 0), "close_price": float(b.get("close_price") or 0),
                          "volume": int(float(b.get("volume") or 0)), "oi": 0})
         if bars:
-            return bars, "yahoo_fallback", errs + ["fyers_index_cands_failed"]
-        errs.append("yahoo_empty")
+            return bars, "nse_index_archive", errs + ["fyers_index_cands_failed"]
+        errs.append("nse_index_empty")
     except Exception as e:
-        errs.append(f"yahoo_exc:{str(e)[:80]}")
+        errs.append(f"nse_index_exc:{str(e)[:80]}")
     return [], "failed", errs
 
 

@@ -245,13 +245,13 @@ class BacktestEngine:
                         continue
             except Exception:
                 pass
-        # Yahoo daily VIX history: Render par NSE blocked + /data ephemeral,
-        # isliye backtest date range ke per-day VIX values yahan se aate hain
-        # (warna filter har din "neutral 15" par no-op ban jata tha).
+        # Yahoo VIX history path completely REMOVED (user request): VIX values
+        # yahan sirf NSE official archive se aate hain (INDIAVIX - ind_close_all).
+        # Na mile to filter no-op (never fabricated 15.0).
         if vix_max > 0 and not vix_data:
             try:
-                from core.services.free_data import fetch_yahoo_daily as _yfd
-                _vrows = _yfd("INDIAVIX", start_date, end_date) or []
+                from core.services.historical_fetcher import _fetch_nseindex_historical as _fnx
+                _vrows = _fnx("INDIAVIX", start_date, end_date) or []
                 for _b in _vrows:
                     _vd = str(_b.get("trade_date") or "")[:10]
                     _vc = float(_b.get("close_price") or 0)

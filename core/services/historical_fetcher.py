@@ -616,22 +616,15 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
                                       "bars": len(db_data), "note": "NSE/BSE official primary truth"})
     except Exception:
         db_data = []
-    # 2) Priority order: nsepython (NSE official) -> Yahoo (60d) -> Stooq ->
-    # Alpha Vantage -> Twelve Data. openchart is reference-only
-    # (never bar suppliers).
+    # 2) Priority order: nsepython (NSE official) -> NSE index-archive ->
+    # Fyers -> Stooq -> Alpha Vantage -> Twelve Data. Yahoo completely
+    # removed (user request).
+    # openchart is reference-only (never bar suppliers).
     _deadline = _t.time() + 25
-
-    def _fetch_yahoo_hist(sym, s, e):
-        try:
-            from core.services.free_data import fetch_yahoo_daily
-            return _dv.yahoo_60d_filter(fetch_yahoo_daily(sym, s, e))
-        except Exception:
-            return []
 
     for _name, _fn in (("nsepython", _fetch_nsepython_historical),
                        ("nse_index_archive", _fetch_nseindex_historical),
                        ("fyers", _fetch_fyers_historical),
-                       ("yahoo", _fetch_yahoo_hist),
                        ("stooq", _fetch_stooq_historical),
                        ("alphavantage", _dv._fetch_alphavantage_daily),
                        ("twelvedata", _dv._fetch_twelvedata_daily)):

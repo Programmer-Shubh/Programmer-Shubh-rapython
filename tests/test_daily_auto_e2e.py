@@ -99,6 +99,9 @@ def test_all_fail_empty_and_logged(monkeypatch, capsys):
 
 def test_single_day_gate_span_aware(monkeypatch):
     import routes.strategy_builder as sb2
+    # Force the Yahoo fallback path (must not hit persistent intraday cache)
+    monkeypatch.setattr("core.services.intraday_cache.get_cached_bars",
+                        lambda *a, **k: [])
     # fetch is imported inside free_data users; patch at source module
     monkeypatch.setattr("core.services.free_data.fetch_yahoo_intraday",
                         lambda *a, **k: _bars(26, same_day=True))

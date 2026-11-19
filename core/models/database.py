@@ -397,6 +397,22 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_stratres_sid ON strategy_results(strategy_id);
                 CREATE INDEX IF NOT EXISTS idx_strategies_user_updated
                     ON strategies(user_id, updated_at);
+                CREATE TABLE IF NOT EXISTS intraday_bars (
+                    id SERIAL PRIMARY KEY,
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    trade_date TEXT NOT NULL,
+                    bar_time TEXT NOT NULL,
+                    open_price DOUBLE PRECISION DEFAULT 0,
+                    high_price DOUBLE PRECISION DEFAULT 0,
+                    low_price DOUBLE PRECISION DEFAULT 0,
+                    close_price DOUBLE PRECISION DEFAULT 0,
+                    volume BIGINT DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE(symbol, timeframe, trade_date, bar_time)
+                );
+                CREATE INDEX IF NOT EXISTS idx_intra_symbol_tf
+                    ON intraday_bars(symbol, timeframe, trade_date);
             """
             try:
                 with self._conn() as conn:
@@ -575,6 +591,22 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_stratres_sid ON strategy_results(strategy_id);
                 CREATE INDEX IF NOT EXISTS idx_strategies_user_updated
                     ON strategies(user_id, updated_at);
+                CREATE TABLE IF NOT EXISTS intraday_bars (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    trade_date TEXT NOT NULL,
+                    bar_time TEXT NOT NULL,
+                    open_price REAL DEFAULT 0,
+                    high_price REAL DEFAULT 0,
+                    low_price REAL DEFAULT 0,
+                    close_price REAL DEFAULT 0,
+                    volume INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    UNIQUE(symbol, timeframe, trade_date, bar_time)
+                );
+                CREATE INDEX IF NOT EXISTS idx_intra_symbol_tf
+                    ON intraday_bars(symbol, timeframe, trade_date);
             """)
         try:
             _sconn.close()

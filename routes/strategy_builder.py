@@ -412,8 +412,9 @@ def _fyers_intraday(sym, timeframe, start_date, end_date):
 
 
 def _intraday_full_range(sym, timeframe, start_date, end_date):
-    """Full-range 15m bars (spec §1/§5): Yahoo 60-day windows (TV feed removed).
-    NO synthetic fabrication - na mile to ([], reason).
+    """Full-range bars (spec §1/§5): Fyers official intraday only (+ persistent
+    DB cache). Yahoo/any free feed completely removed - agar Fyers ya cache se
+    na mile to ([], reason). NO synthetic fabrication.
     Returns (bars_chrono_ist, src). Bars sorted, deduped, IST."""
     import datetime as _dt
     try:
@@ -429,51 +430,43 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
     # (hamesha INSUFFICIENT = intraday auto/backtest dead). Engine
     # min_bars=5 + abstain rule ke saath 15 bars honest hain.
     _need = 40 if _span > 2 else 15
-    # 0) Fyers intraday (primary, official, ~100-day depth). Yahoo ka 60-day
-    # wall aur cloud-IP 429/timeout yahan nahi aata (token local/DB se hota
-    # hai). Na mile/fail ho to Yahoo fallback.
+    # Persistent DB cache: historical bars kabhi change nahi hote - NETWORK
+    # fetch ki jagah local DB se lo (backtest ~5-10x fast).
+    try:
+        _today_ist = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+    except Exception:
+        _today_ist = ""
+    try:
+        from core.services.intraday_cache import get_cached_bars
+        if _today_ist and str(end_date)[:10] < _today_ist:
+            _cached = get_cached_bars(sym, timeframe, start_date, end_date)
+            if _cached and len(_cached) >= _need:
+                return _dedup_bars(_cached), "intraday_db_cache"
+    except Exception:
+        pass
+    # 0) Fyers intraday (primary + only intraday source now; ~100-day depth,
+    # official). Koi Yahoo/free-feed fallback nahi. Na mile/fail ho to
+    # honest INSUFFICIENT.
     try:
         _fb = _fyers_intraday(sym, timeframe, start_date, end_date)
         if len(_fb) >= _need:
+            try:
+                from core.services.intraday_cache import store_bars
+                store_bars(sym, timeframe, [b for b in _fb if str(b.get("trade_date", ""))[:10] < _today_ist])
+            except Exception:
+                pass
             return _dedup_bars(_fb), "fyers_intraday"
-    except Exception:
-        pass
-    # 1) Yahoo 15m (hard 60-day/request limit): single window back from
-    # end_date. Older start = honest gap (no fabrication, ever).
-    try:
-        from core.services.free_data import fetch_yahoo_intraday as _fy
-        _days = min(60, _span + 5)
-        try:
-            _got = _fy(sym, timeframe if timeframe in ("5m", "15m", "30m", "1h") else "15m",
-                       days=_days) or []
-        except Exception:
-            _got = []
-        _got = [b for b in _got
-                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
-        # Forming-bar look-ahead fix: aaj ka AADHURA 15m/5m bar backtest me na
-        # aaye (paper engine khud aakhri bar hata kar sirf closed bars par
-        # signal banata hai). Iske bina end_date=aaj ke runs wo partial bar
-        # close ka use karke (future se) jhoota signal laga lete the.
-        try:
-            import datetime as _istdt
-            _today = _istdt.datetime.now(_istdt.timezone(_istdt.timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
-            if _got and str(_got[-1].get("trade_date", ""))[:10] == _today:
-                _got = _got[:-1]
-        except Exception:
-            pass
-        if len(_got) >= _need:
-            return _dedup_bars(_got), "yahoo_intraday"
     except Exception:
         pass
     return [], "no-intraday-data"
 
 
 def _daily_fallback_range(sym, start_date, end_date):
-    """Daily fallback, poora requested range: nsepython (NSE official) pehle,
-    phir NSE index-archive, phir Fyers broker-history (FINNIFTY ka Yahoo dead
-    hai), phir Yahoo (60-day cut). Single source jo pehle 15+ bars de (koi
-    date-merge nahi). Returns (bars, src) - src: nsepython_daily /
-    nse_index_archive / fyers_daily / yahoo_daily / ""."""
+    """Daily fallback, poora requested range (NO Yahoo - completely removed):
+    nsepython (NSE official) pehle, phir NSE index-archive, phir Fyers
+    broker-history. Single source jo pehle 15+ bars de (koi date-merge nahi).
+    Returns (bars, src) - src: nsepython_daily / nse_index_archive /
+    fyers_daily / ""."""
     try:
         from core.services.historical_fetcher import _fetch_nsepython_historical as _fnp
         try:
@@ -512,38 +505,7 @@ def _daily_fallback_range(sym, start_date, end_date):
             return _db2, "fyers_daily"
     except Exception:
         pass
-    try:
-        from core.services.free_data import fetch_yahoo_daily as _fyd
-        from core.services.data_validator import yahoo_60d_filter as _f60
-        bars = []
-        for _attempt in (1, 2):
-            try:
-                bars = _f60(_fyd(sym, start_date, end_date) or [])
-                if bars and len(bars) >= 5:
-                    break
-            except Exception:
-                bars = []
-            try:
-                import time as _ts
-                _ts.sleep(1)
-            except Exception:
-                pass
-        bars = [b for b in (bars or [])
-                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
-        if bars:
-            return bars, "yahoo_daily"
-    except Exception:
-        pass
     return [], ""
-
-
-def _yahoo_full_range(sym, start_date, end_date):
-    """Backward-compat wrapper (sirf bars). Naya code _daily_fallback_range use kare."""
-    try:
-        _b, _s = _daily_fallback_range(sym, start_date, end_date)
-        return _b
-    except Exception:
-        return []
 
 
 def _dedup_bars(bars):
@@ -1284,11 +1246,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                             pass
             except Exception:
                 _pre15 = {}
-        # Daily DB preload (local, tez) + Yahoo-daily parallel supplement un
+        # Daily DB preload (local, tez) + fallback parallel supplement un
         # symbols ke liye jinke DB bars <15 hain YA window coverage <70% hai.
         # Pehle partial-coverage symbols loop ke ANDAR serial network call
-        # karte the (nsepython 15s + fyers 25s + yahoo 21s = 70s/symbol on
-        # Render) - wahi "Run click -> bahut der me result" ka bada kaaran.
+        # karte the (nsepython + fyers ~70s/symbol on Render) - wahi
+        # "Run click -> bahut der me result" ka bada kaaran.
         _preDB, _preY = {}, {}
         try:
             for _s in list(_syms):
@@ -1408,8 +1370,6 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     historical = _bars15
                     _use_db = True
                     _hist_src = _src15 if _src15 else _hist_src
-                    if _hist_src in ("yahoo_intraday",):
-                        _hist_status = "SECONDARY_ONLY"
                     _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
                     if len(_BT_CACHE) > 12:
                         _BT_CACHE.pop(next(iter(_BT_CACHE)))
@@ -1438,7 +1398,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 elif _db_hist and len(_db_hist) >= 15:
                     historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
                     _use_db = True
-                    # Coverage <70% ho to Yahoo full-range se compare karo -
+                    # Coverage <70% ho to fallback full-range se compare karo -
                     # jo zyada din cover kare wahi single source (no-merge).
                     try:
                         import datetime as _cdt
@@ -1464,10 +1424,10 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                             if _ybc and len(_ybc) >= 15 and _cov1 > _cov0:
                                 historical = _ybc
                                 _use_db = False
-                                _hist_src = "yahoo_daily"
+                                _hist_src = _ybsrc or "nsepython_daily"
                                 try:
                                     from core.services.data_validator import validate_symbol as _vs2
-                                    _q2 = _vs2(_ybc, "yahoo", _db_hist or None, "nse_official_db")
+                                    _q2 = _vs2(_ybc, "nsepython", _db_hist or None, "nse_official_db")
                                     _hist_status = str(_q2.get("status", "SECONDARY_ONLY"))
                                 except Exception:
                                     _hist_status = "SECONDARY_ONLY"
@@ -1485,16 +1445,16 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         _yb, _ysrc = [], ""
                     if _yb and _cov_ok(_yb):
                         historical = _yb
-                        _hist_src = _ysrc or "yahoo_daily"
+                        _hist_src = _ysrc or "nsepython_daily"
                         try:
                             from core.services.data_validator import validate_symbol as _vs
-                            _q = _vs(_yb, "yahoo" if "yahoo" in _hist_src else "nsepython",
+                            _q = _vs(_yb, "nsepython",
                                      _db_hist or None, "nse_official_db")
                             _hist_status = str(_q.get("status", "SECONDARY_ONLY"))
                         except Exception:
                             _hist_status = "SECONDARY_ONLY"
                     else:
-                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, NSE/Yahoo fail) - fabricated data nahi banate", "total_trades": 0,
+                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, NSE/Fyers fail) - fabricated data nahi banate", "total_trades": 0,
                                              "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                              "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
                         _fire_prog(_sym)
@@ -1654,10 +1614,14 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     _dq = {"source": "NSE official", "status": "VALID"}
                 elif _dq_src == "tradingview_intraday":
                     _dq = {"source": "TradingView intraday", "status": "SECONDARY_ONLY"}
-                elif _dq_src == "yahoo_intraday":
-                    _dq = {"source": "Yahoo intraday", "status": "SECONDARY_ONLY"}
-                elif _dq_src == "yahoo_daily":
-                    _dq = {"source": "Yahoo daily", "status": "SECONDARY_ONLY"}
+                elif _dq_src == "fyers_intraday":
+                    _dq = {"source": "Fyers intraday", "status": "VALID"}
+                elif _dq_src == "fyers_daily":
+                    _dq = {"source": "Fyers daily", "status": "VALID"}
+                elif _dq_src == "nse_index_archive":
+                    _dq = {"source": "NSE index archive", "status": "VALID"}
+                elif _dq_src == "intraday_db_cache":
+                    _dq = {"source": "Intraday DB cache", "status": "VALID"}
                 elif _dq_src == "nsepython_daily":
                     _dq = {"source": "NSE official", "status": "VALID"}
                 elif _dq_src in ("synthetic", "synthetic_expansion"):
@@ -1666,7 +1630,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     _dq = {"source": "Cache", "status": "SECONDARY_ONLY"}
                 try:
                     _hs = str(_hist_status or "")
-                    if _hs and _dq_src in ("yahoo_daily", "nsepython_daily", "yahoo_intraday", "tradingview_intraday"):
+                    if _hs and _dq_src in ("nsepython_daily", "tradingview_intraday", "nse_index_archive"):
                         _dq["status"] = _hs
                 except Exception:
                     pass
