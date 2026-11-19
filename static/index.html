@@ -422,7 +422,7 @@
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols + Order</small></div>
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">Poori F&O list</span> <span id="r-otm20-note" class="small text-muted"></span> <label class="ms-1" style="font-size:12px" title="Sirf wo symbols dikhe jinka OTM-4 strike premium ₹15+ hai (model estimate)"><input type="checkbox" id="r-otm15-check" checked onchange="otm15Toggle()"> OTM-4 &gt; ₹15</label> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
+                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">Poori F&O list</span> <span id="r-otm20-note" class="small text-muted"></span> <label class="ms-1" style="font-size:12px" title="Sirf wo symbols dikhe jinka OTM-4 strike premium ₹15+ hai (model estimate)"><input type="checkbox" id="r-otm15-check" onchange="otm15Toggle()"> OTM-4 &gt; ₹15</label> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
                         <input type="hidden" id="r-order" value="CE-BUY"><input type="hidden" id="r-strike" value="ATM"><input type="hidden" id="r-otm" value="1"><input type="hidden" id="r-lots" value="1">
                         <div class="col-md-8 d-flex align-items-center"><small class="text-muted">Order/Strike/Lots — Template se auto (Strategy Templates neeche)</small></div>
                     </div>
@@ -486,7 +486,7 @@
                         <div class="col-md-4"><label class="small" title="Bollinger Bands: Volatility squeeze breakout"><input type="checkbox" id="r-ind-bb"> <strong>Bollinger</strong>(<input type="number" id="r-p-bb" value="20" min="2" max="50" style="width:40px;font-size:11px">,<input type="number" id="r-p-bbstd" value="2.0" min="1" max="3" step="0.1" style="width:40px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="Neural Network: ML price prediction signal"><input type="checkbox" id="r-ind-nn"> <strong>Neural</strong>(<input type="number" id="r-p-nn" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="RSI: momentum filter (oversold bounce <45 / overbought >55)"><input type="checkbox" id="r-ind-rsi"> <strong>RSI</strong>(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
-                        <div class="col-md-4"><label class="small" title="Market Regime FILTER: VWAP+EMA+ADX composite. CE Buy / PE Sell sirf bullish regime me, PE Buy / CE Sell sirf bearish regime me entry (sideways me bhi entry allowed, opposite regime me block)"><input type="checkbox" id="r-ind-market_regime" checked> <strong>Market Regime</strong>(filter)</div>
+                        <div class="col-md-4"><label class="small" title="Market Regime FILTER: VWAP+EMA+ADX composite. CE Buy / PE Sell sirf bullish regime me, PE Buy / CE Sell sirf bearish regime me entry (sideways me bhi entry allowed, opposite regime me block)"><input type="checkbox" id="r-ind-market_regime"> <strong>Market Regime</strong>(filter)</label></div>
                         <div class="col-md-4"><label class="small" title="VWAP: intraday price anchor (upar=bullish, neeche=bearish)"><input type="checkbox" id="r-ind-vwap"> <strong>VWAP</strong>(<input type="number" id="r-p-vwap" value="20" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="Heikin-Ashi candles: smoother trend candles (reduces noise, better for trend following)"><input type="checkbox" id="r-ind-heikin"> <strong>Heikin-Ashi</strong>(<input type="number" id="r-p-ha" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
                     </div>
@@ -871,8 +871,11 @@
         }
     }
     async function loadStrategySymbols(){
-        // OTM-4 > ₹15 filter DEFAULT ON har load par (user rule 27-10-2026)
-        try{const c=document.getElementById('r-otm15-check');if(c){c.checked=true;otm15Toggle();}}catch(e){}
+        // OTM-4 > Rs15 filter ab DEFAULT OFF - user demand 19-11-2026: filter saved
+        // result page + strategy backtest page par symbols ko kabhi kam na kare;
+        // pehle filter ON (27-10-2026) har load par hide karta tha = saved strategy
+        // me symbol kum/jayada select karne ka vikalp hi nahi milta tha.
+        try{const c=document.getElementById('r-otm15-check');if(c){c.checked=false;try{localStorage.setItem('rOtm15','0');}catch(e){}}}catch(e){}
         // Step 1: INSTANT — static full F&O list, koi API wait nahi
         try{_fillStrategySyms([...new Set(_FNO_MASTER)].filter(Boolean).sort());}catch(e){}
         // Step 2: background me DB naye symbols merge (list rahegi dikhti)
@@ -885,7 +888,7 @@
     // ---- OTM-4 > ₹15 symbol filter (user rule 27-10-2026) ----
     // DEFAULT ON har page load par (user: "default tik laga hua dikhe").
     // User session me untick kar sakta hai; reload par phir ON.
-    function otm15On(){try{const c=document.getElementById('r-otm15-check');const v=c?c.checked:true;try{if(c)localStorage.setItem('rOtm15',v?'1':'0');}catch(e){}return v;}catch(e){return true;}}
+    function otm15On(){try{const c=document.getElementById('r-otm15-check');const v=c?c.checked:false;try{if(c)localStorage.setItem('rOtm15',v?'1':'0');}catch(e){}return v;}catch(e){return false;}}
     async function otm15Toggle(){
         const v=otm15On();
         if(v&&(!window._otm4ok||!window._otm4ok._ts||Date.now()-window._otm4ok._ts>10*60*1000)){
@@ -2239,9 +2242,10 @@ let _lastOpenTrdHTML = null;
             // Entry time: sirf tab jab user ne khud change na kiya ho.
             const eEl=document.getElementById('r-entry');
             if(eEl&&(force||!_rbCustom.has('r-entry'))){ eEl.value=d.entry; _rbTag('r-entry',true); }
-            // BUY rulebook: SuperTrend + VWAP + Market Regime filters ON.
+            // BUY rulebook: sirf SuperTrend ON. VWAP / Market Regime ab default OFF
+            // (user demand 19-11-2026: ye 2 indicator default tick na rahein).
             if(_rbSide()==='buy'){
-                [['r-ind-supertrend',true],['r-ind-vwap',true],['r-ind-market_regime',true]].forEach(([id,v])=>{
+                [['r-ind-supertrend',true]].forEach(([id,v])=>{
                     const el=document.getElementById(id);
                     if(el&&(force||!_rbIndCustom.has(id))){ el.checked=v; }
                 });
