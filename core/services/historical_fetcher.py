@@ -399,10 +399,19 @@ def _fetch_fyers_historical(symbol: str, start_date: str, end_date: str) -> List
         _payload = {"symbol": under, "resolution": "D", "date_format": 1,
                     "range_from": str(start_date)[:10], "range_to": str(end_date)[:10],
                     "cont_flag": "1"}
-        _r = _rq.get("https://api-t1.fyers.in/data/history", params=_payload,
-                     headers={"Authorization": f"{app_id}:{token}",
-                              "Content-Type": "application/json", "version": "3"},
-                     timeout=10)
+        try:
+            from core.services import egress_proxy as _eg
+            _r = _eg.sync_request("GET",
+                                  "https://api-t1.fyers.in/data/history",
+                                  params=_payload,
+                                  headers={"Authorization": f"{app_id}:{token}",
+                                           "Content-Type": "application/json", "version": "3"},
+                                  timeout=10)
+        except Exception:
+            _r = _rq.get("https://api-t1.fyers.in/data/history", params=_payload,
+                         headers={"Authorization": f"{app_id}:{token}",
+                                  "Content-Type": "application/json", "version": "3"},
+                         timeout=10)
         if getattr(_r, "status_code", 0) != 200:
             return []
         body = _r.json() or {}
