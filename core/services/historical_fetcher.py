@@ -334,7 +334,9 @@ def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> 
         try:
             _ex = _TPE(max_workers=1)
             try:
-                df = _ex.submit(_do).result(timeout=15)
+                # Cloud IPs NSE se block hote hain ("you are not allowed" type hang) -
+                # 15s -> 5s: far-gate fail-fast, chain aage badhti hai.
+                df = _ex.submit(_do).result(timeout=5)
             except Exception:
                 df = None
             finally:
@@ -400,7 +402,7 @@ def _fetch_fyers_historical(symbol: str, start_date: str, end_date: str) -> List
         _r = _rq.get("https://api-t1.fyers.in/data/history", params=_payload,
                      headers={"Authorization": f"{app_id}:{token}",
                               "Content-Type": "application/json", "version": "3"},
-                     timeout=25)
+                     timeout=10)
         if getattr(_r, "status_code", 0) != 200:
             return []
         body = _r.json() or {}
@@ -620,7 +622,7 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
     # Fyers -> Stooq -> Alpha Vantage -> Twelve Data. Yahoo completely
     # removed (user request).
     # openchart is reference-only (never bar suppliers).
-    _deadline = _t.time() + 25
+    _deadline = _t.time() + 12
 
     for _name, _fn in (("nsepython", _fetch_nsepython_historical),
                        ("nse_index_archive", _fetch_nseindex_historical),
