@@ -494,13 +494,14 @@
                     <div class="slab-sec" style="background:linear-gradient(135deg,#fff8e1 0%,#ffffff 100%); border:1px solid #ffe082; padding:6px"><div class="slab-sec-title"><i class="bi bi-sliders"></i> Schedule & Risk</div>
                     <div class="row g-1 mt-1">
                         <div class="col-md-3"><label class="form-label small">Overall Stop Loss (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-sl" value="" placeholder="0 = no stop loss"><small class="text-muted" id="s-sl-mirror">blank/0 = no SL (user fills own)</small></div>
+                        <div class="col-md-3"><label class="form-label small">Overall Target (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-tp" value="" placeholder="0 = no target"><small class="text-muted" id="s-tp-mirror">blank/0 = no target (user fills own)</small></div>
                     </div>
                     <div class="row g-1 mt-1">
                         <div class="col-md-3"><label class="form-label small">Re-entry on SL</label><select class="form-select form-select-sm" id="s-reentry-sl"><option>RE ASAP</option><option selected>No Re-entry</option><option>RE Next Day</option></select></div>
                         <div class="col-md-3"><label class="form-label small">Re-entry on Tgt</label><select class="form-select form-select-sm" id="s-reentry-tp"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
                     </div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="s-mtd" value="2" min="0" max="50" step="1" title="Rulebook default: Buy 2/day, Sell 5/day. 0 = unlimited"></div>
+                        <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="s-mtd" value="5" min="0" max="50" step="1" title="Rulebook default: 5/day (Buy/Sell). 0 = unlimited"></div>
                         <div class="col-md-2"><label class="form-label small">Slippage (%) <span class="badge bg-warning text-dark">strategy</span></label><input type="number" class="form-control form-control-sm" id="s-slippage" value="0.50" step="0.05" min="0" max="2" title="Add Slippage to make results realistic (market impact + spread)"></div>
                     </div>
                     <div class="row g-1 mt-1">
@@ -2171,7 +2172,7 @@ let _lastOpenTrdHTML = null;
         const tp=idx?idx[1]:(side==='sell'?18:28);
         return side==='sell'
             ? {sl:sl,tp:tp,entry:'10:15',lockAt:10,lockAmt:5,step:5,mtd:5,reSl:'No Re-entry'}
-            : {sl:sl,tp:tp,entry:'09:35',lockAt:12,lockAmt:6,step:5,mtd:2,reSl:'No Re-entry'};
+            : {sl:sl,tp:tp,entry:'09:35',lockAt:12,lockAmt:6,step:5,mtd:5,reSl:'No Re-entry'};
     }
     // ---- Rulebook default vs user-customized visibility ----
     const _rbCustom=new Set(); const _rbIndCustom=new Set(); let _rbApplying=false;
@@ -2185,10 +2186,10 @@ let _lastOpenTrdHTML = null;
                 if(force||!_rbCustom.has(id)){ el.value=v; _rbTag(id,true); }
                 else { _rbTag(id,false); }
             };
-            // Default TARGET and TRAILING stop-loss removed per user request:
-            // user fills them manually (0/blank = no target / no trail).
+            // Default TARGET, TRAILING stop-loss and SL removed per user request:
+            // user fills them manually (0/blank = no target / no trail / no SL).
             // set('s-tp',d.tp); set('s-lock-profit',d.lockAt); set('s-lock-amount',d.lockAmt); set('s-trail-step',d.step);
-            set('s-sl',d.sl);
+            // set('s-sl',d.sl);
             set('s-reentry-sl',d.reSl);
             // Max trades: Sell 5/day, Buy 2/day. Explicit -1/blank = unlimited.
             const mEl=document.getElementById('s-mtd');
