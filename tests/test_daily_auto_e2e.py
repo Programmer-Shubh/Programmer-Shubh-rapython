@@ -99,17 +99,19 @@ def test_all_fail_empty_and_logged(monkeypatch, capsys):
 
 def test_single_day_gate_span_aware(monkeypatch):
     import routes.strategy_builder as sb2
-    # Force the Yahoo fallback path (must not hit persistent intraday cache)
+    # Yahoo path removed - intraday now comes only from Fyers official + DB cache.
+    # Force both to be absent/controlled in tests (no network, no persistent cache).
     monkeypatch.setattr("core.services.intraday_cache.get_cached_bars",
                         lambda *a, **k: [])
-    # fetch is imported inside free_data users; patch at source module
-    monkeypatch.setattr("core.services.free_data.fetch_yahoo_intraday",
+    monkeypatch.setattr("core.services.intraday_cache.store_bars",
+                        lambda *a, **k: None)
+    # 26 bars on a single-day request -> passes span-aware gate (need=15)
+    monkeypatch.setattr(sb2, "_fyers_intraday",
                         lambda *a, **k: _bars(26, same_day=True))
     bars, src = sb2._intraday_full_range("NIFTY", "15m", "2026-10-13", "2026-10-13")
-    assert src == "yahoo_intraday" and len(bars) == 26, (src, len(bars))
-    # 10 bars -> honestly refused
-    monkeypatch.setattr("core.services.free_data.fetch_yahoo_intraday",
-                        lambda *a, **k: _bars(10))
+    assert src == "fyers_intraday" and len(bars) == 26, (src, len(bars))
+    # Fyers/network unavailable -> honestly empty, never fabricated
+    monkeypatch.setattr(sb2, "_fyers_intraday", lambda *a, **k: [])
     bars2, src2 = sb2._intraday_full_range("NIFTY", "15m", "2026-10-13", "2026-10-13")
     assert bars2 == [] and src2 == "no-intraday-data", (src2, len(bars2))
 
