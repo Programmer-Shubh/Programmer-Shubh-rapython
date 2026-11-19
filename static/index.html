@@ -900,6 +900,8 @@
             const box=document.getElementById('r-syms');if(!box)return;
             const note=document.getElementById('r-otm20-note');
             if(!otm15On()){box.querySelectorAll('label').forEach(l=>l.style.display='');if(note)note.textContent=(window._symCount||'')+' symbols (poori F&O list)';return;}
+            // Saved strategy edit/backtest mode: filter hiding OFF - user can toggle any symbol.
+            if(window._savedStratMode === true){box.querySelectorAll('label').forEach(l=>l.style.display='');if(note)note.textContent='saved strategy mode - poori F&O list dikh rahi hai';return;}
             const ok=window?._otm4ok?window._otm4ok.set:null;
             // Fail-open: server returned all_visible/empty ok - sab dikhao + reason
             if(ok && ok.size===0){box.querySelectorAll('label').forEach(l=>l.style.display='');if(note)note.textContent='OTM-4 filter unavailable (live premium data nahi mila) - poori F&O list dikh rahi hai';return;}
@@ -2296,6 +2298,9 @@ let _lastOpenTrdHTML = null;
     }
 
     function _loadStratToForm(s){
+        // Saved strategy (edit / backtest detail) me OTM-4 filter hiding disable:
+        // user apni saved strategy ke symbols khud toggle kar sake (kum/jayada).
+        try{ window._savedStratMode = true; }catch(e){}
         try{
             try{document.getElementById('s-name').value=s.name||'';}catch(e){}
             try{const _rs=document.getElementById('run-summary');if(_rs&&s.name)_rs.textContent='Strategy: '+s.name+' ('+(s.symbol||'')+')';}catch(e){}
