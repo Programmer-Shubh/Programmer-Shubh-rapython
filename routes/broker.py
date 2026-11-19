@@ -1126,6 +1126,29 @@ def nse_option_sync_status():
         return {"state": "error", "error": str(e)[:200]}
 
 
+@router.post("/stock-history-sync")
+async def stock_history_sync():
+    """Top F&O stocks (FNO_STOCKS, ~92 symbols) ke daily OHLC 1-year Supabase
+    bhavcopy_data me laao (SPOT rows - engine stock backtests par use karta
+    hai). Idempotent.
+    Background thread; progress: GET /api/broker/stock-history-sync/status"""
+    try:
+        from core.services.stock_history_sync import sync_async
+        return sync_async()
+    except Exception as e:
+        return {"started": False, "error": str(e)[:200]}
+
+
+@router.get("/stock-history-sync/status")
+def stock_history_sync_status():
+    """Stock OHLC sync ki progress (stage, counts, symbols_ok/failed, rows_stored)."""
+    try:
+        from core.services.stock_history_sync import sync_status
+        return sync_status()
+    except Exception as e:
+        return {"state": "error", "error": str(e)[:200]}
+
+
 @router.get("/sync-historical/status")
 def sync_historical_status():
     """Fyers history sync ki progress (stage, counts, coverage, errors)."""
