@@ -388,6 +388,18 @@ def fyers_intraday_debug(symbol: str = "NIFTY", timeframe: str = "5m",
             out["code"] = (resp or {}).get("code")
             candles = (resp or {}).get("candles") or []
             out["candles_direct"] = len(candles)
+            import datetime as _idt
+            out["sample"] = candles[:5]
+            _ist = _idt.timezone(_idt.timedelta(hours=5, minutes=30))
+            _wb = []
+            for _ts, _o, _h, _l, _c, _v in candles[:20]:
+                try:
+                    _i = _idt.datetime.fromtimestamp(int(_ts), _idt.timezone.utc).astimezone(_ist)
+                    _wb.append({"ts": int(_ts), "ist": _i.strftime("%Y-%m-%d %H:%M"),
+                                "weekday": _i.weekday()})
+                except Exception as _we:
+                    _wb.append({"ts": str(_ts), "err": str(_we)[:100]})
+            out["weekdays"] = _wb
         from routes import strategy_builder as sb
         bars = sb._fyers_intraday(symbol, timeframe, start_date, end_date)
         out["bars"] = len(bars) if isinstance(bars, list) else -1
