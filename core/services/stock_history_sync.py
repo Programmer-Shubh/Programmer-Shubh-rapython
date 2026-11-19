@@ -73,8 +73,10 @@ def _set_status(patch: dict):
         _cur.update(patch)
         _payload = _js.dumps(_cur, default=str)
         db.execute(
-            "INSERT INTO settings(setting_key, setting_value) VALUES (?, ?) "
-            "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+            "INSERT INTO settings (setting_key, setting_value, updated_at) "
+            "VALUES (?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT (setting_key) DO UPDATE SET setting_value=excluded.setting_value, "
+            "updated_at=excluded.updated_at",
             ["stock_history_sync_status", _payload])
     except Exception:
         pass
