@@ -327,6 +327,7 @@ def _fyers_intraday(sym, timeframe, start_date, end_date):
     Ek hafta ke hisaab se mixed-day guard: agar saare bars 14:30-21:00 ke
     beech aayein (broker IST-as-UTC bhej raha ho) to -5:30 shift karke fix.
     """
+    import datetime as _dt
     try:
         _s = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
         _e = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
