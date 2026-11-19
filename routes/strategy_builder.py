@@ -337,7 +337,10 @@ def _fyers_intraday(sym, timeframe, start_date, end_date):
              "FINNIFTY": "NSE:FINNIFTY-INDEX",
              "MIDCPNIFTY": "NSE:NIFTY_MID_SELECT-INDEX"}.get(str(sym).strip().upper())
     if not under:
-        return []
+        # Stocks default to Fyers EQ format - every NSE F&O underlying works
+        # (lot master me listed NSE symbols).
+        up = str(sym).strip().upper().replace(".NS", "").replace("-EQ", "")
+        under = f"NSE:{up}-EQ"
     resolution = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60"}.get(
         str(timeframe or "15m").lower(), "15")
     try:
