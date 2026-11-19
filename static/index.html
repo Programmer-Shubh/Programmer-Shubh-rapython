@@ -1094,7 +1094,8 @@
             let chg = (d.spot && d.change!==undefined && d.change!==null) ? Number(d.change) : (_cached?Number(_cached.change):0);
             if(!isFinite(chg)) chg = 0;
             const up = chg > 0.005, down = chg < -0.005;
-            const cls = spot>0 ? (up?'price-up':down?'price-down':'text-muted') : 'text-muted';
+            // Flat (chg == 0) par grey nahi - bright/white text dikhe (user demand).
+            const cls = spot>0 ? (up?'price-up':down?'price-down':'text-dark fw-bold') : 'text-muted';
             const arrow = spot>0 ? (up?'▲':down?'▼':'') : '';
             const chgTxt = spot>0 ? `${chg>0?'+':''}${chg.toFixed(2)}%` : '';
             const price = spot>0 ? (d.formatted || ('₹'+spot.toLocaleString('en-IN',{minimumFractionDigits:2}))) : '—';
