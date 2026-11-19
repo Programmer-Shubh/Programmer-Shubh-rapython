@@ -374,6 +374,13 @@ def _intraday_signal(sid, s, today, need_more_than=0):
             _adv0 = {}
         if not isinstance(_adv0, dict):
             _adv0 = {}
+        # Mirror row-level timeframe into adv when missing - backtest does the
+        # same (line ~1330) so saved 5m strategies evaluate 5m live too. Pehle
+        # blank adv.timeframe -> default "15m" -> 5m strategies 15m par signal
+        # check hote + entry miss ("paper trade lag nahi lag rahi" root cause).
+        if not str((_adv0 or {}).get("timeframe") or "").strip() and str(s.get("timeframe") or "").strip():
+            _adv0 = dict(_adv0)
+            _adv0["timeframe"] = str(s.get("timeframe") or "").strip()
         try:
             # Bandwidth saver: 15m bars shared across strategies, 15-min TTL
             # (was: fresh fetch per strategy per 5-min run).
