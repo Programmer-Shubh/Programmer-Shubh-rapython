@@ -786,16 +786,42 @@
         <strong style="color:#334155">Disclaimer:</strong> RaTrade is solely a technology and data analysis platform. We are not a SEBI-registered Investment Advisor (IA) or Research Analyst (RA). All insights, technical setups, and scores displayed are strictly for analytical and educational purposes. No direct trading tips or buy/sell recommendations are provided. All strategies are configured and executed by the user at their own discretion and sole risk. Analytical backtest and paper results do not guarantee future live returns.
     </div>
     <script>
-    let A=async u=>{const r=await fetch(u);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
-    let P=async (u,o)=>{const r=await fetch(u,o);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
+    let A=async u=>{
+        const _do=async()=>{
+            const r=await fetch(u);
+            const t=await r.text();
+            if(!r.ok){ const e=new Error('HTTP '+r.status+' '+(t||'').slice(0,200)); e.status=r.status; throw e; }
+            try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}
+        };
+        try{ return await _do(); }
+        catch(e){
+            // One retry with backoff on transient upstream (429/5xx/network) - kai endpoints
+            // ek hi burst me hit hote hain, second attempt usually passes.
+            const st=e.status||0; const transient=!st||st===408||st===409||st===429||st>=500;
+            if(!transient) throw e;
+            await new Promise(res=>setTimeout(res,700+Math.random()*600));
+            return await _do();
+        }
+    };
+    let P=async (u,o)=>{const r=await fetch(u,o);const t=await r.text();if(!r.ok){const e=new Error('HTTP '+r.status+' '+(t||'').slice(0,200));e.status=r.status;throw e;}try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
 
     // Global fetch with retry & fallback for Connecting... states
-    const _origA = async (u, o) => { const r = await fetch(u, o); const t = await r.text(); try { return JSON.parse(t); } catch(e) { throw new Error(t.slice(0,400)); } };
-    async function A_retry(u, o, retries=2){ let last; for(let i=0;i<=retries;i++){ try{ const r=await _origA(u,o); if(r && r.error && r.error.includes('429')) throw new Error('429'); return r; }catch(e){ last=e; if(i<retries && (String(e.message).includes('429')||String(e.message).includes('Failed to fetch'))){ await new Promise(r=>setTimeout(r, 800*(i+1))); continue; } } } throw last; }
+    const _origA = async (u, o) => {
+        const r = await fetch(u, o);
+        const t = await r.text();
+        if(!r.ok){ const e = new Error('HTTP '+r.status); e.status = r.status; throw e; }
+        try { return JSON.parse(t); } catch(e) { throw new Error(t.slice(0,400)); }
+    };
+    async function A_retry(u, o, retries=2){ let last; for(let i=0;i<=retries;i++){ try{ return await _origA(u,o); }catch(e){ last=e; const st=(e&&e.status)||0; const transient=!st||st===408||st===429||st>=500; if(i<retries && transient){ await new Promise(r=>setTimeout(r, 700+Math.random()*700*(i+1))); continue; } } } throw last; }
     // Patch global A/P to use retry + user-friendly toast on failure
     const _oldA = A; const _oldP = P;
     A = async (u, o) => { try { return await A_retry(u, o); } catch(e){ console.warn('API failed', u, e.message); throw e; } };
     P = async (u, o) => { try { return await A_retry(u, o); } catch(e){ console.warn('API failed', u, e.message); throw e; } };
+    // TTL cache helpers (10 min): stale localStorage paint ki "1 second flash then
+    // blank" wali problem fix - server fresh/empty render kare ga, purani paint
+    // sirf errors/timeouts par dikhegi.
+    function _setTTLCache(k,v){try{localStorage.setItem(k,JSON.stringify({v,ts:Date.now()}));}catch(e){}}
+    function _getTTLCache(k){try{const j=JSON.parse(localStorage.getItem(k)||'null');if(j&&j.ts&&Date.now()-j.ts<600000)return j.v;}catch(e){}return null;}
     function showToast(msg, type='danger'){ let c=document.getElementById('toast-container'); if(!c){ c=document.createElement('div'); c.id='toast-container'; c.style.cssText='position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(c); } const t=document.createElement('div'); t.className='alert alert-'+type+' py-2 px-3 small'; t.style.cssText='min-width:280px;box-shadow:0 4px 12px rgba(0,0,0,0.15)'; t.innerHTML=msg+' <button class="btn-close ms-2" onclick="this.parentElement.remove()"></button>'; c.appendChild(t); setTimeout(()=>t.remove(), 6000); }
 
     const F=n=>n>=0?'₹'+n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}):'-₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -1273,14 +1299,13 @@
     async function loadDashPositions(){
         // Instant render (speed fix 11-11-2026): last portfolio payload
         // localStorage se PEHLE paint, network refresh peeche.
-        let _cached=null;
-        try{_cached=JSON.parse(localStorage.getItem('dashPosCache')||'null');}catch(e){}
+        let _cached=_getTTLCache('dashPosCache');
         try{
             if(_cached&&(_cached.positions||[]).length){ _renderPosTbl(_cached); }
         }catch(e){}
         try{
             const _fresh=await A('/api/dashboard/portfolio/fast');
-            try{localStorage.setItem('dashPosCache',JSON.stringify(_fresh));}catch(e){}
+            _setTTLCache('dashPosCache',_fresh);
             _renderPosTbl(_fresh);
         }catch(e){
             console.error('loadDashPositions failed',e);
@@ -1343,7 +1368,7 @@
         if(/bad_tick/.test(s))return 'Bad Tick Fix';
         if(s==='manual')return 'Manual Exit';
         return s? s.replace(/_/g,' ') : 'Closed';}
-    async function loadDashHistory(){try{try{const _hc=localStorage.getItem('dashHistCache'); if(_hc){const _el=document.getElementById('dash-hist'); if(_el && !_el.innerHTML.trim()) _el.innerHTML=_hc;}}catch(e){} const c=await A('/api/dashboard/trade-history/fast');const _ch=(c.trades||[]).filter(t=>otmPass(t.otm_pct));const _hidH=(c.trades||[]).length-_ch.length;
+    async function loadDashHistory(){try{const _hc=_getTTLCache('dashHistCache'); if(_hc){const _el=document.getElementById('dash-hist'); if(_el && !_el.innerHTML.trim()) _el.innerHTML=_hc;} const c=await A('/api/dashboard/trade-history/fast');const _ch=(c.trades||[]).filter(t=>otmPass(t.otm_pct));const _hidH=(c.trades||[]).length-_ch.length;
         // Strategy-wise summary section
         let summHtml='';
         if(c.strategy_summary&&c.strategy_summary.length){
@@ -1355,7 +1380,7 @@
             });
             summHtml+='</tbody></table></div></div>';
         }
-        if(_ch.length){let h=summHtml+'<table><tr><th>Entry Date</th><th>Entry Time</th><th>Signal Time</th><th>Exit Date</th><th>Exit Time</th><th>Strategy</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>SL Amt</th><th>TP Amt</th><th>OTM</th><th>P&L</th><th>Exit Reason</th><th>Action</th></tr>';_ch.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');const strat=t.strategy_name||'—';const slAmt=t.stop_loss||0;const tpAmt=t.target||0;const exitReason=t.exit_reason||t.status||'—';const sigTime=t.signal_time||'—';h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td class="text-muted small">${sigTime}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td class="text-muted small">${strat}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="text-muted small">${t.sl_unit==='pct'?slAmt+'%':(t.sl_unit==='pt'?slAmt+' pts':'₹'+slAmt)}</td><td class="text-muted small">${t.tp_unit==='pct'?tpAmt+'%':(t.tp_unit==='pt'?tpAmt+' pts':'₹'+tpAmt)}</td><td>${otmBadge(t.otm_pct)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td class="text-muted small" title="${exitReason}">${exitReason}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>'+(_hidH>0?'<div class="small text-danger mt-1">⚠ '+_hidH+' trade(s) hidden — OTM % cap ('+otmVal()+'%) se bahar</div>':'');document.getElementById('dash-hist').innerHTML=h;try{localStorage.setItem('dashHistCache',h);}catch(e){}}else{document.getElementById('dash-hist').innerHTML=(summHtml||'')+'<div class="text-center p-4"><i class="bi bi-journal-text" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No trade history yet'+(((_hidH||0)>0)?' ('+_hidH+' hidden — OTM cap)':'')+'</p><small class="text-muted">Completed trades will be listed here</small></div>';};}catch(e){}}
+        if(_ch.length){let h=summHtml+'<table><tr><th>Entry Date</th><th>Entry Time</th><th>Signal Time</th><th>Exit Date</th><th>Exit Time</th><th>Strategy</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>SL Amt</th><th>TP Amt</th><th>OTM</th><th>P&L</th><th>Exit Reason</th><th>Action</th></tr>';_ch.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');const strat=t.strategy_name||'—';const slAmt=t.stop_loss||0;const tpAmt=t.target||0;const exitReason=t.exit_reason||t.status||'—';const sigTime=t.signal_time||'—';h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td class="text-muted small">${sigTime}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td class="text-muted small">${strat}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="text-muted small">${t.sl_unit==='pct'?slAmt+'%':(t.sl_unit==='pt'?slAmt+' pts':'₹'+slAmt)}</td><td class="text-muted small">${t.tp_unit==='pct'?tpAmt+'%':(t.tp_unit==='pt'?tpAmt+' pts':'₹'+tpAmt)}</td><td>${otmBadge(t.otm_pct)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td class="text-muted small" title="${exitReason}">${exitReason}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>'+(_hidH>0?'<div class="small text-danger mt-1">⚠ '+_hidH+' trade(s) hidden — OTM % cap ('+otmVal()+'%) se bahar</div>':'');document.getElementById('dash-hist').innerHTML=h;_setTTLCache('dashHistCache',h)}else{document.getElementById('dash-hist').innerHTML=(summHtml||'')+'<div class="text-center p-4"><i class="bi bi-journal-text" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No trade history yet'+(((_hidH||0)>0)?' ('+_hidH+' hidden — OTM cap)':'')+'</p><small class="text-muted">Completed trades will be listed here</small></div>';};}catch(e){}}
     async function closeTrade(id,price){if(!confirm('Close #'+id+'?'))return;await P('/api/trades/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,exit_price:price,date:new Date().toISOString().split('T')[0]})});_lastOpenTrdHTML=null;loadDash();loadTrades();try{loadDashHistory();}catch(e){}}
     async function editTradeSLTP(id,sl,tp){const nsl=prompt('Stop Loss (₹) - default 1500:',sl||1500);if(nsl===null||nsl==='')return;const ntp=prompt('Target (₹) - default 3000:',tp||3000);if(ntp===null||ntp==='')return;const r=await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:parseFloat(nsl),target:parseFloat(ntp)})});if(r.error)alert('Error: '+r.error);else{alert('Trade #'+id+' SL ₹'+nsl+' / TP ₹'+ntp+' saved — auto-monitor har 5 min me check karega');loadDashPositions();}}
     async function deleteTrade(id){if(!confirm('Delete trade #'+id+'? This cannot be undone.'))return;const r=await P('/api/trades/'+id,{method:'DELETE'});_lastOpenTrdHTML=null;if(!r.error){loadTrades();try{loadDashPositions();}catch(e){}try{loadDashHistory();}catch(e){}}else alert('Error: '+r.error);}
