@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from ..config import settings
-from ..db import get_db, init_db
+from ..db import SessionLocal, get_db, init_db
 from ..models import BacktestRun, DataCatalog, Strategy, Trade, UploadRecord
 from ..schemas import (
     BacktestRunCreate,
