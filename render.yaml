@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: ratrade
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.4
+      - key: RATRADE_DATA_DIR
+        value: /var/data/ratrade
+    disk:
+      name: ratrade-data
+      mountPath: /var/data
+      sizeGB: 10

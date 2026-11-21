@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/.git
+**/.env
+**/.venv
+**/ratrade_data
+**/*.db
+**/.DS_Store
+**/npm-debug.log
+**/yarn-error.log
