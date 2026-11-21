@@ -441,6 +441,89 @@ def health():
     return {"status": "ok", "app": settings.APP_NAME, "lakehouse": str(settings.LAKEHOUSE_DIR)}
 
 
+@router.post("/api/demo/seed")
+def demo_seed(force: bool = False):
+    """Seed demo option data + a sample backtest run (for Render Free ephemeral storage)."""
+    db = SessionLocal()
+    try:
+        existing = db.query(Strategy).filter_by(name="SuperTrend NIFTY Option Strategy").first()
+        if existing and not force:
+            return {"status": "already_seeded", "strategy_id": existing.id}
+        # Import and run the seed logic inline to avoid path issues on Render
+        import random
+        from datetime import date, datetime, time, timedelta, timezone
+        import polars as pl
+        from ..lakehouse.schema import arrow_table, SCHEMA_COLUMNS, write_parquet_atomic, normalize_option_frame
+        from ..lakehouse.ingestion import _refresh_catalog
+        from ..lakehouse.partitioning import partition_dir
+        from ..backtest.engine import BacktestEngine
+
+        random.seed(42)
+        UNDERLYING = "NIFTY"
+        SPOT = 23750.0
+        STRIKES = list(range(23600, 23901, 50))
+        EXPIRIES = [date(2026, 11, 19), date(2026, 11, 26)]
+        TRADING_DAYS = [date(2026, 11, 18), date(2026, 11, 19), date(2026, 11, 20)]
+
+        def ist(ts): return ts.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
+
+        rows = []
+        for td in TRADING_DAYS:
+            t = datetime.combine(td, time(9, 15)); end = datetime.combine(td, time(15, 30)); px = SPOT
+            while t <= end:
+                px += random.uniform(-3, 3)
+                rows.append({"timestamp": ist(t), "underlying": UNDERLYING, "data_mode": "tick", "expiry": EXPIRIES[0], "option_type": "UNDERLYING", "strike": 0.0, "ltp": round(px,2), "bid": round(px-1,2), "ask": round(px+1,2), "oi": 0, "volume": random.randint(50,500), "trade_date": td, "source":"demo"})
+                t += timedelta(seconds=5)
+            days_to_expiry_base = max((EXPIRIES[0]-td).days, 0)
+            for expiry in EXPIRIES:
+                for strike in STRIKES:
+                    for opt in ("CE","PE"):
+                        intrinsic = max(SPOT-strike,0) if opt=="CE" else max(strike-SPOT,0)
+                        base = intrinsic + max(40-days_to_expiry_base*8,4) + random.uniform(-2,2)
+                        t = datetime.combine(td, time(9,15)); end = datetime.combine(td, time(15,30)); px2 = max(base,1.0)
+                        while t <= end:
+                            px2 = max(px2 + random.uniform(-0.6,0.6), 0.5)
+                            illiquid = random.random() < 0.05
+                            bid = round(max(px2-0.7,0.2),2) if not illiquid else None
+                            ask = round(px2+0.7,2) if not illiquid else None
+                            rows.append({"timestamp": ist(t), "underlying": UNDERLYING, "data_mode":"tick", "expiry": expiry, "option_type": opt, "strike": float(strike), "ltp": round(px2,2), "bid": bid, "ask": ask, "oi": random.randint(100,5000), "volume": 0 if illiquid else random.randint(1,200), "trade_date": td, "source":"demo"})
+                            t += timedelta(seconds=30)
+
+        df = pl.DataFrame(rows)
+        total = 0
+        for keys, group in df.group_by(["underlying","data_mode","expiry","trade_date"], maintain_order=True):
+            norm = normalize_option_frame(group)
+            for _k, g in norm.group_by(["underlying","data_mode","expiry","trade_date"], maintain_order=True):
+                pdir = partition_dir(g["underlying"][0], g["data_mode"][0], g["expiry"][0], g["trade_date"][0])
+                pdir.mkdir(parents=True, exist_ok=True)
+                out = pdir / f"part-seed-{total}.parquet"
+                write_parquet_atomic(arrow_table(g.select(SCHEMA_COLUMNS + ["trade_date","ingested_at"])), out)
+                total += len(g)
+
+        _refresh_catalog(db)
+        from ..models import UploadRecord
+        db.add(UploadRecord(filename="demo_option_ticks.parquet", file_hash=f"demo-seed-render-{force}", file_size=0, rows_ingested=total, status="ingested"))
+        strategy = Strategy(name="SuperTrend NIFTY Option Strategy", user_notes="Demo strategy seeded for offline backtesting. User-editable notes.", config_json={
+            "indicators":["supertrend","rsi","adx","vwap","ema"], "strike_offset":"ATM", "expiry_type":"weekly", "option_side":"both",
+            "sl_points":15.0, "tp_points":35.0, "trailing_sl_points":7.0, "slippage_pct":0.05, "latency":"next_tick", "lot_size":50
+        })
+        db.add(strategy); db.commit(); db.refresh(strategy)
+
+        engine = BacktestEngine(db, UNDERLYING)
+        result = engine.run(strategy.config_json, "tick", date(2026,11,18), date(2026,11,20), lot_size=50, walk_forward=True)
+        run = BacktestRun(strategy_id=strategy.id, status="completed", data_mode="tick", data_source="TICK DATA", use_walk_forward=True,
+            is_start=date(2026,11,18), is_end=date(2026,11,19), oos_start=date(2026,11,20), oos_end=date(2026,11,20),
+            metrics_json={**result["metrics"], "walk_forward": result.get("walk_forward"), "is_metrics": result.get("is_metrics"), "oos_metrics": result.get("oos_metrics")},
+            summary_json={"strategy": strategy.name, "data_mode":"tick","data_source":"TICK DATA","date_range":"2026-11-18 to 2026-11-20 (walk-forward: IS 18-19 / OOS 20)", "signals_evaluated": result.get("signals_evaluated",0), "trades_executed": len(result["trades"]), "net_pnl": result["metrics"].get("net_pnl",0.0), "win_rate": result["metrics"].get("win_rate",0.0), "profit_factor": result["metrics"].get("profit_factor",0.0), "expectancy": result["metrics"].get("expectancy",0.0), "sharpe": result["metrics"].get("sharpe",0.0), "calmar": result["metrics"].get("calmar",0.0), "max_drawdown": result["metrics"].get("max_drawdown",0.0), "run_timestamp": datetime.now(timezone.utc).isoformat()},
+            started_at=datetime.now(timezone.utc), finished_at=datetime.now(timezone.utc))
+        db.add(run); db.commit(); db.refresh(run)
+        db.add_all([Trade(run_id=run.id, entry_date=t["entry_date"], entry_time=t["entry_time"], exit_date=t["exit_date"], exit_time=t["exit_time"], symbol=t["symbol"], trade_type=t["trade_type"], strike=t["strike"], expiry=t["expiry"], entry_price=t["entry_price"], exit_price=t["exit_price"], status=t["status"], pnl=t["pnl"], mae=t["mae"], mfe=t["mfe"], exit_reason=t.get("exit_reason"), is_oos=t.get("is_oos", False)) for t in result["trades"]])
+        db.commit()
+        return {"status":"seeded","rows_cached": total, "trades": len(result["trades"]), "strategy_id": strategy.id, "run_id": run.id}
+    finally:
+        db.close()
+
+
 @router.post("/api/compact-now")
 def compact_now():
     return run_nightly_compaction()
