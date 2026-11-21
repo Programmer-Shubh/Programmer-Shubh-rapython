@@ -444,11 +444,21 @@ def health():
 @router.post("/api/demo/seed")
 def demo_seed(force: bool = False):
     """Seed demo option data + a sample backtest run (for Render Free ephemeral storage)."""
+    init_db()
     db = SessionLocal()
     try:
         existing = db.query(Strategy).filter_by(name="SuperTrend NIFTY Option Strategy").first()
         if existing and not force:
-            return {"status": "already_seeded", "strategy_id": existing.id}
+            has_run = db.query(BacktestRun).filter_by(strategy_id=existing.id, status="completed").first()
+            if has_run:
+                return {"status": "already_seeded", "strategy_id": existing.id, "run_id": has_run.id}
+            # partial seed - clean up and redo
+            db.query(Strategy).filter_by(id=existing.id).delete(synchronize_session=False)
+            db.commit()
+        if force:
+            db.query(Strategy).filter_by(name="SuperTrend NIFTY Option Strategy").delete(synchronize_session=False)
+            db.query(UploadRecord).filter(UploadRecord.file_hash.like("demo-seed-render-%")).delete(synchronize_session=False)
+            db.commit()
         # Import and run the seed logic inline to avoid path issues on Render
         import random
         from datetime import date, datetime, time, timedelta, timezone
@@ -502,7 +512,8 @@ def demo_seed(force: bool = False):
 
         _refresh_catalog(db)
         from ..models import UploadRecord
-        db.add(UploadRecord(filename="demo_option_ticks.parquet", file_hash=f"demo-seed-render-{force}", file_size=0, rows_ingested=total, status="ingested"))
+        import uuid
+        db.add(UploadRecord(filename="demo_option_ticks.parquet", file_hash=f"demo-seed-render-{uuid.uuid4().hex[:12]}", file_size=0, rows_ingested=total, status="ingested"))
         strategy = Strategy(name="SuperTrend NIFTY Option Strategy", user_notes="Demo strategy seeded for offline backtesting. User-editable notes.", config_json={
             "indicators":["supertrend","rsi","adx","vwap","ema"], "strike_offset":"ATM", "expiry_type":"weekly", "option_side":"both",
             "sl_points":15.0, "tp_points":35.0, "trailing_sl_points":7.0, "slippage_pct":0.05, "latency":"next_tick", "lot_size":50
@@ -520,6 +531,9 @@ def demo_seed(force: bool = False):
         db.add_all([Trade(run_id=run.id, entry_date=t["entry_date"], entry_time=t["entry_time"], exit_date=t["exit_date"], exit_time=t["exit_time"], symbol=t["symbol"], trade_type=t["trade_type"], strike=t["strike"], expiry=t["expiry"], entry_price=t["entry_price"], exit_price=t["exit_price"], status=t["status"], pnl=t["pnl"], mae=t["mae"], mfe=t["mfe"], exit_reason=t.get("exit_reason"), is_oos=t.get("is_oos", False)) for t in result["trades"]])
         db.commit()
         return {"status":"seeded","rows_cached": total, "trades": len(result["trades"]), "strategy_id": strategy.id, "run_id": run.id}
+    except Exception as e:
+        import traceback
+        return {"status":"error","detail": str(e), "trace": traceback.format_exc()[-4000:]}
     finally:
         db.close()
 
