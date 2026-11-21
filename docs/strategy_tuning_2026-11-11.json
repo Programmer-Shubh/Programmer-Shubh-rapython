@@ -1,0 +1,189 @@
+{
+  "_meta": {
+    "date": "2026-11-11",
+    "purpose": "Win-rate tuned saved strategies (NIFTY / FINNIFTY CE Buy + NIFTY option selling). Reproducible record of the exact configs that were saved to the live DB (strategies table) with their real-engine backtest results.",
+    "backtest_window": "2026-09-08 -> 2026-11-10",
+    "timeframe": "5m",
+    "engine": "core/services/backtest_engine.py (ENGINE_VERSION v5) + realistic fill model (0.5% slippage + 3-tick spread floor + actual charges)",
+    "notes": [
+      "Win rate 95% + positive profit dono saath is data par nahi mila - 95% wale configs ka PnL negative tha (PF < 1). Ye profitable configs hain, fake 95% nahi.",
+      "Loss side ka asli source: (a) 15:15 tak hold karne par last-hour theta decay, (b) gap-through SL fills. Isliye quality entry gate + early time exit + wide (90% = practical wipe-out) SL.",
+      "SL 90% ka matlab: premium ka 90% ghata tabhi cut - intraday me rare. No-SL vs SL 90% backtest numbers identical aaye.",
+      "Paper/live me wahi SL/TP DB values use hote hain; Edit SL/TP se turant change hota hai.",
+      "BANKNIFTY #53 bhi 11-Nov ko honest engine par re-backtest hua: SL 20% config loss-making tha (-Rs32,723, 67.91% WR) - 20% SL par gap-through fills. SL 90% (user ka original 'no leg stop-loss' intent) par: 124 trades, 73.39% WR, +Rs15,220, PF 1.15. Saved result ab stale_engine=False.",
+      "11-Nov late-evening: SL 90% revert karke user ke kehne par SL 20% / TP 7% wapas lagaya (user: 'kal tak jaisa profit de rahi thi'). Honest backtest (engine v5 + real fills): 180 trades, 67.22% WR, -Rs35,587 (gap-through SL fills avg loss 2,902). Paper (corrected): 11 trades, 81.8% WR, +Rs1,283 (9W/2L) - sample chhota hai. Saved BT ab 67.2% WR / -Rs35,587 dikhata hai; SL 90% wala config (+Rs15,220 / 73.4% WR) docs me bhi record hai.",
+      "PAPER fix ke baad: target exits ab LEVEL par hote hain (pehle current quote par - fake +42% target). Stale broker quote (prev_close par entry) guard bhi add hua. Dono parity RULE-LEVEL par hain; paper WR ka backtest se 100% match isliye abhi bhi data-source (historical vs live) se limited hai - lekin rules/fill-model/exit ab identical hain, aur parity endpoint (id/parity) parity proof deta hai.",
+      "11-Nov night: user ne 'net_pnl 65000 se adhik' maanga (1 lot hi rakhna). REALISTIC fills ke saath 1 lot par 65k reachable NAHI hai - TP ladder 3..50 sweep kiya (sweep15): BANKNIFTY max +Rs55,075 (TP50/SL90, 58.7% WR), FINNIFTY +Rs24,359 (TP20, 61.5%), NIFTY Buy +Rs12,884 (TP50, 66.7%), NIFTY Sell +Rs6,851 (TP40, 66.7%). Sabhi 4 strategies ab PnL-max TP par save hain. WR kam hai (59-67%) kyunki bada TP sirf tab hit hota hai jab premium bahut tez move kare. 65k+ ke liye lots badhane padenge (user ne 1 lot ka hi kaha).",
+      "11-Nov late: user ne 'aur achha profit bhi rahe' kaha (high WR + good PnL dono). Fine TP sweep (1..7) + BANKNIFTY quality-gate sweep se har strategy ka best BALANCE config save kiya: #53 BANKNIFTY opp_combo/TP5/exit14:00 -> 87.5% WR +Rs6,954; #56 NIFTY comboA/TP3/exit14:00 -> 92.86% +Rs1,337; #57 FINNIFTY opp_combo/TP3/exit13:45 -> 89.74% +Rs9,378; #68 NIFTY PE sell comboA/TP3/exit14:00 -> 92.86% +Rs1,012. 95% WR realistic fills me abhi bhi nahi mila (max 92.86%).",
+      "11-Nov night: user ne 'sabme exit 03:15 PM + WR 95%' maanga. Exit 15:15 par max-WR (positive PnL) configs save kiye: #56 NIFTY TP2 -> 94.44% WR/+Rs234 (sabse zyada WR), #57 FINNIFTY TP2.8 -> 84.31%/+Rs2,679, #68 NIFTY PE sell TP3 -> 83.33%/+Rs246, #53 BANKNIFTY TP3.8 -> 83.72%/+Rs1,731. 95% abhi bhi nahi mila (ceiling ~94.4%). 95% wale TP (1.5-2%) par PnL negative/zero ho jaata hai kyunki round-trip cost har trade ~Rs55-60 hai.",
+      "11-Nov night round 2: user ne 'SL 30% sabhi me' + 'RSI/EMA/ST gate sabhi me' + BANKNIFTY purani default wali + exit 15:15 maanga. Sweep20 (purane gates + SL30) aur Sweep21 (plain RSI+EMA9/21+ST confluence + SL30, TP 3.8-20) chale. RSI/EMA/ST gate har jagah better nikla. Save: #56 NIFTY TP10 -> 80.45% WR/+Rs11,458 (266 trades), #57 FINNIFTY TP10 -> 73.68%/+Rs24,528 (133), #53 BANKNIFTY TP10 -> 67.74%/+Rs9,014 (124). NIFTY PE Sell #68: SL30 par saare 100+ configs negative (dono gates) - isliye SL90/TP3 (83.33%/+Rs246) hi rakha. Purana 87.59%/Rs16k BANKNIFTY result 6 lots + engine v4 ka tha."
+    ]
+  },
+  "saved_strategies": [
+    {
+      "strategy_id": 56,
+      "name": "NIFTY Intraday CE Buy - RSI/EMA/ST (SL 30%)",
+      "symbol": "NIFTY",
+      "indicators": [
+        {
+          "id": "comboA_ema_st_rsi"
+        }
+      ],
+      "legs": [
+        {
+          "option_type": "CE",
+          "transaction": "buy",
+          "lots": 1,
+          "strike_selection": "atm",
+          "otm_distance": 0,
+          "expiry": "weekly",
+          "stop_loss": "90%"
+        }
+      ],
+      "advanced_options": {
+        "trade_mode": "intraday",
+        "timeframe": "5m",
+        "entry_time": "09:35",
+        "exit_time": "15:15",
+        "slippage_pct": 0.5,
+        "strike_selection": "atm",
+        "otm_distance": 0,
+        "max_holding_bars": 1000000,
+        "auto_exit_on_time": true
+      },
+      "risk_management": {
+        "daily_stop_loss": 0,
+        "daily_stop_loss_pct": 30,
+        "daily_take_profit": 0,
+        "daily_take_profit_pct": 10,
+        "max_trades_per_day": -1,
+        "signal_lookback_days": 0,
+        "sl_unit": "pct"
+      },
+      "backtest": {
+        "total_trades": 266,
+        "win_rate": 80.45,
+        "net_pnl": 11457.82,
+        "profit_factor": 1.1084,
+        "sharpe": 1.3436
+      },
+      "why": "User: SL 30% + RSI/EMA/ST gate sabhi me. TP 10% = max WR jahan PnL strong hai. WR 80.45%, net Rs11,458. #68 PE sell SL30 par negative tha isliye SL90/TP3 rakha."
+    },
+    {
+      "strategy_id": 57,
+      "name": "FINNIFTY Intraday CE Buy - RSI/EMA/ST (SL 30%)",
+      "symbol": "FINNIFTY",
+      "indicators": [
+        {
+          "id": "opp_combo"
+        }
+      ],
+      "legs": [
+        {
+          "option_type": "CE",
+          "transaction": "buy",
+          "lots": 1,
+          "strike_selection": "atm",
+          "otm_distance": 0,
+          "expiry": "weekly",
+          "stop_loss": "90%"
+        }
+      ],
+      "advanced_options": {
+        "trade_mode": "intraday",
+        "timeframe": "5m",
+        "entry_time": "09:35",
+        "exit_time": "15:15",
+        "slippage_pct": 0.5,
+        "strike_selection": "atm",
+        "otm_distance": 0,
+        "max_holding_bars": 1000000,
+        "auto_exit_on_time": true
+      },
+      "risk_management": {
+        "daily_stop_loss": 0,
+        "daily_stop_loss_pct": 30,
+        "daily_take_profit": 0,
+        "daily_take_profit_pct": 10,
+        "max_trades_per_day": -1,
+        "signal_lookback_days": 0,
+        "sl_unit": "pct"
+      },
+      "backtest": {
+        "total_trades": 133,
+        "win_rate": 73.68,
+        "net_pnl": 24527.78,
+        "profit_factor": 1.2403,
+        "sharpe": 1.7755
+      },
+      "why": "User: SL 30% + RSI/EMA/ST gate sabhi me. TP 10% = max WR jahan PnL strong hai. WR 73.68%, net Rs24,528. #68 PE sell SL30 par negative tha isliye SL90/TP3 rakha."
+    },
+    {
+      "strategy_id": 68,
+      "name": "NIFTY Option Selling PE - 83.3% WR (Exit 15:15)",
+      "symbol": "NIFTY",
+      "indicators": [
+        {
+          "id": "comboA_ema_st_rsi"
+        }
+      ],
+      "legs": [
+        {
+          "option_type": "PE",
+          "transaction": "sell",
+          "lots": 1,
+          "strike_selection": "atm",
+          "otm_distance": 0,
+          "expiry": "weekly",
+          "stop_loss": "90%"
+        }
+      ],
+      "advanced_options": {
+        "trade_mode": "intraday",
+        "timeframe": "5m",
+        "entry_time": "09:35",
+        "exit_time": "15:15",
+        "slippage_pct": 0.5,
+        "strike_selection": "atm",
+        "otm_distance": 0,
+        "max_holding_bars": 1000000,
+        "auto_exit_on_time": true
+      },
+      "risk_management": {
+        "daily_stop_loss": 0,
+        "daily_stop_loss_pct": 90,
+        "daily_take_profit": 0,
+        "daily_take_profit_pct": 3,
+        "max_trades_per_day": -1,
+        "signal_lookback_days": 0,
+        "sl_unit": "pct"
+      },
+      "backtest": {
+        "total_trades": 18,
+        "win_rate": 83.33,
+        "net_pnl": 246.4,
+        "profit_factor": 1.1481,
+        "sharpe": 0.528
+      },
+      "why": "Exit 15:15 (user) + max WR jahan PnL positive hai. WR 83.33%, net Rs246, PF 1.1481. 95% realistic fills me nahi mila."
+    }
+  ],
+  "sweep_evidence": {
+    "total_configs_tested": 120,
+    "key_findings": [
+      "Har-bar auto signal (koi indicator nahi) par WR 69-83% aur PnL bade negative - signal quality hi asli driver hai.",
+      "TP 2-3% + time exit 13:45/14:00 = WR up, loss size down.",
+      "Trailing 'lock' (breakeven lock) scratch exits ko 'loss' dikhata hai -> WR girata hai, isliye use nahi kiya.",
+      "NIFTY CE sell (option selling) har config me negative tha; sirf PE sell profitable nikla.",
+      "SL 20% + gap fills = avg_loss 1700-5000 (catastrophic); SL 90% (wipe-out) + early exit = avg_loss 800-1700."
+    ]
+  },
+  "parity_fixes_2026-11-11": {
+    "paper_tp_exit_at_level": "Paper monitor TP hit par LEVEL par exit karta hai (pehle current quote par - fake +42% target profit). Backtest parity.",
+    "stale_quote_guard": "Fyers lp aaj ke traded range (low/high) ke bahar ho to stale maankar reject (pehle stale prev_close par entry lag rahi thi - aaj kabhi trade nahi hua premium).",
+    "soft_spike_guard": "Paper monitor 10s scan me 0.6x/1.6x se bada quote jump skip karta hai.",
+    "trailing_lock": "lock_profit_at/lock_profit (UI ke 'Lock if profit reaches' / 'Lock profit') pehle engine me IGNORE hote the - ab backtest + paper dono me kaam karte hain (shared utils.helpers.trailing_lock_level).",
+    "parity_endpoint": "GET /api/strategies/{id}/parity - backtest vs paper vs live side-by-side (rules echo + trades/WR/PnL each).",
+    "dashboard_bt_columns": "Strategy-wise summary table me BT Win %, BT P&L aur Paper-BT delta columns."
+  }
+}

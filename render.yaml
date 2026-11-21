@@ -4,12 +4,26 @@ services:
     runtime: docker
     plan: starter
     autoDeploy: true
-    healthCheckPath: /api/health
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.4
-      - key: RATRADE_DATA_DIR
-        value: /var/data/ratrade
+        value: 3.11.9
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: MARKET_MODE
+        value: auto
+      - key: DB_PATH
+        value: /var/data/ratrade.db
+      - key: DATABASE_URL
+        sync: false
+      - key: RATRADE_FYERS_APP_ID
+        sync: false
+      - key: RATRADE_FYERS_SECRET_ID
+        sync: false
+      - key: RATRADE_FYERS_REDIRECT_URI
+        value: "https://ratrade-iwi2.onrender.com/api/broker/fyers-callback"
+      - key: RATRADE_FYERS_PIN
+        sync: false
     disk:
       name: ratrade-data
       mountPath: /var/data

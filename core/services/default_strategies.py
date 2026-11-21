@@ -1,0 +1,359 @@
+# -*- coding: utf-8 -*-
+"""Default strategies - REMOVED permanently (user 15-11-2026).
+RENDER: v1 + v2 NIFTY option-selling defaults deleted by seed cleanup below.
+Ab koi bhi default strategy seed nahi hoti (DEFAULT_STRATEGIES = []).
+Nayi defaults add karna ho to is file me entry add karo - cleanup list me
+remove wali names bhi update karni padti hain."""
+
+DEFAULT_STRATEGIES = []
+
+# User request (11-11-2026): aaj ke SENSEX/MIDCPNIFTY BUY strategies DELETE -
+# 95% win-rate target data par nahi mila, isliye inhe save nahi rakhna.
+# Ye names seed se hata diye; startup par ye entries DB se bhi clean hoti hain.
+REMOVED_DEFAULT_STRATEGIES = [
+    "SENSEX Buy Option (Auto CE/PE) - Tight TP",
+    "SENSEX Buy Option (Auto CE/PE) - High Profit",
+    "MIDCPNIFTY Buy Option (Auto CE/PE) - Tight TP",
+    "MIDCPNIFTY Buy Option (Auto CE/PE) - Balanced",
+    # User request (15-11-2026): dono Default NIFTY option-selling strategies
+    # permanently DELETE - ab SAVE/SEED na ho.
+    "NIFTY Intraday Sell PE + VIX Filter",
+    "NIFTY Intraday Sell PE + VIX Filter (v2)",
+]
+
+
+def cleanup_removed_defaults(db=None):
+    """Removed defaults ko strategies + strategy_results se delete karo.
+    Sirf EXACT name match; user ki khud ki entries kabhi nahi chhooti. Idempotent."""
+    if db is None:
+        from core.models.database import Database
+        db = Database.get_instance()
+    deleted = 0
+    for name in REMOVED_DEFAULT_STRATEGIES:
+        try:
+            rows = db.fetch_all("SELECT id FROM strategies WHERE name=? ORDER BY id", [name])
+            for _row in (rows or []):
+                try:
+                    sid = int(_row["id"])
+                except Exception:
+                    continue
+                try:
+                    db.execute("DELETE FROM strategy_results WHERE strategy_id=?", [sid])
+                except Exception:
+                    pass
+                db.execute("DELETE FROM strategies WHERE id=?", [sid])
+                deleted += 1
+        except Exception:
+            continue
+    return deleted
+
+
+def _run_backtest_and_save(db, strat_id, _sc):
+    """Run backtest for a default strategy and save result so BT detail always shows."""
+    import json as _js
+    try:
+        from routes.strategy_builder import _run_backtest_core, BacktestRequest
+        req = BacktestRequest(
+            symbol=_sc["symbol"], symbols=[_sc["symbol"]],
+            start_date=_sc["start_date"], end_date=_sc["end_date"],
+            indicators=_sc["indicators"],
+            entry_conditions=_sc["entry_conditions"],
+            exit_conditions=_sc["exit_conditions"],
+            legs=_sc["legs"],
+            advanced=_sc["advanced_options"],
+            risk=_sc["risk_management"],
+        )
+        res = _run_backtest_core(req) or {}
+        m = res.get("metrics") or {}
+        if isinstance(m, dict) and m.get("total_trades") is not None:
+            db.execute(
+                "UPDATE strategies SET last_backtest=?, last_backtest_at=datetime('now') WHERE id=?",
+                [_js.dumps(res, default=str), strat_id],
+            )
+            # Also archive to strategy_results so _bt_summary fallback works
+            try:
+                from routes.strategies import _ensure_results_table, _archive_result
+                _ensure_results_table()
+                _archive_result(strat_id, res, "default-seed", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+            except Exception:
+                pass
+            return True
+    except Exception as e:
+        try:
+            import sys as _sys
+            print(f"[seed BT] {_sc['name']}: {e}", file=_sys.stderr, flush=True)
+        except Exception:
+            pass
+    return False
+
+
+def fix_paper_trade_sltp_units(db=None):
+    """OPEN paper trades ka SL/TP unit strategy ke saath SYNC karo.
+
+    BUG (16-11-2026): `sltp_unit()` 'pt' (points) ko 'rs' (rupees) me
+    convert kar deta tha. Iska matlab: ek 30-POINT stop-loss paper trade row
+    me 30-RUPEES stop-loss ban jata tha -> monitor level = entry ∓ (30 /
+    (lots x lot)) = 0.6 points par collapse -> trade ENTRY ke SAME MINUTE me
+    hi SL/TP par kat jata tha (NIFTY 217.83 -> 214.92 'stoploss',
+    BANKNIFTY 490.64 -> 489.51 'target' + LOSS). Har paper trade instant
+    exit + loss dikha raha tha.
+
+    Fix: jis open trade ki strategy points/percent unit use kar rahi hai
+    aur trade row me 'rs' pada hai -> row ko strategy ke sahi SL/TP amount
+    + unit ke saath update karo. Sirf OPEN trades (closed history nahi
+    chhedte - audit trail bacha rahe). Idempotent.
+    """
+    import json as _js
+    if db is None:
+        from core.models.database import Database
+        db = Database.get_instance()
+    try:
+        rows = db.fetch_all(
+            "SELECT t.id, t.stop_loss, t.target, t.sl_unit, t.tp_unit,"
+            " s.risk_management AS rm, s.legs AS lg"
+            " FROM paper_trades t LEFT JOIN strategies s ON s.id = t.strategy_id"
+            " WHERE t.status='open' AND t.strategy_id IS NOT NULL"
+        ) or []
+    except Exception:
+        return 0
+    changed = 0
+    for r in rows or []:
+        try:
+            rm = _js.loads(r.get("rm") or "{}")
+            if not isinstance(rm, dict):
+                continue
+            legs = _js.loads(r.get("lg") or "[]")
+            if not isinstance(legs, list) or not legs:
+                continue
+            from utils.helpers import resolve_strategy_sltp as _res
+            sl, sl_u, tp, tp_u = _res(rm, legs[0])
+            _sl_row = str(r.get("sl_unit") or "rs").lower()
+            _tp_row = str(r.get("tp_unit") or "rs").lower()
+            _sl_set = str(r.get("sl_unit") or "rs")
+            _tp_set = str(r.get("tp_unit") or "rs")
+            dirty = False
+            if sl_u in ("pt", "pct") and _sl_row == "rs":
+                _sl_set = sl_u
+                dirty = True
+            if tp_u in ("pt", "pct") and _tp_row == "rs":
+                _tp_set = tp_u
+                dirty = True
+            if not dirty:
+                continue
+            db.execute(
+                "UPDATE paper_trades SET stop_loss=?, target=?, sl_unit=?,"
+                " tp_unit=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                [float(sl or 0), float(tp or 0), _sl_set, _tp_set, r.get("id")])
+            changed += 1
+        except Exception:
+            continue
+    return changed
+
+
+def seed_default_strategies():
+    """Seed default NIFTY strategies (always present, protected). Idempotent."""
+    import json as _js
+    import datetime as _dt
+    from core.models.database import Database
+    db = Database.get_instance()
+    # Ensure protected column exists
+    try:
+        db.execute("ALTER TABLE strategies ADD COLUMN protected INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    for _sc in DEFAULT_STRATEGIES:
+        try:
+            _existing = db.fetch_one("SELECT id, last_backtest FROM strategies WHERE name=?", [_sc["name"]])
+            if _existing:
+                # Update protected flag and settings (always re-save)
+                db.execute(
+                    """UPDATE strategies SET symbol=?, start_date=?, end_date=?, timeframe=?,
+                       description=?, indicators=?, entry_conditions=?, exit_conditions=?,
+                       legs=?, advanced_options=?, risk_management=?, status=?, protected=1
+                       WHERE id=?""",
+                    [_sc["symbol"], _sc["start_date"], _sc["end_date"], _sc["timeframe"],
+                     _sc["description"], _js.dumps(_sc["indicators"]),
+                     _js.dumps(_sc["entry_conditions"]), _js.dumps(_sc["exit_conditions"]),
+                     _js.dumps(_sc["legs"]), _js.dumps(_sc["advanced_options"]),
+                     _js.dumps(_sc["risk_management"]), _sc["status"], _existing["id"]])
+                # If no backtest result, run one and save it
+                _need_bt = not _existing.get("last_backtest")
+                if _need_bt:
+                    _run_backtest_and_save(db, _existing["id"], _sc)
+            else:
+                db.execute(
+                    """INSERT INTO strategies (user_id,name,symbol,start_date,end_date,timeframe,description,indicators,entry_conditions,exit_conditions,legs,advanced_options,risk_management,status,protected)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    [1, _sc["name"], _sc["symbol"], _sc["start_date"], _sc["end_date"], _sc["timeframe"],
+                     _sc["description"], _js.dumps(_sc["indicators"]),
+                     _js.dumps(_sc["entry_conditions"]), _js.dumps(_sc["exit_conditions"]),
+                     _js.dumps(_sc["legs"]), _js.dumps(_sc["advanced_options"]),
+                     _js.dumps(_sc["risk_management"]), _sc["status"], _sc["protected"]])
+                _row = db.fetch_one("SELECT id FROM strategies WHERE name=? ORDER BY id DESC LIMIT 1", [_sc["name"]])
+                if _row:
+                    _run_backtest_and_save(db, _row["id"], _sc)
+        except Exception as e:
+            try:
+                import sys as _sys
+                print(f"[seed] {_sc['name']}: {e}", file=_sys.stderr, flush=True)
+            except Exception:
+                pass
+    # One-time data cleanup: removed default strategies (user 11-11-2026)
+    try:
+        cleanup_removed_defaults(db)
+    except Exception:
+        pass
+    # One-time data migration: existing saved strategies carried legacy caps
+    # (max 5 trades/day, 5000 daily loss). Normalize them to unlimited so
+    # Fyers keeps taking every valid signal all day.
+    try:
+        normalize_daily_limits(db)
+    except Exception:
+        pass
+    # SL/TP unit sync (16-11-2026 bug): 'pt' -> 'rs' convert hone se open
+    # paper trades ka SL/TP 0.5-3 points par collapse ho jata tha aur trade
+    # entry ke same minute me kat jata tha.
+    try:
+        fix_paper_trade_sltp_units(db)
+    except Exception:
+        pass
+    # Tight-target saved strategies ki 100%/150% SL -> active 20%/30% SL.
+    # Pehle 100%+ math monitor par disabled level banata tha; current
+    # open positions bhi isi naye level par katne lagti hain.
+    try:
+        normalize_aggressive_sl(db)
+    except Exception:
+        pass
+
+
+def normalize_daily_limits(db=None):
+    """ONE-TIME legacy cleanup (guarded by settings flag).
+
+    Legacy saved strategies carried positive caps (e.g. 5 trades/day, 5000
+    daily loss) from the pre-rulebook era. Old behavior forced them to
+    unlimited on EVERY boot - which also stripped user-configured limits.
+    Ab: ek hi baar chalti hai (settings flag). Rulebook (17-11-2026) ke
+    baad save/updated strategies ka configured value KABHI overwrite nahi
+    hota; missing stays unlimited.
+    """
+    import json as _js
+    if db is None:
+        from core.models.database import Database
+        db = Database.get_instance()
+    try:
+        _flag = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key='normalize_daily_limits_v2_done'")
+        if _flag and str(_flag.get("setting_value") or "") == "1":
+            return 0
+    except Exception:
+        pass
+    try:
+        rows = db.fetch_all("SELECT id, risk_management FROM strategies")
+    except Exception:
+        return 0
+    changed = 0
+    for r in rows or []:
+        try:
+            rm = _js.loads(r.get("risk_management") or "{}")
+            if not isinstance(rm, dict):
+                continue
+            dirty = False
+            try:
+                _mt = int(rm.get("max_trades_per_day", -1))
+            except Exception:
+                _mt = -1
+            if _mt >= 0:
+                rm["max_trades_per_day"] = -1
+                dirty = True
+            for _k in ("daily_loss_limit", "daily_max_loss", "max_daily_loss"):
+                if _k in rm:
+                    try:
+                        if float(rm.get(_k) or 0) != 0:
+                            rm[_k] = 0
+                            dirty = True
+                    except Exception:
+                        rm[_k] = 0
+                        dirty = True
+            if dirty:
+                db.execute("UPDATE strategies SET risk_management=? WHERE id=?",
+                           [_js.dumps(rm), r.get("id")])
+                changed += 1
+        except Exception:
+            continue
+    try:
+        db.execute(
+            "INSERT INTO settings (setting_key, setting_value, updated_at) "
+            "VALUES ('normalize_daily_limits_v2_done','1',CURRENT_TIMESTAMP) "
+            "ON CONFLICT(setting_key) DO UPDATE SET setting_value='1', updated_at=CURRENT_TIMESTAMP")
+    except Exception:
+        try:
+            db.execute(
+                "INSERT OR REPLACE INTO settings (setting_key, setting_value, updated_at) "
+                "VALUES ('normalize_daily_limits_v2_done','1',CURRENT_TIMESTAMP)")
+        except Exception:
+            pass
+    return changed
+
+
+def normalize_aggressive_sl(db=None):
+    """Activate very high percent SLs (>=100%) at an executable stop.
+
+    User rule (2026-11-27): previously saved BUY strategies carry SL 100% or
+    150% with TP only 5-8%. With the premium math, those stopped at ~zero, so
+    positions could stay open in heavy loss. Cap them to a conservative
+    premium stop instead: TP <= 10% -> 20%, otherwise 30%. The value and
+    trade copies are updated in place, so the existing open positions use it
+    on the next monitor scan. Idempotent: only writes values >=100.
+    """
+    import json as _js
+    if db is None:
+        from core.models.database import Database
+        db = Database.get_instance()
+    try:
+        rows = db.fetch_all("SELECT id, risk_management, legs FROM strategies")
+    except Exception:
+        return 0
+    changed = 0
+    for r in rows or []:
+        try:
+            sid = int(r.get("id") or 0)
+            if not sid:
+                continue
+            rm = _js.loads(r.get("risk_management") or "{}")
+            if not isinstance(rm, dict):
+                continue
+            try:
+                sl_pct = float(rm.get("daily_stop_loss_pct") or 0)
+            except Exception:
+                continue
+            if sl_pct < 100:
+                continue
+            try:
+                tp_pct = float(rm.get("daily_take_profit_pct") or 0)
+            except Exception:
+                tp_pct = 0.0
+            cap = 20.0 if tp_pct <= 10 else 30.0
+            rm["daily_stop_loss_pct"] = cap
+            rm["daily_stop_loss"] = 0
+            rm["sl_unit"] = "pct"
+            try:
+                legs = _js.loads(r.get("legs") or "[]")
+            except Exception:
+                legs = []
+            if isinstance(legs, list):
+                for leg in legs:
+                    if isinstance(leg, dict):
+                        leg["stop_loss"] = f"{cap:g}%"
+            db.execute(
+                "UPDATE strategies SET risk_management=?, legs=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                [_js.dumps(rm), _js.dumps(legs), sid],
+            )
+            # Strategy se kati copy par nahi - already-open position ke row
+            # par bhi naya stop lagao, warna monitor purana 100% level padhega.
+            db.execute(
+                "UPDATE paper_trades SET stop_loss=?, sl_unit='pct', updated_at=CURRENT_TIMESTAMP WHERE strategy_id=? AND status='open'",
+                [cap, sid],
+            )
+            changed += 1
+        except Exception:
+            continue
+    return changed

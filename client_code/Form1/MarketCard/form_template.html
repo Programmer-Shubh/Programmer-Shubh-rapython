@@ -1,0 +1,6 @@
+<anvil-form container="ColumnPanel" prop:role="rt-market-card">
+  <anvil-component type="Label" name="symbol_label" bind:text="self.item['symbol']" prop:role="rt-symbol"></anvil-component>
+  <anvil-component type="Label" name="price_label" bind:text="self.item['price_formatted']" prop:role="rt-price"></anvil-component>
+  <anvil-component type="Label" name="change_label" bind:text="self.item['change_formatted']" prop:role="rt-change"></anvil-component>
+  <anvil-component type="Label" name="source_label" bind:text="self.item['source']" prop:role="rt-muted"></anvil-component>
+</anvil-form>

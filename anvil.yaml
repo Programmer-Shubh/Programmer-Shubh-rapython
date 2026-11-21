@@ -1,0 +1,43 @@
+db_schema:
+  table_1:
+    client: none
+    columns:
+    - admin_ui: {order: 0, width: 200}
+      client_hidden: false
+      name: DATABASE_URL
+      type: simpleObject
+    indexes: []
+    server: full
+    title: Table 1
+  table_2:
+    client: none
+    columns: []
+    indexes: []
+    server: full
+    title: Table 2
+  table_3:
+    client: none
+    columns: []
+    indexes: []
+    server: full
+    title: Table 3
+metadata: {logo_img: 'asset:ratrade-logo.svg', title: trading}
+name: trading
+native_deps:
+  head_html: |2
+
+    <style>
+      .anvil-panel-section-container { padding: 0 15px; }
+    </style>
+package_name: ratrade
+runtime_options:
+  client_version: '2'
+  server_spec: {}
+  server_version: python3-sandbox
+  version: 2
+services:
+- client_config: {enable_v2: true}
+  server_config: {}
+  source: /runtime/services/tables.yml
+startup_form: Form1
+uplink_visible: true

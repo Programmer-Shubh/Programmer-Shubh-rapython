@@ -1,0 +1,879 @@
+import math
+import os, json, time as _time
+
+_NSE_LOTS_CACHE = None
+_NSE_LOTS_CACHE_TS = 0
+_NSE_LOTS_TTL = 24*3600
+_NSE_LOTS_FAIL_TS = 0
+_NSE_LOTS_FAIL_TTL = 600
+
+def _load_nse_lots():
+    global _NSE_LOTS_CACHE, _NSE_LOTS_CACHE_TS, _NSE_LOTS_FAIL_TS
+    if _NSE_LOTS_CACHE and _time.time() - _NSE_LOTS_CACHE_TS < _NSE_LOTS_TTL:
+        return _NSE_LOTS_CACHE
+    # Negative cache: a failed fetch must not retry on every tick (each retry
+    # costs seconds of NSE timeouts inside hot loops like the backtest engine)
+    if _time.time() - _NSE_LOTS_FAIL_TS < _NSE_LOTS_FAIL_TTL:
+        return _NSE_LOTS_CACHE
+    # Try daily file cache
+    for p in [os.path.join(os.path.dirname(__file__), "..", "data", "nse_lots.json"), os.path.join("data","nse_lots.json")]:
+        try:
+            if os.path.exists(p):
+                with open(p,"r") as f: j=json.load(f)
+                if j.get("ts",0) > _time.time() - _NSE_LOTS_TTL and j.get("lots"):
+                    _NSE_LOTS_CACHE=j["lots"]; _NSE_LOTS_CACHE_TS=j["ts"]; return _NSE_LOTS_CACHE
+        except Exception: pass
+    # Fetch from NSE
+    try:
+        import urllib.request as _ur
+        _ur_headers={"User-Agent":"Mozilla/5.0"}
+        # NSE endpoint for F&O securities
+        for url in ["https://www.nseindia.com/api/equity-stockIndices?index=SECURITIES%20IN%20F%26O","https://archives.nseindia.com/content/fo/fo_mktlots.csv"]:
+            try:
+                req=_ur.Request(url, headers=_ur_headers)
+                with _ur.urlopen(req, timeout=5) as r:
+                    data=r.read().decode()
+                    lots={}
+                    if "symbol" in data.lower():
+                        import csv, io
+                        reader=csv.DictReader(io.StringIO(data))
+                        for row in reader:
+                            sym=(row.get("SYMBOL") or row.get("symbol") or "").strip().upper()
+                            ls=row.get("LOT SIZE") or row.get("lotSize") or row.get("marketLot") or ""
+                            try: lots[sym]=int(str(ls).strip())
+                            except: pass
+                    elif data.strip().startswith("{"):
+                        j=json.loads(data)
+                        for d in j.get("data",[]):
+                            sym=str(d.get("symbol","")).upper(); ls=d.get("marketLot") or d.get("lotSize")
+                            try: lots[sym]=int(ls)
+                            except: pass
+                    if lots:
+                        _NSE_LOTS_CACHE=lots; _NSE_LOTS_CACHE_TS=_time.time()
+                        # persist
+                        try:
+                            os.makedirs("data", exist_ok=True)
+                            with open("data/nse_lots.json","w") as f: json.dump({"ts":_NSE_LOTS_CACHE_TS,"lots":lots},f)
+                        except: pass
+                        return lots
+            except Exception: continue
+    except Exception: pass
+    _NSE_LOTS_FAIL_TS = _time.time()
+    return _NSE_LOTS_CACHE
+
+# Verified static lot map (module-level taaki get_lot_size + official_lot
+# ek hi source dekhen - drift impossible). NSE lots Dec-2025 revision
+# (ICICI-Direct: NIFTY 65, BANKNIFTY 30, FINNIFTY 60);
+# BSE lots Oct-2026 verified (SENSEX 20, BANKEX 30). Broker master (NSE)
+# runtime par override karta hai.
+_STATIC_LOTS = {
+    "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60,
+    "SENSEX": 20, "BANKEX": 30,
+    "RELIANCE": 500, "HDFCBANK": 650, "ICICIBANK": 700,
+    "TCS": 225, "INFY": 400, "ITC": 1725, "SBIN": 750,
+    "AXISBANK": 625, "KOTAKBANK": 2000, "LT": 175, "HINDUNILVR": 300,
+    "BHARTIARTL": 475, "M&M": 200, "MARUTI": 50, "BAJFINANCE": 750,
+    "WIPRO": 3000, "ONGC": 2250, "SUNPHARMA": 350, "ULTRACEMCO": 50,
+    "NTPC": 1500, "POWERGRID": 1900, "TATAMOTORS": 1125, "TATASTEEL": 2750,
+    "HCLTECH": 400, "JSWSTEEL": 675, "COALINDIA": 1350, "DRREDDY": 625,
+    "CIPLA": 425, "ADANIENT": 309, "SBILIFE": 375, "BPCL": 1975,
+    "GRASIM": 250, "TECHM": 600, "DIVISLAB": 100, "EICHERMOT": 100,
+    "BRITANNIA": 125, "HINDALCO": 700, "VEDL": 1150, "INDUSINDBK": 700,
+    "SHREECEM": 25, "NESTLEIND": 500, "BAJAJFINSV": 300, "HEROMOTOCO": 150,
+    "APOLLOHOSP": 125, "UPL": 1355, "BAJAJHLDNG": 75, "ALKEM": 125,
+    "TITAN": 175,
+    # Naye F&O additions (scrip-master verified 2026-10-15 - taaki
+    # cold-start par bhi lot block na ho).
+    "BOSCHLTD": 25, "EICHERMOT": 100, "FORCEMOT": 25, "HDFCAMC": 300,
+    "MPHASIS": 275, "OFSS": 50, "PAGEIND": 20, "POWERINDIA": 25,
+    "SOLARINDS": 25, "SRF": 200, "WAAREEENER": 175,
+    # BAJAJ-AUTO 75 (NSE market-lots file Oct-2026, 2 sources; scrip master me
+    # naam alag hone se broker lookup miss hota hai).
+    "BAJAJ-AUTO": 75,
+    "GOLDBEES": 100, "SILVERBEES": 100,
+}
+
+
+def get_lot_size(symbol: str) -> int:
+    s = str(symbol or "").strip().upper()
+    if not s:
+        return 50
+    # 1) Broker instrument master (official, dynamic). Cached/disk - instant
+    #    after warmup; cold start par None (neeche static). Kabhi block nahi.
+    try:
+        from core.services.lot_master import get_lot as _bl
+        _lot, _src = _bl(s)
+        if _lot and int(_lot) > 0:
+            return int(_lot)
+    except Exception:
+        pass
+    # Hardcoded map FIRST (instant): network fetch only for unknown symbols.
+    # The old order called _load_nse_lots() (seconds of NSE timeouts) on every
+    # get_lot_size() even for symbols already in the map below.
+    _hit = _STATIC_LOTS.get(s)
+    if _hit:
+        return _hit
+    try:
+        live = _load_nse_lots()
+        if live and s in live:
+            return int(live[s])
+    except Exception:
+        pass
+    return 50
+
+
+def official_lot(symbol: str):
+    """Single source of truth: (lot, source, verified).
+    verified=True sirf tab jab lot kisi official jagah se aaya ho
+    (broker-master / nse / verified static map). Unknown symbol par
+    (50, 'default', False) - order paths is par TRADE BLOCK karte hain
+    taaki galat lot par kabhi order na lage (SENSEX-10 jaisa case)."""
+    try:
+        s = str(symbol or "").strip().upper()
+        if not s:
+            return 50, "default", False
+        try:
+            from core.services.lot_master import get_lot as _bl
+            _lot, _src = _bl(s)
+            if _lot and int(_lot) > 0:
+                return int(_lot), str(_src or "broker-master"), True
+        except Exception:
+            pass
+        try:
+            live = _load_nse_lots()
+            if live and s in live and int(live[s] or 0) > 0:
+                return int(live[s]), "nse", True
+        except Exception:
+            pass
+        if s in _STATIC_LOTS:
+            try:
+                return int(_STATIC_LOTS[s]), "static-map", True
+            except Exception:
+                pass
+        return 50, "default", False
+    except Exception:
+        return 50, "default", False
+
+
+def lot_guard_error(symbol: str):
+    """Order-time lot gate: None = lot verified (order OK); str = block reason.
+    Har order path (paper/live/webhook/auto) isko check karta hai - galat ya
+    unverified lot par TRADE LAGTA HI NAHI (fail-closed)."""
+    try:
+        _lot, _src, _ok = official_lot(symbol)
+        if _ok and _lot and int(_lot) > 0:
+            return None
+        return (f"{str(symbol or '').upper()} ka official lot size verify nahi hua "
+                f"(source: {_src}) - galat lot par order BLOCK. Symbol naam check karo.")
+    except Exception:
+        return f"{symbol} ka lot verify nahi hua - order BLOCK."
+
+
+def effective_lot_size(symbol: str, stored=None) -> int:
+    """Display/live lot for OPEN positions: dynamic lookup wins (stale stored
+    50/175/150 kabhi nahi), lookup fail par stored, phir 50. Closed history
+    hamesha stored lot par rehti hai (as-recorded record)."""
+    try:
+        v = get_lot_size(symbol)
+        if v and int(v) > 0:
+            return int(v)
+    except Exception:
+        pass
+    try:
+        if stored and int(stored) > 0:
+            return int(stored)
+    except Exception:
+        pass
+    return 50
+
+
+def lot_source(symbol: str) -> str:
+    """Kahan se aaya: broker-master | nse | static-map | default (transparency).
+    Unknown symbol (50-default guess) par 'default' - order paths is par block."""
+    try:
+        return official_lot(symbol)[1]
+    except Exception:
+        return "default"
+
+
+OPTION_INDICES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+
+# Canonical NSE F&O stock list (options exist ONLY on these + indices).
+# ETFs like GOLDBEES/SILVERBEES have NO options - option backtests/orders
+# on them are fantasy (model Rs1.5 premiums on strikes that can't trade).
+FNO_STOCKS = {'RELIANCE','HDFCBANK','ICICIBANK','TCS','INFY','ITC','SBIN','AXISBANK','KOTAKBANK','LT','HINDUNILVR','BHARTIARTL','M&M','MARUTI','BAJFINANCE','WIPRO','ONGC','SUNPHARMA','ULTRACEMCO','NTPC','POWERGRID','TATAMOTORS','TATASTEEL','HCLTECH','JSWSTEEL','COALINDIA','DRREDDY','CIPLA','ADANIENT','SBILIFE','BPCL','GRASIM','TECHM','DIVISLAB','EICHERMOT','BRITANNIA','HINDALCO','VEDL','INDUSINDBK','SHREECEM','NESTLEIND','BAJAJFINSV','HEROMOTOCO','APOLLOHOSP','UPL','TITAN','BAJAJ-AUTO','NESTLEIND','TRENT','BEL','DMART','INDIGO','CONCOR','LTF',
+# NSE F&O expansion (official derivatives - backtest/live block hote the)
+'ABB','AMBER','ALKEM','ASIANPAINT','BAJAJHLDNG','BOSCHLTD','CDSL','CUMMINSIND','DIXON','FORCEMOT','GVT&D','HAL','KEI','LTM','OFSS','PAGEIND','PERSISTENT','POLYCAB','POWERINDIA','RADICO','SIEMENS','SOLARINDS','TORNTPHARM','TVSMOTOR','TATAPOWER','TATACONSUM','COLPAL','DABUR','MARICO','MUTHOOTFIN','SRF','PIDILITIND','CROMPTON','VOLTAS','ASHOKLEY','BAJAJHLDNG','KAYNES','KPITTECH','MPHASIS','COFORGE','PERSISTENT'}
+
+# DB ground-truth caches (official NSE bhavcopy rows = derivatives exist;
+# static lists purani pad jati hain, ye khud update hota hai)
+_DB_FNO_CACHE = {"ts": 0, "syms": set()}
+_DB_FNO_TTL = 3600
+_DB_STEP_CACHE = {}
+_DB_STEP_TTL = 3600
+
+
+def _db_has_options(symbol: str) -> bool:
+    """Official NSE F&O bhavcopy me 50+ option rows = options exist karte hain."""
+    try:
+        s = str(symbol or "").strip().upper()
+        if not s:
+            return False
+        now = _time.time()
+        if now - _DB_FNO_CACHE["ts"] < _DB_FNO_TTL and _DB_FNO_CACHE["syms"]:
+            return s in _DB_FNO_CACHE["syms"]
+        from core.models.database import Database as _DB
+        rows = _DB.get_instance().fetch_all(
+            "SELECT symbol FROM bhavcopy_data WHERE option_type IN ('CE','PE') "
+            "GROUP BY symbol HAVING COUNT(*) >= 50")
+        syms = {str((r or {}).get("symbol") or "").upper() for r in (rows or [])}
+        _DB_FNO_CACHE.update({"ts": now, "syms": syms})
+        return s in syms
+    except Exception:
+        return False
+
+
+def _db_strike_step(symbol: str) -> float:
+    """Asli traded strikes ka GCD = exchange step (ground truth)."""
+    try:
+        s = str(symbol or "").strip().upper()
+        now = _time.time()
+        hit = _DB_STEP_CACHE.get(s)
+        if hit and now - hit[0] < _DB_STEP_TTL:
+            return hit[1]
+        from core.models.database import Database as _DB
+        rows = _DB.get_instance().fetch_all(
+            "SELECT DISTINCT strike_price AS k FROM bhavcopy_data WHERE symbol=? "
+            "AND option_type IN ('CE','PE') AND strike_price > 0 LIMIT 200", [s])
+        import math as _m
+        g = 0
+        for r in (rows or []):
+            try:
+                g = _m.gcd(g, int(round(float(r["k"]) * 100)))
+            except Exception:
+                continue
+        step = round(g / 100, 2) if g > 0 else 0
+        if step < 1 or step > 1000:
+            return 0
+        _DB_STEP_CACHE[s] = (now, step)
+        return step
+    except Exception:
+        return 0
+
+
+def is_optionable(symbol: str) -> bool:
+    """True only if exchange-traded options exist (index or F&O stock).
+    Static list first (instant), phir DB ground-truth (naye F&O additions
+    code-update ke bina kaam karte hain)."""
+    try:
+        s = str(symbol or "").strip().upper()
+        if s in OPTION_INDICES or s in FNO_STOCKS:
+            return True
+        return _db_has_options(s)
+    except Exception:
+        return False
+
+
+# Minimum option premium (₹) for backtest entries AND live/paper orders.
+# ₹1-2 lottery tickets (far-OTM) are blocked everywhere: SELL me unlimited
+# risk for pennies, BUY me predictable decay. EQ (equity) legs exempt.
+# User rule 27-10-2026: "₹15 se jyada wale" - floor 20 se 15 kiya taki valid
+# strikes (BANKNIFTY Nov monthly CE ₹15.85) live/paper par block na hon.
+# Far-OTM junk ab OTM-20% cap se block hota hai (auto_paper + option_chain).
+MIN_ORDER_PREMIUM = 15.0
+
+
+def check_min_premium(premium, option_type: str = "CE") -> str | None:
+    """Error string if option premium below floor, else None (pass)."""
+    try:
+        if str(option_type or "").upper() == "EQ":
+            return None
+        px = float(premium or 0)
+    except Exception:
+        return "Premium samajh nahi aaya - order blocked"
+    if px < MIN_ORDER_PREMIUM:
+        return (f"Premium ₹{px:.2f} < ₹{MIN_ORDER_PREMIUM:.0f} floor - "
+                f"ye strike bahut door OTM hai. ATM ke najdeek strike chuno.")
+    return None
+
+
+def get_strike_step(symbol: str) -> float:
+    steps = {
+        "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
+        "SENSEX": 100, "BANKEX": 100,
+        # Stocks: use appropriate strike steps based on price range
+        "BAJFINANCE": 200, "BAJAJFINSV": 200, "MARUTI": 200, "SHREECEM": 100,
+        "NESTLEIND": 100, "LT": 50, "HDFCBANK": 20, "ICICIBANK": 20,
+        "RELIANCE": 20, "TCS": 50, "INFY": 20, "ITC": 10, "SBIN": 10,
+        "AXISBANK": 10, "KOTAKBANK": 10, "HINDUNILVR": 10, "BHARTIARTL": 20,
+        "M&M": 20, "WIPRO": 10, "ONGC": 10, "SUNPHARMA": 20,
+        "ULTRACEMCO": 100, "NTPC": 10, "POWERGRID": 10, "TATAMOTORS": 10,
+        "TATASTEEL": 10, "HCLTECH": 20, "JSWSTEEL": 10, "COALINDIA": 10,
+        "DRREDDY": 20, "CIPLA": 20, "ADANIENT": 20, "SBILIFE": 10, "BPCL": 20,
+        "GRASIM": 20, "EICHERMOT": 20, "BRITANNIA": 20, "HINDALCO": 10,
+        "VEDL": 20, "INDUSINDBK": 20,
+        # F&O stocks (NSE live chain se verify kiye hue near-ATM gaps):
+        # pehle inke liye DB/50 fallback chalta tha - 50/20 ka step galat
+        # strike bana raha tha (premium phir nearest-strike par chala jaata).
+        "BAJAJHLDNG": 100, "BAJAJ-AUTO": 100, "APOLLOHOSP": 100,
+        "HEROMOTOCO": 50, "TITAN": 50, "FORCEMOT": 250, "MPHASIS": 50,
+        "SOLARINDS": 250, "BOSCHLTD": 500, "PAGEIND": 500, "OFSS": 100,
+        "GOLDBEES": 1, "SILVERBEES": 5,
+    }
+    hit = steps.get(symbol.upper())
+    if hit:
+        return hit
+    # Unmapped symbol: asli traded strikes se step nikalo, warna 50
+    try:
+        _db_step = _db_strike_step(symbol)
+        if _db_step:
+            return _db_step
+    except Exception:
+        pass
+    return 50
+
+
+def align_strike_price(symbol: str, strike: float) -> float:
+    """Snap any strike to the exchange's required multiple for this symbol.
+    Global fix: Nifty 50, BankNifty 100, stocks mostly 10/20 etc. Prevents
+    backtest/order failures on invalid strikes like Cipla 123 vs step 20."""
+    try:
+        s = float(strike)
+        step = float(get_strike_step(symbol))
+        if step <= 0 or s <= 0:
+            return s
+        return round(s / step) * step
+    except Exception:
+        return strike
+
+
+def format_currency(amount: float) -> str:
+    if abs(amount) >= 10000000:
+        return f"₹{amount/10000000:.2f}Cr"
+    elif abs(amount) >= 100000:
+        return f"₹{amount/100000:.2f}L"
+    return f"₹{amount:,.2f}"
+
+
+def normal_cdf(x: float) -> float:
+    a1 = 0.254829592
+    a2 = -0.284496736
+    a3 = 1.421413741
+    a4 = -1.453152027
+    a5 = 1.061405429
+    p = 0.3275911
+    sign = 1 if x >= 0 else -1
+    x = abs(x) / math.sqrt(2)
+    t = 1.0 / (1.0 + p * x)
+    y = 1.0 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * math.exp(-x * x)
+    return 0.5 * (1.0 + sign * y)
+
+
+def black_scholes(spot: float, strike: float, time: float, iv: float, option_type: str) -> float:
+    if time <= 0:
+        time = 0.003
+    if iv <= 0:
+        iv = 0.14
+    if spot <= 0 or strike <= 0:
+        return 0
+    r = 0.065
+    sigma_sqrt_t = iv * math.sqrt(time)
+    d1 = (math.log(spot / strike) + (r + 0.5 * iv * iv) * time) / sigma_sqrt_t
+    d2 = d1 - sigma_sqrt_t
+    if option_type == "CE":
+        price = spot * normal_cdf(d1) - strike * math.exp(-r * time) * normal_cdf(d2)
+    else:
+        price = strike * math.exp(-r * time) * normal_cdf(-d2) - spot * normal_cdf(-d1)
+    return max(1.0, round(price, 2))
+
+
+# ---- Unified option model (single source of truth for ALL symbols) ----
+# Entry (order placement), Current (open positions), Scanner suggestion and
+# Backtest MUST use the same IV + floor, else every trade instantly shows a
+# fake profit/loss. NSE option chain is blocked from cloud IPs (Render), so on
+# cloud the model priced off LIVE Yahoo spot is the closest NSE match.
+# IVs are NSE-typical: indices ~13-16%, stocks ~30% (high-vol ~35%).
+OPTION_MODEL_IV = 0.25
+OPTION_MODEL_MIN = 1.5
+
+_SYMBOL_IV = {
+    "NIFTY": 0.13, "BANKNIFTY": 0.15, "FINNIFTY": 0.14,
+    "SENSEX": 0.13, "BANKEX": 0.14,
+    "ADANIENT": 0.35, "VEDL": 0.35, "INDUSINDBK": 0.35,
+}
+
+
+def model_iv(symbol: str | None) -> float:
+    """Per-symbol model IV: NSE-typical values so ATM premium lands near NSE LTP."""
+    if not symbol:
+        return OPTION_MODEL_IV
+    s = str(symbol).upper().strip()
+    if s in _SYMBOL_IV:
+        return _SYMBOL_IV[s]
+    # Indices default 0.14, stocks default 0.30
+    if s in ("NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX",
+             "INDIAVIX"):
+        return 0.14
+    return 0.30
+
+
+def model_premium(spot: float, strike: float, expiry_days: float, option_type: str, symbol: str | None = None, iv: float | None = None) -> float:
+    """Shared model premium: BS(per-symbol NSE-typical IV) with floor 1.5.
+    Used by order entry, open-position LTP, scanner suggestion and backtest
+    alike. Real DB premiums are used as-is (never inflated) - only model
+    values get the floor. Pass iv= to pin a trade's entry IV (old positions
+    never reprice when the map is tuned)."""
+    try:
+        t = float(expiry_days) / 365.0 if expiry_days and float(expiry_days) > 0 else 7 / 365.0
+    except Exception:
+        t = 7 / 365.0
+    use_iv = float(iv) if iv and float(iv) > 0 else model_iv(symbol)
+    try:
+        bs = black_scholes(float(spot), float(strike), t, use_iv, option_type)
+    except Exception:
+        bs = 0
+    if not bs or bs <= 0:
+        return 0
+    return max(round(float(bs), 2), OPTION_MODEL_MIN)
+
+
+def sltp_unit(value) -> str:
+    """SL/TP unit normalize: 'rs' | 'pct' | 'pt' (kuch bhi aur = 'rs').
+    Trade rows par default 'rs' - purane trades bilkul purana behavior.
+
+    BUG FIX (16-11-2026): 'pt' (points) unit yahan 'rs' me convert ho jata
+    tha - iska matlab tha ki ek 30-POINT stop-loss ek 30-RUPEES stop-loss
+    ban jata tha. Paper trade row me sl_unit='rs' likha jaata tha, to
+    monitor level = entry ∓ (30 / lots*lot) = 0.6 points par collapse ho
+    jata tha - trade entry ke SAME MINUTE me hi SL/TP par kat jata tha
+    (NIFTY 217.83 -> 214.92 'stoploss', BANKNIFTY 490.64 -> 489.51
+    'target' + LOSS). Ab 'pt' sahi se preserve hota hai."""
+    try:
+        if isinstance(value, str):
+            u = value.strip().lower()
+            if u in ("pct", "%", "percent"):
+                return "pct"
+            if u in ("pt", "pts", "point", "points"):
+                return "pt"
+    except Exception:
+        pass
+    return "rs"
+
+
+def sltp_amount(value, default_unit: str = "rs"):
+    """SL/TP value ko (amount, unit) me parse karo - unit 'rs' | 'pct' | 'pt'.
+    Har jagah (backtest risk, paper trade, live orders, sliders) yehi parser
+    chalta hai:
+      - Number            -> (value, default_unit)
+      - String '2%'/'2pct'/'2percent' -> (2.0, 'pct')
+      - String '1500'/'Rs1500'/'1500rs' -> (1500.0, 'rs')
+      - String '30pt'/'30pts'/'30 points' -> (30.0, 'pt')
+    Purani rupee entries mera-purana behavior: number jo UI me 1500 jaisa bhar
+    jaata hai wahi rupees hai (default_unit='rs')."""
+    try:
+        dflt = str(default_unit or "rs")
+        if value is None:
+            return 0.0, dflt
+        if isinstance(value, bool):
+            return 0.0, dflt
+        if isinstance(value, (int, float)):
+            return float(value), dflt
+        s = str(value).strip().replace("\u20b9", "").replace(",", "")
+        if not s:
+            return 0.0, dflt
+        low = s.lower()
+        if low.endswith("%"):
+            num = low[:-1].strip()
+            try:
+                return float(num), "pct"
+            except Exception:
+                return 0.0, "pct"
+        for _suf in ("percent", "pct"):
+            if low.endswith(_suf):
+                num = low[:-len(_suf)].strip()
+                try:
+                    return float(num), "pct"
+                except Exception:
+                    return 0.0, "pct"
+        for _suf in ("rs",):
+            if low.endswith(_suf):
+                num = low[:-len(_suf)].strip()
+                try:
+                    return float(num), "rs"
+                except Exception:
+                    return 0.0, "rs"
+        for _suf in ("points", "point", "pts", "pt"):
+            if low.endswith(_suf):
+                num = low[:-len(_suf)].strip()
+                try:
+                    return float(num), "pt"
+                except Exception:
+                    return 0.0, "pt"
+        try:
+            return float(s), dflt
+        except Exception:
+            return 0.0, dflt
+    except Exception:
+        return 0.0, str(default_unit or "rs")
+
+
+def trailing_lock_level(entry: float, best_px: float, is_buy: bool,
+                        lock_at_pct: float, lock_amt_pct: float = 0.0,
+                        unit: str = "pct") -> float:
+    """Trailing-LOCK level (single source for backtest + paper monitor).
+
+    User rule: "jab trade 10-15% profit me aaye, SL ko breakeven (cost
+    price) par trail karo" + "profitable trades lock karo".
+
+    - lock_at_pct : profit % jiske baad SL trigger hona chahiye
+                    (e.g. 10 = +10% par SL move)
+    - lock_amt_pct: kitna profit LOCK karna hai (0 = sirf breakeven,
+                    e.g. 1 = +1% profit lock kar do)
+    - unit        : 'pct' (default, legacy) ya 'pt' = premium POINTS
+                    (rulebook 16-11-2026: 10 pts profit -> 5 pts lock).
+
+    Returns the new SL level (0.0 = lock not armed).
+    BUY  : SL upar jaata hai (entry + lock%)  - SELL: SL neeche (entry - lock%)
+    """
+    try:
+        entry = float(entry or 0)
+        best = float(best_px or 0)
+        lock_at = float(lock_at_pct or 0)
+        lock_amt = float(lock_amt_pct or 0)
+    except Exception:
+        return 0.0
+    if entry <= 0 or best <= 0 or lock_at <= 0:
+        return 0.0
+    # Points mode: point move seedha compare karo (lot-size independent).
+    if str(unit or "pct").lower() in ("pt", "pts", "point", "points"):
+        profit_px = (best - entry) if is_buy else (entry - best)
+        if profit_px < lock_at:
+            return 0.0
+        lock_px = max(0.0, lock_amt)
+        return (entry + lock_px) if is_buy else max(0.05, entry - lock_px)
+    profit_pct = ((best - entry) / entry * 100.0) if is_buy else ((entry - best) / entry * 100.0)
+    if profit_pct < lock_at:
+        return 0.0
+    if is_buy:
+        return entry * (1 + (lock_amt / 100.0 if lock_amt > 0 else 0.0))
+    return entry * (1 - (lock_amt / 100.0 if lock_amt > 0 else 0.0))
+
+
+def sltp_premium_level(entry_price: float, amount: float, quantity: int,
+                       lot_size: int, transaction_type: str, is_sl: bool,
+                       unit: str = None) -> float:
+    """SINGLE source of truth for SL/TP premium levels (backtest engine,
+    paper SL monitor, open-position auto-exit - sab yahi use karte hain taaki
+    paper wahi level par kate jahan backtest kat-ta hai).
+    UI me SL/TP RUPEES-total me hote hain (e.g. 1500) YA premium ka PERCENT
+    (e.g. '2%' ya daily_stop_loss_pct=2):
+      - unit None  -> legacy heuristic: amount > 20 -> rupees, <= 20 -> percent
+        (purane trades/backtests bilkul waisa hi behavior).
+      - unit 'rs'   -> rupees total -> premium points = amount/(qty*lot).
+        BUY: SL = entry-pts, TP = entry+pts.
+        SELL: SL = entry+pts, TP = entry-pts (floor 0.05).
+      - unit 'pct'  -> percent of premium (chhota percent bhi, e.g. 2).
+        BUY: SL = entry*(1-amt%), TP = entry*(1+amt%).
+        SELL: SL = entry*(1+amt%), TP = entry*(1-amt%).
+    NaN amount / <= 0 -> 0 (disabled). Win = net pnl strictly > 0 (kahin aur)."""
+    try:
+        entry = float(entry_price or 0)
+        if isinstance(amount, str):
+            # String may carry its own unit suffix ("30pt"/"2%"/"1500rs");
+            # plain string keeps the caller's default unit (not "rs").
+            _amt, _u = sltp_amount(amount, unit or "rs")
+            amount, unit = _amt, _u
+        amt = float(amount or 0)
+        if amt != amt or amt <= 0 or entry <= 0:   # NaN / disabled guard
+            return 0.0
+        txn = str(transaction_type or "BUY").upper()
+        is_buy = txn != "SELL"
+        u = str(unit or "").lower()
+        if u not in ("rs", "pct", "pt"):
+            u = "rs" if amt > 20 else "pct"       # legacy amount-based heuristic
+        units = max(int(quantity or 1) * int(lot_size or 0), 1)
+        if u == "pt":
+            # Points: DIRECT premium move (lot-sizese independent). BUY:
+            # SL=entry-pts, TP=entry+pts. SELL: SL=entry+pts, TP=entry-pts.
+            pts = amt
+            if is_buy:
+                lvl = (entry - pts) if is_sl else (entry + pts)
+            else:
+                lvl = (entry + pts) if is_sl else (entry - pts)
+            return max(0.05, lvl)
+        if u == "rs":
+            pts = amt / units
+            if is_buy:
+                lvl = (entry - pts) if is_sl else (entry + pts)
+            else:
+                lvl = (entry + pts) if is_sl else (entry - pts)
+            return max(0.05, lvl)
+        eff = min(amt, 100)  # >=100% SL/TP = premium wipe-out, cap at 100%
+        if is_buy:
+            if is_sl:
+                return max(0.05, entry * (1 - eff / 100))
+            return entry * (1 + amt / 100)
+        if is_sl:
+            return entry * (1 + amt / 100)
+        return max(0.05, entry * (1 - eff / 100))
+    except Exception:
+        return 0.0
+
+
+# ---------------- Shared strategy SL/TP resolver (backtest == paper == live) ------------
+def resolve_strategy_sltp(risk_management: dict, leg: dict = None,
+                          default_sl: float = 1500.0, default_tp: float = 3000.0,
+                          symbol: str = None):
+    """SINGLE SL/TP rule - backtest, paper worker aur live order TEENON ka.
+
+      SL: risk.daily_stop_loss_pct -> risk.daily_stop_loss (unit = rm.sl_unit) -> leg.stop_loss -> default
+      TP: risk.daily_take_profit_pct -> risk.daily_take_profit (unit = rm.tp_unit) -> leg.take_profit -> default
+
+      Units: 'rs' = rupees total cap (qty*lot_size divide hota hai),
+             'pct' = entry premium ka percent,
+             'pt'  = DIRECT premium movement points (lot-sizese independent).
+
+      '0' / '' / None / negative = 'set nahi hai' (fall through).
+      Returns (sl_amt, sl_unit, tp_amt, tp_unit).
+
+    RULEBOOK (16-11-2026): koi explicit SL/TP nahi + symbol index ho to
+    per-index tight defaults (points) - NIFTY 15/20, FINNIFTY 18/22,
+    BANKNIFTY 25/35 (core.services.strategy_rulebook). Rs1500/3000 sirf
+    non-index symbols ke liye."""
+    try:
+        rm = risk_management if isinstance(risk_management, dict) else {}
+        lg = leg if isinstance(leg, dict) else {}
+
+        def _pick(pairs):
+            for val, unit in pairs:
+                if val is None:
+                    continue
+                if isinstance(val, str) and val.strip() in ("", "0", "0.0"):
+                    continue
+                try:
+                    if isinstance(val, (int, float)) and float(val) <= 0:
+                        continue
+                except Exception:
+                    continue
+                amt, u = sltp_amount(val, unit)
+                if amt and float(amt) > 0:
+                    return float(amt), u
+            return 0.0, "rs"
+
+        sl_amt, sl_unit = _pick([
+            (rm.get("daily_stop_loss_pct"), "pct"),
+            (rm.get("daily_stop_loss"), rm.get("sl_unit") or "rs"),
+            (lg.get("stop_loss"), "rs"),
+        ])
+        tp_amt, tp_unit = _pick([
+            (rm.get("daily_take_profit_pct"), "pct"),
+            (rm.get("daily_take_profit"), rm.get("tp_unit") or "rs"),
+            (lg.get("take_profit"), "rs"),
+        ])
+        # RULEBOOK (16-11-2026): koi explicit SL/TP nahi hai + symbol index
+        # hai -> per-index tight defaults (points): NIFTY 15/20, FINNIFTY
+        # 18/22, BANKNIFTY 25/35 (core.services.strategy_rulebook).
+        # Ek side missing ho to bhi index default usi side par lagta hai.
+        if not sl_amt or not tp_amt:
+            try:
+                from core.services.strategy_rulebook import index_default_sltp as _ids
+                _d = _ids(symbol) if symbol else None
+                if _d:
+                    if not sl_amt:
+                        sl_amt, sl_unit = float(_d[0]), "pt"
+                    if not tp_amt:
+                        tp_amt, tp_unit = float(_d[1]), "pt"
+            except Exception:
+                pass
+        if not sl_amt:
+            sl_amt, sl_unit = float(default_sl or 0), "rs"
+        if not tp_amt:
+            tp_amt, tp_unit = float(default_tp or 0), "rs"
+        return sl_amt, sl_unit, tp_amt, tp_unit
+    except Exception:
+        return 0.0, "rs", 0.0, "rs"
+
+# ---------------- Forming (running) candle filter ----------------
+_TF_MINUTES = {"1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30,
+               "45m": 45, "1h": 60, "60m": 60, "1d": 0}
+
+
+def tf_minutes(timeframe) -> int:
+    try:
+        return int(_TF_MINUTES.get(str(timeframe or "5m").lower(), 5))
+    except Exception:
+        return 5
+
+
+def drop_forming_bars(bars, timeframe="5m", now_ist=None):
+    """Chal rahi (running) candle hata do - sirf COMPLETED candles evaluate karo.
+
+    Intraday data me aakhri bar abhi bhi ban raha hota hai (Yahoo/Fyers ka
+    current candle). Us par signal bana kar trade lagana = LIVE candle par
+    trade = look-ahead (backtest me aapne bhi nahi hona chahiye). Paper
+    worker bhi wahi rule use karta hai (auto_paper._live_signal_check).
+
+    Daily bars me 'forming' concept nahi hota - unhe chheda nahi jaata.
+    """
+    try:
+        from datetime import datetime, timedelta, timezone
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now = now_ist or datetime.now(ist)
+        out = list(bars or [])
+        if not out:
+            return out
+        last = out[-1]
+        if not isinstance(last, dict):
+            return out
+        bt = str(last.get("bar_time") or "")
+        d = str(last.get("trade_date") or "")[:10]
+        if not bt:
+            return out                      # daily bar - complete by definition
+        today = now.strftime("%Y-%m-%d")
+        if d > today:
+            return out[:-1]                 # future bar (impossible data)
+        if d != today:
+            return out                      # pichle din ka last bar complete hai
+        mins = tf_minutes(timeframe)
+        if mins <= 0:
+            return out
+        try:
+            hh, mm = bt[:5].split(":")
+            bar_end = now.replace(hour=int(hh), minute=int(mm), second=0,
+                                  microsecond=0) + timedelta(minutes=mins)
+        except Exception:
+            return out
+        if now < bar_end:
+            return out[:-1]
+        return out
+    except Exception:
+        return list(bars or [])
+
+
+# ---------------- BS extras: implied vol + delta (entry realism) ----------------
+def bs_price(spot: float, strike: float, years: float, iv: float, option_type: str) -> float:
+    """Raw Black-Scholes price (NO floor) - implied-vol solver + delta ke liye."""
+    try:
+        s = float(spot or 0)
+        k = float(strike or 0)
+        t = float(years or 0)
+        v = float(iv or 0)
+        if s <= 0 or k <= 0:
+            return 0.0
+        if t <= 0:
+            t = 0.003
+        if v <= 0:
+            v = 0.14
+        r = 0.065
+        sv = v * math.sqrt(t)
+        d1 = (math.log(s / k) + (r + 0.5 * v * v) * t) / sv
+        d2 = d1 - sv
+        if str(option_type or "CE").upper().startswith("C"):
+            return s * normal_cdf(d1) - k * math.exp(-r * t) * normal_cdf(d2)
+        return k * math.exp(-r * t) * normal_cdf(-d2) - s * normal_cdf(-d1)
+    except Exception:
+        return 0.0
+
+
+def implied_volatility(price: float, spot: float, strike: float, years: float,
+                       option_type: str, lo: float = 0.02, hi: float = 3.0,
+                       iters: int = 48) -> float:
+    """Market print se implied IV (bisection on BS). 0 = nahi nikal paya."""
+    try:
+        p = float(price or 0)
+        if p <= 0 or float(spot or 0) <= 0 or float(strike or 0) <= 0:
+            return 0.0
+        t = max(float(years or 0), 0.002)
+        if bs_price(spot, strike, t, hi, option_type) < p:
+            return 0.0            # price is beyond BS range -> unreliable
+        for _ in range(iters):
+            mid = (lo + hi) / 2.0
+            if bs_price(spot, strike, t, mid, option_type) < p:
+                lo = mid
+            else:
+                hi = mid
+        return round((lo + hi) / 2.0, 4)
+    except Exception:
+        return 0.0
+
+
+def bs_delta(spot: float, strike: float, years: float, iv: float, option_type: str) -> float:
+    """Option delta (CE: N(d1), PE: N(d1)-1).
+
+    Intrabar option range BANANE ke liye: real option premium bar ke
+    underlying high/low par Black-Scholes RE-PRICE se nahi, balki DELTA
+    (vega-free) se move karta hai. BS re-price gamma/vega exaggeration de
+    deta tha - option ka range 3-8x bada, jisse unreal target hits aate the.
+    """
+    try:
+        s = float(spot or 0)
+        k = float(strike or 0)
+        t = float(years or 0)
+        v = float(iv or 0)
+        if s <= 0 or k <= 0:
+            return 0.0
+        if t <= 0:
+            t = 0.003
+        if v <= 0:
+            v = 0.14
+        r = 0.065
+        d1 = (math.log(s / k) + (r + 0.5 * v * v) * t) / (v * math.sqrt(t))
+        d = normal_cdf(d1)
+        if str(option_type or "CE").upper().startswith("C"):
+            return d
+        return d - 1.0
+    except Exception:
+        return 0.0
+
+
+def log_trade_delete(trade: dict, where: str = "") -> None:
+    """Har paper_trades DELETE ka snapshot JSONL me (never raises).
+    File: data/logs/trade_deletes_YYYYMMDD.jsonl. Closed/open trade gayab
+    ho to yahi batayega kisne-kab delete kiya (manual button vs cleanup)."""
+    try:
+        import datetime as _dt
+        _base = os.path.join(os.path.dirname(__file__), "..", "data", "logs")
+        try:
+            os.makedirs(_base, exist_ok=True)
+        except Exception:
+            return
+        _now = _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
+        _row = {"ts": _now.strftime("%Y-%m-%d %H:%M:%S"), "where": str(where or ""),
+                "trade": {k: (trade or {}).get(k) for k in
+                          ("id", "symbol", "option_type", "strike_price",
+                           "transaction_type", "quantity", "lot_size", "entry_price",
+                           "exit_price", "entry_date", "exit_date", "pnl",
+                           "status", "exit_status", "strategy_id", "trade_mode")}}
+        try:
+            with open(os.path.join(_base, f"trade_deletes_{_now.strftime('%Y%m%d')}.jsonl"),
+                      "a", encoding="utf-8") as _f:
+                _f.write(json.dumps(_row, default=str) + "\n")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def log_exit_skip(check: str, trade_id=None, symbol: str = "", reason: str = "") -> None:
+    """SL/TP/EOD exit skip ka reason JSONL me likho (never raises).
+    File: data/logs/exit_skips_YYYYMMDD.jsonl — ek line per skip:
+    {ts, check, trade_id, symbol, reason}. Isse "SL kyu nahi kata" ka
+    jawab log me hamesha milta hai (silent `continue` khatm)."""
+    try:
+        import datetime as _dt
+        _base = os.path.join(os.path.dirname(__file__), "..", "data", "logs")
+        try:
+            os.makedirs(_base, exist_ok=True)
+        except Exception:
+            return
+        _day = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y%m%d")
+        _ts = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+        _row = {"ts": _ts, "check": str(check or ""), "trade_id": trade_id,
+                "symbol": str(symbol or ""), "reason": str(reason or "")[:200]}
+        try:
+            with open(os.path.join(_base, f"exit_skips_{_day}.jsonl"), "a", encoding="utf-8") as _f:
+                _f.write(json.dumps(_row) + "\n")
+        except Exception:
+            pass
+    except Exception:
+        pass

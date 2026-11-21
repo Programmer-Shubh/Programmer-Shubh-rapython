@@ -1,32 +1,77 @@
-# Python
-__pycache__/
+﻿__pycache__/
+*.pyc
+*.pyo
 *.py[cod]
+*$py.class
+*.so
 *.egg-info/
-.venv/
-venv/
-.env
-
-# Node
-node_modules/
 dist/
-.vite/
-
-# OS / IDE
+build/
+*.egg
+.env
+.env.*
+db.sqlite3
+staticfiles/
+*.log
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
+ngrok.zip
+*.zip
+audit_site.py
+tmp_root.html
+click
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/logs/
+data/scrip_master.csv
+data/shoonya_nfo_symbols.txt
+data/fyers_*.csv
+data/angel_*.json
+data/scrip_master_*.json
+data/scrip_lots.json
+.streamlit/secrets.toml
+# temporary debug/check scripts
+check_*.py
+check_*.js
+debug_*.py
+debug_*.js
+isolate_*.js
+parse_check*.js
+narrow_down.py
+narrow_down.js
+rb_full.js
+runbacktest.js
+test_js_*.js
+find_error*.py
+acorn_check.py
+binary_search.js
+# windows helper
+Start_RaTrade.bat
+# removed stale artifacts - never track again
+/db.sqlite3
+ngrok.zip
+click
+audit_site.py
+ai/
+.aionrs/
+opencode/
+test_webhook.py
+static/ratrade-extension.zip
+static/chain_comparison.html
+static/tutorial.html
+static/download.png
+Dockerfile
+.koyeb.yaml
+WEBSITE_HINDI_DOC.md
 
-# Local data
-ratrade_data/
-*.db
-*.sqlite
-
-# Logs
-*.log
-
-# Debug scratch
-backend/chk.py
-backend/chk2.py
-backend/chk3.py
-backend/dbg.py
-backend/dbg2.py
-backend/backfill_wf.py
+# research artifacts (not for commit)
+scripts/_sell_grid_*_results*.json
+scripts/_validation_results.json
+scripts/_save_runs.json
+scripts/_winner_style_results_*.json
