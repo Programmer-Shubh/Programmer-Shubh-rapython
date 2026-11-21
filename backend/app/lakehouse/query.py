@@ -9,7 +9,8 @@ import polars as pl
 from .partitioning import lakehouse_glob
 from ..config import settings
 
-_con = duckdb.connect()
+def _get_con():
+    return duckdb.connect()
 
 
 def _base_sql() -> str:
@@ -62,7 +63,11 @@ def query_options(
     if limit is not None:
         sql += f" LIMIT {int(limit)}"
 
-    pdf = _con.execute(sql, params).fetchdf()  # DuckDB -> pandas (zero-copy Arrow under the hood)
+    con = _get_con()
+    try:
+        pdf = con.execute(sql, params).fetchdf()
+    finally:
+        con.close()
     if pdf.empty:
         return pl.DataFrame()
     return pl.from_pandas(pdf)
