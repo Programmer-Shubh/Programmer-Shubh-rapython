@@ -15,6 +15,13 @@ except Exception:  # pragma: no cover
 
 os.environ.setdefault("DB_PATH", os.path.join(os.path.dirname(__file__), "data", "ratrade.db"))
 
+# Render's existing Python service builds the frontend into backend/static.
+# Local/dev runs use the tracked static/ folder. Serve whichever exists.
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(_ROOT, "backend", "static")
+if not os.path.isdir(STATIC_DIR):
+    STATIC_DIR = os.path.join(_ROOT, "static")
+
 
 def _restore_bundled_db():
     """A fresh Render deploy has an empty disk. Restore the bundled snapshot
@@ -376,10 +383,10 @@ app.include_router(tvchart.router, prefix="/api/tvchart", tags=["TV Chart"])
 
 @app.get("/")
 def root():
-    return FileResponse(os.path.join(os.path.dirname(__file__), "static", "index.html"))
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
-app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/health")
