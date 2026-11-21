@@ -8,13 +8,13 @@ function SummaryPill({ run }: { run: BacktestRun | null }) {
   const m = run.metrics || {};
   const pnl = Number(m.net_pnl || 0);
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs">
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs">
       <Badge tone="blue">Saved BT</Badge>
       <DataSourceBadge source={run.data_source} />
-      <span className="text-slate-300">{m.trades ?? 0} trades</span>
+      <span className="text-slate-600">{m.trades ?? 0} trades</span>
       <span className={pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}>Net P&L ₹{pnl.toFixed(2)}</span>
-      <span className="text-slate-300">Win {m.win_rate ?? 0}%</span>
-      <span className="text-slate-300">PF {m.profit_factor ?? '—'}</span>
+      <span className="text-slate-600">Win {m.win_rate ?? 0}%</span>
+      <span className="text-slate-600">PF {m.profit_factor ?? '—'}</span>
       <span className="text-slate-500">{new Date(run.created_at).toLocaleString()}</span>
     </div>
   );
@@ -61,10 +61,10 @@ export function SavedStrategies() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Saved Strategies</h1>
-          <p className="text-sm text-slate-400">Cards and Trade History pull from the same latest saved backtest record (single source of truth). User Notes are preserved separately.</p>
+          <h1 className="text-2xl font-bold text-slate-900">Saved Strategies</h1>
+          <p className="text-sm text-slate-500">Cards and Trade History pull from the same latest saved backtest record (single source of truth). User Notes are preserved separately.</p>
         </div>
-        <button onClick={load} className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"><RefreshCw size={13}/> Refresh</button>
+        <button onClick={load} className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200"><RefreshCw size={13}/> Refresh</button>
       </div>
 
       <div className="grid gap-4">
@@ -73,17 +73,17 @@ export function SavedStrategies() {
           const m = run?.metrics || {};
           const trows = trades[st.id] || [];
           return (
-            <div key={st.id} className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+            <div key={st.id} className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-semibold text-white">{st.name}</h3>
+                    <h3 className="text-lg font-semibold text-slate-900">{st.name}</h3>
                     {st.is_user_configured && <UserConfiguredBadge />}
                     {run && <DataSourceBadge source={run.data_source} />}
                   </div>
-                  <div className="mt-1 text-xs text-slate-400">Strike: {st.config?.strike_offset} · Expiry: {st.config?.expiry_type} · SL {st.config?.sl_points} / TP {st.config?.tp_points} / Trail {st.config?.trailing_sl_points} · Latency {st.config?.latency}</div>
+                  <div className="mt-1 text-xs text-slate-500">Strike: {st.config?.strike_offset} · Expiry: {st.config?.expiry_type} · SL {st.config?.sl_points} / TP {st.config?.tp_points} / Trail {st.config?.trailing_sl_points} · Latency {st.config?.latency}</div>
                 </div>
-                <button onClick={() => toggle(st.id)} className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800">{expanded === st.id ? 'Hide Details' : 'View Trade History'}</button>
+                <button onClick={() => toggle(st.id)} className="rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-200">{expanded === st.id ? 'Hide Details' : 'View Trade History'}</button>
               </div>
 
               <div className="mt-3"><SummaryPill run={run} /></div>
@@ -94,26 +94,26 @@ export function SavedStrategies() {
                     ['Net P&L ₹', m.net_pnl], ['Trades', m.trades], ['Win %', m.win_rate], ['Profit Factor', m.profit_factor],
                     ['Sharpe', m.sharpe], ['Max DD ₹', m.max_drawdown],
                   ].map(([k,v]) => (
-                    <div key={String(k)} className="rounded-md border border-slate-800 bg-slate-950/40 p-2">
+                    <div key={String(k)} className="rounded-md border border-slate-200 bg-white p-2">
                       <div className="text-slate-500">{k}</div>
-                      <div className={`font-semibold ${Number(v) < 0 ? 'text-rose-400' : 'text-slate-200'}`}>{String(v ?? '—')}</div>
+                      <div className={`font-semibold ${Number(v) < 0 ? 'text-rose-400' : 'text-slate-700'}`}>{String(v ?? '—')}</div>
                     </div>
                   ))}
                 </div>
               )}
 
               <div className="mt-3">
-                <label className="text-[11px] text-slate-400">User Notes (preserved separately; not overwritten by BT summary)</label>
+                <label className="text-[11px] text-slate-500">User Notes (preserved separately; not overwritten by BT summary)</label>
                 <div className="mt-1 flex gap-2">
-                  <textarea value={notes[st.id] || ''} onChange={e => setNotes(p => ({ ...p, [st.id]: e.target.value }))} className="min-h-[56px] w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-xs text-slate-200" />
-                  <button onClick={() => saveNotes(st.id)} disabled={saving === st.id} className="inline-flex h-9 items-center gap-1 rounded-md bg-slate-700 px-3 text-xs text-white hover:bg-slate-600"><Save size={13}/>{saving===st.id?'Saving':'Save'}</button>
+                  <textarea value={notes[st.id] || ''} onChange={e => setNotes(p => ({ ...p, [st.id]: e.target.value }))} className="min-h-[56px] w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-xs text-slate-700" />
+                  <button onClick={() => saveNotes(st.id)} disabled={saving === st.id} className="inline-flex h-9 items-center gap-1 rounded-md bg-slate-700 px-3 text-xs text-slate-900 hover:bg-slate-300"><Save size={13}/>{saving===st.id?'Saving':'Save'}</button>
                 </div>
               </div>
 
               {expanded === st.id && (
-                <div className="mt-4 overflow-x-auto rounded-lg border border-slate-800">
+                <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
                   <table className="min-w-full text-left text-xs">
-                    <thead className="bg-slate-950/70 text-slate-400">
+                    <thead className="bg-white/70 text-slate-500">
                       <tr>
                         {['Entry Date','Entry Time','Exit Date','Exit Time','Symbol','Type','Strike','Expiry','Entry ₹','Exit ₹','Status','P&L','MAE','MFE','BT'].map(h => <th key={h} className="px-2 py-2 font-medium">{h}</th>)}
                       </tr>
@@ -121,7 +121,7 @@ export function SavedStrategies() {
                     <tbody>
                       {trows.length === 0 && <tr><td colSpan={15} className="px-3 py-4 text-center text-slate-500">No trades in latest saved backtest.</td></tr>}
                       {trows.map(t => (
-                        <tr key={t.id} className="border-t border-slate-800 text-slate-300">
+                        <tr key={t.id} className="border-t border-slate-200 text-slate-600">
                           <td className="px-2 py-1.5">{t.entry_date}</td>
                           <td className="px-2 py-1.5">{t.entry_time}</td>
                           <td className="px-2 py-1.5">{t.exit_date}</td>

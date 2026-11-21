@@ -74,8 +74,8 @@ export function StrategyBacktest() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Strategy Backtest</h1>
-          <p className="text-sm text-slate-400">Real Option Tick / 1-Min Chain Data only. No synthetic Black-Scholes pricing. 100% offline from local Parquet lakehouse.</p>
+          <h1 className="text-2xl font-bold text-slate-900">Strategy Backtest</h1>
+          <p className="text-sm text-slate-500">Real Option Tick / 1-Min Chain Data only. No synthetic Black-Scholes pricing. 100% offline from local Parquet lakehouse.</p>
         </div>
         <div className="flex gap-2"><Badge tone="blue">Zero-Copy DuckDB</Badge><Badge tone="purple">Hive Parquet</Badge><Badge tone="green">Offline Ready</Badge></div>
       </div>
@@ -83,58 +83,58 @@ export function StrategyBacktest() {
       <StoredDataLibrary onUploaded={load} />
 
       <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-3">
-          <div className="text-sm font-semibold text-white">Backtest Configuration</div>
-          <label className="block text-xs text-slate-400">Strategy
-            <select value={selected} onChange={e => setSelected(Number(e.target.value))} className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-200">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+          <div className="text-sm font-semibold text-slate-900">Backtest Configuration</div>
+          <label className="block text-xs text-slate-500">Strategy
+            <select value={selected} onChange={e => setSelected(Number(e.target.value))} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-700">
               {strategies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </label>
-          <label className="block text-xs text-slate-400">Data Mode
-            <select value={dataMode} onChange={e => setDataMode(e.target.value as any)} className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-200">
+          <label className="block text-xs text-slate-500">Data Mode
+            <select value={dataMode} onChange={e => setDataMode(e.target.value as any)} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-700">
               <option value="tick">High-Frequency Option Tick Data</option>
               <option value="1m_chain">1-Minute Option Chain Data</option>
             </select>
           </label>
           <div className="grid grid-cols-2 gap-2">
-            <label className="text-xs text-slate-400">From <input type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-200"/></label>
-            <label className="text-xs text-slate-400">To <input type="date" value={toDate} onChange={e=>setToDate(e.target.value)} className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-200"/></label>
+            <label className="text-xs text-slate-500">From <input type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-700"/></label>
+            <label className="text-xs text-slate-500">To <input type="date" value={toDate} onChange={e=>setToDate(e.target.value)} className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-700"/></label>
           </div>
-          <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={wf} onChange={e=>setWf(e.target.checked)} /> In-Sample / Out-of-Sample (Walk-Forward) Split</label>
+          <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={wf} onChange={e=>setWf(e.target.checked)} /> In-Sample / Out-of-Sample (Walk-Forward) Split</label>
           {wf && (
-            <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2">
-              <label className="text-[11px] text-slate-400">IS Start <input type="date" value={isStart} onChange={e=>setIsStart(e.target.value)} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs"/></label>
-              <label className="text-[11px] text-slate-400">IS End <input type="date" value={isEnd} onChange={e=>setIsEnd(e.target.value)} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs"/></label>
-              <label className="text-[11px] text-slate-400">OOS Start <input type="date" value={oosStart} onChange={e=>setOosStart(e.target.value)} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs"/></label>
-              <label className="text-[11px] text-slate-400">OOS End <input type="date" value={oosEnd} onChange={e=>setOosEnd(e.target.value)} className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs"/></label>
+            <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-white p-2">
+              <label className="text-[11px] text-slate-500">IS Start <input type="date" value={isStart} onChange={e=>setIsStart(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs"/></label>
+              <label className="text-[11px] text-slate-500">IS End <input type="date" value={isEnd} onChange={e=>setIsEnd(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs"/></label>
+              <label className="text-[11px] text-slate-500">OOS Start <input type="date" value={oosStart} onChange={e=>setOosStart(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs"/></label>
+              <label className="text-[11px] text-slate-500">OOS End <input type="date" value={oosEnd} onChange={e=>setOosEnd(e.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs"/></label>
             </div>
           )}
 
           {missingDates.length > 0 && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-200">
+            <div className="rounded-lg border border-amber-500/30 bg-amber-50 p-2 text-[11px] text-amber-800">
               <div className="flex items-center gap-1 font-semibold"><AlertTriangle size={12}/> Missing dates not cached ({dataMode})</div>
-              <div className="mt-1 text-amber-300/90">{missingDates.slice(0,8).join(', ')}{missingDates.length>8 ? ` +${missingDates.length-8} more` : ''}</div>
-              <div className="mt-1 text-amber-200/80">Action: upload CSV/Parquet for these dates or run incremental historical sync when broker is connected.</div>
+              <div className="mt-1 text-amber-700">{missingDates.slice(0,8).join(', ')}{missingDates.length>8 ? ` +${missingDates.length-8} more` : ''}</div>
+              <div className="mt-1 text-amber-800/80">Action: upload CSV/Parquet for these dates or run incremental historical sync when broker is connected.</div>
             </div>
           )}
 
           <button onClick={runBacktest} disabled={!selected || (job && job.status==='running')}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-sky-500 disabled:opacity-50">
             <Play size={15} /> Run Backtest (Offline)
           </button>
 
           {job && (
             <div className="space-y-1">
-              <div className="flex justify-between text-[11px] text-slate-400"><span>{job.message}</span><span>{job.progress?.toFixed?.(0) ?? 0}%</span></div>
-              <div className="h-2 rounded-full bg-slate-800"><div className="h-2 rounded-full bg-sky-500 transition-all" style={{ width: `${job.progress || 0}%` }} /></div>
+              <div className="flex justify-between text-[11px] text-slate-500"><span>{job.message}</span><span>{job.progress?.toFixed?.(0) ?? 0}%</span></div>
+              <div className="h-2 rounded-full bg-slate-200"><div className="h-2 rounded-full bg-sky-500 transition-all" style={{ width: `${job.progress || 0}%` }} /></div>
             </div>
           )}
           {error && <div className="text-xs text-rose-400">{error}</div>}
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="mb-3 flex items-center justify-between">
-            <div className="text-sm font-semibold text-white">Backtest Results</div>
+            <div className="text-sm font-semibold text-slate-900">Backtest Results</div>
             {run && <div className="flex items-center gap-2"><DataSourceBadge source={run.data_source} /><Badge tone="slate">Run #{run.id}</Badge></div>}
           </div>
           {!run && <div className="text-sm text-slate-500">Run a backtest to see institutional analytics (MAE/MFE, Expectancy, Profit Factor, Sharpe, Calmar, Max DD, Walk-Forward).</div>}
@@ -146,8 +146,8 @@ export function StrategyBacktest() {
                   ['Expectancy ₹', m.expectancy], ['Avg MAE', m.avg_mae], ['Avg MFE', m.avg_mfe], ['Sharpe', m.sharpe],
                   ['Calmar', m.calmar], ['Max DD ₹', m.max_drawdown], ['Max DD %', m.max_drawdown_pct],
                 ].map(([k,v]) => (
-                  <div key={String(k)} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                    <div className="text-[11px] text-slate-400">{k}</div>
+                  <div key={String(k)} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="text-[11px] text-slate-500">{k}</div>
                     <div className={`text-lg font-semibold ${Number(v) < 0 ? 'text-rose-400' : 'text-slate-100'}`}>{v ?? '—'}</div>
                   </div>
                 ))}
@@ -155,18 +155,18 @@ export function StrategyBacktest() {
               {wfData && (
                 <div className="grid gap-3 md:grid-cols-2">
                   {[['In-Sample', wfData.in_sample], ['Out-of-Sample', wfData.out_of_sample]].map(([label, d]: any) => (
-                    <div key={label} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-white">{label} <Badge tone={label==='In-Sample'?'blue':'purple'}>{label}</Badge></div>
+                    <div key={label} className="rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">{label} <Badge tone={label==='In-Sample'?'blue':'purple'}>{label}</Badge></div>
                       <div className="grid grid-cols-3 gap-2 text-xs">
                         {Object.entries(d || {}).map(([k,v]) => (
-                          <div key={k}><div className="text-slate-500">{k}</div><div className="text-slate-200">{String(v)}</div></div>
+                          <div key={k}><div className="text-slate-500">{k}</div><div className="text-slate-700">{String(v)}</div></div>
                         ))}
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs text-emerald-200 flex items-center gap-2"><CheckCircle2 size={14}/> Execution model: real bid/ask fills, slippage %, zero-volume guard, next-tick/bar latency, point-based SL/TP/Trailing, 15:15 intraday exit — on real option contract series only.</div>
+              <div className="rounded-lg border border-emerald-500/20 bg-emerald-50 p-3 text-xs text-emerald-800 flex items-center gap-2"><CheckCircle2 size={14}/> Execution model: real bid/ask fills, slippage %, zero-volume guard, next-tick/bar latency, point-based SL/TP/Trailing, 15:15 intraday exit — on real option contract series only.</div>
             </div>
           )}
         </div>
