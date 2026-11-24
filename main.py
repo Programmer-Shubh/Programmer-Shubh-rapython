@@ -129,6 +129,25 @@ async def _startup_background():
         _fast_exit_bg(0.75)
     except: pass
     try:
+        # Real option tick data backfill (user rule 24-11): 3-month NSE
+        # bhavcopy option premiums ko option_ticks table me seed karo - broker
+        # offline par bhi real tick data par backtest chal sake. Background
+        # thread (boot block nahi karta). Idempotent (upsert).
+        def _tick_backfill():
+            try:
+                import time as _tb_t
+                _tb_t.sleep(120)  # cold-start settle + schema ready
+                from core.services.tick_recorder import backfill_from_bhavcopy
+                n = backfill_from_bhavcopy(90)
+                if n:
+                    print(f"[tick-backfill] {n} real option ticks seeded", flush=True)
+            except Exception:
+                pass
+        import threading as _th_tb
+        _th_tb.Thread(target=_tick_backfill, daemon=True).start()
+    except Exception:
+        pass
+    try:
         # Auto paper-trading: ACTIVE saved strategies place today's paper
         # trades by themselves (the missing executor - backtest never did).
         def _ap_loop():

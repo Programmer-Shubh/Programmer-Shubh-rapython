@@ -10,6 +10,42 @@ from utils.helpers import get_lot_size, format_currency, effective_lot_size, slt
 router = APIRouter()
 
 
+@router.get("/tick-data/status")
+def tick_data_status():
+    """Real option tick data status: kitne ticks store hain, kab se, kaunsa
+    source. Backfill trigger bhi (query param backfill=1) - broker offline par
+    bhi 3-month NSE bhavcopy se real data load karne ke liye."""
+    try:
+        from core.services.tick_recorder import tick_count
+        from core.models.database import Database
+        db = Database.get_instance()
+        try:
+            rng = db.fetch_one(
+                "SELECT MIN(trade_date) as d0, MAX(trade_date) as d1, COUNT(*) as c FROM option_ticks")
+        except Exception:
+            rng = {}
+        return {"success": True,
+                "ticks": int((rng or {}).get("c") or 0),
+                "from": (rng or {}).get("d0") or "", "to": (rng or {}).get("d1") or "",
+                "sources": (db.fetch_all(
+                    "SELECT source, COUNT(*) as c FROM option_ticks GROUP BY source")
+                    if tick_count() > 0 else [])}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:150]}
+
+
+@router.post("/tick-data/backfill")
+def tick_data_backfill(days: int = 90):
+    """Manually seed 3-month real option data into option_ticks (idempotent).
+    Broker connect zaroori nahi - NSE bhavcopy DB se data aata hai."""
+    try:
+        from core.services.tick_recorder import backfill_from_bhavcopy
+        n = backfill_from_bhavcopy(days)
+        return {"success": True, "rows_written": n, "days": days}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:150]}
+
+
 class PlaceTradeRequest(BaseModel):
     symbol: str
     option_type: str
