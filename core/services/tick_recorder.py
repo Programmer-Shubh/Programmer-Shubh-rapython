@@ -29,11 +29,25 @@ def _ist_now():
     return now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
 
 
+# HARD GUARD (user rule 24-11, permanent): sirf REAL recorded ticks hi store
+# ho sakte hain. Kabhi bhi fabricated/assumed time points (10:00 high,
+# 14:00 low, interpolation) allow NAHI. Ye list aage se badhayi ja sakti hai
+# par koi bhi 'synthetic'/'model'/'interpolated' source yahan kabhi na aaye.
+_REAL_TICK_SOURCES = frozenset({"fyers_ws", "nse_bhavcopy"})
+
+
+def _is_real_source(source: str) -> bool:
+    return str(source or "").lower() in _REAL_TICK_SOURCES
+
+
 def record_tick(symbol, strike, option_type, ltp, expiry="", volume=0,
                 source="fyers_ws", force=False):
     """Persist ONE real option LTP into option_ticks (throttled to 1/min/strike).
-    Safe to call from the WS callback thread - never raises."""
+    Safe to call from the WS callback thread - never raises.
+    Fabricated/synthetic time points permanently blocked (see _REAL_TICK_SOURCES)."""
     try:
+        if not _is_real_source(source):
+            return False   # fabricated source -> kabhi store na ho
         strike = float(strike or 0)
         ltp = float(ltp or 0)
         symbol = str(symbol or "").upper()
@@ -41,7 +55,7 @@ def record_tick(symbol, strike, option_type, ltp, expiry="", volume=0,
         if not symbol or strike <= 0 or ltp <= 0 or option_type not in ("CE", "PE"):
             return False
         date, hhmm = _ist_now()
-        bar_time = f"{hhmm[:2]}:00"   # 1-min bar start (09:17 -> 09:17:00 style HH:MM)
+        bar_time = f"{hhmm[:2]}:{hhmm[3:]}"   # real WS minute (09:17 -> "09:17")
         key = (symbol, strike, option_type, date, bar_time)
         with _LOCK:
             now = _time.time()
@@ -159,6 +173,25 @@ def record_from_ws(sym, ltp, volume=0):
                            expiry=exp_ymd, volume=volume, source="fyers_ws")
     except Exception:
         return False
+
+
+def purge_fabricated_ticks() -> int:
+    """One-time cleanup: koi bhi purana fabricated tick (synthetic source ya
+    10:00/14:00 jaise assumed high/low time points) hamesha ke liye hatao.
+    Real sources (fyers_ws, nse_bhavcopy) kabhi nahi hote. Returns deleted."""
+    try:
+        from core.models.database import Database
+        db = Database.get_instance()
+        # Sirf non-real sources delete karo (real source kabhi fabricate nahi hota).
+        r = db.fetch_one("SELECT COUNT(*) as c FROM option_ticks "
+                         "WHERE LOWER(COALESCE(source,'')) NOT IN ('fyers_ws','nse_bhavcopy')")
+        n0 = int(r["c"]) if r else 0
+        if n0:
+            db.execute("DELETE FROM option_ticks "
+                       "WHERE LOWER(COALESCE(source,'')) NOT IN ('fyers_ws','nse_bhavcopy')")
+        return n0
+    except Exception:
+        return 0
 
 
 def backfill_from_bhavcopy(days: int = 90, batch: int = 4000) -> int:

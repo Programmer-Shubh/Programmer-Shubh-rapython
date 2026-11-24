@@ -137,7 +137,8 @@ async def _startup_background():
             try:
                 import time as _tb_t
                 _tb_t.sleep(120)  # cold-start settle + schema ready
-                from core.services.tick_recorder import backfill_from_bhavcopy
+                from core.services.tick_recorder import purge_fabricated_ticks, backfill_from_bhavcopy
+                purge_fabricated_ticks()   # permanent: fabricated ticks hamesha ke liye hataye
                 n = backfill_from_bhavcopy(90)
                 if n:
                     print(f"[tick-backfill] {n} real option ticks seeded", flush=True)
