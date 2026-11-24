@@ -217,9 +217,12 @@ def _parse_rows(df, trade_date):
 
 
 def sync_from_nse(start_date: str = "2026-01-01", end_date: str | None = None,
-                  log=print):
+                  log=print, resume_date: str = ""):
     """Fetch official bhavcopy per weekday; store index-option rows within
-    +/-3 steps of ATM. Best-effort (a missing/blocked day is skipped)."""
+    +/-3 steps of ATM. Best-effort (a missing/blocked day is skipped).
+    resume_date: sync_async ne seed-import se PEHLE capture kiya hua last
+    current_date (seed import status ko 'done' kar deta tha → andar wala
+    status-based resume kabhi kaam nahi karta tha)."""
     global _RUNNING
     with _RUN_LOCK:
         if _RUNNING:
@@ -232,12 +235,15 @@ def sync_from_nse(start_date: str = "2026-01-01", end_date: str | None = None,
     # kiya tha, wahan se shuru karo (har baar 01-01 se nahi). Status mein
     # 'current_date' save hota hai - next run usse aage se chalega.
     try:
-        _prev = sync_status()
-        _resume = str(_prev.get("current_date") or "")[:10]
-        # 'paused' (4-min deadline) aur 'interrupted' (restart) dono se resume
-        # karo - pehle sirf 'running' par resume hota tha, deadline ke baad
-        # dobara dabane par 01-01 se shuru ho jata tha (barbaad fetch).
-        if _resume and str(_prev.get("state")) in ("running", "paused", "interrupted") and _resume > str(s):
+        _resume = str(resume_date or "")[:10]
+        if not _resume:
+            _prev = sync_status()
+            _resume = str(_prev.get("current_date") or "")[:10]
+            # 'paused' (4-min deadline) aur 'interrupted' (restart) dono se
+            # resume karo - pehle sirf 'running' par resume hota tha.
+            if _resume and str(_prev.get("state")) not in ("running", "paused", "interrupted"):
+                _resume = ""
+        if _resume and _resume > str(s):
             s = _dt.datetime.strptime(_resume, "%Y-%m-%d").date() + _dt.timedelta(days=1)
     except Exception:
         pass
@@ -369,19 +375,31 @@ def import_seed(path: str | None = None, log=print):
 
 
 def sync_async(start_date: str = "2026-01-01"):
-    """Background: seed (guaranteed) first, then best-effort NSE refresh."""
+    """Background: seed (guaranteed) first, then best-effort NSE refresh.
+    Resume date SNAPSHOT yahin (thread start se pehle) — seed import status
+    ko 'done' overwrite kar deta tha, isliye andar baithkar status padhna
+    hamesha fail hota tha aur har baar 01-01 se dobara fetch hota tha."""
     global _RUNNING
     with _RUN_LOCK:
         if _RUNNING:
             return {"started": False, "reason": "already_running"}
-    t = threading.Thread(target=_worker, kwargs={"start_date": start_date}, daemon=True)
+    _resume = ""
+    try:
+        _prev = sync_status()
+        if str(_prev.get("state")) in ("running", "paused", "interrupted"):
+            _resume = str(_prev.get("current_date") or "")[:10]
+    except Exception:
+        pass
+    t = threading.Thread(target=_worker,
+                         kwargs={"start_date": start_date, "resume_date": _resume},
+                         daemon=True)
     t.start()
     return {"started": True}
 
 
-def _worker(start_date):
+def _worker(start_date, resume_date=""):
     r = import_seed()
-    sync_from_nse(start_date, None)
+    sync_from_nse(start_date, None, resume_date=resume_date)
 
 
 def auto_seed_if_empty(log=print):
