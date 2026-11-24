@@ -631,14 +631,30 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
     # Fyers -> Stooq -> Alpha Vantage -> Twelve Data. Yahoo completely
     # removed (user request).
     # openchart is reference-only (never bar suppliers).
-    _deadline = _t.time() + 12
+    # Deadline 75s (was 12s): NSE index-archive (FINNIFTY etc) ~31s leta hai
+    # 3-month range ke liye - 12s mein kill ho jata tha => INSUFFICIENT_DATA.
+    # 75s cap ab bhi bounded hai (backtest hang nahi karta).
+    _deadline = _t.time() + 75
 
-    for _name, _fn in (("nsepython", _fetch_nsepython_historical),
-                       ("nse_index_archive", _fetch_nseindex_historical),
-                       ("fyers", _fetch_fyers_historical),
-                       ("stooq", _fetch_stooq_historical),
-                       ("alphavantage", _dv._fetch_alphavantage_daily),
-                       ("twelvedata", _dv._fetch_twelvedata_daily)):
+    # FINNIFTY/midcap jaise indices ke liye NSE index-archive PEHLE (broker-free,
+    # reliable) - nsepython cloud par block hota hai, wait nahi karna.
+    _sym_u = str(symbol or "").upper()
+    if _sym_u in _NSE_INDEX_NAMES and _sym_u != "NIFTY":
+        _chain = (("nse_index_archive", _fetch_nseindex_historical),
+                  ("nsepython", _fetch_nsepython_historical),
+                  ("fyers", _fetch_fyers_historical),
+                  ("stooq", _fetch_stooq_historical),
+                  ("alphavantage", _dv._fetch_alphavantage_daily),
+                  ("twelvedata", _dv._fetch_twelvedata_daily))
+    else:
+        _chain = (("nsepython", _fetch_nsepython_historical),
+                  ("nse_index_archive", _fetch_nseindex_historical),
+                  ("fyers", _fetch_fyers_historical),
+                  ("stooq", _fetch_stooq_historical),
+                  ("alphavantage", _dv._fetch_alphavantage_daily),
+                  ("twelvedata", _dv._fetch_twelvedata_daily))
+
+    for _name, _fn in _chain:
         try:
             if _t.time() > _deadline:
                 break

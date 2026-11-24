@@ -2078,7 +2078,17 @@ let _lastOpenTrdHTML = null;
     let stratLegs=[];
     let _payoffSpot=24500;
     function payoffSym(){ try{ const s=(typeof rSyms==='function'&&rSyms()[0])||''; if(s) return s; }catch(e){} return document.getElementById('s-index').value||'NIFTY'; }
-    async function fetchPayoffSpot(){ try{ const s=payoffSym(); const d=await A('/api/chain/live/'+s); if(d.spot) _payoffSpot=d.spot; else if(d.rows) _payoffSpot=d.spot; }catch(e){} }
+    async function fetchPayoffSpot(){
+        // ROBUST (user rule 24-11): /api/chain/live/{sym} heavy hai aur timeout
+        // ho sakta hai (FINNIFTY par timeout mila -> 'Spot: -' dikhta tha).
+        // Pehle lightweight /api/dashboard/spot/{sym} try karo, chain fallback.
+        const s=payoffSym();
+        try{
+            const d=await A('/api/dashboard/spot/'+s);
+            if(d&&d.spot&&Number(d.spot)>0){_payoffSpot=Number(d.spot);return;}
+        }catch(e){}
+        try{ const d=await A('/api/chain/live/'+s); if(d&&d.spot&&Number(d.spot)>0) _payoffSpot=Number(d.spot); }catch(e){}
+    }
     function renderLegs(){
         const card=document.getElementById('legsTableCard'); const tbody=document.querySelector('#legsTable tbody');
         if(!stratLegs.length){card.style.display='none'; tbody.innerHTML=''; document.getElementById('payoffCard').style.display='none'; return;}
