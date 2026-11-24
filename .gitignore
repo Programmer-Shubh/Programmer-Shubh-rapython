@@ -53,6 +53,10 @@ acorn_check.py
 binary_search.js
 # windows helper
 Start_RaTrade.bat
+# Render dashboard build-command compatibility shim artifacts
+node_modules/
+/backend/static/
+
 # removed stale artifacts - never track again
 /db.sqlite3
 /ratrade.db

@@ -1,0 +1,9 @@
+{
+  "name": "ratrade-frontend-shim",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Build shim: Render dashboard expects a frontend build in frontend/frontend. The real RaTrade app serves static/index.html from the repo root, so this produces a harmless placeholder dist/.",
+  "scripts": {
+    "build": "node build.js"
+  }
+}
