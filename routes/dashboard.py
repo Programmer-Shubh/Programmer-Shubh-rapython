@@ -494,6 +494,9 @@ def get_trade_history_fast():
             "exit_cost": _t.get("exit_cost", 0),
             "status": _t.get("exit_status", "closed"),
             "exit_reason": _t.get("exit_status", ""),
+            "trade_mode": ("live" if (str(_t.get("trade_mode") or "").lower() == "live"
+                           or (_t.get("broker_order_id") and str(_t.get("broker_order_id")).strip()))
+                           else "paper"),
             "stop_loss": _t.get("stop_loss", 0),
             "target": _t.get("target", 0),
             "sl_unit": _t.get("sl_unit", "rs"),

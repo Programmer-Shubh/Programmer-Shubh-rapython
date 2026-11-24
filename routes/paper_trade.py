@@ -618,6 +618,9 @@ def get_history():
                 "transaction_type": t.get("transaction_type",""),
                 "expiry_date": t.get("expiry_date", ""),
                 "exit_status": t.get("exit_status", ""),
+                "trade_mode": ("live" if (str(t.get("trade_mode") or "").lower() == "live"
+                               or (t.get("broker_order_id") and str(t.get("broker_order_id")).strip()))
+                               else "paper"),
                 "strategy_id": int(t.get("strategy_id") or 0),
                 "strategy_name": _smap.get(int(t.get("strategy_id") or 0), ""),
                 "calc": f"({t.get('exit_price',0):.2f}-{t['entry_price']:.2f})×{t.get('lot_size',50)}" if t.get("transaction_type")=="BUY" else f"({t['entry_price']:.2f}-{t.get('exit_price',0):.2f})×{t.get('lot_size',50)}",
