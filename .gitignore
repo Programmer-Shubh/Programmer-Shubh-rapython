@@ -55,6 +55,7 @@ binary_search.js
 Start_RaTrade.bat
 # removed stale artifacts - never track again
 /db.sqlite3
+/ratrade.db
 ngrok.zip
 click
 audit_site.py
