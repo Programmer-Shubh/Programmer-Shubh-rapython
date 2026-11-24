@@ -49,7 +49,9 @@ def _market_open_now() -> bool:
 
 
 def _seed_history(symbol: str):
-    """6-month EOD archive: fetch_historical priority chain, always 180 days."""
+    """6-month EOD archive: fetch_historical priority chain, always 180 days.
+    Indices ko stale hone par bhi refresh karta hai (sirf row-count nahi dekhta) -
+    warna BANKNIFTY 8 din ka purana data chipak jata tha => PARTIAL DATA."""
     from datetime import datetime, timedelta
     db = Database.get_instance()
     has = db.fetch_one(
@@ -58,7 +60,20 @@ def _seed_history(symbol: str):
     )
     existing = has["c"] if has else 0
     if existing >= 120:
-        return
+        # Freshness guard for indices: last stored date 5 din se purana ho to
+        # refresh karo, chahe 120+ rows ho (stale data = galat signals).
+        if symbol not in INDEX_SYMBOLS:
+            return
+        try:
+            _last = db.fetch_one(
+                "SELECT MAX(trade_date) as d FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL",
+                [symbol],
+            )
+            _ld = str((_last or {}).get("d") or "")[:10]
+            if not _ld or _ld >= (datetime.now().date() - timedelta(days=5)).strftime("%Y-%m-%d"):
+                return
+        except Exception:
+            return
     bhav = BhavcopyModel()
     # Always 6 months archive, clamp to last trading day
     from core.services.historical_fetcher import _last_trading_day
@@ -194,16 +209,27 @@ async def run_refresh_loop():
             bhav = BhavcopyModel()
             # Bandwidth saver: max 8 most-needed symbols per night (was: all 50
             # x 1y every night - and on ephemeral free-tier DB, every restart).
+            # PRIORITY: indices (NIFTY/BANKNIFTY/FINNIFTY) hamesha PEHLE import
+            # karo - inhi par saved strategies, backtests aur auto-paper signals
+            # chalte hain. Pehle extra symbols pehle aate the to BANKNIFTY 8-10
+            # din tak missing rehta tha (PARTIAL DATA / 9-of-15 din missing).
             end = __import__("datetime").date.today().strftime("%Y-%m-%d")
             start = (__import__("datetime").date.today() - __import__("datetime").timedelta(days=365)).strftime("%Y-%m-%d")
             _done = 0
-            for sym in ALL_SYMBOLS:
+            # Indices first, then extras (dedup preserved).
+            _ordered = list(INDEX_SYMBOLS) + [s for s in ALL_SYMBOLS if s not in INDEX_SYMBOLS]
+            # Freshness check: stale index (last date > 5 days old) ko hamesha
+            # refresh karo, chahe row count 200+ ho (purana data = galat signals).
+            _today = __import__("datetime").date.today()
+            for sym in _ordered:
                 if _done >= 8:
                     break
                 try:
-                    # Skip if already has 200+ rows in last year
                     has = bhav.get_dates(sym)
-                    if len([d for d in has if d >= start]) >= 200:
+                    _year = [d for d in has if d >= start]
+                    # Skip if 200+ rows in last year AND (non-index OR fresh).
+                    _fresh = bool(_year) and max(_year) >= (_today - __import__("datetime").timedelta(days=5)).strftime("%Y-%m-%d")
+                    if len(_year) >= 200 and (sym not in INDEX_SYMBOLS or _fresh):
                         continue
                     data = fetch_historical(sym, start, end, allow_synthetic=False)
                     if data and len(data) >= 5:
