@@ -1989,6 +1989,14 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     except Exception:
         _tick_n = 0
         _tick_src = ""
+    # DATA HONESTY: engine ne ₹5 fake fallback se fill diya ho to result ko
+    # 'real tick' ya 'black_scholes' nahi bolna - 'fake_fallback' label do.
+    _fake_fills = 0
+    try:
+        _fake_fills = int((((m or {}).get("metrics") or {}).get("realism") or {})
+                          .get("fake_premium_fills") or 0)
+    except Exception:
+        _fake_fills = 0
     _final_res = {
         "success": True,
         "run_id": _run_id,
@@ -2012,15 +2020,17 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         # Data-source parity (user rule 24-11): UI ko batana hai ki backtest
         # REAL option tick/chain data par chala ya Black-Scholes model par.
         # tick_mode tabhi real jab user ne data_mode maanga HO aur ticks store ho.
-        "data_source": (_tick_src if (_tick_mode and _tick_n > 0 and _tick_src)
-                        else "black_scholes"),
+        "data_source": ("fake_fallback" if _fake_fills > 0 else
+                        (_tick_src if (_tick_mode and _tick_n > 0 and _tick_src)
+                         else "black_scholes")),
         "tick_count": _tick_n,
         "tick_source": _tick_src,
         "tick_reason": _tick_reason,  # kyoon Black-Scholes / auto-seed note (UI toast)
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
         "symbols": _syms,
         "per_symbol": _per_symbol,
-        "note": ((_prov_note + " ") if _prov_note else "") + (_zero_note or ""),
+        "note": ((_prov_note + " ") if _prov_note else "") + (_zero_note or "")
+                + (f" ⚠️ {_fake_fills} fill(s) ₹5 fake fallback se — ye result real data ka nahi hai." if _fake_fills else ""),
         "suggestions": _zero_tips,
         "took_ms": int((__import__("time").time() - _t0) * 1000),
         "metrics": {

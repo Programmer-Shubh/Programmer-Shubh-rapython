@@ -984,7 +984,7 @@ class BacktestEngine:
                              "missing_days_count": 0, "missing_days": []}
             except Exception:
                 self._cov = {}
-        return self._build_result(symbol, start_date, end_date, entries, exits)
+        return self._build_result(symbol, start_date, end_date, entries, exits, historical=historical)
 
     def _pre_calc(self, historical, closes, highs, lows, ind_list):
         result = {}
@@ -2556,6 +2556,12 @@ class BacktestEngine:
         Spec §7 labeling."""
         try:
             _ck = (str(date or "")[:10], float(strike or 0), str(option_type or "").upper())
+            # Real tick / fake fallback labels memo se PEHLE - warna purana
+            # 'model' label cache ho kar chhupa reh jata tha.
+            if _ck in getattr(self, "_tick_prem_keys", set()):
+                return "real_ticks"
+            if _ck in getattr(self, "_fake_prem_keys", set()):
+                return "fake_fallback"
             _memo = getattr(self, "_prem_src_cache", None)
             if isinstance(_memo, dict) and _ck in _memo:
                 return _memo[_ck]
@@ -2802,6 +2808,7 @@ class BacktestEngine:
                                option_type, str(getattr(self, "bt_expiry", "") or ""))
                 if _tv and float(_tv) > 0:
                     self.premium_cache[key] = float(_tv)
+                    self._tick_prem_keys.add(key)
                     return float(_tv)
         except Exception:
             pass
@@ -2896,6 +2903,10 @@ class BacktestEngine:
                 val = round(float(val), 2)
                 self.premium_cache[_mkey] = val
                 return val
+        # DATA HONESTY: ₹5 ek FABRICATED premium hai (real/model dono fail).
+        # Pehle ise 'model' label mil jata tha aur P&L bilkul real dikhata tha.
+        # Ab mark karte hain taaki UI/result me 'fake_fallback' warning dikhe.
+        self._fake_prem_keys.add(key)
         # Never poison the date cache with a fake 5.0 on an intraday bar.
         if not _intra:
             self.premium_cache[key] = 5.0
@@ -2954,6 +2965,7 @@ class BacktestEngine:
                                option_type, str(getattr(self, "bt_expiry", "") or ""))
                 if _tv and float(_tv) > 0:
                     self.premium_cache[key] = float(_tv)
+                    self._tick_prem_keys.add(key)
                     return float(_tv)
         except Exception:
             pass
@@ -3028,6 +3040,8 @@ class BacktestEngine:
                 val = round(float(val), 2)
                 self.premium_cache[_mkey] = val
                 return val
+        # DATA HONESTY: ₹5 = fabricated fallback (koi real/model source nahi).
+        self._fake_prem_keys.add(key)
         if not _intra:
             self.premium_cache[key] = 5.0
         return 5.0
@@ -3242,7 +3256,7 @@ class BacktestEngine:
             return float(row2["close_price"])
         return 0
 
-    def _build_result(self, symbol, start_date, end_date, entries, exits):
+    def _build_result(self, symbol, start_date, end_date, entries, exits, historical=None):
         equity = [self.initial_capital]
         capital = self.initial_capital
         total_trades = 0
@@ -3447,7 +3461,12 @@ class BacktestEngine:
             _is_naked_sell = True
             _spot_ref = 0.0
             try:
-                _spot_ref = float((historical[-1] or {}).get("close_price", 0) or 0) if historical else 0.0
+                # PURANA BUG: yahan `historical` undefined tha (NameError silently
+                # catch hota tha) → _spot_ref hamesha 0 → naked-sell risk metrics
+                # wrong fallback par bante the. Ab run() se real bars pass hote
+                # hain (old callers ke liye None-safe).
+                _hb = historical or []
+                _spot_ref = float((_hb[-1] or {}).get("close_price", 0) or 0) if _hb else 0.0
             except Exception:
                 pass
             for _t in _sell_trades:
@@ -3491,6 +3510,13 @@ class BacktestEngine:
         if _max_possible_loss_est > 0:
             _warn_opt.append(f"सबसे बुरा अनुमानित नुकसान: ₹{_max_possible_loss_est:,.0f} प्रति ट्रेड (स्टॉक ज़ीरो पर जाने का सैद्धांतिक केस)।")
         _warn.extend(_warn_opt)
+        # DATA HONESTY warning: agar koi bhi fill ₹5 fake fallback se aaya to
+        # result 'REAL' nahi hai - UI ko batana zaroori (user rule 24-11).
+        _fake_n = sum(1 for t in trade_list
+                      if str(t.get("entry_src") or "") == "fake_fallback"
+                      or str(t.get("exit_src") or "") == "fake_fallback")
+        if _fake_n:
+            _warn.append(f"⚠️ {_fake_n} trade(s) me premium kisi real/model source se nahi mila — ₹5 fallback use hua. Ye result REAL data ka nahi hai; NSE option sync + tick data check karo.")
 
         return {
             "success": True,
@@ -3565,6 +3591,8 @@ class BacktestEngine:
                     "tp_confirmed_by_close": int(getattr(self, "_n_tp_confirmed", 0) or 0),
                     "tp_wick_touches_ignored": int(getattr(self, "_n_tp_unconfirmed", 0) or 0),
                     "exit_latency_fills": int(getattr(self, "_n_exit_latency", 0) or 0),
+                    "fake_premium_fills": _fake_n,
+                    "tick_priced_fills": len(getattr(self, "_tick_prem_keys", set()) or ()),
                     "warnings": _warn,
                 },
                 "equity_curve": equity,
@@ -3636,3 +3664,7 @@ class BacktestEngine:
         self._used_intraday_bars = False
         self._trailing_best = {}  # trade index -> best price seen (for trailing SL)
         self._prem_src_cache = {}
+        # Data-honesty audit (24-11): kis premium ne real tick / DB / fake
+        # fallback se aayi. Fake ₹5 fallback ko 'model' bolna galat tha.
+        self._tick_prem_keys = set()
+        self._fake_prem_keys = set()

@@ -481,7 +481,14 @@ def _intraday_signal(sid, s, today, need_more_than=0):
             except Exception as e:
                 return None, f"engine timeout/fail: {e}"[:100]
         try:
-            tl = ((res or {}).get("metrics") or {}).get("trade_list") or []
+            # CRITICAL FIX (24-11): purana path `metrics.trade_list` hamesha
+            # KHALI tha - _final_res (routes/strategy_builder.py) metrics ko
+            # selective fields se banata hai, trade_list TOP-LEVEL hota hai
+            # (wahi bug _today_signal me pehle fix hua tha). Is wajah se live
+            # intraday worker ko kabhi koi signal nahi milta tha = ZERO auto
+            # paper trades. Ab top-level FIRST, metrics fallback (direct
+            # BacktestEngine.run path ke liye).
+            tl = (res or {}).get("trade_list") or ((res or {}).get("metrics") or {}).get("trade_list") or []
         except Exception:
             tl = []
         fired = []
@@ -616,7 +623,12 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
             # auto fire nahi honge. Cap strategy ke advanced_options me
             # 'otm_pct_cap' se set ho sakta hai (default 20).
             try:
-                _cap = float(((s.get("advanced_options") or {}) or {}).get("otm_pct_cap") or 20.0)
+                # DB me advanced_options aksar JSON STRING hota hai - purane
+                # code me string par .get() called -> AttributeError -> cap
+                # hamesha 20.0 (user ka saved cap ignore ho jata tha).
+                _ao_raw = s.get("advanced_options") or {}
+                _ao = _js.loads(_ao_raw) if isinstance(_ao_raw, str) else _ao_raw
+                _cap = float((_ao or {}).get("otm_pct_cap") or 20.0)
             except Exception:
                 _cap = 20.0
             try:

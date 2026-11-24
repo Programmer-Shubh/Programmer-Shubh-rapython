@@ -116,6 +116,18 @@ def sync_status() -> dict:
         if row and row.get("setting_value"):
             d = _js.loads(row["setting_value"]) or {}
             d["sync_running"] = _RUNNING
+            # SELF-HEAL: 09:41 wala sync 'running' me atak gaya tha (Render
+            # restart, thread dead, DB state purana). 15 min se purana + koi
+            # live thread nahi = interrupted. (NSE sync me bhi yahi fix.)
+            if str(d.get("state")) == "running" and not _RUNNING:
+                try:
+                    ua = str(d.get("updated_at") or "")
+                    _u = _dt.datetime.strptime(ua, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_IST)
+                    if (_dt.datetime.now(_IST) - _u).total_seconds() > 15 * 60:
+                        d["state"] = "interrupted"
+                        d["note"] = "Process restart — sync atak gaya tha. Dobara 'Sync Fyers History' dabao."
+                except Exception:
+                    pass
             return d
     except Exception:
         pass
@@ -243,20 +255,20 @@ def _store_bars(bars, expiry=None, strike=None, option_type=None):
         ))
     for a in range(0, len(rows), CH):
         chunk = rows[a:a + CH]
-        try:
-            db.executemany(
-                "DELETE FROM bhavcopy_data WHERE symbol=? AND trade_date=? "
-                "AND COALESCE(expiry_date,'')=COALESCE(?,'') "
-                "AND COALESCE(strike_price,0)=COALESCE(?,0) "
-                "AND COALESCE(option_type,'')=COALESCE(?,'')",
-                [(r[0], r[1], r[2], r[3], r[4]) for r in chunk])
-        except Exception:
-            pass
+        # PEHLE: DELETE (per-key) ke baad INSERT tha - dono alag try me the.
+        # Agar INSERT fail ho jaye (Render PG pooler hiccup) to DELETE khali
+        # successful rehta tha = purana REAL row hamesha ke liye delete.
+        # Ab single atomic UPSERT: purana bachta bhi hai, fresh bhi update.
         try:
             db.executemany(
                 "INSERT INTO bhavcopy_data (symbol, trade_date, expiry_date, strike_price, option_type,"
                 " open_price, high_price, low_price, close_price, volume, oi)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(symbol, trade_date, COALESCE(expiry_date,''), "
+                "COALESCE(strike_price,0), COALESCE(option_type,'')) DO UPDATE SET "
+                "open_price=excluded.open_price, high_price=excluded.high_price, "
+                "low_price=excluded.low_price, close_price=excluded.close_price, "
+                "volume=excluded.volume, oi=excluded.oi",
                 chunk)
             n += len(chunk)
         except Exception:
@@ -274,6 +286,12 @@ def sync_all(start_date: str = "2026-01-01", log=print):
     _set_status({"state": "running", "started_at": _ist_now().strftime("%Y-%m-%d %H:%M:%S"),
                  "stage": "index_bars", "index_ok": [], "index_failed": [],
                  "contracts_ok": 0, "contracts_failed": [], "rows_stored": 0})
+    # Overall 4-min deadline (user rule 24-11): pehle 4 indices × ~40 expiries
+    # × 10 contracts = ~1600 Fyers calls bina timeout ke chalte the; Render
+    # thread mar jati thi par DB state 'running' atak jata tha.
+    import time as _ptime
+    _deadline = _ptime.time() + 240
+    _paused = False
     try:
         end = _ist_today().strftime("%Y-%m-%d")
         app_id, token = _fyers_creds()
@@ -306,6 +324,9 @@ def sync_all(start_date: str = "2026-01-01", log=print):
             exps = expiry_dates(idx, start_date, (end[:8] + "28"))
             exp_ok = []
             for exp in exps:
+                if _ptime.time() > _deadline:
+                    _paused = True
+                    break
                 ref = _nearest_bar_close(closes, exp) or (ibars[0]["close_price"] if ibars else 0)
                 if ref <= 0:
                     continue
@@ -323,6 +344,9 @@ def sync_all(start_date: str = "2026-01-01", log=print):
                     continue
                 exp_ok.append(exp)
                 for stk in strikes:
+                    if _ptime.time() > _deadline:
+                        _paused = True
+                        break
                     for opt in ("CE", "PE"):
                         try:
                             from core.services.symbol_resolver import _fyers_symbol
@@ -356,6 +380,16 @@ def sync_all(start_date: str = "2026-01-01", log=print):
                              "current_expiry": exp})
             summary["expiries"][idx] = exp_ok
             sys_log(idx, "expiries synced:", len(exp_ok), "contracts ok:", summary["contracts_ok"])
+            if _paused:
+                break
+
+        if _paused:
+            # Partial run - ab 'done' nahi (auto-flag galat set hota tha).
+            _set_status({"state": "paused", "stage": "contracts",
+                         "note": "4-min deadline — agle run yahin se resume hoga",
+                         "rows_stored": summary["rows_stored"],
+                         "contracts_ok": summary["contracts_ok"]})
+            return summary
 
         # ---------- 3) coverage snapshot ----------
         try:

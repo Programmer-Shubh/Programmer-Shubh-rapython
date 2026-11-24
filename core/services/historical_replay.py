@@ -374,10 +374,32 @@ class HistoricalReplayEngine:
                 open_trade_idx = len([t for t in self.trades if t.get("exit_date")])
                 entry = self.trades[open_trade_idx]
                 if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
-                    hit = self.bt_engine._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty)
+                    hit = self.bt_engine._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty,
+                                                      entry_idx=open_trade_idx)
                     if hit:
                         from core.services.transaction_costs import TransactionCosts as _TC
-                        exit_prem = _TC.apply_fill_slippage(hit.get("fill", hit["level"]), "SELL" if txn_type == "buy" else "BUY", False,
+                        _fill = hit.get("fill", hit["level"])
+                        # PARITY FIX: engine SL block (backtest_engine.py ~629)
+                        # stop fill ko level ke paas cap karta hai (sl_fill_cap,
+                        # 2%). Replay me ye cap nahi tha → SL ₹1.25 zyada slip,
+                        # net P&L ₹81 alag (test_replay_matches_backtest_contract).
+                        if str(hit.get("reason")) == "stoploss":
+                            try:
+                                from core.services.strategy_rulebook import sl_fill_cap as _capf
+                                _sl_pts = None
+                                try:
+                                    _sl_pts = abs(float(entry.get("price") or 0)
+                                                  - float(hit.get("level") or 0))
+                                except Exception:
+                                    _sl_pts = None
+                                _cap_px = _capf(float(hit.get("level") or 0),
+                                                txn_type == "buy", 2.0, _sl_pts)
+                                if _cap_px > 0:
+                                    _fill = (max(float(_fill), _cap_px) if txn_type == "buy"
+                                             else min(float(_fill), _cap_px))
+                            except Exception:
+                                pass
+                        exit_prem = _TC.apply_fill_slippage(_fill, "SELL" if txn_type == "buy" else "BUY", False,
                                                             slippage_pct=float(getattr(self.bt_engine, "_slippage_pct", 0.5) or 0.5))
                         self.bt_engine._close_position(self.trades, self._exits, entry, exit_prem,
                             hit["reason"], cur_date, qty, txn_type)

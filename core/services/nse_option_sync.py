@@ -94,6 +94,19 @@ def sync_status() -> dict:
         if row and row.get("setting_value"):
             d = _js.loads(row["setting_value"]) or {}
             d["sync_running"] = _RUNNING
+            # SELF-HEAL: Render restart ke baad DB me 'running' atak jata hai
+            # (thread mri par finally likhne ka mauqa nahi milta). Agar 15 min
+            # se zyada purana 'running' ho aur abhi koi thread na chal rahi
+            # ho to 'interrupted' mark karo - UI aur resume dono sahi.
+            if str(d.get("state")) == "running" and not _RUNNING:
+                try:
+                    ua = str(d.get("updated_at") or "")
+                    _u = _dt.datetime.strptime(ua, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_IST)
+                    if (_dt.datetime.now(_IST) - _u).total_seconds() > 15 * 60:
+                        d["state"] = "interrupted"
+                        d["note"] = "Process restart — sync atak gaya tha. Dobara dabao, resume karega."
+                except Exception:
+                    pass
             return d
     except Exception:
         pass
@@ -221,7 +234,10 @@ def sync_from_nse(start_date: str = "2026-01-01", end_date: str | None = None,
     try:
         _prev = sync_status()
         _resume = str(_prev.get("current_date") or "")[:10]
-        if _resume and _prev.get("state") == "running" and _resume > str(s):
+        # 'paused' (4-min deadline) aur 'interrupted' (restart) dono se resume
+        # karo - pehle sirf 'running' par resume hota tha, deadline ke baad
+        # dobara dabane par 01-01 se shuru ho jata tha (barbaad fetch).
+        if _resume and str(_prev.get("state")) in ("running", "paused", "interrupted") and _resume > str(s):
             s = _dt.datetime.strptime(_resume, "%Y-%m-%d").date() + _dt.timedelta(days=1)
     except Exception:
         pass
