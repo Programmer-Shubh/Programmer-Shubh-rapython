@@ -204,20 +204,50 @@ def backfill_from_bhavcopy(days: int = 90, batch: int = 4000) -> int:
 
     Isse intraday backtest ko real open→close price move milta hai (synthetic
     nahi), broker offline par bhi. Idempotent (upsert). Returns rows written."""
+    from datetime import datetime, timedelta
     try:
         from core.models.database import Database
-        from datetime import datetime, timedelta
         db = Database.get_instance()
         since = (datetime.now() - timedelta(days=int(days or 90))).strftime("%Y-%m-%d")
+        # FASTEST PATH (24-11): dono real ticks EK server-side INSERT..SELECT se.
+        # Pehle Python me rows fetch karke har tick alag/executemany se likha —
+        # Supabase par 400s timeout bhi cross kar gaya (sirf 3192 ticks likhe
+        # the). Ab DB khud 2 statements me sab karta hai (seconds).
+        head = ("INSERT INTO option_ticks (symbol, trade_date, bar_time, expiry_date, "
+                "strike_price, option_type, ltp, volume, source) ")
+        where = (" FROM bhavcopy_data WHERE option_type IN ('CE','PE') AND trade_date>=? "
+                 "AND close_price>0 AND strike_price>0 ")
+        tail = (" ON CONFLICT(symbol, trade_date, bar_time, strike_price, option_type, expiry_date) "
+                "DO UPDATE SET ltp=excluded.ltp, volume=excluded.volume")
+        ok = True
+        for bar_time, px in (("09:15", "COALESCE(open_price, close_price)"),
+                             ("15:15", "close_price")):
+            q = (head + "SELECT UPPER(symbol), trade_date, ?, COALESCE(expiry_date,''), "
+                 "strike_price, UPPER(option_type), " + px +
+                 ", COALESCE(volume,0), 'nse_bhavcopy'" + where
+                 + "AND " + px + ">0" + tail)
+            try:
+                db.execute(q, [bar_time, since])
+            except Exception:
+                ok = False
+                break
+        if ok:
+            try:
+                r = db.fetch_one("SELECT COUNT(*) c FROM option_ticks WHERE source='nse_bhavcopy' AND trade_date>=?", [since])
+                return int((r or {}).get("c") or 0)
+            except Exception:
+                return 1
+    except Exception:
+        pass
+    # FALLBACK (purana Python path) - agar SQL variant kisi DB par na chale.
+    try:
+        from core.models.database import Database
+        db = Database.get_instance()
         rows = db.fetch_all(
             "SELECT symbol, trade_date, expiry_date, strike_price, option_type, "
             "open_price, close_price, volume FROM bhavcopy_data "
             "WHERE option_type IN ('CE','PE') AND trade_date>=? "
-            "AND close_price>0 ORDER BY trade_date, symbol",
-            [since])
-        # SPEED FIX (24-11): pehle har tick ke liye alag db.execute() tha —
-        # ~10-20 hazaar round-trips Supabase pooler par, 5+ min lagte the.
-        # Ab tuple banakar batch me executemany (ek round-trip / 1000 tick).
+            "AND close_price>0 ORDER BY trade_date, symbol", [since])
         q = ("INSERT INTO option_ticks (symbol, trade_date, bar_time, expiry_date, "
              "strike_price, option_type, ltp, volume, source) "
              "VALUES (?,?,?,?,?,?,?,?,?) "
@@ -236,7 +266,6 @@ def backfill_from_bhavcopy(days: int = 90, batch: int = 4000) -> int:
                 date = str(r.get("trade_date"))[:10]
                 exp = str(r.get("expiry_date") or "")
                 vol = int(r.get("volume") or 0)
-                # Real OPEN tick @ 09:15, real CLOSE tick @ 15:15.
                 for bar_time, price in (("09:15", opn or close), ("15:15", close)):
                     if price > 0:
                         out.append((sym, date, bar_time, exp, strike, opt,
@@ -247,7 +276,6 @@ def backfill_from_bhavcopy(days: int = 90, batch: int = 4000) -> int:
             try:
                 db.executemany(q, out[i:i + batch])
             except Exception:
-                # Fallback: purane DB adapters par executemany na ho to per-row.
                 for r0 in out[i:i + batch]:
                     try:
                         db.execute(q, list(r0))
