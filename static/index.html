@@ -517,6 +517,7 @@
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small" title="Auto paper: aaj ka signal na mile to kitne din purana signal chalega (0 = sirf aaj)">Signal Lookback (din)</label><input type="number" id="r-slb" class="form-control form-control-sm" value="0" min="0" max="15"></div>
                         <div class="col-md-2"><label class="form-label small">Chart Timeframe</label><select id="r-timeframe" class="form-select form-select-sm"><option value="1d">Daily</option><option value="5m">5 Minute</option><option value="15m" selected>15 Minute</option><option value="30m">30 Minute</option><option value="1h">1 Hour</option><option value="1m">1 Minute</option></select></div>
+                        <div class="col-md-2"><label class="form-label small" title="Real option tick/chain data se backtest (recorded 1-min LTP) ya Black-Scholes model">Premium Data</label><select id="r-data-mode" class="form-select form-select-sm"><option value="model">Black-Scholes (model)</option><option value="1m_chain" selected>Real Tick (1M chain)</option></select></div>
                     </div>
                     <div class="row g-1 mt-1">
                         <div class="col-md-2"><label class="form-label small">Momentum</label><input type="range" class="form-range" id="s-momentum" min="0" max="20" value="0"></div>
@@ -1562,7 +1563,7 @@ let _lastOpenTrdHTML = null;
         // use karta hai (index 13-15%, stock 30%) - wahi paper/live/scanner
         // use karte hain. Pehle yahan hardcoded 0.14 jata tha (index ka IV)
         // to stock options ka premium 5x chhota dikhta tha.
-        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:trailOn,trailing:trailOn?String(_trailStep):'Off',max_holding_bars:rType==='intraday'?0:(momentum>0?Math.max(5,20-momentum):20),strict_trend:(indicators||[]).some(i=>['adx','vwap','market_regime','combo_rsi_vwap_pcr'].includes(String(i.id||i).toLowerCase())),allow_intraday_time_exit:false,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'No Re-entry',reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'RE ASAP',lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,lock_profit_unit:'pt',dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,sl_unit:slUnit,tp_unit:tpUnit,signal_lookback_days:slb}};
+        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:trailOn,trailing:trailOn?String(_trailStep):'Off',max_holding_bars:rType==='intraday'?0:(momentum>0?Math.max(5,20-momentum):20),strict_trend:(indicators||[]).some(i=>['adx','vwap','market_regime','combo_rsi_vwap_pcr'].includes(String(i.id||i).toLowerCase())),allow_intraday_time_exit:false,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'No Re-entry',reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'RE ASAP',lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,lock_profit_unit:'pt',dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip,data_mode:(document.getElementById('r-data-mode')?.value||'1m_chain')},risk:{max_trades_per_day:mtd,daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,sl_unit:slUnit,tp_unit:tpUnit,signal_lookback_days:slb}};
     }
     async function runBacktest(opts){
         // opts.direct: saved-strategy endpoint ka ready result - dobara fetch nahi, sidha render.
@@ -1652,7 +1653,22 @@ let _lastOpenTrdHTML = null;
             const _chgBadge=r.config_changed?(' • <span class="badge bg-warning text-dark">Config badli — trade history purani wali, naya chahiye to ↻ Naya run</span>'):'';
             const _localBadge=(r._localCache&&!r.stored)?(' • <span class="badge bg-secondary">Turant copy (server se pakka ho raha...)</span>'):'';
             const _refreshBtn=r.strategy_id?(' <button class="btn btn-sm btn-outline-primary ms-1" style="font-size:11px;padding:0 6px" title="Config same hai to saved, naya chahiye to force" onclick="backtestStrat('+(r.strategy_id)+',true)">↻ Naya run</button>'):'';
-            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'')+_storedBadge+_chgBadge+_localBadge+_refreshBtn;
+            // DATA SOURCE badge (user rule 24-11): backtest kis premium data par
+            // chal gaya - Real 1M option chain vs Black-Scholes model - clearly
+            // dikhao. Pehle backend data_source bhejta tha par UI ignore karta tha.
+            let _dsBadge='';
+            try{
+                const _ds=String(r.data_source||_p.data_mode||'').toLowerCase();
+                const _ticks=(r.tick_count!=null?Number(r.tick_count):null);
+                if(_ds==='1m_chain'||_ds==='1m option chain'||_ds==='tick'||_ds==='real'){
+                    _dsBadge=' • <span class="badge bg-success" title="Backtest REAL option tick/chain data par chal gaya (asli option LTP)">Real BT (1M OPTION CHAIN)'+(_ticks!=null?(' • '+_ticks+' ticks'):'')+'</span>';
+                }else if(_ds==='black_scholes'||_ds==='model'||_ds==='bs'){
+                    _dsBadge=' • <span class="badge bg-secondary" title="Premium Black-Scholes model se estimate kiya gaya (real tick data nahi)">Black-Scholes (model)</span>';
+                }else if(_ds){
+                    _dsBadge=' • <span class="badge bg-info" title="Premium data source: '+_ds.replace(/"/g,'&quot;')+'">'+_ds+'</span>';
+                }
+            }catch(_dse){_dsBadge='';}
+            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+_dsBadge+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'')+_storedBadge+_chgBadge+_localBadge+_refreshBtn;
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
             const pnl = m.final_capital - m.initial_capital;
@@ -2000,6 +2016,7 @@ let _lastOpenTrdHTML = null;
                 timeframe:timeframe,
                 momentum:momentum,
                 slippage_pct:0.5,
+                data_mode:(document.getElementById('r-data-mode')?.value||'1m_chain'),
                 strike_selection:(legs[0]&&legs[0].strike_selection)||'atm',
                 otm_distance:(legs[0]&&legs[0].otm_distance)||0,
                 max_holding_bars:stratType==='intraday'?0:1000000,
@@ -2321,6 +2338,7 @@ let _lastOpenTrdHTML = null;
                 if(_ao.entry_time)document.getElementById('r-entry').value=_ao.entry_time;
                 if(_ao.exit_time)document.getElementById('r-exit').value=_ao.exit_time;
                 if(_ao.timeframe||s.timeframe)document.getElementById('r-timeframe').value=_ao.timeframe||s.timeframe;
+                if(_ao.data_mode)document.getElementById('r-data-mode').value=_ao.data_mode;
             }catch(e){}
             try{
                 _rm=(typeof s.risk_management==='string')?JSON.parse(s.risk_management||'{}'):(s.risk_management||{});

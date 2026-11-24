@@ -304,6 +304,24 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_bhav_symbol_date ON bhavcopy_data(symbol, trade_date);
                 CREATE INDEX IF NOT EXISTS idx_bhav_strike ON bhavcopy_data(symbol, strike_price, option_type);
 
+                -- Real option ticks (1-min LTP from live WS) for tick-based backtests
+                CREATE TABLE IF NOT EXISTS option_ticks (
+                    id SERIAL PRIMARY KEY,
+                    symbol TEXT NOT NULL,
+                    trade_date TEXT NOT NULL,
+                    bar_time TEXT NOT NULL,
+                    expiry_date TEXT,
+                    strike_price DOUBLE PRECISION NOT NULL,
+                    option_type TEXT NOT NULL,
+                    ltp DOUBLE PRECISION NOT NULL,
+                    volume BIGINT DEFAULT 0,
+                    source TEXT DEFAULT 'fyers_ws',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE(symbol, trade_date, bar_time, strike_price, option_type, expiry_date)
+                );
+                CREATE INDEX IF NOT EXISTS idx_ticks_lookup
+                    ON option_ticks(symbol, trade_date, strike_price, option_type);
+
                 CREATE TABLE IF NOT EXISTS paper_trades (
                     id SERIAL PRIMARY KEY,
                     user_id INTEGER DEFAULT 1,
@@ -495,6 +513,24 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_bhav_symbol_date ON bhavcopy_data(symbol, trade_date);
                 CREATE INDEX IF NOT EXISTS idx_bhav_strike ON bhavcopy_data(symbol, strike_price, option_type);
+
+                -- Real option ticks (1-min LTP from live WS) for tick-based backtests
+                CREATE TABLE IF NOT EXISTS option_ticks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    trade_date TEXT NOT NULL,
+                    bar_time TEXT NOT NULL,
+                    expiry_date TEXT,
+                    strike_price REAL NOT NULL,
+                    option_type TEXT NOT NULL,
+                    ltp REAL NOT NULL,
+                    volume INTEGER DEFAULT 0,
+                    source TEXT DEFAULT 'fyers_ws',
+                    created_at TEXT DEFAULT (datetime('now')),
+                    UNIQUE(symbol, trade_date, bar_time, strike_price, option_type, expiry_date)
+                );
+                CREATE INDEX IF NOT EXISTS idx_ticks_lookup
+                    ON option_ticks(symbol, trade_date, strike_price, option_type);
 
                 CREATE TABLE IF NOT EXISTS paper_trades (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

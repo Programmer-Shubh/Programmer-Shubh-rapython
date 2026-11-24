@@ -105,6 +105,10 @@ class BacktestEngine:
             self._used_intraday_bars = False
         self._trade_mode = str(advanced_options.get("trade_mode") or "").lower()
         self._advanced = advanced_options
+        # REAL option tick data mode (user rule 24-11): '1m_chain' / 'tick' /
+        # 'real' par premium recorded ticks se lo, Black-Scholes nahi.
+        self._use_tick_data = str(advanced_options.get("data_mode") or "").lower() in (
+            "1m_chain", "1m", "tick", "ticks", "real", "real_option", "option_chain")
         self.bt_expiry = str(legs[0].get("expiry_date", "") if legs else "")[:10]
         self._explicit_expiry = bool(self.bt_expiry)
         # Unified pricer: paper/live/chain/scan sab model_premium(model_iv)
@@ -2787,6 +2791,20 @@ class BacktestEngine:
         # value for the whole session). Never use it for a clocked bar.
         if not _intra and key in self.premium_cache:
             return self.premium_cache[key]
+        # 0) REAL option tick data (user rule 24-11): jab user ne tick-data
+        # mode chuna ho to recorded 1-min LTP se premium lo - Black-Scholes
+        # model nahi. Pehle sirf model tha jisse real option prints se gap tha.
+        try:
+            if getattr(self, "_use_tick_data", False):
+                from core.services.tick_recorder import tick_bar
+                _bt = getattr(self, "_cur_bar_time", "") or ""
+                _tv = tick_bar(self.bt_symbol, date, _bt or "09:15", strike,
+                               option_type, str(getattr(self, "bt_expiry", "") or ""))
+                if _tv and float(_tv) > 0:
+                    self.premium_cache[key] = float(_tv)
+                    return float(_tv)
+        except Exception:
+            pass
         # 1) Real DB LTP (historical) — skip if table missing (fresh local DB)
         # Fast path: synthetic-only backtest never hits DB (Render free tier = slow roundtrips)
         row = None
@@ -2927,6 +2945,18 @@ class BacktestEngine:
         _intra = self._intraday_bar()
         if not _intra and key in self.premium_cache:
             return self.premium_cache[key]
+        # REAL tick data (exit): recorded 1-min LTP at the exit bar.
+        try:
+            if getattr(self, "_use_tick_data", False):
+                from core.services.tick_recorder import tick_bar
+                _bt = getattr(self, "_cur_bar_time", "") or ""
+                _tv = tick_bar(self.bt_symbol, date, _bt or "15:15", strike,
+                               option_type, str(getattr(self, "bt_expiry", "") or ""))
+                if _tv and float(_tv) > 0:
+                    self.premium_cache[key] = float(_tv)
+                    return float(_tv)
+        except Exception:
+            pass
         skip_db = getattr(self, "_skip_db", False)
         if not _intra and not skip_db:
             try:

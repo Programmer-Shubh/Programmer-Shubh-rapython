@@ -1,14 +1,161 @@
-"""Tick recorder: captures real option LTP per minute while broker is connected,
-stores into the `option_ticks` table so historical backtests can use real intraday
-option data instead of daily-anchored interpolation.
+"""Real option-tick recorder: stores actual option LTP (1-min bars) into the
+`option_ticks` table so backtests can price contracts from REAL recorded ticks
+instead of synthetic Black-Scholes interpolation.
 
-Usage:
-    from core.services.tick_recorder import start_tick_recorder, stop_tick_recorder
-    start_tick_recorder(interval_sec=60)   # default 1-min ticks
-    # ... run your app ...
-    stop_tick_recorder()
+Data flow:
+  Fyers WebSocket tick (fast_exit._on_message) -> record_tick(sym, strike, opt, ltp)
+  -> option_ticks table -> backtest_engine._close_premium / entry premium
+                           (when data_mode='1m_chain' or real ticks available)
+
+Public API:
+  record_tick(symbol, strike, option_type, ltp, expiry='', volume=0, source='fyers_ws')
+  get_ticks(symbol, trade_date, strike, option_type, expiry='') -> list[dict]
+  tick_bar(symbol, trade_date, bar_time, strike, option_type, expiry='') -> dict|None
+  tick_count(symbol=None, trade_date=None) -> int
 """
-
-import asyncio
+import threading
 import time as _time
-from core.models.database import Database
+from datetime import datetime, timedelta, timezone
+
+_LOCK = threading.Lock()
+_LAST_WRITE = {}   # (symbol, strike, option_type, bar_minute) -> epoch (throttle)
+_MIN_WRITE_INTERVAL = 1.0   # 1 tick/minute par likho (1-min bars)
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _ist_now():
+    now = datetime.now(_IST)
+    return now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
+
+
+def record_tick(symbol, strike, option_type, ltp, expiry="", volume=0,
+                source="fyers_ws", force=False):
+    """Persist ONE real option LTP into option_ticks (throttled to 1/min/strike).
+    Safe to call from the WS callback thread - never raises."""
+    try:
+        strike = float(strike or 0)
+        ltp = float(ltp or 0)
+        symbol = str(symbol or "").upper()
+        option_type = str(option_type or "").upper()
+        if not symbol or strike <= 0 or ltp <= 0 or option_type not in ("CE", "PE"):
+            return False
+        date, hhmm = _ist_now()
+        bar_time = f"{hhmm[:2]}:00"   # 1-min bar start (09:17 -> 09:17:00 style HH:MM)
+        key = (symbol, strike, option_type, date, bar_time)
+        with _LOCK:
+            now = _time.time()
+            if not force and now - _LAST_WRITE.get(key, 0) < _MIN_WRITE_INTERVAL:
+                return False
+            _LAST_WRITE[key] = now
+            if len(_LAST_WRITE) > 5000:
+                _LAST_WRITE.clear()
+        from core.models.database import Database
+        db = Database.get_instance()
+        db.execute(
+            "INSERT INTO option_ticks (symbol, trade_date, bar_time, expiry_date, "
+            "strike_price, option_type, ltp, volume, source) "
+            "VALUES (?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(symbol, trade_date, bar_time, strike_price, option_type, expiry_date) "
+            "DO UPDATE SET ltp=excluded.ltp, volume=excluded.volume",
+            [symbol, date, bar_time, str(expiry or ""), strike, option_type,
+             ltp, int(volume or 0), str(source or "fyers_ws")])
+        return True
+    except Exception:
+        return False
+
+
+def get_ticks(symbol, trade_date, strike, option_type, expiry=""):
+    """All recorded ticks for one contract on one date (chronological).
+    Returns list of {'bar_time': 'HH:MM:00', 'ltp': float}."""
+    try:
+        from core.models.database import Database
+        rows = Database.get_instance().fetch_all(
+            "SELECT bar_time, ltp FROM option_ticks "
+            "WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=? "
+            "AND expiry_date=? ORDER BY bar_time",
+            [str(symbol or "").upper(), str(trade_date)[:10], float(strike or 0),
+             str(option_type or "").upper(), str(expiry or "")])
+        return [{"bar_time": str(r.get("bar_time") or "")[:5],
+                 "ltp": float(r.get("ltp") or 0)} for r in (rows or [])]
+    except Exception:
+        return []
+
+
+def tick_bar(symbol, trade_date, bar_time, strike, option_type, expiry=""):
+    """LTP of a specific 1-min bar (engine premium lookup). None if no tick."""
+    try:
+        from core.models.database import Database
+        r = Database.get_instance().fetch_one(
+            "SELECT ltp FROM option_ticks "
+            "WHERE symbol=? AND trade_date=? AND bar_time LIKE ? "
+            "AND strike_price=? AND option_type=? AND expiry_date=? "
+            "ORDER BY bar_time DESC LIMIT 1",
+            [str(symbol or "").upper(), str(trade_date)[:10],
+             str(bar_time)[:5] + "%", float(strike or 0),
+             str(option_type or "").upper(), str(expiry or "")])
+        return float(r["ltp"]) if r and r.get("ltp") else None
+    except Exception:
+        return None
+
+
+def tick_count(symbol=None, trade_date=None):
+    """How many real ticks stored (diagnostics / UI)."""
+    try:
+        from core.models.database import Database
+        where, params = [], []
+        if symbol:
+            where.append("symbol=?")
+            params.append(str(symbol).upper())
+        if trade_date:
+            where.append("trade_date=?")
+            params.append(str(trade_date)[:10])
+        q = "SELECT COUNT(*) as c FROM option_ticks" + (
+            (" WHERE " + " AND ".join(where)) if where else "")
+        r = Database.get_instance().fetch_one(q, params)
+        return int(r["c"]) if r else 0
+    except Exception:
+        return 0
+
+
+def parse_fyers_option(sym):
+    """Parse a Fyers option symbol -> (underlying, strike, CE/PE, expiry_ymd).
+    Examples: NIFTY25DEC24000CE, BANKNIFTY26NOV55000PE, NIFTY26NOV24CE.
+    Returns None for non-option/index-equity symbols."""
+    try:
+        s = str(sym or "").upper().replace("-", "").replace(" ", "")
+        if not s.endswith("CE") and not s.endswith("PE"):
+            return None
+        opt = s[-2:]
+        body = s[:-2]
+        # Strike = trailing digits (before CE/PE). Expiry = 2-digit YY + MMM before strike.
+        import re
+        m = re.search(r"(\d{2}(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC))(\d+)$", body)
+        if not m:
+            return None
+        exp_token = m.group(1)      # e.g. 26NOV
+        strike = float(m.group(2))
+        underlying = body[:m.start()]
+        if not underlying or strike <= 0:
+            return None
+        yy = 2000 + int(exp_token[:2])
+        mon = {m_: i + 1 for i, m_ in enumerate(
+            ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"])}
+        exp_ymd = f"{yy:04d}-{mon.get(exp_token[2:], 1):02d}-01"
+        return underlying, strike, opt, exp_ymd
+    except Exception:
+        return None
+
+
+def record_from_ws(sym, ltp, volume=0):
+    """Hook for fast_exit WS tick: parse option symbol and store its real LTP.
+    Non-option symbols are ignored. Never raises."""
+    try:
+        p = parse_fyers_option(sym)
+        if not p:
+            return False
+        underlying, strike, opt, exp_ymd = p
+        return record_tick(underlying, strike, opt, ltp,
+                           expiry=exp_ymd, volume=volume, source="fyers_ws")
+    except Exception:
+        return False

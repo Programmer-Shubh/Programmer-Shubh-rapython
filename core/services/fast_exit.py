@@ -485,6 +485,14 @@ def _on_message(message):
                 continue
             _WS["ticks"] = int(_WS.get("ticks") or 0) + 1
             _WS["last_tick"] = _ist_now_str()
+            # REAL option tick recording (user rule 24-11): har WS tick ka
+            # option LTP option_ticks table me store karo - backtest real tick
+            # data par chal sake. Non-option symbols ignore hote hain.
+            try:
+                from core.services.tick_recorder import record_from_ws
+                record_from_ws(sym, v, volume=0)
+            except Exception:
+                pass
             tid = _SYM_MAP.get(sym)
             if not tid:
                 continue

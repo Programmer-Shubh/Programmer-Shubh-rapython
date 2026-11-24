@@ -1951,6 +1951,16 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                  "phase_ms": _phase_ms}
     except Exception:
         _diag = {}
+    # Real option tick data: mode user ne maanga ho (data_mode) aur ticks store ho.
+    _tick_mode = str(advanced_in.get("data_mode") or "").lower() in (
+        "1m_chain", "1m", "tick", "ticks", "real", "real_option", "option_chain")
+    _tick_n = 0
+    try:
+        if _tick_mode:
+            from core.services.tick_recorder import tick_count
+            _tick_n = int(tick_count(symbol=req.symbol) or 0)
+    except Exception:
+        _tick_n = 0
     _final_res = {
         "success": True,
         "run_id": _run_id,
@@ -1971,6 +1981,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                                else str(risk_in.get("tp_unit") or "rs").lower()),
                    "max_trades_per_day": int(risk_in.get("max_trades_per_day", 0) or 0)},
         "engine": _engine_name,
+        # Data-source parity (user rule 24-11): UI ko batana hai ki backtest
+        # REAL option tick/chain data par chala ya Black-Scholes model par.
+        # tick_mode tabhi real jab user ne data_mode maanga HO aur ticks store ho.
+        "data_source": ("1m_chain" if (_tick_mode and _tick_n > 0) else "black_scholes"),
+        "tick_count": _tick_n,
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
         "symbols": _syms,
         "per_symbol": _per_symbol,
