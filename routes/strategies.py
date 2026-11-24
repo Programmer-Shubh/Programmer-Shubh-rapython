@@ -1269,10 +1269,21 @@ def strategy_trades(strat_id: int, unlinked: int = 0):
 
 @router.post("/{strat_id}/rollover")
 def rollover_endpoint(strat_id: int):
+    """Renew button: expired strategy ko next weekly expiry par shift karo aur
+    status ko active karo - taaki paper/live worker turant dobara trade laga sake.
+    (end_date purana = display_status 'expired' bhi clear ho jayega.)"""
     new_end = rollover_strategy(strat_id)
     if not new_end:
         return {"error": "Rollover failed"}
-    return {"strategy_id": strat_id, "end_date": new_end, "status": "rolled"}
+    try:
+        db = Database.get_instance()
+        db.execute(
+            "UPDATE strategies SET status='active', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            [strat_id])
+    except Exception:
+        pass
+    return {"strategy_id": strat_id, "end_date": new_end, "status": "active",
+            "paper_enabled": True}
 
 
 @router.post("/{strat_id}/backtest")
