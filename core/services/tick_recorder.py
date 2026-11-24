@@ -162,11 +162,15 @@ def record_from_ws(sym, ltp, volume=0):
 
 
 def backfill_from_bhavcopy(days: int = 90, batch: int = 4000) -> int:
-    """Seed `option_ticks` from REAL NSE bhavcopy option premiums saved in
-    `bhavcopy_data` (3 months by default). Har (date, contract) ke liye ek
-    EOD tick (15:15) store hota hai - ye ASLI bhavcopy price hai, synthetic
-    nahi. Iske baad broker offline par bhi real option data par backtest
-    chal sakta hai. Idempotent (upsert). Returns rows written."""
+    """Seed `option_ticks` from REAL NSE bhavcopy OHLC saved in `bhavcopy_data`.
+
+    Best honest approach (user rule 24-11): har (date, contract) ke liye DO
+    real ticks store karo - 09:15 = asli OPEN, 15:15 = asli CLOSE. High/low
+    ko koi time stamp NAHI dete (asli time pata nahi - fabricate-na) - wo
+    bhavcopy_data mein pehle se hi SL/TP range ke liye maujood hain.
+
+    Isse intraday backtest ko real open→close price move milta hai (synthetic
+    nahi), broker offline par bhi. Idempotent (upsert). Returns rows written."""
     try:
         from core.models.database import Database
         from datetime import datetime, timedelta
@@ -174,7 +178,7 @@ def backfill_from_bhavcopy(days: int = 90, batch: int = 4000) -> int:
         since = (datetime.now() - timedelta(days=int(days or 90))).strftime("%Y-%m-%d")
         rows = db.fetch_all(
             "SELECT symbol, trade_date, expiry_date, strike_price, option_type, "
-            "close_price, volume FROM bhavcopy_data "
+            "open_price, close_price, volume FROM bhavcopy_data "
             "WHERE option_type IN ('CE','PE') AND trade_date>=? "
             "AND close_price>0 ORDER BY trade_date, symbol",
             [since])
@@ -186,19 +190,25 @@ def backfill_from_bhavcopy(days: int = 90, batch: int = 4000) -> int:
                     sym = str(r.get("symbol") or "").upper()
                     strike = float(r.get("strike_price") or 0)
                     opt = str(r.get("option_type") or "").upper()
-                    ltp = float(r.get("close_price") or 0)
-                    if not sym or strike <= 0 or opt not in ("CE", "PE") or ltp <= 0:
+                    close = float(r.get("close_price") or 0)
+                    opn = float(r.get("open_price") or 0)
+                    if not sym or strike <= 0 or opt not in ("CE", "PE") or close <= 0:
                         continue
-                    db.execute(
-                        "INSERT INTO option_ticks (symbol, trade_date, bar_time, expiry_date, "
-                        "strike_price, option_type, ltp, volume, source) "
-                        "VALUES (?,?,?,?,?,?,?,?,?) "
-                        "ON CONFLICT(symbol, trade_date, bar_time, strike_price, option_type, expiry_date) "
-                        "DO UPDATE SET ltp=excluded.ltp, volume=excluded.volume",
-                        [sym, str(r.get("trade_date"))[:10], "15:15",
-                         str(r.get("expiry_date") or ""), strike, opt, ltp,
-                         int(r.get("volume") or 0), "nse_bhavcopy"])
-                    n += 1
+                    date = str(r.get("trade_date"))[:10]
+                    exp = str(r.get("expiry_date") or "")
+                    vol = int(r.get("volume") or 0)
+                    # Real OPEN tick @ 09:15, real CLOSE tick @ 15:15.
+                    for bar_time, price in (("09:15", opn or close), ("15:15", close)):
+                        if price <= 0:
+                            continue
+                        db.execute(
+                            "INSERT INTO option_ticks (symbol, trade_date, bar_time, expiry_date, "
+                            "strike_price, option_type, ltp, volume, source) "
+                            "VALUES (?,?,?,?,?,?,?,?,?) "
+                            "ON CONFLICT(symbol, trade_date, bar_time, strike_price, option_type, expiry_date) "
+                            "DO UPDATE SET ltp=excluded.ltp, volume=excluded.volume",
+                            [sym, date, bar_time, exp, strike, opt, price, vol, "nse_bhavcopy"])
+                        n += 1
                 except Exception:
                     continue
         return n

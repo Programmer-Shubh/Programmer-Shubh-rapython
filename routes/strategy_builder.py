@@ -1955,12 +1955,24 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     _tick_mode = str(advanced_in.get("data_mode") or "").lower() in (
         "1m_chain", "1m", "tick", "ticks", "real", "real_option", "option_chain")
     _tick_n = 0
+    _tick_src = ""
     try:
         if _tick_mode:
             from core.services.tick_recorder import tick_count
+            from core.models.database import Database as _DB
             _tick_n = int(tick_count(symbol=req.symbol) or 0)
+            # Source breakdown: WS 1-min real ticks vs bhavcopy EOD (open/close).
+            _srcrows = _DB.get_instance().fetch_all(
+                "SELECT source, COUNT(*) as c FROM option_ticks WHERE symbol=? GROUP BY source",
+                [str(req.symbol or "").upper()])
+            _srcd = {str(r.get("source") or ""): int(r.get("c") or 0) for r in (_srcrows or [])}
+            if (_srcd.get("fyers_ws") or 0) > 0:
+                _tick_src = "real_1m_ticks"
+            elif (_srcd.get("nse_bhavcopy") or 0) > 0:
+                _tick_src = "real_eod_bhavcopy"
     except Exception:
         _tick_n = 0
+        _tick_src = ""
     _final_res = {
         "success": True,
         "run_id": _run_id,
@@ -1984,8 +1996,10 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         # Data-source parity (user rule 24-11): UI ko batana hai ki backtest
         # REAL option tick/chain data par chala ya Black-Scholes model par.
         # tick_mode tabhi real jab user ne data_mode maanga HO aur ticks store ho.
-        "data_source": ("1m_chain" if (_tick_mode and _tick_n > 0) else "black_scholes"),
+        "data_source": (_tick_src if (_tick_mode and _tick_n > 0 and _tick_src)
+                        else "black_scholes"),
         "tick_count": _tick_n,
+        "tick_source": _tick_src,
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
         "symbols": _syms,
         "per_symbol": _per_symbol,

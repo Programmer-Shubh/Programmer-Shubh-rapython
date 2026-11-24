@@ -1684,8 +1684,10 @@ let _lastOpenTrdHTML = null;
             try{
                 const _ds=String(r.data_source||_p.data_mode||'').toLowerCase();
                 const _ticks=(r.tick_count!=null?Number(r.tick_count):null);
-                if(_ds==='1m_chain'||_ds==='1m option chain'||_ds==='tick'||_ds==='real'){
-                    _dsBadge=' • <span class="badge bg-success" title="Backtest REAL option tick/chain data par chal gaya (asli option LTP)">Real BT (1M OPTION CHAIN)'+(_ticks!=null?(' • '+_ticks+' ticks'):'')+'</span>';
+                if(_ds==='real_1m_ticks'||_ds==='1m_chain'||_ds==='1m option chain'||_ds==='tick'||_ds==='real'){
+                    _dsBadge=' • <span class="badge bg-success" title="Backtest REAL recorded 1-min option ticks par chal gaya (live WS se record kiye gaye asli LTP)">Real BT (1M ticks)'+(_ticks!=null?(' • '+_ticks):'')+'</span>';
+                }else if(_ds==='real_eod_bhavcopy'){
+                    _dsBadge=' • <span class="badge bg-success" title="Backtest REAL NSE bhavcopy OHLC par chal gaya (09:15 asli open + 15:15 asli close; high/low SL-TP range)">Real BT (EOD bhavcopy • open→close)'+(_ticks!=null?(' • '+_ticks+' pts'):'')+'</span>';
                 }else if(_ds==='black_scholes'||_ds==='model'||_ds==='bs'){
                     _dsBadge=' • <span class="badge bg-secondary" title="Premium Black-Scholes model se estimate kiya gaya (real tick data nahi)">Black-Scholes (model)</span>';
                 }else if(_ds){
