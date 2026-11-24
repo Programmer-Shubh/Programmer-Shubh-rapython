@@ -605,7 +605,7 @@ def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
             pass
         # per-trade sanity
         try:
-            _bad_ts, _bad_px = 0, 0
+            _bad_ts, _bad_px, _bad_sl = 0, 0, 0
             for _t in (all_trades or []):
                 if not _t.get("entry_date") or not _t.get("exit_date"):
                     _bad_ts += 1
@@ -613,6 +613,25 @@ def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
                     _bad_ts += 1
                 if float(_t.get("entry_price", 0) or 0) <= 0 or float(_t.get("exit_price", 0) or 0) <= 0:
                     _bad_px += 1
+                # User rule 24-11: BUY option ka SL kabhi entry se UPAR nahi hit
+                # hona chahiye (SL = entry - sl_points). Aise trade ko Math OK
+                # mat karo - warning dikhao.
+                try:
+                    _txn = str(_t.get("transaction_type") or _t.get("position") or "buy").lower()
+                    _reason = str(_t.get("exit_status") or _t.get("exit_reason") or "").lower()
+                    _ep = float(_t.get("entry_price") or 0)
+                    _xp = float(_t.get("exit_price") or 0)
+                    if _txn == "buy" and ("stop" in _reason or "sl" in _reason) and _xp > _ep:
+                        _bad_sl += 1
+                    # Risk Rs = sl_points × Qty verify (jahan dono fields ho).
+                    _risk = float(_t.get("risk_amount_rs", 0) or 0)
+                    _slpts = float(_t.get("sl_points", 0) or 0)
+                    _qty = int(_t.get("quantity", 0) or 0)
+                    if _slpts > 0 and _qty > 0 and _risk > 0:
+                        if abs(_risk - _slpts * _qty) > max(1.0, _slpts * _qty * 0.02):
+                            failed.append(f"risk Rs mismatch: {_risk:.2f} != sl_points {_slpts} × qty {_qty}")
+                except Exception:
+                    pass
             if _bad_ts == 0:
                 passed.append("timestamps valid")
             else:
@@ -621,6 +640,10 @@ def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
                 passed.append("premium present")
             else:
                 failed.append(f"{_bad_px} trades me premium missing")
+            if _bad_sl == 0:
+                passed.append("SL direction valid")
+            else:
+                failed.append(f"{_bad_sl} BUY trades me SL entry se upar hit hua (math bug)")
         except Exception:
             pass
     except Exception as e:

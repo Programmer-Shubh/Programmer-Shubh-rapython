@@ -548,7 +548,11 @@ class BacktestEngine:
                     pending_entry = None
                     pending_auto_buy = None
                     try:
-                        self._rej["min_premium_lt_20"] = self._rej.get("min_premium_lt_20", 0) + 1
+                        # Dynamic label: threshold ke saath (pehle hamesha
+                        # 'min_premium_lt_20' likha tha chahe ₹15 ho ya ₹20 -
+                        # diagnostics aur filter rule match nahi hote the).
+                        _key = f"min_premium_lt_{int(min_premium)}"
+                        self._rej[_key] = self._rej.get(_key, 0) + 1
                     except Exception:
                         pass
                     continue
@@ -559,8 +563,14 @@ class BacktestEngine:
                 try:
                     _sl_unit = getattr(self, "_sl_unit", "rs")
                     _sl_amt = leg_sl if leg_sl else 0
+                    _qty = int(trade.get("quantity", 0) or 0)
                     if _sl_unit == "pct" and _sl_amt > 0:
-                        _risk_rs = (_sl_amt / 100.0) * float(trade.get("price", 0)) * int(trade.get("quantity", 0))
+                        _risk_rs = (_sl_amt / 100.0) * float(trade.get("price", 0)) * _qty
+                    elif str(_sl_unit).lower() in ("pt", "points") and _sl_amt > 0:
+                        # User rule 24-11: Risk Rs = sl_points × Qty (qty already
+                        # = lots × lot_size). Pehle sirf sl_points dikhata tha
+                        # (-30.00) bina qty multiply kiye -> galat R-multiple.
+                        _risk_rs = float(_sl_amt) * _qty
                     else:
                         _risk_rs = float(_sl_amt)
                     trade["risk_amount_rs"] = round(_risk_rs, 2)
@@ -695,7 +705,17 @@ class BacktestEngine:
                 except Exception:
                     _ed = ""
                 if cur.get("bar_time"):
-                    is_early_exit = bool(is_last)
+                    # User rule 24-11-2026: intraday square-off EXACTLY 15:15
+                    # (never 15:25). Bar start time >= 15:15 par close karo;
+                    # 15:15 ki bar itself last ho to bhi yahin trigger hoga.
+                    # 15:15 se pehle wali bars par nahi nikalo.
+                    try:
+                        _bth = str(cur.get("bar_time"))[:5]
+                        _bh, _bm = _bth.split(":")
+                        _bar_min = int(_bh) * 60 + int(_bm)
+                        is_early_exit = _bar_min >= 15 * 60 + 15 or is_last
+                    except Exception:
+                        is_early_exit = bool(is_last)
                 else:
                     is_early_exit = bool(is_last and _ed and _ed <= cur_date)
             if has_open_eod and trade_mode == "intraday" and is_early_exit:
@@ -869,6 +889,11 @@ class BacktestEngine:
                                          symbol=symbol, iv=(self.implied_volatility or None))
                         if (est_prem or 0) < min_premium:
                             can_enter = False
+                            try:
+                                _key = f"min_premium_lt_{int(min_premium)}"
+                                self._rej[_key] = self._rej.get(_key, 0) + 1
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                 # VIX filter: skip entry on high-volatility days (VIX > threshold)

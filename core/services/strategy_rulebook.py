@@ -225,7 +225,10 @@ SELL_PROFILE = {
     "reentry_on_sl": "No Re-entry",
     "reentry_on_tp": "RE ASAP",
     "max_trades_per_day": 5,
-    "strict_trend": True,
+    # Default ADX/VWAP trend filter HATAYA (user rule 24-11-2026): sirf user
+    # explicitly chune gaye indicators chalenge. Pehle True tha to 71-76
+    # signals bina reason block ho jate the.
+    "strict_trend": False,
 }
 
 BUY_PROFILE = {
@@ -245,7 +248,7 @@ BUY_PROFILE = {
     "reentry_on_sl": "No Re-entry",
     "reentry_on_tp": "RE ASAP",
     "max_trades_per_day": 2,
-    "strict_trend": True,           # ADX > 22 + VWAP
+    "strict_trend": False,          # ADX/VWAP default filter hataaya (user rule 24-11)
 }
 
 _PROFILES = {"buy": BUY_PROFILE, "sell": SELL_PROFILE}
