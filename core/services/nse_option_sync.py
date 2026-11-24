@@ -101,17 +101,17 @@ def sync_status() -> dict:
 
 
 def _store_rows(rows, chunk: int = 250):
-    """Single multi-VALUES INSERT per ~250 rows (Render PG pooler friendly:
-    one round-trip per chunk instead of one per row). Deletes existing
-    option rows first so re-imports are idempotent (no duplicates)."""
+    """Single multi-VALUES INSERT per ~250 rows (Render PG pooler friendly).
+    PEHLE yahan har call par 'DELETE FROM bhavcopy_data WHERE option_type CE/PE'
+    tha - matlab har din ke fetch par PURA option data delete ho jata aur sirf
+    aaj ka bachta tha. Ye HATAYA (user rule 24-11): ab koi delete nahi, sirf
+    per-day upsert. DB unique index par ON CONFLICT DO NOTHING se re-import
+    idempotent rehta hai (duplicate nahi), purana data safe rehta hai."""
     if not rows:
         return 0
     db = _db()
     n = 0
-    try:
-        db.execute("DELETE FROM bhavcopy_data WHERE option_type IN ('CE','PE')")
-    except Exception:
-        pass
+    # Koi DELETE nahi - ye function sirf naye din ke rows insert karta hai.
     cols = ("symbol, trade_date, expiry_date, strike_price, option_type,"
             " open_price, high_price, low_price, close_price, volume, oi")
     for a in range(0, len(rows), chunk):
@@ -125,7 +125,11 @@ def _store_rows(rows, chunk: int = 250):
                        round(float(r["open_price"]), 2), round(float(r["high_price"]), 2),
                        round(float(r["low_price"]), 2), round(float(r["close_price"]), 2),
                        int(float(r["volume"])), int(float(r["oi"]))]
-        q = f"INSERT INTO bhavcopy_data ({cols}) VALUES {','.join(tup)}"
+        # Idempotent: pehle se maujood (symbol,date,expiry,strike,type) par
+        # DO NOTHING - dobara sync/chunk retry par duplicate nahi ban-te.
+        q = (f"INSERT INTO bhavcopy_data ({cols}) VALUES {','.join(tup)} "
+             "ON CONFLICT(symbol, trade_date, COALESCE(expiry_date,''), "
+             "COALESCE(strike_price,0), COALESCE(option_type,'')) DO NOTHING")
         try:
             db.execute(q, params)
             n += len(batch)
@@ -211,18 +215,37 @@ def sync_from_nse(start_date: str = "2026-01-01", end_date: str | None = None,
     s = _dt.datetime.strptime(start_date[:10], "%Y-%m-%d").date()
     e = (_dt.datetime.strptime(end_date[:10], "%Y-%m-%d").date() if end_date
          else _ist_today())
+    # RESUME (user rule 24-11): pichhle atke hue sync ne jis date tak kaam
+    # kiya tha, wahan se shuru karo (har baar 01-01 se nahi). Status mein
+    # 'current_date' save hota hai - next run usse aage se chalega.
+    try:
+        _prev = sync_status()
+        _resume = str(_prev.get("current_date") or "")[:10]
+        if _resume and _prev.get("state") == "running" and _resume > str(s):
+            s = _dt.datetime.strptime(_resume, "%Y-%m-%d").date() + _dt.timedelta(days=1)
+    except Exception:
+        pass
+    # Overall deadline 4 min: 225 din × ~3s = ~11 min tha -> Render thread
+    # mar jata tha par _RUNNING true reh jata tha (state 'running' atka).
+    import time as _ptime
+    _deadline = _ptime.time() + 240
     _set_status({"state": "running", "started_at": _dt.datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S"),
                  "stage": "nse_fetch", "days_done": 0, "rows_stored": 0,
                  "days_failed": 0, "current_date": ""})
     d = s
     days_done = days_failed = rows_stored = 0
+    _interrupted = False
     try:
         from core.services.nsefin_bhav import fetch_fno_bhavcopy
     except Exception as e:
         _set_status({"state": "error", "error": f"nsefin import: {e}"})
         _RUNNING = False
         return {"started": False, "error": str(e)}
-    while d <= e:
+    try:
+      while d <= e:
+        if _ptime.time() > _deadline:
+            _interrupted = True
+            break
         if d.weekday() >= 5:
             d += _dt.timedelta(days=1)
             continue
@@ -243,10 +266,20 @@ def sync_from_nse(start_date: str = "2026-01-01", end_date: str | None = None,
             except Exception:
                 pass
         d += _dt.timedelta(days=1)
-        if (days_done + days_failed) % 5 == 0:
-            _set_status({"stage": "nse_fetch", "days_done": days_done,
-                         "days_failed": days_failed,
-                         "rows_stored": rows_stored, "current_date": td})
+        # Har din status save karo taaki resume/+ UI progress sahi rahe.
+        _set_status({"stage": "nse_fetch", "days_done": days_done,
+                     "days_failed": days_failed,
+                     "rows_stored": rows_stored, "current_date": td})
+    finally:
+        # Lock HAMESHA release karo (crash/timeout par bhi atka na rahe).
+        _RUNNING = False
+    if _interrupted:
+        _set_status({"state": "paused", "stage": "nse_fetch",
+                     "note": "4-min deadline — agle run yahin se resume hoga",
+                     "days_done": days_done, "days_failed": days_failed,
+                     "rows_stored": rows_stored, "current_date": td})
+        return {"started": True, "paused": True, "days_done": days_done,
+                "days_failed": days_failed, "rows_stored": rows_stored}
     _set_status({"state": "done", "stage": "done", "days_done": days_done,
                  "days_failed": days_failed, "rows_stored": rows_stored,
                  "finished_at": _dt.datetime.now(_IST).strftime("%Y-%m-%d %H:%M:%S")})

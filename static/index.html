@@ -1808,7 +1808,15 @@ let _lastOpenTrdHTML = null;
         const btn=document.getElementById('s-run');
         const rbtn=document.getElementById('r-run');
         const orig=btn?btn.innerHTML:''; const rorig=rbtn?rbtn.innerHTML:'';
-        const _restore=()=>{ try{if(btn){btn.innerHTML=orig;btn.disabled=false;}}catch(e){} try{if(rbtn){rbtn.innerHTML=rorig;rbtn.disabled=false;}}catch(e){} };
+        const _restore=()=>{
+            try{if(btn){btn.innerHTML=orig;btn.disabled=false;}}catch(e){}
+            try{if(rbtn){rbtn.innerHTML=rorig;rbtn.disabled=false;}}catch(e){}
+            // Progress timer/text hamesha band karo (error/done/stale par
+            // 'Backtest shuru ho raha hai... 157s' atak na rahe - user report).
+            try{const pb=document.getElementById('bt-progress');if(pb)pb.classList.add('hidden');}catch(e){}
+            try{const bar=document.getElementById('bt-progress-bar');if(bar){clearInterval(window._btSpinTimer);bar.style.width='0%';bar.textContent='0%';}}catch(e){}
+            window._btStopSpin=true;  // stale poll loop progress dobara na dikhaaye
+        };
         try{
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Starting backtest...</p>';
@@ -1823,7 +1831,9 @@ let _lastOpenTrdHTML = null;
         // Cached same-params run = response me hi result (0ms poll).
         let r=null; let lastErr=''; let _usedAsync=false;
         const _btStart=Date.now();
+        window._btStopSpin=false;  // naya run - purana stop flag clear
         const _btSpin=()=>{
+            if(window._btStopSpin)return;  // restore ho chuka - text wapas mat dikhao
             const s=Math.round((Date.now()-_btStart)/1000);
             document.getElementById('bt-results').classList.remove('hidden');
             const pb=document.getElementById('bt-progress'); if(pb) pb.classList.remove('hidden');
