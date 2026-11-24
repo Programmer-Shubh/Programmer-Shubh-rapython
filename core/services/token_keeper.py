@@ -16,10 +16,11 @@ import time
 
 _LAST = {"ts": 0, "result": {}}
 _LOCK = threading.Lock()
-# Fyers vagator login-OTP endpoint par STRICT rate-limit hai (429). Risk:
-# har 30-min cycle me naya attempt rate-limit-window ko aur tight karta
-# hai. 429 ke baad AUTO-LOGIN ke liye ye cool-window.
-_AUTO_COOLDOWN_S = 47 * 60
+# Fyers vagator login-OTP endpoint par STRICT rate-limit hai (429).
+# Pehle 47-min cooldown tha - ek 429 ke baad 47 min tak token wapas hi nahi
+# aata tha (rate-limit window actual me ~2-5 min hoti hai). Ab 3-min:
+# jaldi retry, par itna ki limiter aur tight na ho.
+_AUTO_COOLDOWN_S = 3 * 60
 _AUTO_LAST_FAIL = {"ts": 0, "blocked": False}
 
 
@@ -107,8 +108,17 @@ def _fyers_refresh(cfg):
         return False, "", str(e)[:150]
 
 
+def _is_rate_limit(msg: str) -> bool:
+    """429 / 'Too many requests' = token invalid nahi, sirf API throttled.
+    Aise par token drop/refresh mat karo (bekaar login attempts se limiter
+    aur tight hota hai) - instead cooldown chhota rakho."""
+    m = str(msg or "").lower()
+    return ("429" in m or "too many" in m or "rate limit" in m or "rate-limit" in m)
+
+
 def _fyers_valid(cfg):
-    """Live ping: is the stored token still accepted by Fyers?"""
+    """Live ping: is the stored token still accepted by Fyers?
+    Rate-limit (429) ko 'invalid' na maano - token theek hai, bas throttled."""
     try:
         import asyncio as _aio
         from core.services.broker_fyers import FyersV3
@@ -122,7 +132,12 @@ def _fyers_valid(cfg):
         r = _aio.run(fy.validate())
         if r.get("success"):
             return True, "valid"
-        return False, str(r.get("error") or "invalid")[:150]
+        err = str(r.get("error") or "invalid")[:150]
+        if _is_rate_limit(err):
+            # Token invalid nahi - API throttled. Valid maano taaki keeper
+            # login attempt na kare (jo limiter ko aur tight karta hai).
+            return True, "valid (rate-limited API - token retained)"
+        return False, err
     except Exception as e:
         return False, str(e)[:120]
 
