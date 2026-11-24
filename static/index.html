@@ -2005,7 +2005,10 @@ let _lastOpenTrdHTML = null;
             }
             // Save ke saath result bhi save ho: Backtest Detail phir dobara run nahi karega
             try{if(r&&(r.metrics||r.trade_list))window._lastFullBT=r;}catch(e){}
-        }catch(e){_restore();document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+' <button class="btn btn-sm btn-primary ms-2" onclick="runBacktest()">Retry</button></p>'; showToast('Backtest failed: '+e.message, 'danger');}
+        }catch(e){_restore();const _isBusy=String(e.message||'').toLowerCase().includes('busy');document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Network error: '+e.message+' <button class="btn btn-sm btn-primary ms-2" onclick="runBacktest()">Retry</button>'+(_isBusy?' <button class="btn btn-sm btn-warning ms-2" onclick="clearBtLock()" title="Atka hua purana backtest worker - lock tod do">🔓 Lock clear karo</button>':'')+'</p>'; showToast('Backtest failed: '+e.message, 'danger');}
+    async function clearBtLock(){
+        try{const r=await P('/api/backtest/clear-lock',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});showToast((r&&r.message)||'lock clear','success');}catch(e){showToast('clear fail: '+e.message,'danger');}
+    }
     }
     async function saveStrat(){
         const idx=(rSyms()[0]||'NIFTY');

@@ -2217,6 +2217,21 @@ def _bt_worker(job_id: str, req_dict: dict):
         _bt_release(_gen)
 
 
+@router.post("/clear-lock")
+def clear_backtest_lock():
+    """Emergency: atka hua backtest lock tod do (purana worker 480s se phle
+    ka lock, jo ab 150s stale rule se bhi na chhuta ho). User dashboard par
+    'busy' message par click karne ke liye. Koi chal raha backtest nahi hai
+    to bhi safe (sirf counter reset)."""
+    try:
+        with _BT_JOBS_LOCK:
+            _BT_ACTIVE["n"] = 0
+            _BT_ACTIVE["since"] = 0.0
+        return {"success": True, "message": "backtest lock clear — ab naya run dabao"}
+    except Exception as e:
+        return {"success": False, "error": str(e)[:120]}
+
+
 @router.post("/run-async")
 def run_backtest_async(req: BacktestRequest):
     # Returns instantly {job_id}; UI polls /result/{job_id}. Survives
