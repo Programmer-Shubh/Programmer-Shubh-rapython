@@ -215,35 +215,44 @@ def backfill_from_bhavcopy(days: int = 90, batch: int = 4000) -> int:
             "WHERE option_type IN ('CE','PE') AND trade_date>=? "
             "AND close_price>0 ORDER BY trade_date, symbol",
             [since])
-        n = 0
-        for i in range(0, len(rows or []), batch):
-            chunk = rows[i:i + batch]
-            for r in chunk:
-                try:
-                    sym = str(r.get("symbol") or "").upper()
-                    strike = float(r.get("strike_price") or 0)
-                    opt = str(r.get("option_type") or "").upper()
-                    close = float(r.get("close_price") or 0)
-                    opn = float(r.get("open_price") or 0)
-                    if not sym or strike <= 0 or opt not in ("CE", "PE") or close <= 0:
-                        continue
-                    date = str(r.get("trade_date"))[:10]
-                    exp = str(r.get("expiry_date") or "")
-                    vol = int(r.get("volume") or 0)
-                    # Real OPEN tick @ 09:15, real CLOSE tick @ 15:15.
-                    for bar_time, price in (("09:15", opn or close), ("15:15", close)):
-                        if price <= 0:
-                            continue
-                        db.execute(
-                            "INSERT INTO option_ticks (symbol, trade_date, bar_time, expiry_date, "
-                            "strike_price, option_type, ltp, volume, source) "
-                            "VALUES (?,?,?,?,?,?,?,?,?) "
-                            "ON CONFLICT(symbol, trade_date, bar_time, strike_price, option_type, expiry_date) "
-                            "DO UPDATE SET ltp=excluded.ltp, volume=excluded.volume",
-                            [sym, date, bar_time, exp, strike, opt, price, vol, "nse_bhavcopy"])
-                        n += 1
-                except Exception:
+        # SPEED FIX (24-11): pehle har tick ke liye alag db.execute() tha —
+        # ~10-20 hazaar round-trips Supabase pooler par, 5+ min lagte the.
+        # Ab tuple banakar batch me executemany (ek round-trip / 1000 tick).
+        q = ("INSERT INTO option_ticks (symbol, trade_date, bar_time, expiry_date, "
+             "strike_price, option_type, ltp, volume, source) "
+             "VALUES (?,?,?,?,?,?,?,?,?) "
+             "ON CONFLICT(symbol, trade_date, bar_time, strike_price, option_type, expiry_date) "
+             "DO UPDATE SET ltp=excluded.ltp, volume=excluded.volume")
+        out = []
+        for r in (rows or []):
+            try:
+                sym = str(r.get("symbol") or "").upper()
+                strike = float(r.get("strike_price") or 0)
+                opt = str(r.get("option_type") or "").upper()
+                close = float(r.get("close_price") or 0)
+                opn = float(r.get("open_price") or 0)
+                if not sym or strike <= 0 or opt not in ("CE", "PE") or close <= 0:
                     continue
-        return n
+                date = str(r.get("trade_date"))[:10]
+                exp = str(r.get("expiry_date") or "")
+                vol = int(r.get("volume") or 0)
+                # Real OPEN tick @ 09:15, real CLOSE tick @ 15:15.
+                for bar_time, price in (("09:15", opn or close), ("15:15", close)):
+                    if price > 0:
+                        out.append((sym, date, bar_time, exp, strike, opt,
+                                    price, vol, "nse_bhavcopy"))
+            except Exception:
+                continue
+        for i in range(0, len(out), batch):
+            try:
+                db.executemany(q, out[i:i + batch])
+            except Exception:
+                # Fallback: purane DB adapters par executemany na ho to per-row.
+                for r0 in out[i:i + batch]:
+                    try:
+                        db.execute(q, list(r0))
+                    except Exception:
+                        continue
+        return len(out)
     except Exception:
         return 0
