@@ -1,4 +1,8 @@
-"""Daily trade-count policy: repeats always allowed (cap removed 2026-11)."""
+"""Per-strategy daily trade-count policy (rulebook 16-11-2026).
+
+Explicit per-strategy max_trades_per_day is honored (Buy 2 / Sell 5 defaults,
+configurable). -1 / 0 / blank = unlimited. There is NO global or portfolio
+cutoff - caps apply only inside the strategy itself."""
 import os
 import sys
 import json
@@ -67,11 +71,33 @@ def test_repeat_allowed_until_cap(monkeypatch):
         db.execute("DELETE FROM strategies WHERE id=?", [sid])
 
 
-def test_no_daily_cap_blocks_at_any_count(monkeypatch):
-    """User rule (2026-11): daily trade-count cap REMOVED - even after many
-    closed trades today a fresh valid signal must still execute."""
+def test_explicit_cap_blocks_at_limit(monkeypatch):
+    """Rulebook (16-11-2026): explicit per-strategy cap is HONORED - after N
+    closed trades today, further signals for THIS strategy are skipped."""
     _entry_open(monkeypatch)
-    sid = _seed_strategy(5)  # legacy cap value in DB must be ignored
+    sid = _seed_strategy(5)
+    try:
+        today = _ist()
+        _seed_closed(sid, 5, today)
+        calls = []
+        monkeypatch.setattr(ap, "_today_signal", lambda a, b, c, need_more_than=0: (True, "t"))
+        monkeypatch.setattr(
+            ap, "_execute_legs",
+            lambda s, legs, db, tm, today: (calls.append(1) or ([{"trade_id": 1}], [])))
+        out = ap.place_for_strategy(sid, signal_check="daily")
+        assert not calls, f"cap of 5 ignored after 5 closed today: {out}"
+        assert any("max_trades_per_day" in str(n) for n in out.get("notes", [])), out
+    finally:
+        db = Database.get_instance()
+        db.execute("DELETE FROM paper_trades WHERE strategy_id=?", [sid])
+        db.execute("DELETE FROM strategies WHERE id=?", [sid])
+
+
+def test_no_daily_cap_blocks_at_any_count(monkeypatch):
+    """Rulebook (16-11-2026): -1 = unlimited - even after many closed trades
+    today a fresh valid signal must still execute."""
+    _entry_open(monkeypatch)
+    sid = _seed_strategy(-1)  # explicit unlimited
     try:
         today = _ist()
         _seed_closed(sid, 50, today)  # way beyond the old 5/day cap

@@ -1083,6 +1083,104 @@ async def fyers_selftest():
     return out
 
 
+@router.post("/sync-historical")
+async def sync_historical():
+    """Fyers se real option premiums + index daily bars bhavcopy_data me laao.
+
+    Dashboard/UI: Brokers page -> "Sync Fyers History" button. Idempotent.
+    Runs in a background thread (ye request turant return karega; state
+    /api/broker/sync-historical/status se poll karo).
+
+    NOTE: Fyers /data/history serves ACTIVE symbols only - the NIFTY/etc.
+    index daily bars succeed, but EXPIRED option contracts always fail here
+    (Fyers v3 limitation). The REAL option-premium path is
+    POST /api/broker/nse-option-sync (NSE official bhavcopy)."""
+    try:
+        from core.services.fyers_history_sync import sync_async
+        return sync_async(start_date="2026-01-01")
+    except Exception as e:
+        return {"started": False, "error": str(e)[:200]}
+
+
+@router.post("/nse-option-sync")
+async def nse_option_sync():
+    """NSE official F&O bhavcopy se REAL index-option premiums bhavcopy_data
+    me laao (ATM +/- 3 steps of spot per index, CE/PE, weekly+monthly expiry).
+
+    Fyers ke expired-option limitation ki wajah se ye primary path hai.
+    Background thread; progress: GET /api/broker/nse-option-sync/status"""
+    try:
+        from core.services.nse_option_sync import sync_async
+        return sync_async(start_date="2026-01-01")
+    except Exception as e:
+        return {"started": False, "error": str(e)[:200]}
+
+
+@router.get("/nse-option-sync/status")
+def nse_option_sync_status():
+    """NSE option-premium sync ki progress."""
+    try:
+        from core.services.nse_option_sync import sync_status
+        return sync_status()
+    except Exception as e:
+        return {"state": "error", "error": str(e)[:200]}
+
+
+@router.post("/stock-history-sync")
+async def stock_history_sync():
+    """Top F&O stocks (FNO_STOCKS, ~92 symbols) ke daily OHLC 1-year Supabase
+    bhavcopy_data me laao (SPOT rows - engine stock backtests par use karta
+    hai). Idempotent.
+    Background thread; progress: GET /api/broker/stock-history-sync/status"""
+    try:
+        from core.services.stock_history_sync import sync_async
+        return sync_async()
+    except Exception as e:
+        return {"started": False, "error": str(e)[:200]}
+
+
+@router.get("/stock-history-sync/debug")
+def stock_history_sync_debug():
+    """Temp diagnostic - _set_status को सीधे call karke error force karta hai."""
+    try:
+        from core.services import stock_history_sync as shs
+        from core.models.database import Database
+        db = Database.get_instance()
+        try:
+            row = db.fetch_one("SELECT setting_key, updated_at FROM settings WHERE setting_key='stock_history_sync_status'")
+            cur = row.get("setting_value") if row else "row MISSING"
+        except Exception as e:
+            cur = f"SELECT FAIL: {e}"
+        try:
+            shs._set_status({"state": "debug_test"})
+            post = shs.sync_status()
+        except Exception as e:
+            post = f"_set_status/sync_status FAIL: {e}"
+        return {"row_before": cur, "post": post, "top_stocks_len": len(shs.TOP_STOCKS)}
+    except Exception as e:
+        return {"error": str(e)[:400]}
+
+
+@router.get("/stock-history-sync/status")
+def stock_history_sync_status():
+    """Stock OHLC sync ki progress (stage, counts, symbols_ok/failed, rows_stored)."""
+    try:
+        from core.services.stock_history_sync import sync_status
+        return sync_status()
+    except Exception as e:
+        return {"state": "error", "error": str(e)[:200]}
+
+
+@router.get("/sync-historical/status")
+def sync_historical_status():
+    """Fyers history sync ki progress (stage, counts, coverage, errors)."""
+    try:
+        from core.services.fyers_history_sync import sync_status
+        return sync_status()
+    except Exception as e:
+        return {"state": "error", "error": str(e)[:200]}
+
+
 @router.post("/refresh-tokens")
 async def refresh_tokens():
     results = {}

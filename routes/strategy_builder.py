@@ -251,8 +251,20 @@ def otm4_symbols():
             if prem > 15.0:
                 ok.append(s)
         ok.sort()
-        _out = {"symbols": ok, "count": len(ok), "details": details,
-                "min_premium": 15.0, "otm_steps": 4}
+        # Fail-open when live premium data unavailable (e.g. Fyers rate-limited /
+        # bhavcopy spot rows missing -> spot<=40 for every symbol => ok empty).
+        # Hiding the whole F&O list would leave the user with NOTHING selectable -
+        # exactly the "saved strategy me symbol kum/jayada karne ka vikalp nahi hai"
+        # complaint. Better: show all F&O symbols + honest note (no fake pass).
+        if not ok:
+            _out = {"symbols": sorted(set(syms)), "count": len(set(syms)),
+                    "details": details,
+                    "min_premium": 15.0, "otm_steps": 4,
+                    "all_visible": True,
+                    "reason": "live premium data unavailable (spot/premium fetch failed) - showing all F&O symbols"}
+        else:
+            _out = {"symbols": ok, "count": len(ok), "details": details,
+                    "min_premium": 15.0, "otm_steps": 4}
     except Exception as e:
         _out = {"symbols": [], "count": 0, "details": {}, "error": str(e)[:120]}
     _otm4_cache["ts"] = now
@@ -317,9 +329,108 @@ def _normalize_legs(raw_legs: list, lots_fallback: int = 1) -> list:
     return out
 
 
+def _fyers_intraday(sym, timeframe, start_date, end_date):
+    """Fyers intraday bars (official source, ~100-day depth) - Yahoo 60-day
+    wall ki jagah ye PRIMARY rahega. Bar dict shape Yahoo wali jaisi hi hai.
+
+    Fyers history epoch ki theek interpretation isse hoti hai: UTC epoch me
+    `fromtimestamp(ts, utc).astimezone(IST)` - duniya ke har broker ke liye
+    sahi IST date/time milta hai (index futures/cash IST open 09:15 IST).
+    Ek hafta ke hisaab se mixed-day guard: agar saare bars 14:30-21:00 ke
+    beech aayein (broker IST-as-UTC bhej raha ho) to -5:30 shift karke fix.
+    """
+    import datetime as _dt
+    try:
+        _s = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+        _e = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return []
+    under = {"NIFTY": "NSE:NIFTY50-INDEX", "BANKNIFTY": "NSE:NIFTYBANK-INDEX",
+             "FINNIFTY": "NSE:FINNIFTY-INDEX",
+             "MIDCPNIFTY": "NSE:NIFTY_MID_SELECT-INDEX"}.get(str(sym).strip().upper())
+    if not under:
+        # Stocks default to Fyers EQ format - every NSE F&O underlying works
+        # (lot master me listed NSE symbols).
+        up = str(sym).strip().upper().replace(".NS", "").replace("-EQ", "")
+        under = f"NSE:{up}-EQ"
+    resolution = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60"}.get(
+        str(timeframe or "15m").lower(), "15")
+    try:
+        from routes.broker import _get_config as _gc
+        cfg = _gc("fyers") or {}
+        app_id, token = str(cfg.get("app_id") or ""), str(cfg.get("access_token") or "")
+    except Exception:
+        return []
+    if not app_id or not token:
+        return []
+    try:
+        from core.services.fyers_data import FyersHistoryData
+        fh = FyersHistoryData(app_id, token)
+    except Exception:
+        return []
+    _ist = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    out = []
+    cur = _s
+    while cur <= _e:
+        chunk_end = min(_e, cur + _dt.timedelta(days=55))
+        try:
+            resp = fh.history(under, str(cur), str(chunk_end), resolution)
+        except Exception:
+            resp = {"s": "error", "message": "fetch failed"}
+        candles = (resp or {}).get("candles") if isinstance(resp, dict) else None
+        if candles:
+            for ts, o, h, l, c, v in candles:
+                try:
+                    ist = _dt.datetime.fromtimestamp(int(ts), _dt.timezone.utc).astimezone(_ist)
+                except Exception:
+                    continue
+                if ist.weekday() >= 5:
+                    continue
+                cc = float(c) if c else 0
+                if cc <= 0:
+                    continue
+                oo = float(o) if o else cc
+                hh = float(h) if h else cc
+                ll = float(l) if l else cc
+                out.append({"symbol": str(sym).upper(),
+                            "trade_date": ist.strftime("%Y-%m-%d"),
+                            "bar_time": ist.strftime("%H:%M"),
+                            "open_price": round(oo, 2), "high_price": round(hh, 2),
+                            "low_price": round(ll, 2), "close_price": round(cc, 2),
+                            "volume": int(float(v or 0))})
+        cur = chunk_end + _dt.timedelta(days=1)
+    if not out:
+        return []
+    # IST-as-UTC guard: agar ek din ke SAARE bars 14:30 ke baad hain to ye
+    # broker timestamps ko IST-as-UTC maanta hai -> -5:30 shift fix karo
+    by_day = {}
+    for b in out:
+        by_day.setdefault(b["trade_date"], []).append(b)
+    for d, bars in by_day.items():
+        times = [b["bar_time"] for b in bars]
+        if times and min(times) >= "14:00":
+            for b in bars:
+                try:
+                    dt0 = _dt.datetime.strptime(d + " " + b["bar_time"], "%Y-%m-%d %H:%M") - _dt.timedelta(hours=5, minutes=30)
+                    b["trade_date"] = dt0.strftime("%Y-%m-%d")
+                    b["bar_time"] = dt0.strftime("%H:%M")
+                except Exception:
+                    pass
+    # Sort + drop aaj ka forming bar (paper engine khud bhi karta hai)
+    out.sort(key=lambda b: (b["trade_date"], b["bar_time"]))
+    try:
+        today_ist = _dt.datetime.now(_ist).strftime("%Y-%m-%d")
+        if out and out[-1]["trade_date"] == today_ist:
+            out = out[:-1]
+    except Exception:
+        pass
+    return out
+
+
 def _intraday_full_range(sym, timeframe, start_date, end_date):
-    """Full-range 15m bars (spec §1/§5): Yahoo 60-day windows (TV feed removed).
-    NO synthetic fabrication - na mile to ([], reason).
+    """Full-range bars (spec §1/§5): Fyers official intraday only (+ persistent
+    DB cache). Yahoo/any free feed completely removed - agar Fyers ya cache se
+    na mile to ([], reason). NO synthetic fabrication.
     Returns (bars_chrono_ist, src). Bars sorted, deduped, IST."""
     import datetime as _dt
     try:
@@ -330,47 +441,53 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
     if _e < _s:
         return [], "bad-range"
     _span = max(1, (_e - _s).days + 1)
-    # 1) Yahoo 15m (hard 60-day/request limit): single window back from
-    # end_date. Older start = honest gap (no fabrication, ever).
+    # Span-aware minimum: ek 15m din me max ~25 bars hote hain, to
+    # single-day request par 40-bar gate kabhi pass nahi hota tha
+    # (hamesha INSUFFICIENT = intraday auto/backtest dead). Engine
+    # min_bars=5 + abstain rule ke saath 15 bars honest hain.
+    _need = 40 if _span > 2 else 15
+    # Persistent DB cache: historical bars kabhi change nahi hote - NETWORK
+    # fetch ki jagah local DB se lo (backtest ~5-10x fast).
     try:
-        from core.services.free_data import fetch_yahoo_intraday as _fy
-        _days = min(60, _span + 5)
-        try:
-            _got = _fy(sym, timeframe if timeframe in ("5m", "15m", "30m", "1h") else "15m",
-                       days=_days) or []
-        except Exception:
-            _got = []
-        _got = [b for b in _got
-                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
-        # Forming-bar look-ahead fix: aaj ka AADHURA 15m/5m bar backtest me na
-        # aaye (paper engine khud aakhri bar hata kar sirf closed bars par
-        # signal banata hai). Iske bina end_date=aaj ke runs wo partial bar
-        # close ka use karke (future se) jhoota signal laga lete the.
-        try:
-            import datetime as _istdt
-            _today = _istdt.datetime.now(_istdt.timezone(_istdt.timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
-            if _got and str(_got[-1].get("trade_date", ""))[:10] == _today:
-                _got = _got[:-1]
-        except Exception:
-            pass
-        # Span-aware minimum: ek 15m din me max ~25 bars hote hain, to
-        # single-day request par 40-bar gate kabhi pass nahi hota tha
-        # (hamesha INSUFFICIENT = intraday auto/backtest dead). Engine
-        # min_bars=5 + abstain rule ke saath 15 bars honest hain.
-        _need = 40 if _span > 2 else 15
-        if len(_got) >= _need:
-            return _dedup_bars(_got), "yahoo_intraday"
+        _today_ist = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+    except Exception:
+        _today_ist = ""
+    try:
+        from core.services.intraday_cache import get_cached_bars
+        # Cache kabhi bhi padho (end_date=today ho tab bhi) - completed days ke
+        # bars immutable hote hain. Aaj ka forming bar cache me hota hi nahi
+        # (store_bars sirf < today store karta hai), isliye kuch bhi miss hona
+        # theek hai - partial tail ko Fyers top-up karega. Pehle sirf past-end
+        # par cache hit hota tha -> end_date=aaj wale runs HAR BAAR poora fetch
+        # karte the (multi-symbol par 182s ka asli kaaran).
+        _cached = get_cached_bars(sym, timeframe, start_date, end_date)
+        if _cached and len(_cached) >= _need:
+            return _dedup_bars(_cached), "intraday_db_cache"
+    except Exception:
+        pass
+    # 0) Fyers intraday (primary + only intraday source now; ~100-day depth,
+    # official). Koi Yahoo/free-feed fallback nahi. Na mile/fail ho to
+    # honest INSUFFICIENT.
+    try:
+        _fb = _fyers_intraday(sym, timeframe, start_date, end_date)
+        if len(_fb) >= _need:
+            try:
+                from core.services.intraday_cache import store_bars
+                store_bars(sym, timeframe, [b for b in _fb if str(b.get("trade_date", ""))[:10] < _today_ist])
+            except Exception:
+                pass
+            return _dedup_bars(_fb), "fyers_intraday"
     except Exception:
         pass
     return [], "no-intraday-data"
 
 
 def _daily_fallback_range(sym, start_date, end_date):
-    """Daily fallback, poora requested range: nsepython (NSE official) pehle,
-    phir NSE index-archive, phir Fyers broker-history (FINNIFTY ka Yahoo dead
-    hai), phir Yahoo (60-day cut). Single source jo pehle 15+ bars de (koi
-    date-merge nahi). Returns (bars, src) - src: nsepython_daily /
-    nse_index_archive / fyers_daily / yahoo_daily / ""."""
+    """Daily fallback, poora requested range (NO Yahoo - completely removed):
+    nsepython (NSE official) pehle, phir NSE index-archive, phir Fyers
+    broker-history. Single source jo pehle 15+ bars de (koi date-merge nahi).
+    Returns (bars, src) - src: nsepython_daily / nse_index_archive /
+    fyers_daily / ""."""
     try:
         from core.services.historical_fetcher import _fetch_nsepython_historical as _fnp
         try:
@@ -409,38 +526,7 @@ def _daily_fallback_range(sym, start_date, end_date):
             return _db2, "fyers_daily"
     except Exception:
         pass
-    try:
-        from core.services.free_data import fetch_yahoo_daily as _fyd
-        from core.services.data_validator import yahoo_60d_filter as _f60
-        bars = []
-        for _attempt in (1, 2):
-            try:
-                bars = _f60(_fyd(sym, start_date, end_date) or [])
-                if bars and len(bars) >= 5:
-                    break
-            except Exception:
-                bars = []
-            try:
-                import time as _ts
-                _ts.sleep(1)
-            except Exception:
-                pass
-        bars = [b for b in (bars or [])
-                if str(start_date)[:10] <= str(b.get("trade_date", ""))[:10] <= str(end_date)[:10]]
-        if bars:
-            return bars, "yahoo_daily"
-    except Exception:
-        pass
     return [], ""
-
-
-def _yahoo_full_range(sym, start_date, end_date):
-    """Backward-compat wrapper (sirf bars). Naya code _daily_fallback_range use kare."""
-    try:
-        _b, _s = _daily_fallback_range(sym, start_date, end_date)
-        return _b
-    except Exception:
-        return []
 
 
 def _dedup_bars(bars):
@@ -904,7 +990,7 @@ import uuid as _bt_uuid
 _BT_JOBS = {}
 _BT_JOBS_LOCK = _bt_thread.Lock()
 _BT_CACHE = {}
-_BT_RESULT_CACHE = {}  # instant like algotest - keyed by request hash, 10min TTL
+_BT_RESULT_CACHE = {}  # instant like algotest - keyed by request hash, 30min TTL
 
 
 
@@ -986,7 +1072,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     try:
         _rk = hashlib.md5(json.dumps(req.model_dump() if hasattr(req,'model_dump') else req.dict(), sort_keys=True, default=str).encode()).hexdigest()
         _rc = _BT_RESULT_CACHE.get(_rk)
-        if _rc and _t0 - _rc[0] < 600:
+        if _rc and _t0 - _rc[0] < 1800:
             # return cached instantly with fresh took_ms AND fresh run_id
             # (same params, but a NEW run: stale-guard needs unique ids)
             _cached = dict(_rc[1]); _cached['took_ms']=5; _cached['cached']=True
@@ -1019,8 +1105,9 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         if req.take_profit is not None:
             risk_in["daily_take_profit"] = float(req.take_profit)
         if "max_trades_per_day" not in risk_in:
-            # -1 = unlimited (daily trade-count cap removed, user rule 2026-11)
-            risk_in["max_trades_per_day"] = -1
+            # Rulebook profiles: Buy 2/day, Sell 5/day (default). Explicit
+            # -1 = unlimited bhi allowed hai. (Global circuit breaker nahi.)
+            risk_in["max_trades_per_day"] = None
         # Normalize legs + handle presets (Bear Call, Bull Put, Bear Put, Iron Condor)
         raw_legs = req.legs or []
         preset = (req.strategy_preset or advanced_in.get("preset") or "").lower()
@@ -1059,6 +1146,14 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
                 {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
             ]
+        # RULEBOOK DEFAULTS (Buy vs Sell profile): sirf khaali fields bharte
+        # hain - UI/API ka explicit value override nahi hota.
+        try:
+            from core.services.strategy_rulebook import apply_profile_defaults as _apd
+            risk_in, advanced_in = _apd(risk_in, advanced_in, legs, symbol)
+        except Exception:
+            pass
+
         # OTM premium floor: Rs15 se saste option strikes auto-drop (engine
         # signal + execution dono jagah skip karta hai). Yahan lagana ZAROORI
         # hai (legs normalize/preset-expand ke BAAD) - pehle lagane par NameError
@@ -1164,7 +1259,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         return _s, _intraday_full_range(_s, timeframe, start_date, end_date)
                     except Exception:
                         return _s, ([], "prefetch-fail")
-                with _TPE(max_workers=4) as _ex:
+                with _TPE(max_workers=6) as _ex:
                     for _s, _r in _ex.map(_one, list(_syms)):
                         try:
                             _pre15[_s] = _r
@@ -1172,11 +1267,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                             pass
             except Exception:
                 _pre15 = {}
-        # Daily DB preload (local, tez) + Yahoo-daily parallel supplement un
+        # Daily DB preload (local, tez) + fallback parallel supplement un
         # symbols ke liye jinke DB bars <15 hain YA window coverage <70% hai.
         # Pehle partial-coverage symbols loop ke ANDAR serial network call
-        # karte the (nsepython 15s + fyers 25s + yahoo 21s = 70s/symbol on
-        # Render) - wahi "Run click -> bahut der me result" ka bada kaaran.
+        # karte the (nsepython + fyers ~70s/symbol on Render) - wahi
+        # "Run click -> bahut der me result" ka bada kaaran.
         _preDB, _preY = {}, {}
         try:
             for _s in list(_syms):
@@ -1249,7 +1344,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             _ce = _BT_CACHE.get(_ck)
             _cache_ok = False
             try:
-                _cache_ok = bool(_ce and _bt_t.time() - _ce[0] < 300 and len(_ce[1] or []) >= 5)
+                _cache_ok = bool(_ce and _bt_t.time() - _ce[0] < 1800 and len(_ce[1] or []) >= 5)
             except Exception:
                 _cache_ok = False
             if timeframe in ("1m", "5m", "15m", "30m", "1h"):
@@ -1296,13 +1391,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     historical = _bars15
                     _use_db = True
                     _hist_src = _src15 if _src15 else _hist_src
-                    if _hist_src in ("yahoo_intraday",):
-                        _hist_status = "SECONDARY_ONLY"
                     _BT_CACHE[_ck] = (_bt_t.time(), historical, _hist_src, _hist_status)
                     if len(_BT_CACHE) > 12:
                         _BT_CACHE.pop(next(iter(_BT_CACHE)))
                 else:
-                    _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye 15m bars nahi mile - fabricated bars nahi banate", "total_trades": 0,
+                    _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye {timeframe} bars nahi mile - fabricated bars nahi banate", "total_trades": 0,
                                          "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                          "data": {"source": "none", "status": "INSUFFICIENT", "bars": len(_bars15 or [])}}
                     _fire_prog(_sym)
@@ -1326,7 +1419,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 elif _db_hist and len(_db_hist) >= 15:
                     historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
                     _use_db = True
-                    # Coverage <70% ho to Yahoo full-range se compare karo -
+                    # Coverage <70% ho to fallback full-range se compare karo -
                     # jo zyada din cover kare wahi single source (no-merge).
                     try:
                         import datetime as _cdt
@@ -1352,10 +1445,10 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                             if _ybc and len(_ybc) >= 15 and _cov1 > _cov0:
                                 historical = _ybc
                                 _use_db = False
-                                _hist_src = "yahoo_daily"
+                                _hist_src = _ybsrc or "nsepython_daily"
                                 try:
                                     from core.services.data_validator import validate_symbol as _vs2
-                                    _q2 = _vs2(_ybc, "yahoo", _db_hist or None, "nse_official_db")
+                                    _q2 = _vs2(_ybc, "nsepython", _db_hist or None, "nse_official_db")
                                     _hist_status = str(_q2.get("status", "SECONDARY_ONLY"))
                                 except Exception:
                                     _hist_status = "SECONDARY_ONLY"
@@ -1373,16 +1466,16 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         _yb, _ysrc = [], ""
                     if _yb and _cov_ok(_yb):
                         historical = _yb
-                        _hist_src = _ysrc or "yahoo_daily"
+                        _hist_src = _ysrc or "nsepython_daily"
                         try:
                             from core.services.data_validator import validate_symbol as _vs
-                            _q = _vs(_yb, "yahoo" if "yahoo" in _hist_src else "nsepython",
+                            _q = _vs(_yb, "nsepython",
                                      _db_hist or None, "nse_official_db")
                             _hist_status = str(_q.get("status", "SECONDARY_ONLY"))
                         except Exception:
                             _hist_status = "SECONDARY_ONLY"
                     else:
-                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, NSE/Yahoo fail) - fabricated data nahi banate", "total_trades": 0,
+                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, NSE/Fyers fail) - fabricated data nahi banate", "total_trades": 0,
                                              "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                              "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
                         _fire_prog(_sym)
@@ -1542,10 +1635,14 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     _dq = {"source": "NSE official", "status": "VALID"}
                 elif _dq_src == "tradingview_intraday":
                     _dq = {"source": "TradingView intraday", "status": "SECONDARY_ONLY"}
-                elif _dq_src == "yahoo_intraday":
-                    _dq = {"source": "Yahoo intraday", "status": "SECONDARY_ONLY"}
-                elif _dq_src == "yahoo_daily":
-                    _dq = {"source": "Yahoo daily", "status": "SECONDARY_ONLY"}
+                elif _dq_src == "fyers_intraday":
+                    _dq = {"source": "Fyers intraday", "status": "VALID"}
+                elif _dq_src == "fyers_daily":
+                    _dq = {"source": "Fyers daily", "status": "VALID"}
+                elif _dq_src == "nse_index_archive":
+                    _dq = {"source": "NSE index archive", "status": "VALID"}
+                elif _dq_src == "intraday_db_cache":
+                    _dq = {"source": "Intraday DB cache", "status": "VALID"}
                 elif _dq_src == "nsepython_daily":
                     _dq = {"source": "NSE official", "status": "VALID"}
                 elif _dq_src in ("synthetic", "synthetic_expansion"):
@@ -1554,7 +1651,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     _dq = {"source": "Cache", "status": "SECONDARY_ONLY"}
                 try:
                     _hs = str(_hist_status or "")
-                    if _hs and _dq_src in ("yahoo_daily", "nsepython_daily", "yahoo_intraday", "tradingview_intraday"):
+                    if _hs and _dq_src in ("nsepython_daily", "tradingview_intraday", "nse_index_archive"):
                         _dq["status"] = _hs
                 except Exception:
                     pass
@@ -1844,8 +1941,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                    "exit_time": str(advanced_in.get("exit_time", "") or advanced_in.get("early_exit_time", "")),
                    "sl": float(risk_in.get("daily_stop_loss", 0) or 0),
                    "tp": float(risk_in.get("daily_take_profit", 0) or 0),
-                   "sl_unit": ("pct" if (float(risk_in.get("daily_stop_loss_pct", 0) or 0) > 0) else "rs"),
-                   "tp_unit": ("pct" if (float(risk_in.get("daily_take_profit_pct", 0) or 0) > 0) else "rs"),
+                   # Rulebook units: 'pt' (premium points), 'pct', ya 'rs'.
+                   "sl_unit": ("pct" if (float(risk_in.get("daily_stop_loss_pct", 0) or 0) > 0)
+                               else str(risk_in.get("sl_unit") or "rs").lower()),
+                   "tp_unit": ("pct" if (float(risk_in.get("daily_take_profit_pct", 0) or 0) > 0)
+                               else str(risk_in.get("tp_unit") or "rs").lower()),
                    "max_trades_per_day": int(risk_in.get("max_trades_per_day", 0) or 0)},
         "engine": _engine_name,
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
@@ -1963,7 +2063,7 @@ def run_backtest(req: BacktestRequest):
             req.model_dump() if hasattr(req, "model_dump") else req.dict(),
             sort_keys=True, default=str).encode()).hexdigest()
         _rc0 = _BT_RESULT_CACHE.get(_rk0)
-        if _rc0 and _bt_time.time() - _rc0[0] < 600:
+        if _rc0 and _bt_time.time() - _rc0[0] < 1800:
             _cached0 = dict(_rc0[1])
             _cached0["took_ms"] = 5
             _cached0["cached"] = True
@@ -2074,7 +2174,7 @@ def run_backtest_async(req: BacktestRequest):
     try:
         if _rh:
             _rcA = _BT_RESULT_CACHE.get(_rh)
-            if _rcA and _bt_time.time() - _rcA[0] < 600:
+            if _rcA and _bt_time.time() - _rcA[0] < 1800:
                 _cachedA = dict(_rcA[1])
                 _cachedA["took_ms"] = 5
                 _cachedA["cached"] = True

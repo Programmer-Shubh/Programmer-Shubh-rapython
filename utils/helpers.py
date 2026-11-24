@@ -85,8 +85,8 @@ _STATIC_LOTS = {
     # Naye F&O additions (scrip-master verified 2026-10-15 - taaki
     # cold-start par bhi lot block na ho).
     "BOSCHLTD": 25, "EICHERMOT": 100, "FORCEMOT": 25, "HDFCAMC": 300,
-    "MPHASIS": 275, "OFSS": 100, "PAGEIND": 20, "POWERINDIA": 25,
-    "SOLARINDS": 50, "SRF": 200, "WAAREEENER": 175,
+    "MPHASIS": 275, "OFSS": 50, "PAGEIND": 20, "POWERINDIA": 25,
+    "SOLARINDS": 25, "SRF": 200, "WAAREEENER": 175,
     # BAJAJ-AUTO 75 (NSE market-lots file Oct-2026, 2 sources; scrip master me
     # naam alag hone se broker lookup miss hota hai).
     "BAJAJ-AUTO": 75,
@@ -518,7 +518,8 @@ def sltp_amount(value, default_unit: str = "rs"):
 
 
 def trailing_lock_level(entry: float, best_px: float, is_buy: bool,
-                        lock_at_pct: float, lock_amt_pct: float = 0.0) -> float:
+                        lock_at_pct: float, lock_amt_pct: float = 0.0,
+                        unit: str = "pct") -> float:
     """Trailing-LOCK level (single source for backtest + paper monitor).
 
     User rule: "jab trade 10-15% profit me aaye, SL ko breakeven (cost
@@ -528,6 +529,8 @@ def trailing_lock_level(entry: float, best_px: float, is_buy: bool,
                     (e.g. 10 = +10% par SL move)
     - lock_amt_pct: kitna profit LOCK karna hai (0 = sirf breakeven,
                     e.g. 1 = +1% profit lock kar do)
+    - unit        : 'pct' (default, legacy) ya 'pt' = premium POINTS
+                    (rulebook 16-11-2026: 10 pts profit -> 5 pts lock).
 
     Returns the new SL level (0.0 = lock not armed).
     BUY  : SL upar jaata hai (entry + lock%)  - SELL: SL neeche (entry - lock%)
@@ -541,6 +544,13 @@ def trailing_lock_level(entry: float, best_px: float, is_buy: bool,
         return 0.0
     if entry <= 0 or best <= 0 or lock_at <= 0:
         return 0.0
+    # Points mode: point move seedha compare karo (lot-size independent).
+    if str(unit or "pct").lower() in ("pt", "pts", "point", "points"):
+        profit_px = (best - entry) if is_buy else (entry - best)
+        if profit_px < lock_at:
+            return 0.0
+        lock_px = max(0.0, lock_amt)
+        return (entry + lock_px) if is_buy else max(0.05, entry - lock_px)
     profit_pct = ((best - entry) / entry * 100.0) if is_buy else ((entry - best) / entry * 100.0)
     if profit_pct < lock_at:
         return 0.0
@@ -663,7 +673,8 @@ def resolve_strategy_sltp(risk_management: dict, leg: dict = None,
         # RULEBOOK (16-11-2026): koi explicit SL/TP nahi hai + symbol index
         # hai -> per-index tight defaults (points): NIFTY 15/20, FINNIFTY
         # 18/22, BANKNIFTY 25/35 (core.services.strategy_rulebook).
-        if not sl_amt and not tp_amt:
+        # Ek side missing ho to bhi index default usi side par lagta hai.
+        if not sl_amt or not tp_amt:
             try:
                 from core.services.strategy_rulebook import index_default_sltp as _ids
                 _d = _ids(symbol) if symbol else None

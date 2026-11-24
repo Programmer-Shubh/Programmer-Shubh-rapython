@@ -227,16 +227,25 @@ def seed_default_strategies():
 
 
 def normalize_daily_limits(db=None):
-    """Set legacy daily caps on all saved strategies to UNLIMITED.
+    """ONE-TIME legacy cleanup (guarded by settings flag).
 
-    max_trades_per_day: -1 (engine sentinel = unlimited)
-    daily_loss_limit / daily_max_loss / max_daily_loss: 0 (disabled)
-    Only writes when a legacy positive cap is found (idempotent).
+    Legacy saved strategies carried positive caps (e.g. 5 trades/day, 5000
+    daily loss) from the pre-rulebook era. Old behavior forced them to
+    unlimited on EVERY boot - which also stripped user-configured limits.
+    Ab: ek hi baar chalti hai (settings flag). Rulebook (17-11-2026) ke
+    baad save/updated strategies ka configured value KABHI overwrite nahi
+    hota; missing stays unlimited.
     """
     import json as _js
     if db is None:
         from core.models.database import Database
         db = Database.get_instance()
+    try:
+        _flag = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key='normalize_daily_limits_v2_done'")
+        if _flag and str(_flag.get("setting_value") or "") == "1":
+            return 0
+    except Exception:
+        pass
     try:
         rows = db.fetch_all("SELECT id, risk_management FROM strategies")
     except Exception:
@@ -270,6 +279,18 @@ def normalize_daily_limits(db=None):
                 changed += 1
         except Exception:
             continue
+    try:
+        db.execute(
+            "INSERT INTO settings (setting_key, setting_value, updated_at) "
+            "VALUES ('normalize_daily_limits_v2_done','1',CURRENT_TIMESTAMP) "
+            "ON CONFLICT(setting_key) DO UPDATE SET setting_value='1', updated_at=CURRENT_TIMESTAMP")
+    except Exception:
+        try:
+            db.execute(
+                "INSERT OR REPLACE INTO settings (setting_key, setting_value, updated_at) "
+                "VALUES ('normalize_daily_limits_v2_done','1',CURRENT_TIMESTAMP)")
+        except Exception:
+            pass
     return changed
 
 

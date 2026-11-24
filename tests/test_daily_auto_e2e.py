@@ -99,14 +99,19 @@ def test_all_fail_empty_and_logged(monkeypatch, capsys):
 
 def test_single_day_gate_span_aware(monkeypatch):
     import routes.strategy_builder as sb2
-    # fetch is imported inside free_data users; patch at source module
-    monkeypatch.setattr("core.services.free_data.fetch_yahoo_intraday",
+    # Yahoo path removed - intraday now comes only from Fyers official + DB cache.
+    # Force both to be absent/controlled in tests (no network, no persistent cache).
+    monkeypatch.setattr("core.services.intraday_cache.get_cached_bars",
+                        lambda *a, **k: [])
+    monkeypatch.setattr("core.services.intraday_cache.store_bars",
+                        lambda *a, **k: None)
+    # 26 bars on a single-day request -> passes span-aware gate (need=15)
+    monkeypatch.setattr(sb2, "_fyers_intraday",
                         lambda *a, **k: _bars(26, same_day=True))
     bars, src = sb2._intraday_full_range("NIFTY", "15m", "2026-10-13", "2026-10-13")
-    assert src == "yahoo_intraday" and len(bars) == 26, (src, len(bars))
-    # 10 bars -> honestly refused
-    monkeypatch.setattr("core.services.free_data.fetch_yahoo_intraday",
-                        lambda *a, **k: _bars(10))
+    assert src == "fyers_intraday" and len(bars) == 26, (src, len(bars))
+    # Fyers/network unavailable -> honestly empty, never fabricated
+    monkeypatch.setattr(sb2, "_fyers_intraday", lambda *a, **k: [])
     bars2, src2 = sb2._intraday_full_range("NIFTY", "15m", "2026-10-13", "2026-10-13")
     assert bars2 == [] and src2 == "no-intraday-data", (src2, len(bars2))
 
@@ -143,7 +148,7 @@ def test_run_once_market_closed_skips(monkeypatch):
     assert out.get("placed") == []
 
 
-def test_lookback_entry_uses_current_legs_and_no_cap(monkeypatch):
+def test_lookback_entry_uses_current_legs_and_unlimited_cap(monkeypatch):
     import core.services.auto_paper as ap
     from core.models.database import Database
     db = Database.get_instance()
@@ -153,7 +158,7 @@ def test_lookback_entry_uses_current_legs_and_no_cap(monkeypatch):
         " status) VALUES (1,'t-lb-verify','NIFTY',?,?,?)",
         [json.dumps([{"option_type": "CE", "transaction": "buy", "lots": 2}]),
          json.dumps({"daily_stop_loss": 1500, "daily_take_profit": 3000,
-                     "max_trades_per_day": 5, "signal_lookback_days": 5}),
+                     "max_trades_per_day": -1, "signal_lookback_days": 5}),
          "active"])
     sid = int(db.fetch_one("SELECT id FROM strategies WHERE name='t-lb-verify'")["id"])
     today = (datetime.datetime.utcnow()
@@ -183,8 +188,8 @@ def test_lookback_entry_uses_current_legs_and_no_cap(monkeypatch):
         assert out["placed"], out
         # legs forwarded must be the CURRENT saved legs (lots 2), not stale
         assert seen["legs"][0].get("lots") == 2, seen
-        # Daily trade-count cap REMOVED (user rule 2026-11): 5 closed trades
-        # today must NOT block the next valid signal.
+        # Rulebook (16-11-2026): -1 = unlimited - even 5+ closed trades today
+        # must NOT block the next valid signal.
         db.execute("DELETE FROM paper_trades WHERE strategy_id=?", [sid])
         for _ in range(5):
             db.execute(

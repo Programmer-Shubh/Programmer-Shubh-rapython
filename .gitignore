@@ -1,4 +1,4 @@
-__pycache__/
+﻿__pycache__/
 *.pyc
 *.pyo
 *.py[cod]
@@ -35,7 +35,6 @@ data/fyers_*.csv
 data/angel_*.json
 data/scrip_master_*.json
 data/scrip_lots.json
-data/dhan_lots.json
 .streamlit/secrets.toml
 # temporary debug/check scripts
 check_*.py
@@ -70,3 +69,9 @@ static/download.png
 Dockerfile
 .koyeb.yaml
 WEBSITE_HINDI_DOC.md
+
+# research artifacts (not for commit)
+scripts/_sell_grid_*_results*.json
+scripts/_validation_results.json
+scripts/_save_runs.json
+scripts/_winner_style_results_*.json

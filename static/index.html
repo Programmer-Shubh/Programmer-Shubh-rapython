@@ -422,7 +422,7 @@
                 <div class="card-header"><span class="slab-num">1</span><i class="bi bi-gear"></i> Trade Setup <small class="text-muted">Symbols + Order</small></div>
                 <div class="card-body">
                     <div class="row g-2">
-                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">Poori F&O list</span> <span id="r-otm20-note" class="small text-muted"></span> <label class="ms-1" style="font-size:12px" title="Sirf wo symbols dikhe jinka OTM-4 strike premium ₹15+ hai (model estimate)"><input type="checkbox" id="r-otm15-check" checked onchange="otm15Toggle()"> OTM-4 &gt; ₹15</label> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
+                        <div class="col-md-4"><label class="form-label small">Symbols (<span id="r-sym-count">1</span> selected, max 25)</label> <span class="badge bg-success ms-1" style="font-size:11px">Poori F&O list</span> <span id="r-otm20-note" class="small text-muted"></span> <label class="ms-1" style="font-size:12px" title="Sirf wo symbols dikhe jinka OTM-4 strike premium ₹15+ hai (model estimate)"><input type="checkbox" id="r-otm15-check" onchange="otm15Toggle()"> OTM-4 &gt; ₹15</label> <button class="btn btn-sm btn-outline-primary ms-1" onclick="tickAllSyms()">All</button><div id="r-syms" class="d-flex gap-2 flex-wrap" style="max-height:96px;overflow:auto;font-size:12.5px"><span class="text-muted small">Loading symbols...</span></div></div>
                         <input type="hidden" id="r-order" value="CE-BUY"><input type="hidden" id="r-strike" value="ATM"><input type="hidden" id="r-otm" value="1"><input type="hidden" id="r-lots" value="1">
                         <div class="col-md-8 d-flex align-items-center"><small class="text-muted">Order/Strike/Lots — Template se auto (Strategy Templates neeche)</small></div>
                     </div>
@@ -486,32 +486,27 @@
                         <div class="col-md-4"><label class="small" title="Bollinger Bands: Volatility squeeze breakout"><input type="checkbox" id="r-ind-bb"> <strong>Bollinger</strong>(<input type="number" id="r-p-bb" value="20" min="2" max="50" style="width:40px;font-size:11px">,<input type="number" id="r-p-bbstd" value="2.0" min="1" max="3" step="0.1" style="width:40px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="Neural Network: ML price prediction signal"><input type="checkbox" id="r-ind-nn"> <strong>Neural</strong>(<input type="number" id="r-p-nn" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="RSI: momentum filter (oversold bounce <45 / overbought >55)"><input type="checkbox" id="r-ind-rsi"> <strong>RSI</strong>(<input type="number" id="r-p-rsi" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
-                        <div class="col-md-4"><label class="small" title="Market Regime FILTER: VWAP+EMA+ADX composite. CE Buy / PE Sell sirf bullish regime me, PE Buy / CE Sell sirf bearish regime me entry (sideways me bhi entry allowed, opposite regime me block)"><input type="checkbox" id="r-ind-market_regime" checked> <strong>Market Regime</strong>(filter)</div>
+                        <div class="col-md-4"><label class="small" title="Market Regime FILTER: VWAP+EMA+ADX composite. CE Buy / PE Sell sirf bullish regime me, PE Buy / CE Sell sirf bearish regime me entry (sideways me bhi entry allowed, opposite regime me block)"><input type="checkbox" id="r-ind-market_regime"> <strong>Market Regime</strong>(filter)</label></div>
                         <div class="col-md-4"><label class="small" title="VWAP: intraday price anchor (upar=bullish, neeche=bearish)"><input type="checkbox" id="r-ind-vwap"> <strong>VWAP</strong>(<input type="number" id="r-p-vwap" value="20" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
-                        <div class="col-md-4"><label class="small" title="Combo: RSI70 cross + SuperTrend + VWAP + PCR>=min + Volume spike (strict, quality entries)"><input type="checkbox" id="r-ind-rvp"> <strong>Combo RVP</strong>(RSI<input type="number" id="r-p-rvpe" value="70" min="50" max="90" step="1" style="width:42px;font-size:11px">,PCR<input type="number" id="r-p-rvpp" value="1.0" min="0.5" max="2" step="0.1" style="width:42px;font-size:11px">)</label></div>
                         <div class="col-md-4"><label class="small" title="Heikin-Ashi candles: smoother trend candles (reduces noise, better for trend following)"><input type="checkbox" id="r-ind-heikin"> <strong>Heikin-Ashi</strong>(<input type="number" id="r-p-ha" value="14" min="2" max="50" style="width:40px;font-size:11px">)</label></div>
                     </div>
                     </div>
                     <div class="slab-sec" style="background:linear-gradient(135deg,#fff8e1 0%,#ffffff 100%); border:1px solid #ffe082; padding:6px"><div class="slab-sec-title"><i class="bi bi-sliders"></i> Schedule & Risk</div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Overall Stop Loss (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-sl" value="30"><small class="text-muted" id="s-sl-mirror">points = entry premium se direct move (30 = 30 points girne par exit)</small></div>
+                        <div class="col-md-3"><label class="form-label small">Overall Stop Loss (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-sl" value="" placeholder="0 = no stop loss"><small class="text-muted" id="s-sl-mirror">blank/0 = no SL (user fills own)</small></div>
+                        <div class="col-md-3"><label class="form-label small">Overall Target (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-tp" value="" placeholder="0 = no target"><small class="text-muted" id="s-tp-mirror">blank/0 = no target (user fills own)</small></div>
                     </div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Overall Target (points)</label><input type="text" inputmode="decimal" class="form-control form-control-sm" id="s-tp" value="50"><small class="text-muted" id="s-tp-mirror">points = entry premium se direct move (50 = 50 points chamke par exit)</small></div>
-                        <div class="col-md-3"><label class="form-label small">Re-entry on SL</label><select class="form-select form-select-sm" id="s-reentry-sl"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
+                        <div class="col-md-3"><label class="form-label small">Re-entry on SL</label><select class="form-select form-select-sm" id="s-reentry-sl"><option>RE ASAP</option><option selected>No Re-entry</option><option>RE Next Day</option></select></div>
                         <div class="col-md-3"><label class="form-label small">Re-entry on Tgt</label><select class="form-select form-select-sm" id="s-reentry-tp"><option selected>RE ASAP</option><option>No Re-entry</option><option>RE Next Day</option></select></div>
-                        <div class="col-md-3"><label class="form-label small">Trailing Options</label><select class="form-select form-select-sm" id="s-trail"><option selected>Lock</option><option>Partial</option><option>Complete</option></select></div>
                     </div>
                     <div class="row g-1 mt-1">
-                        <div class="col-md-3"><label class="form-label small">Lock if profit reaches</label><input type="number" class="form-control form-control-sm" id="s-lock-profit" value="0" min="0" step="50"></div>
-                        <div class="col-md-3"><label class="form-label small">Lock profit</label><input type="number" class="form-control form-control-sm" id="s-lock-amount" value="1" min="0" step="1"></div>
-                        <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="text" class="form-control form-control-sm" id="s-mtd" value="Unlimited" readonly title="Daily trade-count limit removed - din bhar jitne valid signals aayenge, sab execute honge"></div>
-                        <div class="col-md-3"><label class="form-label small">Slippage (%) <span class="badge bg-warning text-dark">strategy</span></label><input type="number" class="form-control form-control-sm" id="s-slippage" value="0.50" step="0.05" min="0" max="2" title="Add Slippage to make results realistic (market impact + spread)"></div>
+                        <div class="col-md-3"><label class="form-label small">Max Trades/Day</label><input type="number" class="form-control form-control-sm" id="s-mtd" value="5" min="0" max="50" step="1" title="Rulebook default: 5/day (Buy/Sell). 0 = unlimited"></div>
+                        <div class="col-md-2"><label class="form-label small">Slippage (%) <span class="badge bg-warning text-dark">strategy</span></label><input type="number" class="form-control form-control-sm" id="s-slippage" value="0.50" step="0.05" min="0" max="2" title="Add Slippage to make results realistic (market impact + spread)"></div>
                     </div>
                     <div class="row g-1 mt-1">
                         <div class="col-md-3"><label class="form-label small">Combined Portfolio</label><select class="form-select form-select-sm" id="s-combine"><option selected>No</option><option>Yes - Merge with previous</option></select></div>
                         <div class="col-md-3"><label class="form-label small">Order-Type Badge</label><select class="form-select form-select-sm" id="s-order-badge"><option selected>Paper</option><option>Live</option><option>Paper + Live</option></select></div>
-                        <div class="col-md-2"><label class="form-label small" title="India VIX is level se upar ho to NAYI entry band (0 = filter off). Exit/SL/TP hamesha chalu rehte hain.">VIX Max (0=off)</label><input type="number" class="form-control form-control-sm" id="s-vix-max" value="0" min="0" max="60" step="0.5"></div>
                         <div class="col-md-2"><label class="form-label small">Type</label><select id="r-type" class="form-select form-select-sm" onchange="robotTypeChange()"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
                         <div class="col-md-2"><label class="form-label small">Entry Time</label><input type="time" id="r-entry" class="form-control form-control-sm" value="09:35"></div>
                     </div>
@@ -606,6 +601,8 @@
                     <button class="btn btn-sm btn-outline-danger" id="live-toggle-btn" onclick="liveToggle()">Enable LIVE</button>
                     <button class="btn btn-sm btn-outline-primary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect All</button>
                     <button class="btn btn-sm btn-outline-warning" onclick="refreshTokens()"><i class="bi bi-arrow-repeat"></i> Refresh Tokens</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="syncFyersHistory()" title="Fyers se index daily bars (+active contracts) DB me save karta hai"><i class="bi bi-database-down"></i> Sync Fyers History</button>
+                    <button class="btn btn-sm btn-outline-info" onclick="syncNSEOptions()" title="NSE official F&amp;O bhavcopy se ASLI index-option premiums (ATM±3) DB me save karta hai - backtests real premium IV se anchored ho jayenge"><i class="bi bi-cloud-arrow-down"></i> Sync NSE Options</button>
                 </div>
             </div>
             <div class="row" id="broker-cards">
@@ -789,16 +786,42 @@
         <strong style="color:#334155">Disclaimer:</strong> RaTrade is solely a technology and data analysis platform. We are not a SEBI-registered Investment Advisor (IA) or Research Analyst (RA). All insights, technical setups, and scores displayed are strictly for analytical and educational purposes. No direct trading tips or buy/sell recommendations are provided. All strategies are configured and executed by the user at their own discretion and sole risk. Analytical backtest and paper results do not guarantee future live returns.
     </div>
     <script>
-    let A=async u=>{const r=await fetch(u);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
-    let P=async (u,o)=>{const r=await fetch(u,o);const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
+    let A=async u=>{
+        const _do=async()=>{
+            const r=await fetch(u);
+            const t=await r.text();
+            if(!r.ok){ const e=new Error('HTTP '+r.status+' '+(t||'').slice(0,200)); e.status=r.status; throw e; }
+            try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}
+        };
+        try{ return await _do(); }
+        catch(e){
+            // One retry with backoff on transient upstream (429/5xx/network) - kai endpoints
+            // ek hi burst me hit hote hain, second attempt usually passes.
+            const st=e.status||0; const transient=!st||st===408||st===409||st===429||st>=500;
+            if(!transient) throw e;
+            await new Promise(res=>setTimeout(res,700+Math.random()*600));
+            return await _do();
+        }
+    };
+    let P=async (u,o)=>{const r=await fetch(u,o);const t=await r.text();if(!r.ok){const e=new Error('HTTP '+r.status+' '+(t||'').slice(0,200));e.status=r.status;throw e;}try{return JSON.parse(t)}catch(e){throw new Error(t.slice(0,400))}};
 
     // Global fetch with retry & fallback for Connecting... states
-    const _origA = async (u, o) => { const r = await fetch(u, o); const t = await r.text(); try { return JSON.parse(t); } catch(e) { throw new Error(t.slice(0,400)); } };
-    async function A_retry(u, o, retries=2){ let last; for(let i=0;i<=retries;i++){ try{ const r=await _origA(u,o); if(r && r.error && r.error.includes('429')) throw new Error('429'); return r; }catch(e){ last=e; if(i<retries && (String(e.message).includes('429')||String(e.message).includes('Failed to fetch'))){ await new Promise(r=>setTimeout(r, 800*(i+1))); continue; } } } throw last; }
+    const _origA = async (u, o) => {
+        const r = await fetch(u, o);
+        const t = await r.text();
+        if(!r.ok){ const e = new Error('HTTP '+r.status); e.status = r.status; throw e; }
+        try { return JSON.parse(t); } catch(e) { throw new Error(t.slice(0,400)); }
+    };
+    async function A_retry(u, o, retries=2){ let last; for(let i=0;i<=retries;i++){ try{ return await _origA(u,o); }catch(e){ last=e; const st=(e&&e.status)||0; const transient=!st||st===408||st===429||st>=500; if(i<retries && transient){ await new Promise(r=>setTimeout(r, 700+Math.random()*700*(i+1))); continue; } } } throw last; }
     // Patch global A/P to use retry + user-friendly toast on failure
     const _oldA = A; const _oldP = P;
     A = async (u, o) => { try { return await A_retry(u, o); } catch(e){ console.warn('API failed', u, e.message); throw e; } };
     P = async (u, o) => { try { return await A_retry(u, o); } catch(e){ console.warn('API failed', u, e.message); throw e; } };
+    // TTL cache helpers (10 min): stale localStorage paint ki "1 second flash then
+    // blank" wali problem fix - server fresh/empty render kare ga, purani paint
+    // sirf errors/timeouts par dikhegi.
+    function _setTTLCache(k,v){try{localStorage.setItem(k,JSON.stringify({v,ts:Date.now()}));}catch(e){}}
+    function _getTTLCache(k){try{const j=JSON.parse(localStorage.getItem(k)||'null');if(j&&j.ts&&Date.now()-j.ts<600000)return j.v;}catch(e){}return null;}
     function showToast(msg, type='danger'){ let c=document.getElementById('toast-container'); if(!c){ c=document.createElement('div'); c.id='toast-container'; c.style.cssText='position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(c); } const t=document.createElement('div'); t.className='alert alert-'+type+' py-2 px-3 small'; t.style.cssText='min-width:280px;box-shadow:0 4px 12px rgba(0,0,0,0.15)'; t.innerHTML=msg+' <button class="btn-close ms-2" onclick="this.parentElement.remove()"></button>'; c.appendChild(t); setTimeout(()=>t.remove(), 6000); }
 
     const F=n=>n>=0?'₹'+n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}):'-₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -848,8 +871,11 @@
         }
     }
     async function loadStrategySymbols(){
-        // OTM-4 > ₹15 filter DEFAULT ON har load par (user rule 27-10-2026)
-        try{const c=document.getElementById('r-otm15-check');if(c){c.checked=true;otm15Toggle();}}catch(e){}
+        // OTM-4 > Rs15 filter ab DEFAULT OFF - user demand 19-11-2026: filter saved
+        // result page + strategy backtest page par symbols ko kabhi kam na kare;
+        // pehle filter ON (27-10-2026) har load par hide karta tha = saved strategy
+        // me symbol kum/jayada select karne ka vikalp hi nahi milta tha.
+        try{const c=document.getElementById('r-otm15-check');if(c){c.checked=false;try{localStorage.setItem('rOtm15','0');}catch(e){}}}catch(e){}
         // Step 1: INSTANT — static full F&O list, koi API wait nahi
         try{_fillStrategySyms([...new Set(_FNO_MASTER)].filter(Boolean).sort());}catch(e){}
         // Step 2: background me DB naye symbols merge (list rahegi dikhti)
@@ -862,7 +888,7 @@
     // ---- OTM-4 > ₹15 symbol filter (user rule 27-10-2026) ----
     // DEFAULT ON har page load par (user: "default tik laga hua dikhe").
     // User session me untick kar sakta hai; reload par phir ON.
-    function otm15On(){try{const c=document.getElementById('r-otm15-check');const v=c?c.checked:true;try{if(c)localStorage.setItem('rOtm15',v?'1':'0');}catch(e){}return v;}catch(e){return true;}}
+    function otm15On(){try{const c=document.getElementById('r-otm15-check');const v=c?c.checked:false;try{if(c)localStorage.setItem('rOtm15',v?'1':'0');}catch(e){}return v;}catch(e){return false;}}
     async function otm15Toggle(){
         const v=otm15On();
         if(v&&(!window._otm4ok||!window._otm4ok._ts||Date.now()-window._otm4ok._ts>10*60*1000)){
@@ -877,7 +903,11 @@
             const box=document.getElementById('r-syms');if(!box)return;
             const note=document.getElementById('r-otm20-note');
             if(!otm15On()){box.querySelectorAll('label').forEach(l=>l.style.display='');if(note)note.textContent=(window._symCount||'')+' symbols (poori F&O list)';return;}
+            // Saved strategy edit/backtest mode: filter hiding OFF - user can toggle any symbol.
+            if(window._savedStratMode === true){box.querySelectorAll('label').forEach(l=>l.style.display='');if(note)note.textContent='saved strategy mode - poori F&O list dikh rahi hai';return;}
             const ok=window?._otm4ok?window._otm4ok.set:null;
+            // Fail-open: server returned all_visible/empty ok - sab dikhao + reason
+            if(ok && ok.size===0){box.querySelectorAll('label').forEach(l=>l.style.display='');if(note)note.textContent='OTM-4 filter unavailable (live premium data nahi mila) - poori F&O list dikh rahi hai';return;}
             if(!ok){if(note)note.textContent='OTM-4 list load nahi hui - dobara toggle karo';return;}
             let vis=0;
             box.querySelectorAll('label').forEach(l=>{const v=l.querySelector('input')?.value;const keep=l.querySelector('input:checked');const show=ok.has(v)||keep;l.style.display=show?'':'none';if(show)vis++;});
@@ -1071,7 +1101,8 @@
             let chg = (d.spot && d.change!==undefined && d.change!==null) ? Number(d.change) : (_cached?Number(_cached.change):0);
             if(!isFinite(chg)) chg = 0;
             const up = chg > 0.005, down = chg < -0.005;
-            const cls = spot>0 ? (up?'price-up':down?'price-down':'text-muted') : 'text-muted';
+            // Flat (chg == 0) par grey nahi - bright/white text dikhe (user demand).
+            const cls = spot>0 ? (up?'price-up':down?'price-down':'text-dark fw-bold') : 'text-muted';
             const arrow = spot>0 ? (up?'▲':down?'▼':'') : '';
             const chgTxt = spot>0 ? `${chg>0?'+':''}${chg.toFixed(2)}%` : '';
             const price = spot>0 ? (d.formatted || ('₹'+spot.toLocaleString('en-IN',{minimumFractionDigits:2}))) : '—';
@@ -1276,14 +1307,13 @@
     async function loadDashPositions(){
         // Instant render (speed fix 11-11-2026): last portfolio payload
         // localStorage se PEHLE paint, network refresh peeche.
-        let _cached=null;
-        try{_cached=JSON.parse(localStorage.getItem('dashPosCache')||'null');}catch(e){}
+        let _cached=_getTTLCache('dashPosCache');
         try{
             if(_cached&&(_cached.positions||[]).length){ _renderPosTbl(_cached); }
         }catch(e){}
         try{
             const _fresh=await A('/api/dashboard/portfolio/fast');
-            try{localStorage.setItem('dashPosCache',JSON.stringify(_fresh));}catch(e){}
+            _setTTLCache('dashPosCache',_fresh);
             _renderPosTbl(_fresh);
         }catch(e){
             console.error('loadDashPositions failed',e);
@@ -1346,7 +1376,7 @@
         if(/bad_tick/.test(s))return 'Bad Tick Fix';
         if(s==='manual')return 'Manual Exit';
         return s? s.replace(/_/g,' ') : 'Closed';}
-    async function loadDashHistory(){try{try{const _hc=localStorage.getItem('dashHistCache'); if(_hc){const _el=document.getElementById('dash-hist'); if(_el && !_el.innerHTML.trim()) _el.innerHTML=_hc;}}catch(e){} const c=await A('/api/dashboard/trade-history/fast');const _ch=(c.trades||[]).filter(t=>otmPass(t.otm_pct));const _hidH=(c.trades||[]).length-_ch.length;
+    async function loadDashHistory(){try{const _hc=_getTTLCache('dashHistCache'); if(_hc){const _el=document.getElementById('dash-hist'); if(_el && !_el.innerHTML.trim()) _el.innerHTML=_hc;} const c=await A('/api/dashboard/trade-history/fast');const _ch=(c.trades||[]).filter(t=>otmPass(t.otm_pct));const _hidH=(c.trades||[]).length-_ch.length;
         // Strategy-wise summary section
         let summHtml='';
         if(c.strategy_summary&&c.strategy_summary.length){
@@ -1358,7 +1388,7 @@
             });
             summHtml+='</tbody></table></div></div>';
         }
-        if(_ch.length){let h=summHtml+'<table><tr><th>Entry Date</th><th>Entry Time</th><th>Signal Time</th><th>Exit Date</th><th>Exit Time</th><th>Strategy</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>SL Amt</th><th>TP Amt</th><th>OTM</th><th>P&L</th><th>Exit Reason</th><th>Action</th></tr>';_ch.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');const strat=t.strategy_name||'—';const slAmt=t.stop_loss||0;const tpAmt=t.target||0;const exitReason=t.exit_reason||t.status||'—';const sigTime=t.signal_time||'—';h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td class="text-muted small">${sigTime}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td class="text-muted small">${strat}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="text-muted small">${t.sl_unit==='pct'?slAmt+'%':(t.sl_unit==='pt'?slAmt+' pts':'₹'+slAmt)}</td><td class="text-muted small">${t.tp_unit==='pct'?tpAmt+'%':(t.tp_unit==='pt'?tpAmt+' pts':'₹'+tpAmt)}</td><td>${otmBadge(t.otm_pct)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td class="text-muted small" title="${exitReason}">${exitReason}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>'+(_hidH>0?'<div class="small text-danger mt-1">⚠ '+_hidH+' trade(s) hidden — OTM % cap ('+otmVal()+'%) se bahar</div>':'');document.getElementById('dash-hist').innerHTML=h;try{localStorage.setItem('dashHistCache',h);}catch(e){}}else{document.getElementById('dash-hist').innerHTML=(summHtml||'')+'<div class="text-center p-4"><i class="bi bi-journal-text" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No trade history yet'+(((_hidH||0)>0)?' ('+_hidH+' hidden — OTM cap)':'')+'</p><small class="text-muted">Completed trades will be listed here</small></div>';};}catch(e){}}
+        if(_ch.length){let h=summHtml+'<table><tr><th>Entry Date</th><th>Entry Time</th><th>Signal Time</th><th>Exit Date</th><th>Exit Time</th><th>Strategy</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>SL Amt</th><th>TP Amt</th><th>OTM</th><th>P&L</th><th>Exit Reason</th><th>Action</th></tr>';_ch.forEach(t=>{const ed=t.entry_date||t.date, ex=t.exit_date||'-';const typeBadge=t.transaction_type? B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell') : B(t.option_type,t.option_type==='CE'?'ce':'pe');const strat=t.strategy_name||'—';const slAmt=t.stop_loss||0;const tpAmt=t.target||0;const exitReason=t.exit_reason||t.status||'—';const sigTime=t.signal_time||'—';h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td class="text-muted small">${sigTime}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td class="text-muted small">${strat}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td class="text-muted small">${t.sl_unit==='pct'?slAmt+'%':(t.sl_unit==='pt'?slAmt+' pts':'₹'+slAmt)}</td><td class="text-muted small">${t.tp_unit==='pct'?tpAmt+'%':(t.tp_unit==='pt'?tpAmt+' pts':'₹'+tpAmt)}</td><td>${otmBadge(t.otm_pct)}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td class="text-muted small" title="${exitReason}">${exitReason}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>'+(_hidH>0?'<div class="small text-danger mt-1">⚠ '+_hidH+' trade(s) hidden — OTM % cap ('+otmVal()+'%) se bahar</div>':'');document.getElementById('dash-hist').innerHTML=h;_setTTLCache('dashHistCache',h)}else{document.getElementById('dash-hist').innerHTML=(summHtml||'')+'<div class="text-center p-4"><i class="bi bi-journal-text" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No trade history yet'+(((_hidH||0)>0)?' ('+_hidH+' hidden — OTM cap)':'')+'</p><small class="text-muted">Completed trades will be listed here</small></div>';};}catch(e){}}
     async function closeTrade(id,price){if(!confirm('Close #'+id+'?'))return;await P('/api/trades/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,exit_price:price,date:new Date().toISOString().split('T')[0]})});_lastOpenTrdHTML=null;loadDash();loadTrades();try{loadDashHistory();}catch(e){}}
     async function editTradeSLTP(id,sl,tp){const nsl=prompt('Stop Loss (₹) - default 1500:',sl||1500);if(nsl===null||nsl==='')return;const ntp=prompt('Target (₹) - default 3000:',tp||3000);if(ntp===null||ntp==='')return;const r=await P('/api/trades/update-sltp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({trade_id:id,stop_loss:parseFloat(nsl),target:parseFloat(ntp)})});if(r.error)alert('Error: '+r.error);else{alert('Trade #'+id+' SL ₹'+nsl+' / TP ₹'+ntp+' saved — auto-monitor har 5 min me check karega');loadDashPositions();}}
     async function deleteTrade(id){if(!confirm('Delete trade #'+id+'? This cannot be undone.'))return;const r=await P('/api/trades/'+id,{method:'DELETE'});_lastOpenTrdHTML=null;if(!r.error){loadTrades();try{loadDashPositions();}catch(e){}try{loadDashHistory();}catch(e){}}else alert('Error: '+r.error);}
@@ -1439,7 +1469,7 @@
     }
 let _lastOpenTrdHTML = null;
     async function loadTrades(){
-        try{const _otc=localStorage.getItem('openTrdCache'); if(_otc && _otc.includes('<table>')){const _el=document.getElementById('open-trd'); if(_el && !_el.innerHTML.trim()) _el.innerHTML=_otc;}}catch(e){}
+        try{const _otc=localStorage.getItem('openTrdCache'); let _cacheHtml=_otc,_cacheTs=0;try{const _pj=JSON.parse(_otc);if(_pj&&typeof _pj==='object'&&_pj.html){_cacheHtml=_pj.html;_cacheTs=_pj.ts||0;}}catch(e){} if(_cacheHtml && String(_cacheHtml).includes('<table>') && (!_cacheTs || Date.now()-_cacheTs<600000)){const _el=document.getElementById('open-trd'); if(_el && !_el.innerHTML.trim()){ _el.innerHTML=_cacheHtml; _lastOpenTrdHTML=_cacheHtml; }}}catch(e){}
         try{const [o,st]=await Promise.all([A('/api/trades/open/fast'), A('/api/dashboard/stats')]);
             document.getElementById('trd-stats').innerHTML=`<div class="col"><div class="card stat-card"><div class="label">Open Trades</div><div class="value text-primary">${st.open_count}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Closed Trades</div><div class="value">${st.closed_count}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Total P&L</div><div class="value ${C(st.total_pnl)}">${F(st.total_pnl)}</div></div></div><div class="col"><div class="card stat-card"><div class="label">Win Rate</div><div class="value">${st.win_rate}%</div></div></div>`;
             if(o.positions&&o.positions.length){
@@ -1456,16 +1486,16 @@ let _lastOpenTrdHTML = null;
                     const typeBadge = B(t.transaction_type+' '+t.option_type, t.transaction_type==='BUY'?'buy':'sell');
                 h+=`<tr><td>${t.entry_date||t.symbol}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>${t.quantity}</td><td>₹${t.entry_price.toFixed(2)}</td><td>₹${cur.toFixed(2)}</td><td><input type="number" value="${t.tp}" style="width:70px;font-size:11px" onchange="updateTP(${t.id},this.value)"></td><td><input type="number" value="${t.sl}" style="width:70px;font-size:11px" onchange="updateSL(${t.id},this.value)"></td><td class="${C(pnl)}">${F(pnl)}<br><small>${(pnl/(t.entry_price*t.quantity*(t.lot_size||50))*100||0).toFixed(1)}%</small><br><small class="text-muted" title="Exit slippage + costs adjusted (backtest-net parity)">net ${F(pnlNet)}</small></td><td>${B(isLive?'LIVE':'PAPER',isLive?'sell':'buy')}</td><td>${B((t.trade_type||'intraday').toUpperCase(),(t.trade_type||'intraday')==='positional'?'ce':'buy')}</td><td class="small" style="min-width:220px;max-width:280px;word-break:break-word;white-space:normal" title="${_strat}">${_strat}</td><td style="white-space:nowrap"><button class="btn btn-sm btn-info" onclick="openTradeTV('${t.symbol}')">Chart</button> <button class="btn btn-sm btn-outline-primary" onclick="setTradeMode(${t.id},'paper')">Paper</button> <button class="btn btn-sm btn-outline-danger" onclick="setTradeMode(${t.id},'live')">Live</button> <button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button> <button class="btn btn-sm btn-warning" onclick="closeTrade(${t.id},${cur})">Exit</button></td></tr>`;
                 });
-                h+='</table>';document.getElementById('open-trd').innerHTML=h;_lastOpenTrdHTML=h;try{localStorage.setItem('openTrdCache',h);}catch(e){}
+                h+='</table>';document.getElementById('open-trd').innerHTML=h;_lastOpenTrdHTML=h;try{localStorage.setItem('openTrdCache',JSON.stringify({html:h,ts:Date.now()}));}catch(e){}
             }else{
-                if(_lastOpenTrdHTML && document.getElementById('open-trd').innerHTML.includes('<table>')){
-                    // keep previous trades visible - avoid flicker when other tab clicked
+                if((_lastOpenTrdHTML || document.getElementById('open-trd').innerHTML.includes('<table>'))){
+                    // keep previous trades visible - cache/server-empty par flicker na ho
                 } else {
                     document.getElementById('open-trd').innerHTML='<div class="text-center p-4"><i class="bi bi-inbox" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No open positions yet</p><small class="text-muted">Trades will appear here once you place an order</small></div>';
                 }
             }
         }catch(e){ console.error('loadTrades failed',e); }
-        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){const _w=(c.winning_trades!=null?c.winning_trades:c.trades.filter(t=>Number(t.pnl||0)>0).length);const _wr=(c.win_rate!=null?c.win_rate:(c.trades.length?(_w/c.trades.length*100):0));let h='<div class="small text-muted mb-1">Closed ('+c.trades.length+') • Win '+_w+'/'+c.trades.length+' ('+Number(_wr).toFixed(1)+'%) — win = net P&L > ₹0</div><table><tr><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Badge</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=exitStatusLabel(t.exit_status);const sbg=(Number(t.pnl||0)>0)?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const badge=B(t.trade_mode==='live'?'LIVE':t.trade_mode==='paper'?'PAPER':'BT', t.trade_mode==='live'?'sell':'buy');const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td>${badge}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{document.getElementById('closed-trd').innerHTML='<div class="text-center p-4"><i class="bi bi-journal-text" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No trade history yet</p><small class="text-muted">Completed trades will be listed here</small></div>';}
+        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){const _w=(c.winning_trades!=null?c.winning_trades:c.trades.filter(t=>Number(t.pnl||0)>0).length);const _wr=(c.win_rate!=null?c.win_rate:(c.trades.length?(_w/c.trades.length*100):0));let h='<div class="small text-muted mb-1">Closed ('+c.trades.length+') • Win '+_w+'/'+c.trades.length+' ('+Number(_wr).toFixed(1)+'%) — win = net P&L > ₹0</div><table><tr><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Badge</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=exitStatusLabel(t.exit_status);const sbg=(Number(t.pnl||0)>0)?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const badge=B(t.trade_mode==='live'?'LIVE':t.trade_mode==='paper'?'PAPER':'BT', t.trade_mode==='live'?'sell':'buy');const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td>${badge}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{if(!document.getElementById('closed-trd').innerHTML.includes('<table>')){document.getElementById('closed-trd').innerHTML='<div class="text-center p-4"><i class="bi bi-journal-text" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No trade history yet</p><small class="text-muted">Completed trades will be listed here</small></div>';}}
         }catch(e){}
         // Drawdown Days in stats
         try{ if(window._lastBacktestMetrics && window._lastBacktestMetrics.max_dd_duration!==undefined) document.getElementById('q-drawdown').textContent='Drawdown Days: '+(window._lastBacktestMetrics.max_dd_duration||0)+' | Trades in DD: '+(window._lastBacktestMetrics.max_trades_in_dd||0); }catch(e){}
@@ -1504,10 +1534,13 @@ let _lastOpenTrdHTML = null;
         const s=document.getElementById('r-start')?.value||'', e=document.getElementById('r-end')?.value||'';
         if(!s||!e){alert('Select start and end date');return null;}
         const lots=parseInt(document.getElementById('r-lots')?.value)||1;
-        const sA=_amtVal('s-sl',30);const sl=sA.v;const slUnit=sA.u;
-        const tA=_amtVal('s-tp',50);const tp=tA.v;const tpUnit=tA.u;
-        // Daily trade-count cap removed: -1 = unlimited in the engine.
-        const mtd=-1;
+        const sA=_amtVal('s-sl',0);const sl=sA.v;const slUnit=sA.u;
+        const tA=_amtVal('s-tp',0);const tp=tA.v;const tpUnit=tA.u;
+        // Max trades/day: rulebook profile default (Buy 2, Sell 5). 0/blank = unlimited.
+        const _mtdRaw=parseInt(document.getElementById('s-mtd')?.value);const mtd=(isNaN(_mtdRaw)||_mtdRaw<=0)?-1:_mtdRaw;
+        const trailSel=document.getElementById('s-trail')?.value||'Off';
+        const trailOn=trailSel!=='Off';
+        const _trailStep=parseFloat(document.getElementById('s-trail-step')?.value)||0;
         const slb=Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0));
         const indicators=robotCollectIndicators();
         let legs=(typeof stratLegs!=='undefined'&&stratLegs.length)?JSON.parse(JSON.stringify(stratLegs)):[];
@@ -1529,7 +1562,7 @@ let _lastOpenTrdHTML = null;
         // use karta hai (index 13-15%, stock 30%) - wahi paper/live/scanner
         // use karte hain. Pehle yahan hardcoded 0.14 jata tha (index ka IV)
         // to stock options ka premium 5x chhota dikhta tha.
-        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:document.getElementById('s-trail')?.value!=='Lock',max_holding_bars:momentum>0?Math.max(5,20-momentum):20,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,sl_unit:slUnit,tp_unit:tpUnit,signal_lookback_days:slb}};
+        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:trailOn,trailing:trailOn?String(_trailStep):'Off',max_holding_bars:rType==='intraday'?0:(momentum>0?Math.max(5,20-momentum):20),strict_trend:true,allow_intraday_time_exit:false,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'No Re-entry',reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'RE ASAP',lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,lock_profit_unit:'pt',dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip},risk:{max_trades_per_day:mtd,daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,sl_unit:slUnit,tp_unit:tpUnit,signal_lookback_days:slb}};
     }
     async function runBacktest(opts){
         // opts.direct: saved-strategy endpoint ka ready result - dobara fetch nahi, sidha render.
@@ -1747,14 +1780,15 @@ let _lastOpenTrdHTML = null;
         const _btStart=Date.now();
         const _btSpin=()=>{
             const s=Math.round((Date.now()-_btStart)/1000);
-            const pct=Math.min(95, Math.round((s/60)*100));
             document.getElementById('bt-results').classList.remove('hidden');
             const pb=document.getElementById('bt-progress'); if(pb) pb.classList.remove('hidden');
-            const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width=pct+'%'; bar.textContent=pct+'%'; }
-            const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Backtest chal raha hai... '+s+'s';
+            // Bar sirf real server progress se badhta hai (neeche _pollJob me) -
+            // time-based fake pct (95% cap) hataya: wahi "95% par hang" jaisa
+            // lagta tha. Bar ab bina real data ke chhota rehta hai.
+            const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Backtest shuru ho raha hai... '+s+'s';
             // Honest spinner only: purane run ke numbers ya random dummy KABHI
             // nahi dikhate (wahi summary-vs-list mismatch ka kaaran tha).
-            document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Backtest chal raha hai... '+s+'s (page band mat karo)</p>';
+            document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Backtest shuru ho raha hai... '+s+'s (page band mat karo)</p>';
         };
         _btSpin();
         // HAMESHA async (sync-first hataya): client 8s par abort karta tha
@@ -1775,7 +1809,18 @@ let _lastOpenTrdHTML = null;
                 try{ st=await A('/api/backtest/result/'+sub.job_id); _netFails=0; }
                 catch(pe){ lastErr=pe.message||''; if(++_netFails>30){ lastErr='server se sampark toot gaya (30 fails) — dobara Run dabao'; break; } try{const _pb=document.getElementById('bt-progress-text');if(_pb)_pb.textContent+=' (retry '+_netFails+')';}catch(e){} continue; }
                 if(!st) continue;
-                try{const _pr=st.progress||null;if(_pr&&_pr.total){const _pb2=document.getElementById('bt-progress-text');if(_pb2)_pb2.textContent='Backtest chal raha hai... '+Math.round((Date.now()-_btStart)/1000)+'s (symbol '+_pr.done+'/'+_pr.total+')';}}catch(e){}
+                try{
+                    const _pr=st.progress||null;
+                    if(_pr&&_pr.total){
+                        // Real per-symbol progress (not fake time-based cap) - server
+                        // reports done/total symbols, so 95% hang nahi hota.
+                        const _realPct=Math.min(97, Math.round(((+_pr.done||0)/Math.max(1,+_pr.total))*100));
+                        const _bar2=document.getElementById('bt-progress-bar');
+                        if(_bar2){ _bar2.style.width=_realPct+'%'; _bar2.textContent=_realPct+'%'; }
+                        const _pb2=document.getElementById('bt-progress-text');
+                        if(_pb2)_pb2.textContent='Backtest chal raha hai... '+Math.round((Date.now()-_btStart)/1000)+'s (symbol '+_pr.done+'/'+_pr.total+')';
+                    }
+                }catch(e){}
                 if(st.status==='done'){ r=st.result||null; lastErr=''; try{ const bar=document.getElementById('bt-progress-bar'); if(bar){ bar.style.width='100%'; bar.textContent='100%'; } const pbt=document.getElementById('bt-progress-text'); if(pbt) pbt.textContent='Done!'; setTimeout(()=>{ const pb=document.getElementById('bt-progress'); if(pb) pb.classList.add('hidden'); },2000);}catch(e){} break; }
                 if(st.status==='error'){ lastErr=st.error||'worker failed'; break; }
                 if(st.status==='unknown'){ lastErr='NEEDS_RESUBMIT'; break; }
@@ -1923,8 +1968,8 @@ let _lastOpenTrdHTML = null;
         const entryTime=document.getElementById('r-entry').value;
         const exitTime=document.getElementById('r-exit').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA2=_amtVal('s-sl',30);const sl=sA2.v;const slUnit=sA2.u;
-        const tA2=_amtVal('s-tp',50);const tp=tA2.v;const tpUnit=tA2.u;
+        const sA2=_amtVal('s-sl',0);const sl=sA2.v;const slUnit=sA2.u;
+        const tA2=_amtVal('s-tp',0);const tp=tA2.v;const tpUnit=tA2.u;
         const momentum=parseInt(document.getElementById('s-momentum').value)||0;
         const startDate=document.getElementById('r-start').value;
         const endDate=document.getElementById('r-end').value;
@@ -1957,13 +2002,17 @@ let _lastOpenTrdHTML = null;
                 slippage_pct:0.5,
                 strike_selection:(legs[0]&&legs[0].strike_selection)||'atm',
                 otm_distance:(legs[0]&&legs[0].otm_distance)||0,
-                max_holding_bars:1000000,
+                max_holding_bars:stratType==='intraday'?0:1000000,
+                allow_intraday_time_exit:false,
+                strict_trend:true,
                 auto_exit_on_time:true,
                 reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'',
                 reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'',
-                trailing:document.getElementById('s-trail')?.value||'',
+                trailing:(document.getElementById('s-trail')?.value||'Off')==='Off'?'Off':String(parseFloat(document.getElementById('s-trail-step')?.value)||0),
+                trailing_sl:(document.getElementById('s-trail')?.value||'Off')!=='Off',
                 lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,
                 lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,
+                lock_profit_unit:'pt',
             },
             risk_management:{
                 daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,
@@ -1972,7 +2021,7 @@ let _lastOpenTrdHTML = null;
                 daily_take_profit_pct:tpUnit==='pct'?tp:0,
                 sl_unit:slUnit,
                 tp_unit:tpUnit,
-                max_trades_per_day:-1,
+                max_trades_per_day:(function(){const v=parseInt(document.getElementById('s-mtd')?.value);return (isNaN(v)||v<=0)?-1:v;})(),
                 signal_lookback_days:parseInt(document.getElementById('r-slb')?.value)||0,
             },
             status:'active',
@@ -2093,9 +2142,9 @@ let _lastOpenTrdHTML = null;
         document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
     }
      document.getElementById('s-strike-type')?.addEventListener('change', e=>{document.getElementById('s-delta').classList.toggle('d-none', e.target.value!=='Delta'); scheduleAutoBT();});
-    document.getElementById('s-index')?.addEventListener('change', ()=>{ if(stratLegs.length) updatePayoff(); scheduleAutoBT(); });
-    ['r-order','r-strike','r-lots','r-type','s-sl','s-tp','r-mtd','r-slb','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
-    document.getElementById('r-syms')?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();});
+    document.getElementById('s-index')?.addEventListener('change', ()=>{ try{_applyOptionBuyDefaults(false);}catch(e){} if(stratLegs.length) updatePayoff(); scheduleAutoBT(); });
+    ['r-order','r-strike','r-lots','r-type','s-sl','s-tp','r-mtd','s-mtd','r-slb','r-entry','r-exit','r-timeframe','r-start','r-end','s-momentum','s-trail','s-trail-step','s-lock-profit','s-lock-amount','s-reentry-sl','s-reentry-tp'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>{try{updateRunSummary();}catch(e){} scheduleAutoBT();}); document.getElementById(id)?.addEventListener('input',()=>scheduleAutoBT());});
+    document.getElementById('r-syms')?.addEventListener('change',()=>{try{_applyOptionBuyDefaults(false);}catch(e){} try{updateRunSummary();}catch(e){} scheduleAutoBT();});
     // Indicator inputs auto
     document.addEventListener('change',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-ind-')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
     document.addEventListener('input',e=>{ if(e.target.closest('#q-ind-table')||e.target.id.startsWith('r-p-')){ try{updateRunSummary();}catch(_){} scheduleAutoBT(); } });
@@ -2137,27 +2186,97 @@ let _lastOpenTrdHTML = null;
     async function _refreshDualMirror(){
         try{ if(!window._entryPrem){ window._entryPrem=await _entryPremEst(); } _dualMirror('s-sl','s-sl-mirror'); _dualMirror('s-tp','s-tp-mirror'); }catch(e){}
     }
-    // ═══ Smart Default for Option Buying (Rule 2 - RESTORED) ═══
-    // User rule (09-11-2026): default inputs 1500/3000 dikhe, LEKIN jab koi
-    // CE/PE BUY strategy/order select ho (backtest ya template) to SL/TP
-    // apne-aap 30% SL / 70% TP (premium-based) par switch ho jaye. Non-BUY
-    // (EQ/SELL) par 1500/3000 hi rehta hai.
-    function _isOptionBuy(){
+    // ═══ Rulebook defaults (Buy vs Sell) - 16-11-2026 ═══
+    // Single source: core/services/strategy_rulebook.py. Yahan sirf UI
+    // pre-fill hota hai; backtest/paper/live backend wahi rules enforce karte
+    // hain. Har field user ke liye editable hai.
+    //   SELL: entry 10:15, SL 12-15 / TP 15-20, lock 10->5 (step 5), 5/day
+    //   BUY : ATM/ITM-1, SL 10-12 / TP 25-30, lock 12->6 (step 5), 2/day
+    //   Index override: NIFTY 15/20, FINNIFTY 18/22, BANKNIFTY 25/35
+    const _RB_INDEX_SLTP={NIFTY:[15,20],FINNIFTY:[18,22],BANKNIFTY:[25,35]};
+    function _rbSide(){
         try{
-            if(typeof stratLegs!=='undefined'&&stratLegs.length){ const l=stratLegs[0]; const op=(l.option_type||'').toUpperCase(); const tx=(l.transaction||'').toLowerCase(); return op!=='EQ'&&tx==='buy'; }
-            const ro=(document.getElementById('r-order')||{}).value||''; const pp=ro.split('-'); return (pp[0]||'').toUpperCase()!=='EQ'&&String(pp[1]||'').toUpperCase()==='BUY';
-        }catch(e){ return false; }
+            if(typeof stratLegs!=='undefined'&&stratLegs.length){
+                const l=stratLegs[0]; const op=(l.option_type||'').toUpperCase();
+                if(op==='EQ') return 'eq';
+                return String(l.transaction||'').toLowerCase()==='sell'?'sell':'buy';
+            }
+            const ro=(document.getElementById('r-order')||{}).value||'CE-BUY';
+            const pp=ro.split('-');
+            if(String(pp[0]||'').toUpperCase()==='EQ') return 'eq';
+            return String(pp[1]||'BUY').toUpperCase()==='SELL'?'sell':'buy';
+        }catch(e){ return 'buy'; }
     }
+    function _rbSymbol(){
+        try{ const s=(typeof rSyms==='function'&&rSyms()[0])||(document.getElementById('s-index')||{}).value||'NIFTY'; return String(s).toUpperCase().trim(); }catch(e){ return 'NIFTY'; }
+    }
+    function _rbDefaults(){
+        const side=_rbSide(); if(side==='eq') return null;
+        const idx=_RB_INDEX_SLTP[_rbSymbol()]||null;
+        const sl=idx?idx[0]:(side==='sell'?12:12);
+        const tp=idx?idx[1]:(side==='sell'?18:28);
+        return side==='sell'
+            ? {sl:sl,tp:tp,entry:'10:15',lockAt:10,lockAmt:5,step:5,mtd:5,reSl:'No Re-entry'}
+            : {sl:sl,tp:tp,entry:'09:35',lockAt:12,lockAmt:6,step:5,mtd:5,reSl:'No Re-entry'};
+    }
+    // ---- Rulebook default vs user-customized visibility ----
+    const _rbCustom=new Set(); const _rbIndCustom=new Set(); let _rbApplying=false;
     function _applyOptionBuyDefaults(force){
         try{
-            const slEl=document.getElementById('s-sl'), tpEl=document.getElementById('s-tp');
-            if(!slEl||!tpEl)return;
-            if(_isOptionBuy()){
-                slEl.value='20'; tpEl.value='40';
+            const d=_rbDefaults(); if(!d) return;
+            _rbApplying=true;
+            const set=(id,v)=>{const el=document.getElementById(id); if(!el||v===undefined||v===null) return;
+                // force=true (reset / order-type switch) => rulebook default.
+                // Warna user ka customized value kabhi overwrite na ho.
+                if(force||!_rbCustom.has(id)){ el.value=v; _rbTag(id,true); }
+                else { _rbTag(id,false); }
+            };
+            // Default TARGET, TRAILING stop-loss and SL removed per user request:
+            // user fills them manually (0/blank = no target / no trail / no SL).
+            // set('s-tp',d.tp); set('s-lock-profit',d.lockAt); set('s-lock-amount',d.lockAmt); set('s-trail-step',d.step);
+            // set('s-sl',d.sl);
+            set('s-reentry-sl',d.reSl);
+            // Max trades: Sell 5/day, Buy 2/day. Explicit -1/blank = unlimited.
+            const mEl=document.getElementById('s-mtd');
+            if(mEl&&(force||!_rbCustom.has('s-mtd'))){ mEl.value=d.mtd; _rbTag('s-mtd',true); }
+            // Entry time: sirf tab jab user ne khud change na kiya ho.
+            const eEl=document.getElementById('r-entry');
+            if(eEl&&(force||!_rbCustom.has('r-entry'))){ eEl.value=d.entry; _rbTag('r-entry',true); }
+            // BUY rulebook: sirf SuperTrend ON. VWAP / Market Regime ab default OFF
+            // (user demand 19-11-2026: ye 2 indicator default tick na rahein).
+            if(_rbSide()==='buy'){
+                [['r-ind-supertrend',true]].forEach(([id,v])=>{
+                    const el=document.getElementById(id);
+                    if(el&&(force||!_rbIndCustom.has(id))){ el.checked=v; }
+                });
             }
+            _rbApplying=false;
             _refreshDualMirror();
+        }catch(e){ _rbApplying=false; }
+    }
+    // ---- Rulebook default vs user-customized visibility ----
+    function _rbTag(id,isDefault){
+        try{
+            const el=document.getElementById(id); if(!el) return;
+            const box=el.closest('.col-md-3,.col-md-2,.col-md-4,.col-6,.col-4,.col-3')||el.parentElement;
+            const lbl=box&&box.querySelector('label'); if(!lbl) return;
+            let b=lbl.querySelector('.rb-flag');
+            if(!b){ b=document.createElement('span'); b.className='rb-flag badge ms-1'; lbl.appendChild(b); }
+            b.textContent=isDefault?'RB':'Custom';
+            b.className='rb-flag badge ms-1 '+(isDefault?'bg-primary':'bg-secondary');
+            b.title=isDefault?'Rulebook default (editable)':'User-customized value';
+            el.dataset.rbDefault=isDefault?'1':'0';
         }catch(e){}
     }
+    ['s-sl','s-tp','s-lock-profit','s-lock-amount','s-trail-step','s-mtd','s-reentry-sl','r-entry'].forEach(id=>{
+        const el=document.getElementById(id); if(!el) return;
+        const mark=()=>{ if(!_rbApplying){ _rbCustom.add(id); _rbTag(id,false); } };
+        el.addEventListener('input',mark); el.addEventListener('change',mark);
+    });
+    ['r-ind-supertrend','r-ind-vwap','r-ind-market_regime'].forEach(id=>{
+        const el=document.getElementById(id); if(!el) return;
+        el.addEventListener('change',()=>{ if(!_rbApplying) _rbIndCustom.add(id); });
+    });
     // Option BUY select hote hi smart default + mirror updates
     document.getElementById('r-order')?.addEventListener('change',()=>_applyOptionBuyDefaults(false));
     document.getElementById('s-sl')?.addEventListener('input',()=>_dualMirror('s-sl','s-sl-mirror'));
@@ -2174,20 +2293,18 @@ let _lastOpenTrdHTML = null;
     function resetStrat(){
         document.getElementById('s-momentum').value=0;
         document.getElementById('r-lots').value=1;
-        document.getElementById('s-sl').value=1500;
-        document.getElementById('s-tp').value=3000;
         try{document.getElementById('r-slb').value=0;}catch(e){}
-        try{document.getElementById('s-sl').value=1500;document.getElementById('s-tp').value=3000;}catch(e){}
-        document.getElementById('s-lock-profit').value=0;
-        document.getElementById('s-lock-amount').value=1;
-        document.getElementById('s-reentry-sl').value='RE ASAP';
-        document.getElementById('s-reentry-tp').value='RE ASAP';
-        document.getElementById('s-trail').value='Lock';
+        // Rulebook default profiles (Buy 2/day, Sell 5/day; trailing 5-pt step).
+        try{_rbCustom.clear();_rbIndCustom.clear();}catch(e){}
+        try{_applyOptionBuyDefaults(true);}catch(e){}
         clearLegs();
         try{if(typeof refreshAutoBadge==='function')refreshAutoBadge();}catch(e){}
     }
 
     function _loadStratToForm(s){
+        // Saved strategy (edit / backtest detail) me OTM-4 filter hiding disable:
+        // user apni saved strategy ke symbols khud toggle kar sake (kum/jayada).
+        try{ window._savedStratMode = true; }catch(e){}
         try{
             try{document.getElementById('s-name').value=s.name||'';}catch(e){}
             try{const _rs=document.getElementById('run-summary');if(_rs&&s.name)_rs.textContent='Strategy: '+s.name+' ('+(s.symbol||'')+')';}catch(e){}
@@ -2216,11 +2333,16 @@ let _lastOpenTrdHTML = null;
                 const _tpVal =_rm.tp_unit==='pt'?_rm.daily_take_profit:(_rm.daily_take_profit_pct?_rm.daily_take_profit_pct:(_rm.daily_take_profit??''));
                 if(_rm.daily_stop_loss_pct)document.getElementById('s-sl').value=_rm.daily_stop_loss_pct+'%';
                 else if(_rm.daily_stop_loss)document.getElementById('s-sl').value=String(_slVal===undefined?'':_slVal)+_slSuffix;
-                if(_rm.daily_take_profit_pct)document.getElementById('s-tp').value=_rm.daily_take_profit_pct+'%';
-                else if(_rm.daily_take_profit)document.getElementById('s-tp').value=String(_tpVal===undefined?'':_tpVal)+_tpSuffix;
-                try{document.getElementById('s-mtd').value='Unlimited';}catch(e){}
+                // Overall Target element removed from Builder - SL stays user-editable
+                // only. Saved strategies ka TP silently ignore nahi hota (server API par save rahega).
+                try{const _mv=parseInt(_rm.max_trades_per_day);document.getElementById('s-mtd').value=(isNaN(_mv)||_mv<0)?0:_mv;}catch(e){}
+                try{
+                    if(_ao.reentry_on_sl)document.getElementById('s-reentry-sl').value=_ao.reentry_on_sl;
+                    if(_ao.reentry_on_tp)document.getElementById('s-reentry-tp').value=_ao.reentry_on_tp;
+                    // Trailing/lock UI was removed (user request). Saved strategy's
+                    // trailing stays server-side on the backend.
+                }catch(e){}
                 try{if(_rm.signal_lookback_days!=null)document.getElementById('r-slb').value=_rm.signal_lookback_days;}catch(e){}
-                try{const _vx=parseFloat(_rm.vix_max);if(isFinite(_vx)&&document.getElementById('s-vix-max'))document.getElementById('s-vix-max').value=Math.max(0,_vx);}catch(e){}
             }catch(e){}
             if(s.legs)try{stratLegs=Array.isArray(s.legs)?s.legs:JSON.parse(s.legs);try{stratLegs.forEach(l=>{l.lots=l.lots||1;l.expiry=l.expiry||'weekly';l.strike_selection=l.strike_selection||'atm';l.otm_distance=l.otm_distance||0;});}catch(e){}renderLegs();}catch(e){}
             // Saved indicators khaali hon to table mat wipe karo (warna "No
@@ -2235,6 +2357,14 @@ let _lastOpenTrdHTML = null;
             // Entry/exit conditions form me rakh do taaki dobara Run par same rahe (engine AND-logic use karta hai)
             try{window._stratEntryConds=Array.isArray(s.entry_conditions)?s.entry_conditions:JSON.parse(s.entry_conditions||'[]');}catch(e){window._stratEntryConds=[];}
             try{window._stratExitConds=Array.isArray(s.exit_conditions)?s.exit_conditions:JSON.parse(s.exit_conditions||'[]');}catch(e){window._stratExitConds=[];}
+            // Saved config = user ka apna config: rulebook auto-defaults inhe
+            // overwrite na karein (custom badge dikhao).
+            try{
+                ['s-sl','s-tp','s-lock-profit','s-lock-amount','s-trail-step','s-mtd','s-reentry-sl','r-entry'].forEach(id=>{
+                    _rbCustom.add(id); _rbTag(id,false);
+                });
+                ['r-ind-supertrend','r-ind-vwap','r-ind-market_regime'].forEach(id=>_rbIndCustom.add(id));
+            }catch(e){}
         }catch(e){}
     }
     async function backtestStrat(id, force, el){try{
@@ -2480,8 +2610,8 @@ let _lastOpenTrdHTML = null;
         const sym=(rSyms()[0]||'NIFTY');
         let order=document.getElementById('r-order').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA3=_amtVal('s-sl',30);const sl=sA3.v;const slUnit=sA3.u;
-        const tA3=_amtVal('s-tp',50);const tp=tA3.v;const tpUnit=tA3.u;
+        const sA3=_amtVal('s-sl',0);const sl=sA3.v;const slUnit=sA3.u;
+        const tA3=_amtVal('s-tp',0);const tp=tA3.v;const tpUnit=tA3.u;
         const strikeType=document.getElementById('r-strike').value;
         const expiry='weekly';
         let optR, txnR; { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
@@ -2517,7 +2647,6 @@ let _lastOpenTrdHTML = null;
         if(document.getElementById('r-ind-rsi')?.checked) indicators.push({id:'rsi',params:{period:parseInt(document.getElementById('r-p-rsi')?.value)||14}});
         if(document.getElementById('r-ind-vwap')?.checked) indicators.push({id:'vwap',params:{period:parseInt(document.getElementById('r-p-vwap')?.value)||20,multiplier:2.0}});
 if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:'market_regime',params:{vwap_period:20,ema_fast:20,ema_slow:50,adx_period:14,adx_threshold:20}});
-        if(document.getElementById('r-ind-rvp')?.checked) indicators.push({id:'combo_rsi_vwap_pcr',params:{rsi_period:parseInt(document.getElementById('r-p-rsi')?.value)||14,rsi_entry:parseFloat(document.getElementById('r-p-rvpe')?.value)||70,rsi_exit:55,st_period:parseInt(document.getElementById('r-p-st')?.value)||10,st_mult:parseFloat(document.getElementById('r-p-stm')?.value)||3,vwap_period:parseInt(document.getElementById('r-p-vwap')?.value)||20,pcr_min:parseFloat(document.getElementById('r-p-rvpp')?.value)||1.0,vol_mult:1.5}});
         if(document.getElementById('r-ind-heikin')?.checked) indicators.push({id:'heikin_ashi',params:{period:parseInt(document.getElementById('r-p-ha')?.value)||14}});
         if(!indicators.length) indicators.push({id:'supertrend',params:{period:10,multiplier:3}});
         return indicators;
@@ -2528,8 +2657,8 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
         const order=document.getElementById('r-order').value;
         const strikeType=document.getElementById('r-strike').value;
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA4=_amtVal('s-sl',30);const sl=sA4.v;const slUnit=sA4.u;
-        const tA4=_amtVal('s-tp',50);const tp=tA4.v;const tpUnit=tA4.u;
+        const sA4=_amtVal('s-sl',0);const sl=sA4.v;const slUnit=sA4.u;
+        const tA4=_amtVal('s-tp',0);const tp=tA4.v;const tpUnit=tA4.u;
         let legs=[];
         const rOtmSave=Math.min(6,Math.max(1,parseInt(document.getElementById('r-otm').value)||1));
         const rOtmDist=((strikeType.toLowerCase()==='otm'||strikeType.toLowerCase()==='itm'))?rOtmSave:0;
@@ -2552,7 +2681,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
             robotCollectIndicators().forEach(iv=>{ if(iv&&iv.id) _seen[iv.id]=iv; });
             Object.keys(_seen).forEach(k=>_saveInds.push(_seen[k]));
         }catch(e){ try{ _saveInds.push(...robotCollectIndicators()); }catch(_){} }
-        const body={id: window._editingStratId||0, name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0, daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0, daily_stop_loss_pct:slUnit==='pct'?sl:0, daily_take_profit_pct:tpUnit==='pct'?tp:0, sl_unit:slUnit, tp_unit:tpUnit, max_trades_per_day:-1, vix_max:Math.max(0,parseFloat(document.getElementById('s-vix-max')?.value)||0), signal_lookback_days:Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0))},
+        const body={id: window._editingStratId||0, name:finalName, symbol:sym, description:'robot', start_date:document.getElementById('r-start').value, end_date:document.getElementById('r-end').value, indicators:_saveInds, legs:legs, advanced_options:{trade_mode:rType, entry_time:document.getElementById('r-entry').value, exit_time:document.getElementById('r-exit').value, strike_selection:(_leg0.strike_selection||strikeType).toLowerCase(), otm_distance:(_leg0.otm_distance!=null?_leg0.otm_distance:rOtmDist), auto_signal:false}, risk_management:{daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0, daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0, daily_stop_loss_pct:slUnit==='pct'?sl:0, daily_take_profit_pct:tpUnit==='pct'?tp:0, sl_unit:slUnit, tp_unit:tpUnit, max_trades_per_day:-1, signal_lookback_days:Math.max(0,Math.min(15,parseInt(document.getElementById('r-slb')?.value)||0))},
             // Abhi-chalaya backtest result bhi save ke saath bhejo - warna card
             // par "Saved BT: —" aata tha (Backtest Detail dabane tak). Backend
             // config match hone par hi attach karta hai.
@@ -2752,7 +2881,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                         if(_rtp&&!_rtp.value) _rtp.value=_savedTp;
                     }
                 }catch(_e0){}
-                const _slA=_amtVal('s-sl',30);const _tpA=_amtVal('s-tp',50);
+                const _slA=_amtVal('s-sl',0);const _tpA=_amtVal('s-tp',0);
                 // IMPORTANT: sl/tp override backend par SAVED result ko bypass
                 // karke FRESH run chalata hai. Plain 'Backtest' (force=false)
                 // saved result dikhana chahiye - isliye override sirf tab bhejo
@@ -2803,8 +2932,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
             const legs=_parseJsonField(s.legs,[]);
             if(legs.length){ try{stratLegs=JSON.parse(JSON.stringify(legs));renderLegs();}catch(e){} }
             const rm=_parseJsonField(s.risk_management,{});
-            if(!document.getElementById('s-sl').value) document.getElementById('s-sl').value=rm.daily_stop_loss||1500;
-            if(!document.getElementById('s-tp').value) document.getElementById('s-tp').value=rm.daily_take_profit||3000;
+            if(!document.getElementById('s-sl').value) document.getElementById('s-sl').value=rm.daily_stop_loss||'';
             try{if(rm.signal_lookback_days!=null)document.getElementById('r-slb').value=rm.signal_lookback_days;}catch(e){}
             const ao=_parseJsonField(s.advanced_options,{});
             if(ao.trade_mode) document.getElementById('r-type').value=ao.trade_mode;
@@ -2997,8 +3125,8 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
         const order=document.getElementById('r-order').value;
         let optR, txnR; { const p=order.split('-'); optR=p[0]; txnR=p[1]; }
         const lots=parseInt(document.getElementById('r-lots').value)||1;
-        const sA4=_amtVal('s-sl',30);const sl=sA4.v;const slUnit=sA4.u;
-        const tA4=_amtVal('s-tp',50);const tp=tA4.v;const tpUnit=tA4.u;
+        const sA4=_amtVal('s-sl',0);const sl=sA4.v;const slUnit=sA4.u;
+        const tA4=_amtVal('s-tp',0);const tp=tA4.v;const tpUnit=tA4.u;
         const expiry='weekly';
         const base={symbol:sym, option_type:optR, transaction_type:txnR, quantity:lots, strike:0, expiry:expiry, stop_loss:sl, sl_unit:slUnit, take_profit:tp, tp_unit:tpUnit, trade_type:(document.getElementById('r-type')?.value||'intraday').toLowerCase()};
         try{
@@ -3048,11 +3176,11 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
     }
 
     function setBT(p){const e=new Date(); const s=new Date(e); if(p==='1M') s.setMonth(e.getMonth()-1); else if(p==='3M') s.setMonth(e.getMonth()-3); else if(p==='6M') s.setMonth(e.getMonth()-6); else if(p==='1Y') s.setFullYear(e.getFullYear()-1); const fmt=d=>d.toISOString().split('T')[0]; try{document.getElementById('r-start').value=fmt(s); document.getElementById('r-end').value=fmt(e);}catch(e2){} try{document.getElementById('s-start').value=fmt(s); document.getElementById('s-end').value=fmt(e);}catch(e3){}}
-    function renderQInstruments(){const wrap=document.getElementById('q-instruments'); if(!wrap) return; const syms=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY']; const cur=document.getElementById('s-index')?.value||'NIFTY'; wrap.innerHTML=syms.map(s=>`<button class="btn btn-sm ${cur===s?'btn-primary':'btn-outline-primary'}" onclick="document.getElementById('s-index').value='${s}';renderQInstruments();if(stratLegs.length)updatePayoff();">${s}</button>`).join('')+' <small class="text-muted ms-2">Quick select — or use dropdown below (50 F&O)</small>';}
+    function renderQInstruments(){const wrap=document.getElementById('q-instruments'); if(!wrap) return; const syms=['NIFTY','BANKNIFTY','FINNIFTY','RELIANCE','TCS','INFY']; const cur=document.getElementById('s-index')?.value||'NIFTY'; wrap.innerHTML=syms.map(s=>`<button class="btn btn-sm ${cur===s?'btn-primary':'btn-outline-primary'}" onclick="document.getElementById('s-index').value='${s}';renderQInstruments();try{_applyOptionBuyDefaults(false);}catch(e){} if(stratLegs.length)updatePayoff();">${s}</button>`).join('')+' <small class="text-muted ms-2">Quick select — or use dropdown below (50 F&O)</small>';}
     async function runBacktestMonteCarlo(){const btn=document.getElementById('s-run'); const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Monte Carlo (2000 shuffles)...</p>'; try{const r=await P('/api/backtest/monte-carlo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); document.getElementById('bt-metrics').innerHTML='<div class="alert alert-info"><strong>Monte Carlo</strong> p5:'+r.p5+' p50:'+r.p50+' p95:'+r.p95+' prob_profit:'+(r.prob_profit||'-')+'</div>';}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
     async function runWalkForward(){const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Walk-forward (unseen-data check)...</p>'; try{const r=await P('/api/backtest/walk-forward',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error){document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';return;} const ws=r.windows||[]; let h='<div class="alert alert-info"><strong>Walk-forward</strong> '+ws.length+' windows | avg efficiency: '+(r.avg_efficiency||0)+'% '+(r.avg_efficiency>=70?'(robust - trade layak)':r.avg_efficiency>=30?'(ok-ish, chhota size)':'(overfit - mat chalao)')+'</div>'; if(ws.length){h+='<table class="bt-table"><thead><tr><th>IS period</th><th>OOS period</th><th>IS net</th><th>OOS net</th><th>Eff%</th></tr></thead><tbody>'; ws.forEach(w=>{h+='<tr><td>'+w.is.start+'→'+w.is.end+'</td><td>'+w.oos.start+'→'+w.oos.end+'</td><td>'+((w.is.metrics||{}).net_pnl||0)+'</td><td>'+((w.oos.metrics||{}).net_pnl||0)+'</td><td>'+w.efficiency+'%</td></tr>';}); h+='</tbody></table>';} document.getElementById('bt-metrics').innerHTML=h;}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
     async function runOptimize(){const body=_collectBacktestBody(); if(!body) return; document.getElementById('bt-results').classList.remove('hidden'); document.getElementById('bt-metrics').innerHTML='<p class="text-muted p-3"><span class="spinner"></span> Optimizing SL x TP (9 backtests)...</p>'; try{const r=await P('/api/backtest/optimize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.error){document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">'+r.error+'</p>';return;} const rows=r.rows||[]; const b=r.best||{}; let h='<div class="alert alert-success"><strong>Best setting: SL ₹'+(b.sl||'-')+' x TP ₹'+(b.tp||'-')+'</strong> — net ₹'+(b.net||0)+' | PF '+(b.profit_factor||0)+' | Win '+(b.win_rate||0)+'% <button class="btn btn-sm btn-success ms-2" onclick="applyBestSLTP('+b.sl+','+b.tp+')">Apply</button></div>'; if(rows.length){h+='<table class="bt-table"><thead><tr><th>SL ₹</th><th>TP ₹</th><th>Net ₹</th><th>Win%</th><th>Trades</th><th>PF</th><th>MaxDD</th></tr></thead><tbody>'; rows.forEach(x=>{h+='<tr><td>'+x.sl+'</td><td>'+x.tp+'</td><td>'+x.net+'</td><td>'+x.win_rate+'</td><td>'+x.trades+'</td><td>'+x.profit_factor+'</td><td>'+x.max_dd+'</td></tr>';}); h+='</tbody></table>';} document.getElementById('bt-metrics').innerHTML=h;}catch(e){document.getElementById('bt-metrics').innerHTML='<p class="text-danger">'+e.message+'</p>';}}
-    function applyBestSLTP(sl,tp){try{if(sl){document.getElementById('s-sl').value=sl;document.getElementById('s-sl').value=sl;}if(tp){document.getElementById('s-tp').value=tp;document.getElementById('s-tp').value=tp;}try{updateRunSummary();}catch(e){}alert('Best SL ₹'+sl+' / TP ₹'+tp+' lag gaya - ab Run Backtest dabao');}catch(e){alert('Apply failed: '+e.message);}}
+    function applyBestSLTP(sl,tp){try{if(sl){document.getElementById('s-sl').value=sl;document.getElementById('s-sl').value=sl;}try{updateRunSummary();}catch(e){}alert('Best SL ₹'+sl+' lagaya - ab Run Backtest dabao');}catch(e){alert('Apply failed: '+e.message);}}
     async function downloadReportPDF(){const body=_collectBacktestBody(); if(!body) return; try{const r=await fetch('/api/backtest/report.pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const blob=await r.blob(); const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download='RaTrade_'+body.symbol+'_'+body.start_date+'.pdf'; a.click();}catch(e){alert(e.message);}}
     function _collectBacktestBody(){return _unifiedBody();}
 
@@ -3454,6 +3582,52 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
     }
     // Auto-capture callback tokens (Angel)
     setTimeout(()=>{try{const q=new URLSearchParams(window.location.search);const ap='/api/broker/angel-callback';if(q.get('code')&&window.location.pathname.includes('angel-callback')){P(ap,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:q.get('code'),client_code:q.get('client_code')||''})}).then(r=>{if(r.success){showToast('Angel token auto-saved!', 'success');loadBrokers();}else{showToast('Angel callback failed', 'danger');}}).catch(()=>{});}document.history.replaceState({},document.title,window.location.pathname);}catch(e){}},800);
+
+    async function syncNSEOptions(){
+        try{
+            if(!confirm('NSE official F&O bhavcopy se ASLI index-option premiums (NIFTY/BANKNIFTY/FINNIFTY/MIDCPNIFTY, ATM±3 strikes, 2026-01-01..aaj) download karke DB me save karun?\n\n5-15 min lagenge. Backtests REAL premium IV se anchored ho jayenge.')) return;
+            const r=await A('/api/broker/nse-option-sync',{method:'POST'});
+            if(r && r.started){ alert('NSE options sync shuru ho gaya (background). Progress isi page pe dikhega / status: /api/broker/nse-option-sync/status'); _pollNSESyncStatus(); }
+            else { alert('Sync start nahi hua: '+JSON.stringify(r)); }
+        }catch(e){ alert('Sync error: '+e); }
+    }
+    async function _pollNSESyncStatus(){
+        const box=document.getElementById('live-status'); if(!box) return;
+        for(let i=0;i<300;i++){
+            await new Promise(r=>setTimeout(r,5000));
+            try{
+                const s=await A('/api/broker/nse-option-sync/status');
+                box.innerHTML=`<i class="bi bi-cloud-arrow-down"></i> NSE options sync: <strong>${s.stage||s.state||'…'}</strong> · days OK: ${s.days_done||0} · skip: ${s.days_failed||0} · rows: ${s.rows_stored||0}${s.current_date?(' · '+s.current_date):''}`;
+                if(s.state==='done'||s.state==='error'){ alert(s.state==='done'
+                    ? `NSE option premiums sync DONE.\nDays OK: ${s.days_done}\nRows stored: ${s.rows_stored}`
+                    : 'NSE options sync ERROR: '+(s.error||'unknown')); return; }
+            }catch(_){ /* keep polling */ }
+        }
+    }
+
+    async function syncFyersHistory(){
+        try{
+            if(!confirm('Fyers se index daily bars + active contracts (2026-01-01 se aaj tak) download karke DB me save karun?\n\nNote: Fyers /data/history expired option contracts serve nahi karta - real option premiums ke liye "Sync NSE Options" button use karo.')) return;
+            const r=await A('/api/broker/sync-historical',{method:'POST'});
+            if(r && r.started){ alert('Sync shuru ho gaya (background). Status: /api/broker/sync-historical/status'); _pollSyncStatus(); }
+            else { alert('Sync start nahi hua: '+JSON.stringify(r)); }
+        }catch(e){ alert('Sync error: '+e); }
+    }
+    async function _pollSyncStatus(){
+        const box=document.getElementById('live-status'); if(!box) return;
+        for(let i=0;i<200;i++){
+            await new Promise(r=>setTimeout(r,6000));
+            try{
+                const s=await A('/api/broker/sync-historical/status');
+                const stage=s.stage||s.state||'…';
+                const cov=s.premium_coverage?Object.entries(s.premium_coverage).map(([k,v])=>k+':'+v).join(' '):'';
+                box.innerHTML=`<i class="bi bi-database"></i> Fyers sync: <strong>${stage}</strong> · contracts OK: ${s.contracts_ok||0} · rows: ${s.rows_stored||0} ${cov?('· '+cov):''}${s.contracts_failed_count?(' · failed: '+s.contracts_failed_count):''}`;
+                if(s.state==='done'||s.state==='error'){ alert(s.state==='done'
+                    ? `Fyers history sync DONE.\nContracts OK: ${s.contracts_ok}\nRows stored: ${s.rows_stored}\nCoverage: ${cov}\nBacktests ab REAL premium IV use karenge.`
+                    : 'Fyers sync ERROR: '+(s.error||'unknown')); return; }
+            }catch(_){ /* keep polling */ }
+        }
+    }
 
     async function refreshTokens(){
         const r=await A('/api/broker/refresh-tokens',{method:'POST'});

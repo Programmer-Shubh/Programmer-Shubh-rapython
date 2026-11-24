@@ -151,6 +151,24 @@ async def _startup_background():
         _th5.Thread(target=_tk_loop, daemon=True).start()
     except: pass
     try:
+        # NSE option-premium seed (one-time): REAL option premiums DB me laao
+        # taaki backtests model-priced BS premium ki jagah real market IV se
+        # anchored hon. Seed file repo me committed hai (data/option_premium_seed.csv.gz).
+        # Fyers /data/history expired option contracts serve nahi karta
+        # (Fyers v3 limitation) - option premiums ka real source official F&O
+        # bhavcopy hai (nsefin). Seed import ~15k rows, instant.
+        def _optsync_loop():
+            try:
+                import time as _t
+                _t.sleep(20)
+                from core.services.nse_option_sync import auto_seed_if_empty
+                auto_seed_if_empty()
+            except Exception as _e:
+                print("[nse-opt] auto seed error:", _e, flush=True)
+        import threading as _th8
+        _th8.Thread(target=_optsync_loop, daemon=True).start()
+    except: pass
+    try:
         # Live signal worker: ACTIVE strategies evaluated on fresh 15m
         # candles every 60 sec in market hours (ADX/ST/BB live loop).
         # 15-min गैप से intraday entry signal miss होते थे (सिग्नल 10:07 पर

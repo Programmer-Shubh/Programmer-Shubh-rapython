@@ -334,7 +334,9 @@ def _fetch_nsepython_historical(symbol: str, start_date: str, end_date: str) -> 
         try:
             _ex = _TPE(max_workers=1)
             try:
-                df = _ex.submit(_do).result(timeout=15)
+                # Cloud IPs NSE se block hote hain ("you are not allowed" type hang) -
+                # 15s -> 5s: far-gate fail-fast, chain aage badhti hai.
+                df = _ex.submit(_do).result(timeout=5)
             except Exception:
                 df = None
             finally:
@@ -397,10 +399,19 @@ def _fetch_fyers_historical(symbol: str, start_date: str, end_date: str) -> List
         _payload = {"symbol": under, "resolution": "D", "date_format": 1,
                     "range_from": str(start_date)[:10], "range_to": str(end_date)[:10],
                     "cont_flag": "1"}
-        _r = _rq.get("https://api-t1.fyers.in/data/history", params=_payload,
-                     headers={"Authorization": f"{app_id}:{token}",
-                              "Content-Type": "application/json", "version": "3"},
-                     timeout=25)
+        try:
+            from core.services import egress_proxy as _eg
+            _r = _eg.sync_request("GET",
+                                  "https://api-t1.fyers.in/data/history",
+                                  params=_payload,
+                                  headers={"Authorization": f"{app_id}:{token}",
+                                           "Content-Type": "application/json", "version": "3"},
+                                  timeout=10)
+        except Exception:
+            _r = _rq.get("https://api-t1.fyers.in/data/history", params=_payload,
+                         headers={"Authorization": f"{app_id}:{token}",
+                                  "Content-Type": "application/json", "version": "3"},
+                         timeout=10)
         if getattr(_r, "status_code", 0) != 200:
             return []
         body = _r.json() or {}
@@ -432,6 +443,7 @@ _NSE_INDEX_NAMES = {
     "NIFTY": "Nifty 50",
     "BANKNIFTY": "Nifty Bank",
     "FINNIFTY": "Nifty Financial Services",
+    "MIDCPNIFTY": "Nifty Midcap Select",
     "INDIAVIX": "India VIX",
 }
 
@@ -615,22 +627,15 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
                                       "bars": len(db_data), "note": "NSE/BSE official primary truth"})
     except Exception:
         db_data = []
-    # 2) Priority order: nsepython (NSE official) -> Yahoo (60d) -> Stooq ->
-    # Alpha Vantage -> Twelve Data. openchart is reference-only
-    # (never bar suppliers).
-    _deadline = _t.time() + 25
-
-    def _fetch_yahoo_hist(sym, s, e):
-        try:
-            from core.services.free_data import fetch_yahoo_daily
-            return _dv.yahoo_60d_filter(fetch_yahoo_daily(sym, s, e))
-        except Exception:
-            return []
+    # 2) Priority order: nsepython (NSE official) -> NSE index-archive ->
+    # Fyers -> Stooq -> Alpha Vantage -> Twelve Data. Yahoo completely
+    # removed (user request).
+    # openchart is reference-only (never bar suppliers).
+    _deadline = _t.time() + 12
 
     for _name, _fn in (("nsepython", _fetch_nsepython_historical),
                        ("nse_index_archive", _fetch_nseindex_historical),
                        ("fyers", _fetch_fyers_historical),
-                       ("yahoo", _fetch_yahoo_hist),
                        ("stooq", _fetch_stooq_historical),
                        ("alphavantage", _dv._fetch_alphavantage_daily),
                        ("twelvedata", _dv._fetch_twelvedata_daily)):

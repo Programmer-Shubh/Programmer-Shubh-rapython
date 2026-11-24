@@ -111,13 +111,25 @@ def run_once(min_interval=_MIN_INTERVAL, market_hours=True):
             )
         except Exception:
             return {"placed": [], "skipped": "no-strategies-table"}
-        for s in rows or []:
+        # Parallel per-strategy evaluation (history+signal network-bound;
+        # DB writes per-strategy). Pehle serial tha - 5 ON strategies par har
+        # pass minutes lag karta tha ("daily trade late").
+        def _one(_s):
             try:
-                r = place_for_strategy(s.get("id"))
-                placed.extend(r.get("placed", []))
-                notes.extend(r.get("notes", []))
+                return place_for_strategy(_s.get("id"))
             except Exception:
-                continue
+                return {"placed": [], "notes": []}
+        try:
+            import concurrent.futures as _cf_ap
+            with _cf_ap.ThreadPoolExecutor(max_workers=4) as _ex_ap:
+                for r in _ex_ap.map(_one, list(rows or [])):
+                    placed.extend(r.get("placed", []))
+                    notes.extend(r.get("notes", [])[:2])
+        except Exception:
+            for _s in rows or []:
+                r = _one(_s)
+                placed.extend(r.get("placed", []))
+                notes.extend(r.get("notes", [])[:2])
         return {"placed": placed, "skipped": "", "notes": notes[:10]}
     except Exception as e:
         return {"placed": [], "skipped": f"error: {e}"[:150]}
@@ -211,14 +223,20 @@ def _today_signal(sid, s, today, need_more_than=0):
                 sort_keys=True, default=str).encode()).hexdigest()[:12]
             _sck = (int(sid or 0), today, _cfgh, int(need_more_than or 0))
             _shit = _SIGNAL_CACHE.get(_sck)
-            if _shit and time.time() - _shit[0] < _SIGNAL_TTL:
+            if _shit and time.time() - _shit[0] < (_shit[3] if len(_shit) > 3 else _SIGNAL_TTL):
                 return bool(_shit[1]), str(_shit[2])
         except Exception:
             _sck, _cfgh = None, ""
         def _sig_store(_fires, _why):
             try:
                 if _sck:
-                    _SIGNAL_CACHE[_sck] = (time.time(), bool(_fires), str(_why))
+                    # Negative (abhi signal nahi mila) sirf 5 min cache hota hai -
+                    # pehle 30 min cache tha: entry-window ke shuru me False
+                    # cache ho jata tha aur agli 3 passes skip => daily trade
+                    # late/miss ho jati thi. Positive 30 min (heavy backtest na
+                    # dobara chale).
+                    _ttl = _SIGNAL_TTL if _fires else 300
+                    _SIGNAL_CACHE[_sck] = (time.time(), bool(_fires), str(_why), _ttl)
                     if len(_SIGNAL_CACHE) > 60:
                         _SIGNAL_CACHE.pop(next(iter(_SIGNAL_CACHE)))
             except Exception:
@@ -366,6 +384,13 @@ def _intraday_signal(sid, s, today, need_more_than=0):
             _adv0 = {}
         if not isinstance(_adv0, dict):
             _adv0 = {}
+        # Mirror row-level timeframe into adv when missing - backtest does the
+        # same (line ~1330) so saved 5m strategies evaluate 5m live too. Pehle
+        # blank adv.timeframe -> default "15m" -> 5m strategies 15m par signal
+        # check hote + entry miss ("paper trade lag nahi lag rahi" root cause).
+        if not str((_adv0 or {}).get("timeframe") or "").strip() and str(s.get("timeframe") or "").strip():
+            _adv0 = dict(_adv0)
+            _adv0["timeframe"] = str(s.get("timeframe") or "").strip()
         try:
             # Bandwidth saver: 15m bars shared across strategies, 15-min TTL
             # (was: fresh fetch per strategy per 5-min run).
@@ -761,10 +786,10 @@ def place_for_strategy(sid, signal_check="daily"):
             rm0 = _js.loads(s.get("risk_management") or "{}")
         except Exception:
             rm0 = {}
-        # User rule (2026-11): NO daily trade-count cap. The worker keeps
-        # re-entering all day whenever no position is open, so every valid
-        # signal fires on Fyers without a "max N/day" stop.
-        # (Only the one-open-position-per-strategy duplicate guard remains.)
+        # User rule (2026-11): NO GLOBAL daily trade-count cap / no global
+        # daily stop-loss circuit. Har strategy ka APNA max_trades_per_day
+        # (rulebook: Sell 5, Buy 2; -1/blank = unlimited) respect hota hai -
+        # backtest engine ke saath parity.
         n_today_count = 0
         try:
             has_open = db.fetch_one(
@@ -774,6 +799,31 @@ def place_for_strategy(sid, signal_check="daily"):
             n_today = db.fetch_one(
                 "SELECT COUNT(*) as c FROM paper_trades WHERE strategy_id=? AND entry_date=?", [sid, today])
             n_today_count = int((n_today or {}).get("c", 0) or 0)
+        except Exception:
+            pass
+        # ---- RULEBOOK (16-11-2026): per-strategy caps + re-entry policy ----
+        # No GLOBAL cutoff/trade-count circuit. Sirf strategy ka apna
+        # max_trades_per_day (Sell default 5, Buy default 2; -1/blank =
+        # unlimited) aur "No Re-entry"/"RE Next Day" SL block - backtest
+        # engine ke EXACT same rules (parity).
+        try:
+            _mtd = (rm0 or {}).get("max_trades_per_day")
+            if _mtd is not None and str(_mtd).strip() != "":
+                _mtd = int(float(_mtd))
+                if _mtd >= 0 and n_today_count >= _mtd:
+                    return {"placed": placed,
+                            "notes": [f"{s.get('name')}: max_trades_per_day {_mtd} reached - skipped"]}
+        except Exception:
+            pass
+        try:
+            _pol_sl = str((adv0 or {}).get("reentry_on_sl") or "").strip().lower()
+            if _pol_sl.startswith("no") or "next day" in _pol_sl:
+                _last_exit = db.fetch_one(
+                    "SELECT exit_status FROM paper_trades WHERE strategy_id=? AND entry_date=? "
+                    "AND status!='open' ORDER BY exit_date DESC, id DESC LIMIT 1", [sid, today])
+                if _last_exit and "stoploss" in str(_last_exit.get("exit_status") or "").lower():
+                    return {"placed": placed,
+                            "notes": [f"{s.get('name')}: No Re-entry after SL (rulebook) - skipped"]}
         except Exception:
             pass
         try:
@@ -830,13 +880,26 @@ def live_signal_pass(min_interval=240):
         except Exception:
             return {"placed": [], "notes": ["no-strategies-table"]}
         placed, notes = [], []
-        for s in rows or []:
+        # Parallel per-strategy live 15m signal check (intraday gate)
+        def _one_live(_s):
             try:
-                r = place_for_strategy(s.get("id"), signal_check="intraday")
-                placed.extend(r.get("placed", []))
-                notes.extend(r.get("notes", [])[:2])
+                return place_for_strategy(_s.get("id"), signal_check="intraday")
             except Exception:
-                continue
+                return {"placed": [], "notes": []}
+        try:
+            import concurrent.futures as _cf_lv
+            with _cf_lv.ThreadPoolExecutor(max_workers=4) as _ex_lv:
+                for r in _ex_lv.map(_one_live, list(rows or [])):
+                    placed.extend(r.get("placed", []))
+                    notes.extend(r.get("notes", [])[:2])
+        except Exception:
+            for s in rows or []:
+                try:
+                    r = place_for_strategy(s.get("id"), signal_check="intraday")
+                    placed.extend(r.get("placed", []))
+                    notes.extend(r.get("notes", [])[:2])
+                except Exception:
+                    continue
         return {"placed": placed, "notes": notes[:12]}
     except Exception as e:
         return {"placed": [], "notes": [f"error: {e}"[:150]]}
