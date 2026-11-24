@@ -398,23 +398,26 @@ def _ist_today():
 
 
 def auto_rollover_expired():
-    """Background self-healing: every ACTIVE strategy whose end_date passed
-    is shifted to the next weekly expiry automatically - no button press
-    needed, paper/live trading keeps running. Returns rolled count."""
+    """Background self-healing: every ACTIVE strategy whose end_date is
+    within 2 days (or already passed) is shifted to the next weekly expiry
+    automatically - no button press needed, paper/live trading keeps running.
+    Returns rolled count."""
     try:
         db = Database.get_instance()
         rows = db.fetch_all(
             "SELECT id, symbol, end_date FROM strategies WHERE status='active'"
         )
         today = _ist_today()
+        from datetime import datetime as _dt, timedelta as _td
+        _roll_cutoff = (_dt.strptime(today, "%Y-%m-%d") + _td(days=2)).strftime("%Y-%m-%d")
         n = 0
         for r in rows or []:
             try:
                 end = str(r.get("end_date") or "")[:10]
-                if not end or end >= today:
+                if not end or end > _roll_cutoff:
                     continue
                 new_end = next_weekly_expiry(r.get("symbol") or "")
-                if new_end and new_end >= today:
+                if new_end and new_end > today:
                     db.execute(
                         "UPDATE strategies SET end_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                         [new_end, r["id"]],

@@ -227,12 +227,17 @@ def check_stoploss_target(confirm_secs=2):
                         _cap_pct = float(_bcp())
                     except Exception:
                         _cap_pct = 2.0
+                    try:
+                        from core.services.strategy_rulebook import sl_fill_cap as _capf
+                        _sl_pts = abs(float(entry or 0) - float(sl_level or 0))
+                    except Exception:
+                        _sl_pts = None
                     if is_buy:
-                        _floor_px = sl_level * (1 - _cap_pct / 100.0)
+                        _floor_px = _capf(float(sl_level or 0), True, _cap_pct, _sl_pts)
                         if _exit_px < _floor_px:
                             _exit_px = _floor_px
                     else:
-                        _ceil_px = sl_level * (1 + _cap_pct / 100.0)
+                        _ceil_px = _capf(float(sl_level or 0), False, _cap_pct, _sl_pts)
                         if _exit_px > _ceil_px:
                             _exit_px = _ceil_px
                 except Exception:

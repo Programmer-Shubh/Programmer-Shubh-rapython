@@ -357,9 +357,18 @@ class BacktestEngine:
                 "1", "true", "yes", "on")
             if _st_on:
                 _adx = self.indicators.calculate_adx(historical, 14) or {}
-                _vw = self.indicators.calculate_vwap(historical, 20, 2.0) or {}
+                # "Institutional VWAP" = SESSION-anchored (har naye din par
+                # reset) - 5m bars par cumulative VWAP meaningless hota hai.
+                _v_vals = []
+                try:
+                    from core.services.strategy_rulebook import session_vwap as _svwap
+                    _v_vals = list(_svwap(historical) or [])
+                except Exception:
+                    _v_vals = []
+                if not _v_vals:
+                    _vw = self.indicators.calculate_vwap(historical, 20, 2.0) or {}
+                    _v_vals = list((_vw or {}).get("vwap", []) or [])
                 _a_vals = list((_adx or {}).get("adx", []) or [])
-                _v_vals = list((_vw or {}).get("vwap", []) or [])
                 if _a_vals or _v_vals:
                     self._strict_gate = (_a_vals, _v_vals)
         except Exception:
@@ -572,6 +581,36 @@ class BacktestEngine:
                     if hit:
                         # SL हिट होने पर मार्केट स्पाइक के चाले एक्स्ट्रा 1% स्लिपेज (विशेषकर SELL पोजीशन पर)
                         _fill = hit.get("fill", hit["level"])
+                        # PARITY FIX (rulebook 16-11-2026): SL fill bar ke
+                        # EXTREME par nahi - level ke paas (stop-market order
+                        # ~level par fill hota hai). Pehle BT har stop par
+                        # ~2x zyada loss book karta tha (avg -50 pts vs 25 pt
+                        # SL) jabki paper/live level par katte the - isi se
+                        # bada 'Paper-BT Δ' ban raha tha. Ab teenon ka fill
+                        # rule SAME hai (level ±2% cap).
+                        if str(hit.get("reason")) == "stoploss":
+                            try:
+                                from core.services.strategy_rulebook import sl_fill_cap as _capf
+                                _sl_pts = None
+                                try:
+                                    _sl_pts = abs(float(entry.get("price") or 0)
+                                                  - float(hit.get("level") or 0))
+                                except Exception:
+                                    _sl_pts = None
+                                _cap_px = _capf(float(hit.get("level") or 0),
+                                                txn_type == "buy", 2.0, _sl_pts)
+                                if _cap_px > 0:
+                                    if txn_type == "buy":
+                                        # BUY ke exit me hum SELL karte hain -
+                                        # neeche ka price worse hai -> fill
+                                        # cap se NEECHE nahi ja sakta.
+                                        _fill = max(float(_fill), _cap_px)
+                                    else:
+                                        # SELL ke exit me hum BUY karte hain -
+                                        # upar ka price worse hai.
+                                        _fill = min(float(_fill), _cap_px)
+                            except Exception:
+                                pass
                         # Parity: paper close_trade applies the SAME shared
                         # slippage once. Old code added +1% extra on SELL SL
                         # exits, so backtest lost more than paper on identical

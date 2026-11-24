@@ -622,15 +622,20 @@ class TradeModel:
                             # fill SL level se max 2% hi worse ho sakta hai.
                             try:
                                 from core.services.sl_monitor import bad_quote_fill_cap_pct as _bcp
-                                _cap = float(_bcp()) / 100.0
+                                _cap = float(_bcp())
                             except Exception:
-                                _cap = 0.02
+                                _cap = 2.0
+                            try:
+                                from core.services.strategy_rulebook import sl_fill_cap as _capf
+                                _sl_pts = abs(float(entry or 0) - float(sl_level or 0))
+                            except Exception:
+                                _sl_pts = None
                             if str(t.get("transaction_type") or "BUY").upper() == "BUY":
-                                _floor_px = sl_level * (1 - _cap)
+                                _floor_px = _capf(float(sl_level or 0), True, _cap, _sl_pts)
                                 if _exit_px < _floor_px:
                                     _exit_px = _floor_px
                             else:
-                                _ceil_px = sl_level * (1 + _cap)
+                                _ceil_px = _capf(float(sl_level or 0), False, _cap, _sl_pts)
                                 if _exit_px > _ceil_px:
                                     _exit_px = _ceil_px
                         self.close_trade(t["id"], _exit_px, today, exit_status=f"auto_{exit_reason}")

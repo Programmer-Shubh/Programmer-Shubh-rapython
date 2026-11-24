@@ -303,8 +303,14 @@ def _today_signal(sid, s, today, need_more_than=0):
         # Lookback fallback: aaj ka signal na ho par pichhle N din me asli
         # signal bana ho AUR us par ab tak koi paper entry na hui ho to lagao
         # (trend-follow, once-per-signal - roz dobara nahi). N =
-        # signal_lookback_days (risk/advanced me EXPLICIT rakho tabhi; default
-        # 0 = sirf aaj ka signal, purana tareeka).
+        # signal_lookback_days (risk/advanced me EXPLICIT rakho tabhi).
+        # DEFAULT: daily timeframe (1d) strategies ke liye 1 — kyunki aaj ki
+        # daily bar market band hone tak complete nahi hoti, lekin entry_open_ist
+        # 3:00 PM ke baad block kar deta hai. Isliye daily strategies kal ke
+        # complete bar ke signal par aaj enter kar sakti hain. Intraday
+        # (1m/5m/15m/30m/1h) ke liye default 0 rahta hai (sirf aaj ka live
+        # bar signal). Yeh sirf tab laagu hota hai jab user ne explicitly
+        # signal_lookback_days nahi set kiya ho.
         try:
             _lb = 0
             try:
@@ -314,6 +320,10 @@ def _today_signal(sid, s, today, need_more_than=0):
                 _lb = 0 if _v is None else int(_v)
             except Exception:
                 _lb = 0
+            # Daily timeframe: agar user ne explicitly lookback nahi set kiya,
+            # to default 1 (kal ka complete bar signal = aaj ka entry).
+            if _lb == 0 and str((adv or {}).get("timeframe") or "1d").lower() == "1d":
+                _lb = 1
             _lb = max(0, min(15, _lb))
             if _lb > 0:
                 from core.models.database import Database as _DB

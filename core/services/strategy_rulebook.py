@@ -110,3 +110,81 @@ def index_default_sltp(symbol: str):
     if not v:
         return None
     return (float(v[0]), float(v[1]), "pt")
+
+
+def session_vwap(bars, reset_on_new_date: bool = True) -> list:
+    """Session-anchored VWAP ('institutional VWAP' line).
+
+    Har nayi session (naya trade_date) par cumulative VWAP reset hota hai -
+    hi.ee. classic VWAP. Intraday ke liye yehi use hota hai (daily VWAP
+    nahi), warna 5m bars par kai hafte ka cumulative VWAP meaningless ho
+    jata hai.
+
+    Bars me 'volume' missing ho to typical-price ka simple average use hota
+    hai. Bars bina date ke (daily series) -> single continuous VWAP.
+    """
+    out = []
+    try:
+        cum_pv = 0.0
+        cum_vol = 0.0
+        last_date = None
+        for b in (bars or []):
+            try:
+                d = str(b.get("trade_date") or "")[:10]
+            except Exception:
+                d = ""
+            if reset_on_new_date and d and last_date is not None and d != last_date:
+                cum_pv = 0.0
+                cum_vol = 0.0
+            if d:
+                last_date = d
+            try:
+                typical = (float(b.get("high_price") or 0)
+                           + float(b.get("low_price") or 0)
+                           + float(b.get("close_price") or 0)) / 3.0
+            except Exception:
+                typical = 0.0
+            try:
+                vol = float(b.get("volume") or 0) or 1.0
+            except Exception:
+                vol = 1.0
+            cum_pv += typical * vol
+            cum_vol += vol
+            out.append(cum_pv / cum_vol if cum_vol > 0 else None)
+        return out
+    except Exception:
+        return []
+
+
+def sl_fill_cap(level: float, is_buy: bool, cap_pct: float = 2.0,
+                sl_points: float = None) -> float:
+    """SL fill ka realistic cap - level se max itna hi worse fill allowed.
+
+    Backtest, paper aur live TEENO yahi use karte hain (parity): ek stop
+    order market par ~level ke paas fill hota hai, bar ke extreme par nahi.
+    (v7 engine bar-extreme fill use karta tha -> BT har stop par ~2x zyada
+    loss book karta tha vs paper -> bada Paper-BT delta.)
+
+    Cap = MIN(percentage of level, 10% of the SL distance in points).
+    Percentage-only galat tha: ₹900 premium par 2% = 18 points, jabki SL
+    sirf 25 points ka tha -> fill 42+ points peeche chala jata tha.
+    10% allowance paper ke quote-fill ke bilkul paas rehta hai (parity).
+    """
+    try:
+        lvl = float(level or 0)
+        if lvl <= 0:
+            return lvl
+        cap = float(cap_pct or 0) / 100.0
+        cap_abs = lvl * cap
+        try:
+            if sl_points is not None and float(sl_points) > 0:
+                cap_abs = min(cap_abs, float(sl_points) * 0.10)
+        except Exception:
+            pass
+        if cap_abs < 0:
+            cap_abs = 0.0
+        if is_buy:
+            return max(lvl - cap_abs, 0.05)
+        return lvl + cap_abs
+    except Exception:
+        return level
