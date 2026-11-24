@@ -1956,20 +1956,36 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         "1m_chain", "1m", "tick", "ticks", "real", "real_option", "option_chain")
     _tick_n = 0
     _tick_src = ""
+    _tick_reason = ""
     try:
         if _tick_mode:
-            from core.services.tick_recorder import tick_count
+            from core.services.tick_recorder import tick_count, backfill_from_bhavcopy
             from core.models.database import Database as _DB
-            _tick_n = int(tick_count(symbol=req.symbol) or 0)
+            _sym = str(req.symbol or "").upper()
+            _tick_n = int(tick_count(symbol=_sym) or 0)
+            # Auto-seed (user rule 24-11): 'Real Tick' select kiya par is symbol
+            # ke ticks nahi -> DB ke bhavcopy option data se abhi seed karo,
+            # na ki seedha Black-Scholes par chalein. Ye broker-free hai.
+            if _tick_n == 0:
+                try:
+                    backfill_from_bhavcopy(90)
+                    _tick_n = int(tick_count(symbol=_sym) or 0)
+                    if _tick_n:
+                        _tick_reason = "auto-seeded from bhavcopy (ab real ticks available)"
+                except Exception:
+                    pass
             # Source breakdown: WS 1-min real ticks vs bhavcopy EOD (open/close).
             _srcrows = _DB.get_instance().fetch_all(
                 "SELECT source, COUNT(*) as c FROM option_ticks WHERE symbol=? GROUP BY source",
-                [str(req.symbol or "").upper()])
+                [_sym])
             _srcd = {str(r.get("source") or ""): int(r.get("c") or 0) for r in (_srcrows or [])}
             if (_srcd.get("fyers_ws") or 0) > 0:
                 _tick_src = "real_1m_ticks"
             elif (_srcd.get("nse_bhavcopy") or 0) > 0:
                 _tick_src = "real_eod_bhavcopy"
+            elif not _tick_n:
+                _tick_reason = ("Real Tick select kiya par is symbol ke liye koi tick data nahi "
+                                "— Black-Scholes fallback (bhavcopy sync hone do ya broker connect karo)")
     except Exception:
         _tick_n = 0
         _tick_src = ""
@@ -2000,6 +2016,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         else "black_scholes"),
         "tick_count": _tick_n,
         "tick_source": _tick_src,
+        "tick_reason": _tick_reason,  # kyoon Black-Scholes / auto-seed note (UI toast)
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
         "symbols": _syms,
         "per_symbol": _per_symbol,
@@ -2065,7 +2082,10 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
 
 _BT_ACTIVE = {"n": 0, "gen": 0, "since": 0.0}
 _BUSY_MSG = "busy: ek backtest pehle se chal raha hai - khatm hone do, phir Run dabao"
-_BT_STALE_SECS = 480  # 8 min se atka worker = dead (fetch-hang/crash) -> lock tod do
+_BT_STALE_SECS = 150  # 2.5 min se atka worker = dead (fetch-hang/crash) -> lock tod do
+# Pehle 480s tha: 108s ka legit slow backtest (FINNIFTY 31s NSE fetch + 213
+# symbols) ke baad bhi 8 min tak 'busy' dikhta tha aur naya run reject hota
+# tha ('results change nahi ho rahe'). 150s fast recovery deta hai."
 
 
 def _bt_acquire():

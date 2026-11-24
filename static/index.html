@@ -1694,7 +1694,10 @@ let _lastOpenTrdHTML = null;
                     _dsBadge=' • <span class="badge bg-info" title="Premium data source: '+_ds.replace(/"/g,'&quot;')+'">'+_ds+'</span>';
                 }
             }catch(_dse){_dsBadge='';}
-            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+_dsBadge+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'')+_storedBadge+_chgBadge+_localBadge+_refreshBtn;
+            //tick-reason: 'Real Tick' select kiya par data na hone par kyun fallback hua - clear batayein.
+            let _trBadge='';
+            try{ if(r.tick_reason) _trBadge=' • <span class="badge bg-warning text-dark" title="'+String(r.tick_reason).replace(/"/g,'&quot;')+'">ℹ '+String(r.tick_reason).slice(0,90)+'</span>'; }catch(e){}
+            const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+_dsBadge+_trBadge+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'')+_storedBadge+_chgBadge+_localBadge+_refreshBtn;
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
             const pnl = m.final_capital - m.initial_capital;
