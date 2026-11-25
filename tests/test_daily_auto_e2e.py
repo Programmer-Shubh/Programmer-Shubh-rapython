@@ -110,10 +110,10 @@ def test_single_day_gate_span_aware(monkeypatch):
                         lambda *a, **k: _bars(26, same_day=True))
     bars, src = sb2._intraday_full_range("NIFTY", "15m", "2026-10-13", "2026-10-13")
     assert src == "fyers_intraday" and len(bars) == 26, (src, len(bars))
-    # Fyers/network unavailable -> honestly empty, never fabricated
+    # Fyers unavailable -> Yahoo intraday fallback provides real data
     monkeypatch.setattr(sb2, "_fyers_intraday", lambda *a, **k: [])
     bars2, src2 = sb2._intraday_full_range("NIFTY", "15m", "2026-10-13", "2026-10-13")
-    assert bars2 == [] and src2 == "no-intraday-data", (src2, len(bars2))
+    assert src2 == "yahoo_intraday" and len(bars2) > 0, (src2, len(bars2))
 
 
 def test_worker_gate_passes_with_25_bars(monkeypatch):

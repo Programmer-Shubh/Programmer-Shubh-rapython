@@ -730,6 +730,13 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False,
                     _aad5 = _js5.loads((_arow5 or {}).get("auto_action") or "{}") or {}
                     if isinstance(_aad5, dict):
                         _aad5["signal_time"] = _stamp5
+                        # PARITY FIX (25-11): signal entry price (backtest ke
+                        # model premium se) store karo taaki SL/TP levels
+                        # backtest se match hon. Live entry price alag ho
+                        # sakti hai (LTP vs model), isliye signal_price se
+                        # SL/TP levels calculate karo.
+                        if _sig_price and _sig_price > 0:
+                            _aad5["signal_entry_price"] = round(_sig_price, 2)
                         db.execute("UPDATE paper_trades SET auto_action=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                                    [_js5.dumps(_aad5), res["trade_id"]])
                 except Exception:

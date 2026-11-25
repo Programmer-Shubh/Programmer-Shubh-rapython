@@ -132,7 +132,20 @@ def check_stoploss_target(confirm_secs=2):
         if current is None:
             _skip(trade, "live premium nahi mila (market band/expiry/quote fail) - SL/TP check skip")
             continue
-        entry = float(trade["entry_price"])
+        # PARITY FIX (25-11): SL/TP levels backtest ke signal_entry_price se
+        # calculate karo (auto_action JSON me store hota hai), live entry_price
+        # se nahi. Live LTP aur backtest model premium alag hote hain, isliye
+        # live entry se SL/TP level alag ban jati thi aur trades galat SL par
+        # kat-te the.
+        _sig_entry_price = None
+        try:
+            _aa_raw = trade.get("auto_action")
+            _aa_d = _js.loads(_aa_raw) if isinstance(_aa_raw, str) and _aa_raw.strip().startswith("{") else {}
+            if isinstance(_aa_d, dict) and _aa_d.get("signal_entry_price"):
+                _sig_entry_price = float(_aa_d.get("signal_entry_price"))
+        except Exception:
+            pass
+        entry = float(_sig_entry_price) if _sig_entry_price else float(trade["entry_price"])
         is_buy = trade["transaction_type"] == "BUY"
         # BAD-CONTRACT / SPIKE GUARD (bug 27-10-2026): BANKNIFTY 54500 CE
         # (expiry Aaj) ka price galti se NEXT-month contract ka (Rs 904 vs
