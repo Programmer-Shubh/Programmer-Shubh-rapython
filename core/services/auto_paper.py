@@ -181,7 +181,7 @@ def _today_signal(sid, s, today, need_more_than=0):
         import concurrent.futures as _cf
         sym = str(s.get("symbol") or "").upper()
         if not sym:
-            return False, "no symbol"
+            return False, "no symbol", None, 0.0
         try:
             # Full fetch chain (DB -> nsepython -> Yahoo -> Stooq -> AV/TD),
             # NOT DB-only: production DB had 12 stale dates while Yahoo has
@@ -205,15 +205,15 @@ def _today_signal(sid, s, today, need_more_than=0):
                 except Exception:
                     pass
             if not _hist or len(_hist) < 30:
-                return False, "no real history (synthetic par signal nahi)"
+                return False, "no real history (synthetic par signal nahi)", None, 0.0
         except Exception:
-            return False, "history unreadable"
+            return False, "history unreadable", None, 0.0
         try:
             legs = _js.loads(s.get("legs") or "[]")
         except Exception:
             legs = []
         if not legs:
-            return False, "no legs"
+            return False, "no legs", None, 0.0
         # Per-day signal cache (same config): worker/heartbeat har pass me
         # 60-din backtest dobara na chalaye (timeout pressure + CPU). 30 min TTL.
         try:
@@ -383,7 +383,7 @@ def _intraday_signal(sid, s, today, need_more_than=0):
     try:
         sym = str(s.get("symbol") or "").upper()
         if not sym:
-            return None, "no symbol"
+            return None, "no symbol", None, 0.0
         # Config PEHLE parse karo (neeche cache-timeframe ko chahiye) - pehle
         # `adv` neeche define tha par upar use ho raha tha = NameError, har
         # cold call par live worker dead ("no fresh bars" milta tha).
@@ -423,7 +423,7 @@ def _intraday_signal(sid, s, today, need_more_than=0):
         except Exception:
             bars = []
         if not bars or len(bars) < 25:
-            return None, "no fresh 15m bars (25+ chahiye)"
+            return None, "no fresh 15m bars (25+ chahiye)", None, 0.0
         # No forming-bar signals: CHAL RAHI candle hatao - backtest bhi sirf
         # closed (completed) bars par signal banata hai. Shared helper
         # (utils.helpers.drop_forming_bars) exact check karta hai (candle
@@ -438,15 +438,15 @@ def _intraday_signal(sid, s, today, need_more_than=0):
             except Exception:
                 pass
         if not bars or len(bars) < 25:
-            return None, "no fresh 15m bars (25+ chahiye)"
+            return None, "no fresh 15m bars (25+ chahiye)", None, 0.0
         try:
             legs = _js.loads(s.get("legs") or "[]")
         except Exception:
             legs = []
         if not legs:
-            return None, "no legs"
+            return None, "no legs", None, 0.0
         if any(str(l.get("option_type", "")).upper() == "AUTO" for l in legs):
-            return None, "AUTO legs need manual direction"
+            return None, "AUTO legs need manual direction", None, 0.0
         try:
             adv = _js.loads(s.get("advanced_options") or "{}")
         except Exception:

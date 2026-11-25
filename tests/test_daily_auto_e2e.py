@@ -130,13 +130,13 @@ def test_worker_gate_passes_with_25_bars(monkeypatch):
          "risk_management": json.dumps({"daily_stop_loss": 1500,
                                         "daily_take_profit": 3000,
                                         "max_trades_per_day": 5})}
-    fired, note = ap._intraday_signal(1, s, "2026-10-13")
+    fired, note, sig_strike, sig_price = ap._intraday_signal(1, s, "2026-10-13")
     assert "no fresh 15m bars" not in note, note
     # 20 bars -> gate refuses (below worker minimum)
     ap._INTRA_CACHE.clear()
     monkeypatch.setattr("core.services.scanner.OptionScanner._fetch_intraday_bars",
                         lambda self, sym, tf="15m", **k: _bars(20))
-    fired2, note2 = ap._intraday_signal(1, s, "2026-10-13")
+    fired2, note2, sig_strike2, sig_price2 = ap._intraday_signal(1, s, "2026-10-13")
     assert fired2 is None and "25+" in note2, (fired2, note2)
 
 
@@ -170,13 +170,14 @@ def test_lookback_entry_uses_current_legs_and_unlimited_cap(monkeypatch):
     def fake_signal(a, b, c, need_more_than=0):
         # old signal only (no today hit) -> lookback path
         from core.services import auto_paper as _ap
-        tl = [{"entry_date": old, "pnl": 10.0}]
+        tl = [{"entry_date": old, "pnl": 10.0, "strike": 22000, "entry_price": 150.0}]
         ok, _ = _ap._recent_signal_ok([old], c, 5, [])
         assert ok
-        return True, "2 din purana"
+        return True, "2 din purana", 22000, 150.0
 
-    def fake_exec(s, legs, db_, tm_, tday):
+    def fake_exec(s, legs, db_, tm_, tday, signal_strike=None, signal_price=None):
         seen["legs"] = legs
+        seen["signal_strike"] = signal_strike
         return [{"trade_id": 99}], []
 
     import core.services.sl_monitor as _slm

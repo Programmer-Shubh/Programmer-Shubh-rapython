@@ -73,6 +73,6 @@ def test_today_signal_reads_top_level_list(monkeypatch):
     monkeypatch.setattr("routes.strategy_builder._run_backtest_core", fake_bt)
     s = {"id": 1, "symbol": "NIFTY", "legs": "[1]", "indicators": "[]",
          "advanced_options": "{}", "risk_management": "{}"}
-    fires, note = ap._today_signal(1, s, "2026-10-12")
+    fires, note, sig_strike, sig_price = ap._today_signal(1, s, "2026-10-12")
     assert made["n"] == 1
     assert fires is True and "aaj" in note, (fires, note)
