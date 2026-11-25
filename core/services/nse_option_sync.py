@@ -386,7 +386,11 @@ def sync_async(start_date: str = "2026-01-01"):
     _resume = ""
     try:
         _prev = sync_status()
-        if str(_prev.get("state")) in ("running", "paused", "interrupted"):
+        # 'done' bhi qabul karo (25-11): purana run 'done' tha par uska
+        # current_date 11-24 tha → naya trigger 01-01 se dobara chal gaya.
+        # Ab done se bhi current_date ke AAGE se resume hoga (same din ho to
+        # sync_from_nse me _resume > start_date condition fail → koi dup nahi).
+        if str(_prev.get("state")) in ("running", "paused", "interrupted", "done"):
             _resume = str(_prev.get("current_date") or "")[:10]
     except Exception:
         pass
