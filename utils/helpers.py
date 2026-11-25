@@ -877,3 +877,27 @@ def log_exit_skip(check: str, trade_id=None, symbol: str = "", reason: str = "")
             pass
     except Exception:
         pass
+
+
+def strategy_slippage_pct(strategy_id, default=0.5):
+    """Backtest engine (advanced.slippage_pct / slippage) aur paper fills me
+    SAME slippage. Pehle backtest custom slippage use karta tha par paper
+    hamesha 0.5% default par bhar bhai - ₹ke qareeb targets par win/loss
+    flip ho jata tha (shekhar: backtest win ≠ paper win)."""
+    try:
+        sid = int(strategy_id or 0)
+    except Exception:
+        return float(default)
+    if not sid:
+        return float(default)
+    try:
+        from core.models.database import Database as _DB
+        row = _DB.get_instance().fetch_one(
+            "SELECT advanced_options FROM strategies WHERE id=?", [sid])
+        adv = json.loads((row or {}).get("advanced_options") or "{}") or {}
+        v = adv.get("slippage_pct", adv.get("slippage"))
+        if v is None:
+            return float(default)
+        return float(v)
+    except Exception:
+        return float(default)

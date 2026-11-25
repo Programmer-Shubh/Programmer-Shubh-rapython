@@ -58,6 +58,39 @@ def _strategy_trail_cfg(strategy_id):
     return cfg
 
 
+_EXIT_CFG = {}
+_EXIT_CFG_TS = {}
+
+
+def _strategy_exit_cfg(strategy_id):
+    """Strategy ke exit-parity params (tp_fill_mode, slippage_pct) - 5-min
+    cache. Backtest engine inhi advanced_options se ye values padhta hai."""
+    try:
+        sid = int(strategy_id or 0)
+    except Exception:
+        return {}
+    if not sid:
+        return {}
+    import time as _t
+    now = _t.time()
+    if now - float(_EXIT_CFG_TS.get(sid) or 0) < 300 and sid in _EXIT_CFG:
+        return _EXIT_CFG[sid]
+    cfg = {}
+    try:
+        from core.models.database import Database as _DB
+        row = _DB.get_instance().fetch_one(
+            "SELECT advanced_options FROM strategies WHERE id=?", [sid])
+        adv = json.loads((row or {}).get("advanced_options") or "{}") or {}
+        if isinstance(adv, dict):
+            cfg = {"tp_fill_mode": str(adv.get("tp_fill_mode") or "close"),
+                   "slippage_pct": adv.get("slippage_pct", adv.get("slippage"))}
+    except Exception:
+        cfg = {}
+    _EXIT_CFG[sid] = cfg
+    _EXIT_CFG_TS[sid] = now
+    return cfg
+
+
 def check_stoploss_target(confirm_secs=2):
     """Intra-candle SL/TP check - same levels as backtest (shared helper
     utils.helpers.sltp_premium_level - BacktestEngine._check_sl_tp parity).
@@ -181,11 +214,20 @@ def check_stoploss_target(confirm_secs=2):
         # Conservative intra-candle: current is proxy for High/Low - hit if breached
         hit_sl = (current <= sl_level) if is_buy else (current >= sl_level) if sl_level > 0 else False
         hit_tp = (current >= tp_level) if is_buy else (current <= tp_level) if tp_level > 0 else False
-        # Re-quote confirmation (SL only): ek akeli tick (bad print / wide
-        # spread spike, khaas taur par illiquid OTM me) par mat kaato - kuch
-        # second baad dobara quote lo, ab bhi breach to pakka. TP single
-        # touch par (favourable, backtest bar-touch jaisa).
-        if hit_sl and confirm_secs and confirm_secs > 0:
+        # Re-quote confirmation (SL + TP): PARITY FIX 25-11.
+        # Backtest default `tp_fill_mode="close"` hai - TP sirf tab book hota
+        # hai jab confirm ho (completed bar close level ke paar). Paper pehle
+        # TP ko SINGLE TOUCH par book karta tha (SL hi confirm hota tha) →
+        # paper me zyada wins, backtest me kam. Ab TP bhi requote-confirmed;
+        # `advanced.tp_fill_mode="touch"` ho to purana behavior (opt-in).
+        _tp_mode = "close"
+        try:
+            _ec = _strategy_exit_cfg(trade.get("strategy_id"))
+            _tp_mode = str((_ec or {}).get("tp_fill_mode") or "close").lower()
+        except Exception:
+            pass
+        _need_tp_confirm = hit_tp and _tp_mode != "touch"
+        if (hit_sl or _need_tp_confirm) and confirm_secs and confirm_secs > 0:
             try:
                 import time as _t
                 _t.sleep(min(float(confirm_secs), 15))

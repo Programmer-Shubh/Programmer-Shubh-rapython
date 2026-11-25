@@ -902,7 +902,13 @@ class TradeModel:
         # naam se ulta lagta tha - math sahi tha, padhna mushkil tha).
         exit_is_sell = trade["transaction_type"] == "BUY"
         closing_side = "SELL" if exit_is_sell else "BUY"
-        exit_price = max(0.01, TransactionCosts.apply_fill_slippage(exit_price, closing_side, is_live=True))
+        # PARITY (25-11): backtest jis strategy ka slippage use karta hai,
+        # paper exit bhi wahi use kare (pehle hamesha 0.5% default tha →
+        # target ke qareeb trade backtest me win, paper me loss hota tha).
+        from utils.helpers import strategy_slippage_pct as _slip_pct
+        exit_price = max(0.01, TransactionCosts.apply_fill_slippage(
+            exit_price, closing_side, is_live=True,
+            slippage_pct=_slip_pct(trade.get("strategy_id"))))
         exit_costs = TransactionCosts.calculate(exit_price * qty * lot, exit_is_sell, is_live=True)
         if trade["transaction_type"] == "BUY":
             gross_pnl = (exit_price - trade["entry_price"]) * qty * lot

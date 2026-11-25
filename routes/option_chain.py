@@ -815,7 +815,10 @@ def place_trade(req: TradeRequest):
         # Shared slippage model: paper entry = LTP + slippage, exactly like the
         # LIVE path (contract_pricer.entry_price) - so paper and live of the
         # same contract land on the same price.
-        adj_premium = TransactionCosts.apply_fill_slippage(premium, req.transaction_type, is_live=True)
+        from utils.helpers import strategy_slippage_pct as _slip_pct
+        adj_premium = TransactionCosts.apply_fill_slippage(
+            premium, req.transaction_type, is_live=True,
+            slippage_pct=_slip_pct(req.strategy_id))
         # TICK SIZE 0.05 (rulebook): paper entry fill bhi tick par snap
         # (backtest entry ke saath exactly match).
         try:

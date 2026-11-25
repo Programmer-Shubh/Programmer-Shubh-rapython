@@ -620,17 +620,19 @@ def get_history():
         _smap = {int(r.get("id") or 0): str(r.get("name") or "") for r in _srows}
     except Exception:
         _smap = {}
-    # Table-consistent win rate (same >0 net rule as dashboard stats, computed
-    # over the RETURNED table rows so metric == table by construction).
+    # PARITY FIX (25-11): yahan win count sirf pehle 30 rows par nikalta tha
+    # jabki dashboard get_stats() POORE closed set par. Isi se UI me alag
+    # 'winning trades' dikhte the (backtest vs paper compare bhi galat tha).
+    # Ab dono jagah same rule: net pnl > 0, denominator = sab closed trades.
     _shown = closed[:30]
-    _w = sum(1 for t in _shown if float(t.get("pnl") or 0) > 0)
+    _w = sum(1 for t in closed if float(t.get("pnl") or 0) > 0)
     return {
         "count": len(closed),
         "total_pnl": round(total_pnl, 2),
         "total_pnl_formatted": format_currency(total_pnl),
         "winning_trades": _w,
-        "losing_trades": len(_shown) - _w,
-        "win_rate": round(_w / len(_shown) * 100, 1) if _shown else 0,
+        "losing_trades": len(closed) - _w,
+        "win_rate": round(_w / len(closed) * 100, 1) if closed else 0,
         "trades": [
             {
                 "id": t["id"],
