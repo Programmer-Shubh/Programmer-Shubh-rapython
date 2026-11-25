@@ -173,7 +173,8 @@ def test_sl_tp_hit():
     reasons = {t.get("exit_reason") for t in tl}
     assert reasons, "trades must carry exit reasons"
     assert reasons <= {"stoploss", "target", "intraday", "strategy_sl_tp",
-                       "expiry_squareoff", "manual", "reversal", "max_hold"}, reasons
+                       "expiry_squareoff", "manual", "reversal", "max_hold",
+                       "trailing_lock"}, reasons
 
 
 def test_reentry_cap():

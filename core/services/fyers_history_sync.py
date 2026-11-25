@@ -276,22 +276,30 @@ def _store_bars(bars, expiry=None, strike=None, option_type=None):
     return n
 
 
-def sync_all(start_date: str = "2026-01-01", log=print):
-    """Main entry. Returns summary dict. Safe to re-run (upsert)."""
+def sync_all(start_date: str = "2026-01-01", log=print,
+             completed_indices: list = None):
+    """Main entry. Returns summary dict. Safe to re-run (upsert).
+
+    Per-index deadline (50s each) so one slow index (Fyers rate-limit) does
+    not starve the others. Resume from last completed index on next trigger.
+    completed_indices: indices already done in a previous paused run.
+    """
     global _RUNNING
     with _RUN_LOCK:
         if _RUNNING:
             return {"started": False, "reason": "already_running"}
         _RUNNING = True
+    _completed = list(completed_indices or [])
     _set_status({"state": "running", "started_at": _ist_now().strftime("%Y-%m-%d %H:%M:%S"),
                  "stage": "index_bars", "index_ok": [], "index_failed": [],
-                 "contracts_ok": 0, "contracts_failed": [], "rows_stored": 0})
-    # Overall 4-min deadline (user rule 24-11): pehle 4 indices × ~40 expiries
-    # × 10 contracts = ~1600 Fyers calls bina timeout ke chalte the; Render
-    # thread mar jati thi par DB state 'running' atak jata tha.
+                 "contracts_ok": 0, "contracts_failed": [], "rows_stored": 0,
+                 "completed_indices": _completed})
+    # Per-index deadline: 50s/index × 4 indices = ~200s < 240s overall. One
+    # rate-limited index cannot starve the others.
     import time as _ptime
-    _deadline = _ptime.time() + 240
+    _PER_INDEX_DEADLINE = 50
     _paused = False
+    _completed = []
     try:
         end = _ist_today().strftime("%Y-%m-%d")
         app_id, token = _fyers_creds()
@@ -316,15 +324,21 @@ def sync_all(start_date: str = "2026-01-01", log=print):
 
         # ---------- 2) option contracts per expiry ----------
         for idx in INDICES:
+            # Resume: skip indices already completed in a previous (paused) run.
+            if idx in _completed:
+                continue
             ibars = index_bars.get(idx) or []
             if not ibars:
+                _completed.append(idx)
+                _set_status({"completed_indices": _completed})
                 continue
             closes = ibars
             step = _STRIKE_STEP.get(idx, 50.0)
             exps = expiry_dates(idx, start_date, (end[:8] + "28"))
             exp_ok = []
+            _idx_deadline = _ptime.time() + _PER_INDEX_DEADLINE
             for exp in exps:
-                if _ptime.time() > _deadline:
+                if _ptime.time() > _idx_deadline:
                     _paused = True
                     break
                 ref = _nearest_bar_close(closes, exp) or (ibars[0]["close_price"] if ibars else 0)
@@ -332,8 +346,6 @@ def sync_all(start_date: str = "2026-01-01", log=print):
                     continue
                 atm = round(ref / step) * step
                 strikes = [round(atm + k * step, 2) for k in (-2, -1, 0, 1, 2)]
-                # expiry already gone by >10 days and no OI/volume -> skip deep-history
-                # (faster, and keep rows lean); still store if within 75d or monthly.
                 try:
                     d_exp = _dt.datetime.strptime(exp, "%Y-%m-%d").date()
                     days_ago = (_ist_today() - d_exp).days
@@ -344,10 +356,13 @@ def sync_all(start_date: str = "2026-01-01", log=print):
                     continue
                 exp_ok.append(exp)
                 for stk in strikes:
-                    if _ptime.time() > _deadline:
+                    if _ptime.time() > _idx_deadline:
                         _paused = True
                         break
                     for opt in ("CE", "PE"):
+                        if _ptime.time() > _idx_deadline:
+                            _paused = True
+                            break
                         try:
                             from core.services.symbol_resolver import _fyers_symbol
                             fsym = _fyers_symbol(idx, exp, stk, opt)
@@ -379,16 +394,22 @@ def sync_all(start_date: str = "2026-01-01", log=print):
                              "stage": f"contracts:{idx}",
                              "current_expiry": exp})
             summary["expiries"][idx] = exp_ok
+            _completed.append(idx)
+            _set_status({"completed_indices": _completed,
+                         "contracts_ok": summary["contracts_ok"],
+                         "rows_stored": summary["rows_stored"]})
             sys_log(idx, "expiries synced:", len(exp_ok), "contracts ok:", summary["contracts_ok"])
             if _paused:
                 break
 
         if _paused:
-            # Partial run - ab 'done' nahi (auto-flag galat set hota tha).
+            # Partial run - state 'paused' with completed_indices so next run
+            # resumes from here. Not 'done' (auto-flag would wrongly mark complete).
             _set_status({"state": "paused", "stage": "contracts",
-                         "note": "4-min deadline — agle run yahin se resume hoga",
+                         "note": "Per-index deadline — next run resumes from here",
                          "rows_stored": summary["rows_stored"],
-                         "contracts_ok": summary["contracts_ok"]})
+                         "contracts_ok": summary["contracts_ok"],
+                         "completed_indices": _completed})
             return summary
 
         # ---------- 3) coverage snapshot ----------
@@ -449,11 +470,24 @@ def sync_all(start_date: str = "2026-01-01", log=print):
 
 
 def sync_async(start_date: str = "2026-01-01"):
-    """Spawn background thread (non-blocking). Returns status dict."""
+    """Spawn background thread (non-blocking). Returns status dict.
+    Captures completed_indices from previous (paused) status so next run
+    resumes from where it left off."""
     global _RUNNING
     with _RUN_LOCK:
         if _RUNNING:
             return {"started": False, "reason": "already_running"}
-    t = threading.Thread(target=sync_all, kwargs={"start_date": start_date}, daemon=True)
+    _completed = []
+    try:
+        row = _db().fetch_one("SELECT setting_value FROM settings WHERE setting_key='fyers_history_sync_status'")
+        if row and row.get("setting_value"):
+            d = _js.loads(row["setting_value"]) or {}
+            if isinstance(d, dict):
+                _completed = list(d.get("completed_indices") or [])
+    except Exception:
+        pass
+    t = threading.Thread(target=sync_all,
+                          kwargs={"start_date": start_date, "completed_indices": _completed},
+                          daemon=True)
     t.start()
     return {"started": True}

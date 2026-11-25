@@ -466,8 +466,9 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
     except Exception:
         pass
     # 0) Fyers intraday (primary + only intraday source now; ~100-day depth,
-    # official). Koi Yahoo/free-feed fallback nahi. Na mile/fail ho to
-    # honest INSUFFICIENT.
+    # official). Agar Fyers token rate-limited/expired ho to Yahoo
+    # intraday free-feed fallback chalta hai (broker-free, 60-day depth).
+    # Na mile/fail ho to honest INSUFFICIENT - koi synthetic fabrication nahi.
     try:
         _fb = _fyers_intraday(sym, timeframe, start_date, end_date)
         if len(_fb) >= _need:
@@ -477,6 +478,19 @@ def _intraday_full_range(sym, timeframe, start_date, end_date):
             except Exception:
                 pass
             return _dedup_bars(_fb), "fyers_intraday"
+    except Exception:
+        pass
+    # 1) Yahoo intraday fallback (free, no token needed)
+    try:
+        from core.services.historical_fetcher import fetch_intraday_historical as _fih
+        _yb, _ysrc = _fih(sym, timeframe, start_date, end_date)
+        if _yb and len(_yb) >= _need:
+            try:
+                from core.services.intraday_cache import store_bars
+                store_bars(sym, timeframe, [b for b in _yb if str(b.get("trade_date", ""))[:10] < _today_ist])
+            except Exception:
+                pass
+            return _dedup_bars(_yb), _ysrc
     except Exception:
         pass
     return [], "no-intraday-data"

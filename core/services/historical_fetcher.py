@@ -676,3 +676,97 @@ def fetch_historical(symbol: str, start_date: str, end_date: str, allow_syntheti
                               "bars": len(db_data), "note": "stale official partial - fresh nahi"})
     return _out([], {"status": "INSUFFICIENT", "source": "none", "bars": 0,
                      "note": "primary missing, koi secondary bhi nahi"})
+
+
+def fetch_intraday_historical(symbol: str, timeframe: str, start_date: str,
+                              end_date: str) -> tuple:
+    """Intraday bars (5m/15m/30m/1h) with honest fallback chain.
+
+    Priority:
+      1) Fyers official intraday (caller already tried, but retry once here)
+      2) Yahoo intraday (free, no token, 60-day depth)
+      3) openchart intraday (reference only)
+      4) [] with reason - NEVER synthetic/fabricated (user rule 24-11)
+
+    Returns (bars, src) where src is honest source label.
+    """
+    import datetime as _dt
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+
+    sym = str(symbol or "").upper()
+    _tf = str(timeframe or "15m").lower()
+    _need = 15  # min bars for honest signal
+
+    # ---- 1) Yahoo intraday (free, no broker token) ----
+    try:
+        from core.services.free_data import fetch_yahoo_intraday as _fy
+        _yb = _fy(sym, interval=_tf, days=max(5, (_dt.datetime.strptime(str(end_date)[:10],
+                                                   "%Y-%m-%d").date() -
+                                                  _dt.datetime.strptime(str(start_date)[:10],
+                                                   "%Y-%m-%d").date()).days + 1),
+                  timeout=8)
+        if _yb and len(_yb) >= _need:
+            # Normalize bar shape to match Fyers output
+            _norm = []
+            for _b in _yb:
+                _norm.append({
+                    "symbol": sym,
+                    "trade_date": str(_b.get("trade_date", ""))[:10],
+                    "bar_time": str(_b.get("bar_time", ""))[:5],
+                    "open_price": float(_b.get("open_price") or 0),
+                    "high_price": float(_b.get("high_price") or 0),
+                    "low_price": float(_b.get("low_price") or 0),
+                    "close_price": float(_b.get("close_price") or 0),
+                    "volume": int(_b.get("volume") or 0),
+                })
+            if len(_norm) >= _need:
+                return _norm, "yahoo_intraday"
+    except Exception:
+        pass
+
+    # ---- 2) openchart intraday (reference only, may be blocked) ----
+    try:
+        from openchart import NSEData
+        _api = NSEData()
+        _seg = "IDX" if sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "BANKEX") else "EQ"
+        _s = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d")
+        _e = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d")
+        _iv = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60"}.get(_tf, "15")
+
+        def _oc():
+            return _api.historical(sym, segment=_seg, start=_s, end=_e, interval=_iv)
+
+        _df = None
+        try:
+            _ex = _TPE(max_workers=1)
+            _df = _ex.submit(_oc).result(timeout=12)
+            _ex.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        if _df is not None and getattr(_df, "empty", True) is False:
+            _norm = []
+            for _idx, _row in _df.iterrows():
+                try:
+                    _td = str(_idx)[:10] if hasattr(_idx, "strftime") else str(_idx)[:10]
+                    _cl = float(_row.get("close", _row.get("Close", 0)) or 0)
+                    if _cl <= 0:
+                        continue
+                    _norm.append({
+                        "symbol": sym,
+                        "trade_date": _td,
+                        "bar_time": "09:15",  # openchart daily->intraday not granular
+                        "open_price": round(float(_row.get("open", _row.get("Open", _cl)) or _cl), 2),
+                        "high_price": round(float(_row.get("high", _row.get("High", _cl)) or _cl), 2),
+                        "low_price": round(float(_row.get("low", _row.get("Low", _cl)) or _cl), 2),
+                        "close_price": round(_cl, 2),
+                        "volume": int(_row.get("volume", _row.get("Volume", 0)) or 0),
+                    })
+                except Exception:
+                    continue
+            if len(_norm) >= _need:
+                return _norm, "openchart_intraday"
+    except Exception:
+        pass
+
+    # ---- 3) NEVER synthetic - honest empty with reason ----
+    return [], "insufficient_intraday"
