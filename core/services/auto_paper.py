@@ -692,6 +692,21 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
                 trade_type="intraday", strategy_id=int(sid or 0))
             res = place_trade(req)
             if isinstance(res, dict) and res.get("trade_id"):
+                # Signal Time (UI Recent Trades me '—' aa raha tha): actual
+                # worker eval timestamp auto_action JSON me store karo (no new
+                # DB column/migration). Backtest ke signal_time se parity.
+                try:
+                    import datetime as _dt5, json as _js5
+                    _ist5 = _dt5.timezone(_dt5.timedelta(hours=5, minutes=30))
+                    _stamp5 = _dt5.datetime.now(_ist5).strftime("%Y-%m-%d %H:%M:%S")
+                    _arow5 = db.fetch_one("SELECT auto_action FROM paper_trades WHERE id=?", [res["trade_id"]])
+                    _aad5 = _js5.loads((_arow5 or {}).get("auto_action") or "{}") or {}
+                    if isinstance(_aad5, dict):
+                        _aad5["signal_time"] = _stamp5
+                        db.execute("UPDATE paper_trades SET auto_action=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                                   [_js5.dumps(_aad5), res["trade_id"]])
+                except Exception:
+                    pass
                 placed.append({"strategy": s.get("name"), "trade_id": res["trade_id"],
                                "entry": res.get("entry_price"),
                                "rolled_to": res.get("rolled_to", ""),

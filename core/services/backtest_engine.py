@@ -2253,6 +2253,10 @@ class BacktestEngine:
             tp_level = _rtick_lvl(tp_level) if tp_level > 0 else tp_level
         except Exception:
             pass
+        # NOTE (25-11): initial SL/TP direction already enforced by the single
+        # shared helper sltp_premium_level() (BUY: SL=entry-pts, TP=entry+pts;
+        # SELL: SL=entry+pts, TP=entry-pts). Yahan dobara flip mat karo -
+        # trailing lock BUY ka SL entry se upar le ja sakta hai (sahi behavior).
 
         # ---- Trailing Stop: lock in profits as price moves in favor ----
         # Causal: the trailed stop for bar i uses the best price reached on

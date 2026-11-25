@@ -49,7 +49,11 @@ def _strategy_trail_cfg(strategy_id):
             _la = float(adv.get("lock_profit_at") or 0)
             _lp = float(adv.get("lock_profit") or 0)
             if _la > 0:
+                # PARITY: backtest `lock_profit_unit` (pt/pct) paper me bhi
+                # wahi - pehle hamesha 'pct' default tha, SELL ka 5-pt lock
+                # 5% ban jata tha aur SL galti se entry-5 par aa jata tha.
                 cfg = {"lock_at": _la, "lock_amt": _lp,
+                       "unit": str(adv.get("lock_profit_unit") or "pct").lower(),
                        "mode": str(adv.get("trailing") or "")}
     except Exception:
         cfg = None
@@ -197,7 +201,18 @@ def check_stoploss_target(confirm_secs=2):
                 from utils.helpers import trailing_lock_level as _tll
                 _la = float(_trail_cfg.get("lock_at") or 0)
                 _lp = float(_trail_cfg.get("lock_amt") or 0)
-                _lock_level = _tll(entry, _best_px, is_buy, _la, _lp)
+                _lunit = str(_trail_cfg.get("unit") or "pct").lower()
+                # Direction guard: trailing lock SIRF tab jab price configured
+                # profit threshold cross karke anukool direction me gayi ho.
+                # BUY: best >= entry + threshold; SELL: best <= entry - threshold.
+                if _lunit in ("pt", "pts", "point", "points"):
+                    _moved = (float(_best_px) - entry) if is_buy else (entry - float(_best_px))
+                else:
+                    _moved = ((float(_best_px) - entry) / entry * 100.0) if is_buy else ((entry - float(_best_px)) / entry * 100.0)
+                if _moved < _la:
+                    _lock_level = 0.0
+                else:
+                    _lock_level = _tll(entry, _best_px, is_buy, _la, _lp, unit=_lunit)
                 # % rule exclusive: agar strategy me lock_profit_at set hai
                 # to wahi chalega (purana "any-profit breakeven lock" nahi).
                 if _lock_level > 0:
@@ -248,43 +263,16 @@ def check_stoploss_target(confirm_secs=2):
             reason = "stoploss" if hit_sl else "target"
             if hit_sl and _trail_armed:
                 reason = "trailing_lock"
-            # EXIT PRICE HONESTY: TP par LEVEL par exit (backtest parity -
-            # "TP fill stays at the level"). Pehle current quote par exit
-            # hota tha, jisse target hit par +40% fake profit book hota tha.
-            # SL par current quote (gap-aware - jaisa backtest me bar extreme).
+            # EXIT FILL PARITY (25-11): TP AUR SL DONO configured LEVEL par.
+            # Pehle SL 'current quote' par bhar bhai tha (2% cap ke saath) →
+            # 100 pt SL par bhi ~113+ pt overshoot (₹768.10→₹654.81) aur
+            # P&L galat. Ab fill = SL/TP level; configured slippage close_trade
+            # me SIRF EK BAAR lagti hai (backtest engine jaisa hi).
             _exit_px = current
             if hit_tp and tp_level > 0:
                 _exit_px = tp_level
             elif hit_sl and sl_level > 0:
-                # BAD-QUOTE CAP (16-11-2026): SL par quote bahut peeche ho to
-                # (stale/wrong contract print) poora loss book hota tha -
-                # FINNIFTY CE 282.20 -> 230.24 (3 min me -18%, jo liquid
-                # option me possible nahi) ek hi trade me -₹3,182. Ab SL
-                # fill SL level se max 2% hi worse ho sakta hai (gap fill
-                # ka realistic cap) - bad tick se loss book nahi hoga.
-                try:
-                    _cap_pct = 2.0
-                    try:
-                        from core.services.sl_monitor import bad_quote_fill_cap_pct as _bcp
-                        _cap_pct = float(_bcp())
-                    except Exception:
-                        _cap_pct = 2.0
-                    try:
-                        from core.services.strategy_rulebook import sl_fill_cap as _capf
-                        _sl_pts = abs(float(entry or 0) - float(sl_level or 0))
-                    except Exception:
-                        _sl_pts = None
-                    if is_buy:
-                        _floor_px = _capf(float(sl_level or 0), True, _cap_pct, _sl_pts)
-                        if _exit_px < _floor_px:
-                            _exit_px = _floor_px
-                    else:
-                        _ceil_px = _capf(float(sl_level or 0), False, _cap_pct, _sl_pts)
-                        if _exit_px > _ceil_px:
-                            _exit_px = _ceil_px
-                except Exception:
-                    pass
-            # Pass is_live=True via close_trade slippage (trade_model.py)
+                _exit_px = sl_level
             trade_model.close_trade(trade["id"], _exit_px, datetime.now().strftime("%Y-%m-%d"), reason)
             closed.append({"id": trade["id"], "reason": reason, "exit_price": round(float(_exit_px), 2)})
     try:

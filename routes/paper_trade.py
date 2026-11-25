@@ -612,6 +612,19 @@ def clean_preview():
 @router.get("/history")
 def get_history():
     trade_model = TradeModel()
+    import json as _js
+    def _sig_time(t):
+        try:
+            aa = t.get("auto_action")
+            d = _js.loads(aa) if isinstance(aa, str) and aa.strip().startswith("{") else (aa or {})
+            if isinstance(d, dict) and d.get("signal_time"):
+                return str(d["signal_time"])
+        except Exception:
+            pass
+        try:
+            return trade_model.ist_hhmm(t.get("created_at", "")) or ""
+        except Exception:
+            return ""
     closed = trade_model.get_closed_trades()
     total_pnl = sum(t["pnl"] for t in closed)
     # Strategy linkage (paper-vs-backtest compare ke liye): id -> name map.
@@ -656,6 +669,7 @@ def get_history():
                 "transaction_type": t.get("transaction_type",""),
                 "expiry_date": t.get("expiry_date", ""),
                 "exit_status": t.get("exit_status", ""),
+                "signal_time": _sig_time(t),
                 "trade_mode": ("live" if (str(t.get("trade_mode") or "").lower() == "live"
                                or (t.get("broker_order_id") and str(t.get("broker_order_id")).strip()))
                                else "paper"),

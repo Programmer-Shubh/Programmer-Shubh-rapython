@@ -7,6 +7,30 @@ from utils.helpers import get_lot_size, format_currency, effective_lot_size
 router = APIRouter()
 
 
+def _signal_time_of(t: dict) -> str:
+    """Recent Trades 'Signal Time' column: auto_paper worker ne auto_action
+    JSON me actual signal timestamp store kiya hota hai. Purane trades me na
+    ho to entry time (created_at) dikhao — kabhi khali '—' nahi."""
+    try:
+        v = t.get("signal_time")
+        if v:
+            return str(v)
+    except Exception:
+        pass
+    try:
+        import json as _js
+        aa = t.get("auto_action")
+        d = _js.loads(aa) if isinstance(aa, str) and aa.strip().startswith("{") else (aa or {})
+        if isinstance(d, dict) and d.get("signal_time"):
+            return str(d["signal_time"])
+    except Exception:
+        pass
+    try:
+        return TradeModel.ist_hhmm(t.get("created_at", "")) or ""
+    except Exception:
+        return ""
+
+
 def _otm_calc(trade_like: dict, spot_cache: dict):
     """(spot, otm_pct) - strike live spot se kitne % door (user rule
     27-10-2026 "otm 20" filter ke liye). spot=0 -> otm=None."""
@@ -503,7 +527,7 @@ def get_trade_history_fast():
             "tp_unit": _t.get("tp_unit", "rs"),
             "qty": _t.get("quantity", 1),
             "lot_size": _t.get("lot_size", 0),
-            "signal_time": _t.get("signal_time", ""),
+            "signal_time": _signal_time_of(_t),
             "strategy_id": int(_t.get("strategy_id") or 0),
             "strategy_name": _smap.get(int(_t.get("strategy_id") or 0)),
             "spot": _sp if _sp > 0 else None,
@@ -614,7 +638,7 @@ def get_trade_history():
                 "tp_unit": t.get("tp_unit", "rs"),
                 "qty": t.get("quantity", 1),
                 "lot_size": t.get("lot_size", 0),
-                "signal_time": t.get("signal_time", ""),
+                "signal_time": _signal_time_of(t),
                 "strategy_id": int(t.get("strategy_id") or 0),
                 "strategy_name": _smap.get(int(t.get("strategy_id") or 0)),  # None when not found -> fallback below
                 "spot": _sc.get(str(t.get("symbol")).upper()),

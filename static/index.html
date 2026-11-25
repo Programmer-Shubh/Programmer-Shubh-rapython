@@ -1382,11 +1382,14 @@
         // Strategy-wise summary section
         let summHtml='';
         if(c.strategy_summary&&c.strategy_summary.length){
-            summHtml='<div class="card mb-3"><div class="card-header bg-light"><strong>Strategy-wise Profit/Loss</strong> <span class="float-end text-muted small">Date-wise trades per saved strategy</span></div><div class="card-body p-2"><table class="table table-sm table-bordered"><thead><tr><th>Strategy</th><th>Trades</th><th>Profit</th><th>Loss</th><th>Win %</th><th>Total P&L</th><th title="Saved backtest (same strategy config) ka win rate - paper ke saath compare karne ke liye">BT Win %</th><th title="Saved backtest ka net PnL">BT P&L</th><th title="Paper vs Backtest ka difference (same rules hone par ye paas hona chahiye)">Paper-BT Δ</th></tr></thead><tbody>';
+            summHtml='<div class="card mb-3"><div class="card-header bg-light"><strong>Strategy-wise Profit/Loss</strong> <span class="float-end text-muted small">Date-wise trades per saved strategy</span></div><div class="card-body p-2"><table class="table table-sm table-bordered"><thead><tr><th>Strategy</th><th>Trades</th><th>Profit</th><th>Loss</th><th>Win %</th><th>Total P&L</th><th title="Saved backtest (same strategy config) ka win rate - paper ke saath compare karne ke liye">BT Win %</th><th title="Saved backtest ka net PnL">BT P&L</th><th title="Paper net P&L minus Backtest net P&L (₹) — negative = paper backtest se kam">Paper-BT Δ (₹)</th></tr></thead><tbody>';
             c.strategy_summary.forEach(s=>{
                 const pnlCls=s.total_pnl>=0?'text-success':'text-danger';
-                const _btWr=(s.bt_win_rate!=null)?s.bt_win_rate:null;const _btPnl=(s.bt_net_pnl!=null)?s.bt_net_pnl:null;const _dlt=(_btWr!=null)?Math.round(((s.win_rate||0)-_btWr)*10)/10:null;
-                summHtml+=`<tr><td>${s.strategy_name}</td><td>${s.total_trades}</td><td class="text-success">${s.winning_trades}</td><td class="text-danger">${s.losing_trades}</td><td>${s.win_rate}%</td><td class="${pnlCls}">${F(s.total_pnl||0)}</td><td>${_btWr!=null?(_btWr+'%'):'-'}</td><td class="${(_btPnl!=null&&_btPnl>=0)?'text-success':'text-danger'}">${_btPnl!=null?F(_btPnl):'-'}</td><td class="${(_dlt!=null&&Math.abs(_dlt)<=10)?'text-muted':'text-warning'}">${_dlt!=null?(_dlt>0?'+':'')+_dlt+'%':'-'}</td></tr>`;
+                const _btWr=(s.bt_win_rate!=null)?s.bt_win_rate:null;const _btPnl=(s.bt_net_pnl!=null)?Number(s.bt_net_pnl):null;
+                // Paper-BT Δ = P&L difference (₹), galat sign/% formatting hataya:
+                // -19,096.45 vs -13,760.38 => -5,336.07 (sahi minus sign).
+                const _dlt=(_btPnl!=null)?(Number(s.total_pnl||0)-_btPnl):null;
+                summHtml+=`<tr><td>${s.strategy_name}</td><td>${s.total_trades}</td><td class="text-success">${s.winning_trades}</td><td class="text-danger">${s.losing_trades}</td><td>${s.win_rate}%</td><td class="${pnlCls}">${F(s.total_pnl||0)}</td><td>${_btWr!=null?(_btWr+'%'):'-'}</td><td class="${(_btPnl!=null&&_btPnl>=0)?'text-success':'text-danger'}">${_btPnl!=null?F(_btPnl):'-'}</td><td class="${(_dlt==null)?'text-muted':(_dlt>=0?'text-success':'text-danger')}" title="Paper ₹${Number(s.total_pnl||0).toFixed(2)} − BT ₹${(_btPnl!=null?_btPnl.toFixed(2):'-')}">${_dlt!=null?((_dlt>0?'+':_dlt<0?'-':'')+'₹'+Math.abs(_dlt).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})):'-'}</td></tr>`;
             });
             summHtml+='</tbody></table></div></div>';
         }
@@ -1706,6 +1709,8 @@ let _lastOpenTrdHTML = null;
             const ZN=(v)=>_zt?'N/A':v;
             const _p=(r.params||{});
             const _pleg=(_p.legs||[]).map(l=>((l.transaction||'').toUpperCase()+' '+(l.option_type||'').toUpperCase())).join(' + ')||'-';
+            // Run Name fallback: actual leg se CE-BUY / PE-BUY / CE-SELL / PE-SELL
+            const _legDir=(_p.legs||[]).map(l=>((l.option_type||'LEG').toUpperCase()+'-'+(l.transaction||'BUY').toUpperCase())).join(' + ')||'-';
             // Saved-result identity: config same rahe to backend WAHI saved
             // result bhejta hai (same run_id). Naya data/config par naya run
             // chahiye to ↻ Naya run dabao (force refresh).
@@ -1994,6 +1999,8 @@ let _lastOpenTrdHTML = null;
             const ZN=(v)=>_zt?'N/A':v;
             const _p=(r.params||{});
             const _pleg=(_p.legs||[]).map(l=>((l.transaction||'').toUpperCase()+' '+(l.option_type||'').toUpperCase())).join(' + ')||'-';
+            // Run Name fallback: actual leg se CE-BUY / PE-BUY / CE-SELL / PE-SELL
+            const _legDir=(_p.legs||[]).map(l=>((l.option_type||'LEG').toUpperCase()+'-'+(l.transaction||'BUY').toUpperCase())).join(' + ')||'-';
             const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+' • '+(r.cached?'(cached)':((r.took_ms||0)/1000).toFixed(1)+'s')+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'');
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
@@ -2018,7 +2025,7 @@ let _lastOpenTrdHTML = null;
 <div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> strategy 4 Key Metrics:</strong><span>Win Prob: <strong>${ZN(m.win_rate+'%')}</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${_zt?'N/A':F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${ZN(m.expectancy)}</strong> ${_zt?'':(m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>')}</span><span class="ms-auto badge bg-info">Slippage ${(parseFloat(document.getElementById('s-slippage')?.value)||0.50)}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
 <div class="row g-2 mb-2">
 <div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
-<div class="col"><div class="card stat-card-sm"><div class="label">Run Name</div><div class="value fw-bold" style="font-size:13px">${document.getElementById('s-name').value||'-'}</div></div></div>
+<div class="col"><div class="card stat-card-sm"><div class="label">Run Name</div><div class="value fw-bold" style="font-size:13px">${document.getElementById('s-name').value||_legDir||'-'}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlClass}">${F(m.net_pnl||pnl)}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">No. of Trades</div><div class="value">${m.total_trades}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Avg Profit/Trade</div><div class="value ${pnlClass}">${_zt?'N/A':F(m.avg_profit_per_trade)}</div></div></div>
