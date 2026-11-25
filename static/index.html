@@ -2228,17 +2228,26 @@ let _lastOpenTrdHTML = null;
     async function _entryPremEst(){
         try{ const sym=(typeof rSyms==='function'&&rSyms()[0])||''; if(!sym)return null;
             const _c=_premEstCache[sym]; if(_c&&Date.now()-_c.ts<60000&&_c.v)return _c.v;
-            const d=await A('/api/chain/live/'+sym);
-            let v=null;
-            if(d){
-                const spot=d.spot||_payoffSpot||0;
-                const rows=(d.rows||[]).filter(r=>r&&r.strike!=null&&r.ltp!=null);
-                if(spot&&rows.length){ let best=null; for(const r of rows){ const dd=Math.abs(r.strike-spot); if(!best||dd<best.dd) best={dd,r}; } if(best) v=best.r.ltp; }
-                if(!v&&d.atm_premium) v=d.atm_premium;
+            // FAST PATH (25-11): pehle /api/dashboard/spot + /api/dashboard/option-chain
+            // (dono ~0.5s, real bhavcopy chain). /api/chain/live kabhi-kabhi 30s+
+            // timeout karta tha → estimate text kabhi dikhta hi nahi tha.
+            let spot=_payoffSpot||0;
+            if(!spot){ try{ const _sp=await A('/api/dashboard/spot/'+sym); spot=Number((_sp&&(_sp.spot||_sp.price))||0)||0; }catch(e){} }
+            let v=0;
+            if(spot){
+                try{
+                    const _ch=await A('/api/dashboard/option-chain/'+sym);
+                    const rows=[...( (_ch&&_ch.ce)||[] ),...((_ch&&_ch.pe)||[])].filter(r=>r&&r.strike!=null&&r.ltp!=null&&r.ltp>0);
+                    let best=null;
+                    for(const r of rows){ const dd=Math.abs(Number(r.strike)-spot); if(!best||dd<best.dd) best={dd,r}; }
+                    if(best&&best.dd<=Math.max(spot*0.01,50)) v=Number(best.r.ltp)||0;
+                }catch(e){}
             }
-            if(!v){ const spot=_payoffSpot||0; if(spot) v=Math.max(5, Math.round(spot*0.004*(typeof _payoffDTE!=='undefined'?Math.sqrt(Math.max(1,_payoffDTE)/7):1))); }
-            _premEstCache[sym]={v,ts:Date.now()};
-            return v||null;
+            if(!v && spot>0){
+                v=Math.max(5, Math.round(spot*0.004*(typeof _payoffDTE!=='undefined'?Math.sqrt(Math.max(1,_payoffDTE)/7):1)));
+            }
+            if(v>0) _premEstCache[sym]={v,ts:Date.now()};
+            return v>0?v:null;
         }catch(e){ return null; }
     }
     function _dualMirror(el,inEl){
@@ -2249,7 +2258,21 @@ let _lastOpenTrdHTML = null;
             // legacy "%" / "rs" units.
             if(a.u==='pct')out.textContent=a.v>0?(a.v+'% of premium (saved strategy unit)'):'EX: 30%';
             else if(a.u==='rs')out.textContent=a.v>0?('₹'+a.v.toLocaleString('en-IN')+' (rupees, saved strategy unit)'):'EX: ₹1500';
-            else out.textContent=(a.v>0?(a.v+' points - direct entry premium move'):'SL/TP points me likho (e.g. 30)');
+            else{
+                if(a.v<=0){ out.textContent='SL/TP points me likho (e.g. 30)'; return; }
+                let txt=a.v+' points - direct entry premium move';
+                const prem=Number(window._entryPrem||0);
+                if(prem>0){
+                    const isSL=/sl/i.test(inEl);
+                    const sell=String(_rbSide())==='sell';
+                    const lvl=isSL?(sell?prem+a.v:Math.max(0.05,prem-a.v))
+                                  :(sell?Math.max(0.05,prem-a.v):prem+a.v);
+                    txt+=' • est. premium ₹'+prem.toFixed(2)+' → '+(isSL?'SL':'TP')+' ₹'+lvl.toFixed(2);
+                }else{
+                    txt+=' • est. premium load ho raha hai…';
+                }
+                out.textContent=txt;
+            }
         }catch(e){}
     }
     async function _refreshDualMirror(){
@@ -2354,6 +2377,10 @@ let _lastOpenTrdHTML = null;
     document.getElementById('s-tp')?.addEventListener('change',()=>_dualMirror('s-tp','s-tp-mirror'));
     // Symbol select par premium refresh
     try{ const _symBox=document.getElementById('r-syms'); _symBox?.addEventListener('change',()=>{ window._entryPrem=null; _refreshDualMirror(); }); }catch(e){}
+    // BUY/SELL badalne par SL/TP level ki disha badalti hai (BUY: SL neeche,
+    // TP upar; SELL: ulta) - estimate text bhi turant update ho.
+    try{ document.getElementById('r-order')?.addEventListener('change',()=>{ try{_refreshDualMirror();}catch(e){} }); }catch(e){}
+    try{ document.getElementById('s-index')?.addEventListener('change',()=>{ window._entryPrem=null; _refreshDualMirror(); }); }catch(e){}
     // Backtest/paper SL/TP = POINTS (premium move). "Overall Stop Loss (s-sl)" single
     // SL input hai — r-sl removed.
     function _syncRisk(fromSl,fromTp,toSl,toTp){try{const a=document.getElementById(fromSl),b=document.getElementById(fromTp),c=document.getElementById(toSl),d=document.getElementById(toTp);if(a&&c&&a.value!=='')c.value=a.value;if(b&&d&&b.value!=='')d.value=b.value;}catch(e){}}
