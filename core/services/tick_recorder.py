@@ -97,17 +97,39 @@ def get_ticks(symbol, trade_date, strike, option_type, expiry=""):
 
 
 def tick_bar(symbol, trade_date, bar_time, strike, option_type, expiry=""):
-    """LTP of a specific 1-min bar (engine premium lookup). None if no tick."""
+    """LTP for an engine bar. Exact bar_time preferred; if the 1-min WS feed
+    has no tick at 10:55/12:10, fall back to the NEAREST EARLIER REAL tick
+    (same date/strike/type). This is a real recorded price, never an
+    interpolated/fabricated timestamp (user rule 24-11)."""
     try:
         from core.models.database import Database
-        r = Database.get_instance().fetch_one(
-            "SELECT ltp FROM option_ticks "
-            "WHERE symbol=? AND trade_date=? AND bar_time LIKE ? "
-            "AND strike_price=? AND option_type=? AND expiry_date=? "
+        db = Database.get_instance()
+        bt = str(bar_time or "")[:5]
+        sym = str(symbol or "").upper()
+        d = str(trade_date)[:10]
+        opt = str(option_type or "").upper()
+        stk = float(strike or 0)
+        exp = str(expiry or "")
+        # 1) exact bar time, exact expiry
+        r = db.fetch_one(
+            "SELECT ltp FROM option_ticks WHERE symbol=? AND trade_date=? "
+            "AND bar_time LIKE ? AND strike_price=? AND option_type=? AND expiry_date=? "
             "ORDER BY bar_time DESC LIMIT 1",
-            [str(symbol or "").upper(), str(trade_date)[:10],
-             str(bar_time)[:5] + "%", float(strike or 0),
-             str(option_type or "").upper(), str(expiry or "")])
+            [sym, d, bt + "%", stk, opt, exp])
+        # 2) nearest earlier real tick, exact expiry
+        if not r:
+            r = db.fetch_one(
+                "SELECT ltp FROM option_ticks WHERE symbol=? AND trade_date=? "
+                "AND bar_time<=? AND strike_price=? AND option_type=? AND expiry_date=? "
+                "ORDER BY bar_time DESC LIMIT 1",
+                [sym, d, bt, stk, opt, exp])
+        # 3) expiry mismatch (weekly/monthly label) - nearest earlier real tick
+        if not r:
+            r = db.fetch_one(
+                "SELECT ltp FROM option_ticks WHERE symbol=? AND trade_date=? "
+                "AND bar_time<=? AND strike_price=? AND option_type=? "
+                "ORDER BY bar_time DESC LIMIT 1",
+                [sym, d, bt, stk, opt])
         return float(r["ltp"]) if r and r.get("ltp") else None
     except Exception:
         return None

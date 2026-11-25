@@ -656,8 +656,13 @@ class BacktestEngine:
                         sl_exit = TransactionCosts.apply_fill_slippage(
                             _fill, "SELL" if txn_type == "buy" else "BUY", self.is_live,
                             slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
+                        _reason = hit["reason"]
+                        if _reason == "stoploss" and getattr(self, "_last_sl_trailed", False):
+                            # Trailing ne SL entry ke paar le jaya tha — ye
+                            # 'stoploss' nahi, 'trailing_lock' exit hai (sahi label).
+                            _reason = "trailing_lock"
                         _trig = f"{'SL' if hit['reason'] == 'stoploss' else 'TP'}@{float(hit['level']):.2f}"
-                        self._close_position(entries, exits, entry, sl_exit, hit["reason"], cur_date, qty, txn_type,
+                        self._close_position(entries, exits, entry, sl_exit, _reason, cur_date, qty, txn_type,
                                              trigger=_trig)
                         daily_pnl += exits[-1]["pnl"]
                         if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
@@ -864,7 +869,7 @@ class BacktestEngine:
                         _lrsn = str(exits[-1].get("reason") or "").lower()
                         _ldate = str(exits[-1].get("date") or "")[:10]
                         if _ldate and _ldate == str(cur_date)[:10]:
-                            if _lrsn == "stoploss" and _same_day_blocked(_pol.get("reentry_on_sl")):
+                            if _lrsn in ("stoploss", "trailing_lock") and _same_day_blocked(_pol.get("reentry_on_sl")):
                                 can_enter = False
                             elif _lrsn == "target" and _same_day_blocked(_pol.get("reentry_on_tp")):
                                 can_enter = False
@@ -2245,6 +2250,11 @@ class BacktestEngine:
 
         sl_level = _to_level(sl_amt, True)
         tp_level = _to_level(tp_amt, False)
+        # Trailing label audit (user 25-11): initial SL level yaad rakho -
+        # agar trailing ne SL badala aur yahi SL hit hua to exit reason
+        # 'stoploss' ki jagah 'trailing_lock' dikhao (sahi label).
+        self._sl_initial_level = sl_level
+        self._last_sl_trailed = False
         # TICK SIZE 0.05 (rulebook): SL/TP levels bhi exchange tick par -
         # paper/live monitor ke tick levels se exactly match karte hain.
         try:
@@ -2334,6 +2344,10 @@ class BacktestEngine:
                 else:  # sell
                     if (entry_price - _prev) > 0 and (sl_level == 0 or sl_level > entry_price):
                         sl_level = entry_price
+        try:
+            self._last_sl_trailed = abs(float(sl_level) - float(self._sl_initial_level or 0)) > 0.0001
+        except Exception:
+            self._last_sl_trailed = False
         # ... rest of method
 
         # EQ (equity spot) legs: SL/TP on the BAR's spot high/low directly -
@@ -2812,7 +2826,11 @@ class BacktestEngine:
                                option_type, str(getattr(self, "bt_expiry", "") or ""))
                 if _tv and float(_tv) > 0:
                     self.premium_cache[key] = float(_tv)
-                    self._tick_prem_keys.add(key)
+                    # _prem_source tuple key se match hona chahiye (pehle
+                    # string key tha → real tick kabhi 'real_ticks' label nahi
+                    # milta tha). Intraday me bar-specific cache bhi zaroori.
+                    self._tick_prem_keys.add((str(date or "")[:10], float(strike or 0),
+                                              str(option_type or "").upper()))
                     return float(_tv)
         except Exception:
             pass
@@ -2910,7 +2928,8 @@ class BacktestEngine:
         # DATA HONESTY: ₹5 ek FABRICATED premium hai (real/model dono fail).
         # Pehle ise 'model' label mil jata tha aur P&L bilkul real dikhata tha.
         # Ab mark karte hain taaki UI/result me 'fake_fallback' warning dikhe.
-        self._fake_prem_keys.add(key)
+        self._fake_prem_keys.add((str(date or "")[:10], float(strike or 0),
+                                  str(option_type or "").upper()))
         # Never poison the date cache with a fake 5.0 on an intraday bar.
         if not _intra:
             self.premium_cache[key] = 5.0
@@ -2969,7 +2988,11 @@ class BacktestEngine:
                                option_type, str(getattr(self, "bt_expiry", "") or ""))
                 if _tv and float(_tv) > 0:
                     self.premium_cache[key] = float(_tv)
-                    self._tick_prem_keys.add(key)
+                    # _prem_source tuple key se match hona chahiye (pehle
+                    # string key tha → real tick kabhi 'real_ticks' label nahi
+                    # milta tha). Intraday me bar-specific cache bhi zaroori.
+                    self._tick_prem_keys.add((str(date or "")[:10], float(strike or 0),
+                                              str(option_type or "").upper()))
                     return float(_tv)
         except Exception:
             pass
@@ -3045,7 +3068,8 @@ class BacktestEngine:
                 self.premium_cache[_mkey] = val
                 return val
         # DATA HONESTY: ₹5 = fabricated fallback (koi real/model source nahi).
-        self._fake_prem_keys.add(key)
+        self._fake_prem_keys.add((str(date or "")[:10], float(strike or 0),
+                                  str(option_type or "").upper()))
         if not _intra:
             self.premium_cache[key] = 5.0
         return 5.0

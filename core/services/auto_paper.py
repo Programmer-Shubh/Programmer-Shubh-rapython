@@ -848,7 +848,8 @@ def place_for_strategy(sid, signal_check="daily"):
                 _last_exit = db.fetch_one(
                     "SELECT exit_status FROM paper_trades WHERE strategy_id=? AND entry_date=? "
                     "AND status!='open' ORDER BY exit_date DESC, id DESC LIMIT 1", [sid, today])
-                if _last_exit and "stoploss" in str(_last_exit.get("exit_status") or "").lower():
+                if _last_exit and any(k in str(_last_exit.get("exit_status") or "").lower()
+                                      for k in ("stoploss", "trailing_lock")):
                     return {"placed": placed,
                             "notes": [f"{s.get('name')}: No Re-entry after SL (rulebook) - skipped"]}
         except Exception:

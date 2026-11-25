@@ -65,33 +65,27 @@ def test_tick_above_target_closes_immediately_at_level(monkeypatch):
     assert fe._WS["ticks"] == 1 and fe._WS["exits"] == 1
 
 
-def test_tick_below_stop_closes_at_ltp(monkeypatch):
-    """Tick SL level se NEECHE aaye to exit hota hai.
-
-    FILL = bad-quote cap (rulebook 16-11-2026): SL fill SL level se max 2%
-    hi worse ho sakta hai. Pehle raw LTP par fill hota tha - ek stale/wrong
-    print (FINNIFTY CE 282 -> 230 = -18% ek 3-min trade me) poora loss book
-    kar deta tha. Cap ke baad fill = level se 2% ke andar."""
+def test_tick_below_stop_fills_at_sl_level(monkeypatch):
+    """Tick SL se neeche aaye to fill CONFIGURED SL LEVEL par (25-11 rule).
+    Purana 2%-cap/raw-quote model 100 pt SL par ~113 pt overshoot deta tha
+    (₹768→₹654) — ab exact level + configured slippage (ek baar)."""
     fake = _FakeTM()
     _setup(monkeypatch, fake)
     sl = fe._levels(_trade())["sl"]
     fe._on_message({"symbol": "NSE:NIFTY25JUN25000CE", "ltp": sl - 5.0})
     assert fake.calls and fake.calls[0]["reason"] == "stoploss"
-    cap = sl * 0.98          # BUY: level se 2% neeche floor
-    assert fake.calls[0]["px"] == pytest.approx(cap, rel=1e-6)
-    # Real (sane) quote kehta hai - cap usse zyada worse nahi karta
-    assert fake.calls[0]["px"] >= sl - 5.0 - 1e-9
+    assert fake.calls[0]["px"] == pytest.approx(sl, rel=1e-9)
 
 
-def test_tick_slightly_below_stop_fills_at_quote(monkeypatch):
-    """Cap ke andar ka quote - raw LTP par fill (normal behaviour)."""
+def test_tick_slightly_below_stop_fills_at_level(monkeypatch):
+    """Chhota breach bhi SL level par hi fill — quote par nahi (parity)."""
     fake = _FakeTM()
     _setup(monkeypatch, fake)
     sl = fe._levels(_trade())["sl"]
     _px = sl * 0.99
     fe._on_message({"symbol": "NSE:NIFTY25JUN25000CE", "ltp": _px})
     assert fake.calls and fake.calls[0]["reason"] == "stoploss"
-    assert fake.calls[0]["px"] == pytest.approx(_px, rel=1e-6)
+    assert fake.calls[0]["px"] == pytest.approx(sl, rel=1e-9)
 
 
 def test_tick_between_levels_does_nothing(monkeypatch):

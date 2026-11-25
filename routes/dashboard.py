@@ -26,7 +26,7 @@ def _signal_time_of(t: dict) -> str:
     except Exception:
         pass
     try:
-        return TradeModel.ist_hhmm(t.get("created_at", "")) or ""
+        return TradeModel.ist_hhmmss(t.get("created_at", "")) or ""
     except Exception:
         return ""
 
@@ -502,9 +502,9 @@ def get_trade_history_fast():
         trades.append({
             "id": _t["id"],
             "entry_date": _t["entry_date"],
-            "entry_time": TradeModel.ist_hhmm(_t.get("created_at", "")),
+            "entry_time": TradeModel.ist_hhmmss(_t.get("created_at", "")),
             "exit_date": _t.get("exit_date", ""),
-            "exit_time": TradeModel.ist_hhmm(_t.get("updated_at", "")),
+            "exit_time": TradeModel.ist_hhmmss(_t.get("updated_at", "")),
             "symbol": _t["symbol"],
             "option_type": _t["option_type"],
             "strike": _t["strike_price"],
@@ -616,9 +616,9 @@ def get_trade_history():
             {
                 "id": t["id"],
                 "entry_date": t["entry_date"],
-                "entry_time": TradeModel.ist_hhmm(t.get("created_at", "")),
+                "entry_time": TradeModel.ist_hhmmss(t.get("created_at", "")),
                 "exit_date": t.get("exit_date", ""),
-                "exit_time": TradeModel.ist_hhmm(t.get("updated_at", "")),
+                "exit_time": TradeModel.ist_hhmmss(t.get("updated_at", "")),
                 "symbol": t["symbol"],
                 "option_type": t["option_type"],
                 "strike": t["strike_price"],

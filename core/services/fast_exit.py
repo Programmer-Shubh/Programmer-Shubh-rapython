@@ -296,30 +296,18 @@ def _evaluate_and_exit(t, price, source="broker"):
     if not (hit_sl or hit_tp):
         return None, None
     reason = "stoploss" if hit_sl else "target"
+    # EXIT FILL PARITY (25-11): SL/TP dono configured LEVEL par. Pehle current
+    # quote + 2% cap tha → 100 pt SL par ~113 pt overshoot (₹768→₹654).
     exit_px = tp_level if (hit_tp and tp_level > 0) else price
     if hit_sl and sl_level > 0:
-        # BAD-QUOTE CAP (16-11-2026): stale/wrong quote par SL fill bahut
-        # door book ho jata tha (FINNIFTY CE 282.20 -> 230.24 = -18% ek 3-min
-        # trade me). Fill SL level se max 2% (aur SL distance ka 25%) hi
-        # worse ho sakta hai - BT/paper/live ek jaisa.
+        exit_px = sl_level
+        # Trailing/profit-lock ne SL entry ke paar le jaya ho to sahi label.
         try:
-            from core.services.sl_monitor import bad_quote_fill_cap_pct as _bcp
-            _cap_pct = float(_bcp())
+            _e = float(lv.get("entry") or 0)
+            if (is_buy and sl_level > _e) or ((not is_buy) and sl_level < _e):
+                reason = "trailing_lock"
         except Exception:
-            _cap_pct = 2.0
-        try:
-            from core.services.strategy_rulebook import sl_fill_cap as _capf
-            _sl_pts = abs(float(lv.get("entry") or 0) - float(sl_level or 0))
-        except Exception:
-            _sl_pts = None
-        if is_buy:
-            _floor_px = _capf(float(sl_level or 0), True, _cap_pct, _sl_pts)
-            if float(exit_px) < _floor_px:
-                exit_px = _floor_px
-        else:
-            _ceil_px = _capf(float(sl_level or 0), False, _cap_pct, _sl_pts)
-            if float(exit_px) > _ceil_px:
-                exit_px = _ceil_px
+            pass
     if not _claim(tid):
         return None, None
     try:

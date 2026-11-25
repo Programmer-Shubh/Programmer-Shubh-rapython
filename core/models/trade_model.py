@@ -771,6 +771,19 @@ class TradeModel:
             return ""
 
     @staticmethod
+    def ist_hhmmss(dt_str: str) -> str:
+        """Recent Trades ke liye IST HH:MM:SS — pehle HH:MM me entry aur exit
+        same minute dikhte the (10:59 → 10:59), seconds se asli difference
+        saaf dikhta hai. Signal Time bhi isi format me store hota hai."""
+        try:
+            import datetime as _dt
+            d = _dt.datetime.strptime(str(dt_str or "")[:19], "%Y-%m-%d %H:%M:%S")
+            d = d + _dt.timedelta(hours=5, minutes=30)
+            return d.strftime("%H:%M:%S")
+        except Exception:
+            return ""
+
+    @staticmethod
     def _trim_cache(d, max_size):
         if len(d) > max_size:
             for k in list(d.keys())[:len(d)-max_size]:
