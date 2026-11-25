@@ -2815,27 +2815,45 @@ class BacktestEngine:
         # value for the whole session). Never use it for a clocked bar.
         if not _intra and key in self.premium_cache:
             return self.premium_cache[key]
-        # 0) REAL option tick data (user rule 24-11): jab user ne tick-data
-        # mode chuna ho to recorded 1-min LTP se premium lo - Black-Scholes
-        # model nahi. Pehle sirf model tha jisse real option prints se gap tha.
+        # DATA HONESTY (user rule 24-11 + 25-11 upgrade): REAL option tick /
+        # 1m_chain data ONLY from the Parquet lakehouse (real_ticks source).
+        # NEVER fabricate Black-Scholes / synthetic premiums. If no real data
+        # exists for this strike/expiry/date, return None so the caller can
+        # skip the entry honestly instead of trading on fabricated prices.
         try:
-            if getattr(self, "_use_tick_data", False):
-                from core.services.tick_recorder import tick_bar
-                _bt = getattr(self, "_cur_bar_time", "") or ""
-                _tv = tick_bar(self.bt_symbol, date, _bt or "09:15", strike,
-                               option_type, str(getattr(self, "bt_expiry", "") or ""))
-                if _tv and float(_tv) > 0:
-                    self.premium_cache[key] = float(_tv)
-                    # _prem_source tuple key se match hona chahiye (pehle
-                    # string key tha → real tick kabhi 'real_ticks' label nahi
-                    # milta tha). Intraday me bar-specific cache bhi zaroori.
-                    self._tick_prem_keys.add((str(date or "")[:10], float(strike or 0),
-                                              str(option_type or "").upper()))
-                    return float(_tv)
+            from core.services.option_lakehouse import query_option_ticks
+            _bt = getattr(self, "_cur_bar_time", "") or ""
+            _expiry = str(getattr(self, "bt_expiry", "") or "")
+            # Query lakehouse for real ticks on this date/strike/type/expiry
+            _ticks = query_option_ticks(
+                underlying=self.bt_symbol,
+                data_mode="1m_chain" if _intra else "tick",
+                expiry=_expiry,
+                start_date=str(date)[:10],
+                end_date=str(date)[:10],
+                option_type=option_type,
+                strike=float(strike) if strike else 0,
+                limit=200,
+            )
+            if _ticks is not None and len(_ticks) > 0:
+                # Pick the tick closest to bar_time (intraday) or first/last
+                # of day for daily bars.
+                if _intra and _bt:
+                    # Filter ticks on/after bar_time, else take first
+                    cands = [r for r in _ticks if str(r.get("timestamp", ""))[11:16] >= _bt]
+                    tick_row = cands[0] if cands else _ticks[0]
+                else:
+                    tick_row = _ticks[-1] if _ticks else None  # EOD close
+                if tick_row:
+                    val = float(tick_row.get("ltp") or tick_row.get("close_price") or 0)
+                    if val > 0:
+                        self.premium_cache[key] = val
+                        self._tick_prem_keys.add((str(date or "")[:10], float(strike or 0),
+                                                  str(option_type or "").upper()))
+                        return val
         except Exception:
             pass
-        # 1) Real DB LTP (historical) — skip if table missing (fresh local DB)
-        # Fast path: synthetic-only backtest never hits DB (Render free tier = slow roundtrips)
+        # 1) Real DB LTP (historical bhavcopy) — daily bars only
         row = None
         if not _intra and not getattr(self, "_skip_db", False):
             try:
@@ -2854,7 +2872,7 @@ class BacktestEngine:
                 val = float(row["close_price"])
                 self.premium_cache[key] = val
                 return val
-        # 2) Real LTP from live market - only in live mode to keep backtest fast and realistic via Black-Scholes
+        # 2) Real LTP from live market - only in live mode
         if self.is_live:
             try:
                 from core.services.live_market_data import LiveMarketData
@@ -2865,8 +2883,7 @@ class BacktestEngine:
                     return val
             except Exception:
                 pass
-        # 3) Nearest strike real print fallback - DAILY bars only (a nearby
-        # daily print is still a whole-session price, not a 12:05 price).
+        # 3) Nearest strike real print fallback - DAILY bars only
         if not _intra and not getattr(self, "_skip_db", False):
             try:
                 from utils.helpers import get_strike_step
@@ -2879,61 +2896,9 @@ class BacktestEngine:
                     return float(row2["close_price"])
             except Exception:
                 pass
-        # 4) Try openchart real historical via strategy_builder fetch (no synthetic) - live only
-        if self.is_live:
-            try:
-                from routes.strategy_builder import _fetch_google_finance, _fetch_and_store_nselib
-                # attempt to fetch real history for this date range on-demand
-                _fetch_google_finance(self.bt_symbol, date, date)
-                row_retry = Database.get_instance().fetch_one(
-                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-                    [self.bt_symbol, date, strike, option_type],
-                )
-                if row_retry and row_retry["close_price"] and float(row_retry["close_price"]) > 0:
-                    return float(row_retry["close_price"])
-            except Exception:
-                pass
-        # Black-Scholes fallback — UNIFIED pricer (paper/live/chain/scanner
-        # parity): model_premium(per-symbol NSE-typical IV, real DTE). Pehle
-        # yahan custom floor (index 0.18/stock 0.20) tha jo live rate se alag
-        # premium deta tha -> backtest profit, paper loss (divergence #1).
-        # NOTE: cache key me SPOT bhi hai (date-only key same din ke baad ke
-        # bars ko pehle spot ka premium deta tha - intraday fill freeze).
-        # DB-sourced prints date-keyed rehte hain (daily print sahi hai).
-        if spot and spot > 0 and strike and strike > 0:
-            dte_days = max(self._days_to_expiry(date, self._get_expiry_type()), 1)
-            try:
-                _mkey = f"{date}_{strike}_{option_type}_e_m{int(float(spot))}_{getattr(self, '_cur_bar_time', '')}"
-            except Exception:
-                _mkey = f"{date}_{strike}_{option_type}_e_mx"
-            if _mkey in self.premium_cache:
-                return self.premium_cache[_mkey]
-            try:
-                from utils.helpers import model_premium as _mp
-                _iv_use = self.implied_volatility or None
-                if not _iv_use:
-                    # REAL us-din ka IV (DB prints se) - model IV se premium,
-                    # SL aur TP levels real market ke qareeb aate hain.
-                    _real = self._day_iv(date, float(spot))
-                    if _real and _real > 0:
-                        _iv_use = _real
-                val = _mp(float(spot), float(strike), dte_days, option_type,
-                           symbol=self.bt_symbol, iv=_iv_use)
-            except Exception:
-                val = 0
-            if val and float(val) > 0:
-                val = round(float(val), 2)
-                self.premium_cache[_mkey] = val
-                return val
-        # DATA HONESTY: ₹5 ek FABRICATED premium hai (real/model dono fail).
-        # Pehle ise 'model' label mil jata tha aur P&L bilkul real dikhata tha.
-        # Ab mark karte hain taaki UI/result me 'fake_fallback' warning dikhe.
-        self._fake_prem_keys.add((str(date or "")[:10], float(strike or 0),
-                                  str(option_type or "").upper()))
-        # Never poison the date cache with a fake 5.0 on an intraday bar.
-        if not _intra:
-            self.premium_cache[key] = 5.0
-        return 5.0
+        # NO Black-Scholes / synthetic fallback. Return None honestly so the
+        # caller can skip entry or mark the trade as unpriceable.
+        return None
 
     def _expiry_weekday(self) -> int:
         """Expiry weekday (NSE 2025+ rule). NSE weeklies = TUESDAY; BSE
@@ -2979,21 +2944,37 @@ class BacktestEngine:
         _intra = self._intraday_bar()
         if not _intra and key in self.premium_cache:
             return self.premium_cache[key]
-        # REAL tick data (exit): recorded 1-min LTP at the exit bar.
+        # REAL tick data (exit): recorded 1-min LTP at the exit bar from
+        # Parquet lakehouse (real data only - NEVER synthetic).
         try:
-            if getattr(self, "_use_tick_data", False):
-                from core.services.tick_recorder import tick_bar
-                _bt = getattr(self, "_cur_bar_time", "") or ""
-                _tv = tick_bar(self.bt_symbol, date, _bt or "15:15", strike,
-                               option_type, str(getattr(self, "bt_expiry", "") or ""))
-                if _tv and float(_tv) > 0:
-                    self.premium_cache[key] = float(_tv)
-                    # _prem_source tuple key se match hona chahiye (pehle
-                    # string key tha → real tick kabhi 'real_ticks' label nahi
-                    # milta tha). Intraday me bar-specific cache bhi zaroori.
-                    self._tick_prem_keys.add((str(date or "")[:10], float(strike or 0),
-                                              str(option_type or "").upper()))
-                    return float(_tv)
+            from core.services.option_lakehouse import query_option_ticks
+            _bt = getattr(self, "_cur_bar_time", "") or ""
+            _expiry = str(getattr(self, "bt_expiry", "") or "")
+            _ticks = query_option_ticks(
+                underlying=self.bt_symbol,
+                data_mode="1m_chain" if _intra else "tick",
+                expiry=_expiry,
+                start_date=str(date)[:10],
+                end_date=str(date)[:10],
+                option_type=option_type,
+                strike=float(strike) if strike else 0,
+                limit=200,
+            )
+            if _ticks is not None and len(_ticks) > 0:
+                # For exit, take the last tick of the day (EOD close) or the
+                # tick closest to bar_time (intraday).
+                if _intra and _bt:
+                    cands = [r for r in _ticks if str(r.get("timestamp", ""))[11:16] >= _bt]
+                    tick_row = cands[-1] if cands else _ticks[-1]
+                else:
+                    tick_row = _ticks[-1] if _ticks else None
+                if tick_row:
+                    val = float(tick_row.get("ltp") or tick_row.get("close_price") or 0)
+                    if val > 0:
+                        self.premium_cache[key] = val
+                        self._tick_prem_keys.add((str(date or "")[:10], float(strike or 0),
+                                                  str(option_type or "").upper()))
+                        return val
         except Exception:
             pass
         skip_db = getattr(self, "_skip_db", False)
@@ -3040,39 +3021,9 @@ class BacktestEngine:
                     return val
             except Exception:
                 pass
-        # Black-Scholes fallback — UNIFIED pricer (entry parity): model_premium
-        # (per-symbol IV, real DTE). Exit alag formula se nikalta tha to
-        # entry/exit mismatch se fake winrate banta tha. Cache key me SPOT
-        # (entry-side jaisa intraday freeze fix).
-        if spot and spot > 0 and strike and strike > 0:
-            dte_days = max(self._days_to_expiry(date, self._get_expiry_type(), anchor=anchor_exp), 1)
-            try:
-                _mkey = f"{date}_{strike}_{option_type}_c_m{int(float(spot))}_{getattr(self, '_cur_bar_time', '')}"
-            except Exception:
-                _mkey = f"{date}_{strike}_{option_type}_c_mx"
-            if _mkey in self.premium_cache:
-                return self.premium_cache[_mkey]
-            try:
-                from utils.helpers import model_premium as _mp2
-                _iv_use2 = self.implied_volatility or None
-                if not _iv_use2:
-                    _real2 = self._day_iv(date, float(spot))
-                    if _real2 and _real2 > 0:
-                        _iv_use2 = _real2
-                val = _mp2(float(spot), float(strike), dte_days, option_type,
-                            symbol=self.bt_symbol, iv=_iv_use2)
-            except Exception:
-                val = 0
-            if val and float(val) > 0:
-                val = round(float(val), 2)
-                self.premium_cache[_mkey] = val
-                return val
-        # DATA HONESTY: ₹5 = fabricated fallback (koi real/model source nahi).
-        self._fake_prem_keys.add((str(date or "")[:10], float(strike or 0),
-                                  str(option_type or "").upper()))
-        if not _intra:
-            self.premium_cache[key] = 5.0
-        return 5.0
+        # NO Black-Scholes / synthetic fallback. Return None honestly so the
+        # caller can skip exit or mark the trade as unpriceable.
+        return None
 
     def _expiry_for_date(self, bar_date):
         """Exchange expiry for PRICING on `bar_date`: NSE weekly = Tuesday,
@@ -3160,10 +3111,20 @@ class BacktestEngine:
         if entry.get("is_spread"):
             self._close_spread(entries, exits, entry, reason, exit_date, trigger=trigger)
             return
+        # DATA HONESTY: if no real premium available, do NOT fabricate a fill.
+        # Skip the exit honestly so paper/backtest parity is preserved.
+        try:
+            _ep = float(exit_prem)
+        except Exception:
+            _ep = 0.0
+        if _ep <= 0:
+            # No real price available - skip exit, mark trade as unclosed.
+            entries.append({"_skip_exit": True, "reason": reason, "date": exit_date})
+            return
         # Floor at option tick size only. Never floor to spot-based levels:
         # SL/TP exits (e.g. 9.30 on a far-OTM option) must execute exactly,
         # else a spot*1.5% floor (~42) silently destroys every stop-loss.
-        exit_prem = max(float(exit_prem or 0), 0.05)
+        exit_prem = max(_ep, 0.05)
         # TICK SIZE 0.05 (rulebook): exit fill bhi tick par snap.
         try:
             from core.services.strategy_rulebook import round_tick as _rtick_ex
