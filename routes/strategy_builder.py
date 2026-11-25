@@ -621,8 +621,15 @@ def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
                     _reason = str(_t.get("exit_status") or _t.get("exit_reason") or "").lower()
                     _ep = float(_t.get("entry_price") or 0)
                     _xp = float(_t.get("exit_price") or 0)
-                    if _txn == "buy" and ("stop" in _reason or "sl" in _reason) and _xp > _ep:
-                        _bad_sl += 1
+                    # SL DIRECTION (fix 25-11): BUY (long) ka SL entry se UPAR
+                    # hota hai (price upar gayi = loss) - ye SAHI hai. Pehle
+                    # yahi sahi SL 'math bug' bol kar failed dikha raha tha.
+                    # Galat tab hai jab BUY ka SL exit entry se NEECHE ho ya
+                    # SELL ka SL exit entry se UPAR ho (tab to profit dikhega).
+                    _is_sl = ("stop" in _reason or "sl" in _reason)
+                    if _is_sl and _ep > 0:
+                        if (_txn == "buy" and _xp < _ep - 0.01) or (_txn == "sell" and _xp > _ep + 0.01):
+                            _bad_sl += 1
                     # Risk Rs = sl_points × Qty verify (jahan dono fields ho).
                     _risk = float(_t.get("risk_amount_rs", 0) or 0)
                     _slpts = float(_t.get("sl_points", 0) or 0)
@@ -643,7 +650,7 @@ def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
             if _bad_sl == 0:
                 passed.append("SL direction valid")
             else:
-                failed.append(f"{_bad_sl} BUY trades me SL entry se upar hit hua (math bug)")
+                failed.append(f"{_bad_sl} trades me SL direction galat (BUY ka SL entry se neeche / SELL ka upar - loss ki jagah profit dikhega)")
         except Exception:
             pass
     except Exception as e:

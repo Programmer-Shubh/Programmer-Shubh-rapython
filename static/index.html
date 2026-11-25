@@ -1633,6 +1633,49 @@ let _lastOpenTrdHTML = null;
             const vBadge=vv.ok==null?'':(vv.ok?'<span class="badge bg-success">Math OK</span>':'<span class="badge bg-warning text-dark">PARTIAL DATA</span>');
             return `<div class="alert alert-light border py-2 mb-2 small"><strong><i class="bi bi-activity"></i> Diagnostics:</strong> Signals evaluated ${dg.signals_evaluated||0} → generated ${dg.signals_generated||0} (BUY ${dg.signals_buy||0} / SELL ${dg.signals_sell||0}) | Rejected (${rej})<br>Coverage: ${covTxt} ${vBadge}${(vv.failed||[]).length?` <span class="text-danger">${vv.failed.join('; ')}</span>`:''}</div>`;
         }catch(e){return '';}}
+    // Backtest ke baad: kya badalna hai (Hindi, numbers ke saath). User demand
+    // 25-11: result dekhne ke baad SL/target/indicator/data sudhar ki wajah
+    // saaf Hindi me dikhe - sirf metrics nahi.
+    function btSuggestH(r,m){
+        try{
+            const out=[]; const dg=r.diagnostics||{}, vv=r.validation||{};
+            const rej=dg.rejected||{}, cov=dg.coverage||{}, tl=r.trade_list||[];
+            const sl=parseFloat(document.getElementById('s-sl')?.value)||0;
+            const tp=parseFloat(document.getElementById('s-tp')?.value)||0;
+            const p=(v)=>'₹'+Number(v||0).toLocaleString('en-IN',{maximumFractionDigits:0});
+            // 1) Data quality sabse pehle - galat data par tune karna bekaar.
+            if(r.validation_status&&r.validation_status!=='OK'){
+                let cd=0,ct=0; Object.keys(cov).forEach(k=>{cd+=cov[k].days_with_data||0;ct+=cov[k].trading_days||0;});
+                out.push('Data adhura hai ('+cd+'/'+ct+' din). Pehle missing din sync karo ya date range chhota karo — is result ko final mat maano.');
+            }
+            if(!m.total_trades){
+                out.push('Koi trade nahi bana. Indicator threshold thoda relax karo (ADX 25→20), extra filters (Market Regime/VWAP) OFF karo, ya timeframe/date range badlo.');
+            }else{
+                // 2) Win/loss balance.
+                if(m.win_rate<45) out.push('Win rate '+m.win_rate+'% kam hai. Entry signal tight karo: RSI threshold badlo ya SuperTrend ke saath doosra confirm lagao.');
+                if((m.avg_loss||0)>(m.avg_win||0)*1.2){
+                    const ntp=Math.round(tp*1.4/5)*5, nsl=Math.round(sl*0.7/5)*5;
+                    out.push('Avg loss '+p(m.avg_loss)+' avg win '+p(m.avg_win)+' se '+((m.avg_loss/Math.max(m.avg_win,1)).toFixed(1))+'x bada hai (Reward:Risk '+(m.reward_risk||0)+' < 1). Target '+(tp||'ab')+' → '+(ntp||'bada')+' pt karo ya SL '+(sl||'ab')+' → '+(nsl||'chhota')+' pt tight karo.');
+                }
+                if((m.expectancy||0)<0) out.push('Expectancy '+p(m.expectancy)+' (negative) hai — is setup ko live/paper par chalane se pehle SL/TP tune karo.');
+                // 3) Exit reasons: SL/TP distribution.
+                const slN=tl.filter(t=>/stop|sl/i.test(t.exit_reason||'')).length;
+                const tpN=tl.filter(t=>/target|tp/i.test(t.exit_reason||'')).length;
+                if(slN>tl.length*0.6) out.push(slN+' / '+tl.length+' trades SL se nikle. SL bahut tight ya entry late hai: SL '+(sl||30)+' → '+Math.round((sl||30)*1.25)+' pt karo ya entry_time 09:35 → 09:45.');
+                if(tpN && tpN<tl.length*0.25 && slN>tpN) out.push('Target sirf '+tpN+' baar hit hua. TP '+(tp||50)+' pt thoda chhota karke '+Math.round((tp||50)*0.75)+' pt try karo (fast partial profit).');
+            }
+            // 4) Filter/rejection reasons - indicator sudhar.
+            if(rej.strict_trend_adx_vwap>20) out.push('ADX/VWAP filter ne '+rej.strict_trend_adx_vwap+' signals reject kiye. ADX threshold 25 → 20 karo ya ye filter hata do (sirf selected indicators rahein).');
+            if(rej.reentry_block>20) out.push('"No Re-entry" ne '+rej.reentry_block+' baar entry roki. Intraday momentum chalana hai to Re-entry on SL = "RE ASAP" karo.');
+            if(rej.max_trades_day>20) out.push('Max Trades/Day cap baar baar hit hua. Cap 5 → 8 karo ya unlimited (-1) rakho.');
+            if(rej.min_premium_lt_20>20) out.push('Min-premium filter ne '+rej.min_premium_lt_20+' entries rok di. OTM distance 1 strike kam karo (premium ₹20+ wala strike chuno).');
+            // 5) Data mode honesty.
+            if(r.data_source==='black_scholes' && r.tick_reason) out.push('Backtest Black-Scholes model par chala: '+String(r.tick_reason).slice(0,140)+' Real data ke liye "Premium Data = Real Tick (1M chain)" chuno.');
+            if(r.data_source==='fake_fallback') out.push('Kuch fills ₹5 fake fallback se aaye — ye result real nahi hai. NSE option sync + tick data complete karo, phir dobara run karo.');
+            if(!out.length) out.push('Metrics balance mein hain (win rate, Reward:Risk aur coverage theek). Phir bhi chhote size se paper trial karke hi live par jao.');
+            return '<div class="alert alert-warning py-2 mb-2 small"><strong><i class="bi bi-tools"></i> Strategy sudhar (Hindi):</strong><ul class="mb-0 mt-1">'+out.map(x=>'<li>'+x+'</li>').join('')+'</ul></div>';
+        }catch(e){return '';}
+    }
     async function _renderBacktestResult(r, _seq){
         // Shared FULL renderer: direct (saved-strategy Backtest Detail) + normal
         // dono yahi render karte hain — metrics + per-symbol + equity/monthly
@@ -1968,9 +2011,10 @@ let _lastOpenTrdHTML = null;
                 zeroH=`<div class="alert alert-warning py-2 mb-2 small"><strong><i class="bi bi-exclamation-triangle"></i> 0 trades — wajah:</strong> ${r.note||'Is period/setting me koi entry signal nahi bana (honest zero).'}${tips?`<ul class="mb-0 mt-1">${tips}</ul>`:''}</div>`;
             }
             const diagH=diagHtml(r);
+            const sugH=btSuggestH(r,m);
             const nkH2=r.naked_warning?`<div class="alert alert-danger py-2 mb-2 small"><strong><i class="bi bi-exclamation-triangle-fill"></i> Naked Short Warning:</strong> ${r.naked_warning}</div>`:'';
             document.getElementById('bt-metrics').innerHTML=perSymH+zeroH+nkH2+`
-<div class="alert alert-secondary py-1 px-2 mb-2 small text-muted">${_pinfo}</div>${diagH}
+<div class="alert alert-secondary py-1 px-2 mb-2 small text-muted">${_pinfo}</div>${diagH}${sugH}
 <div class="alert alert-primary py-2 mb-2 small d-flex flex-wrap gap-3 align-items-center"><strong><i class="bi bi-star-fill"></i> strategy 4 Key Metrics:</strong><span>Win Prob: <strong>${ZN(m.win_rate+'%')}</strong></span><span>Avg P&L: <strong class="${m.avg_profit_per_trade>=0?'price-up':'price-down'}">${_zt?'N/A':F(m.avg_profit_per_trade)}</strong></span><span>Drawdown: <strong class="price-down">${m.max_drawdown}% / ${m.max_dd_duration||0} days</strong></span><span>RPT/Expectancy: <strong>${ZN(m.expectancy)}</strong> ${_zt?'':(m.expectancy>0?'<span class="badge bg-success">Winner</span>':'<span class="badge bg-danger">Loser</span>')}</span><span class="ms-auto badge bg-info">Slippage ${(parseFloat(document.getElementById('s-slippage')?.value)||0.50)}%</span>${r.took_ms!=null?'<span class="badge bg-secondary">'+(r.took_ms/1000).toFixed(1)+'s</span>':''}</div>
 <div class="row g-2 mb-2">
 <div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
@@ -2116,6 +2160,8 @@ let _lastOpenTrdHTML = null;
         updatePayoff();
         try{if(typeof refreshAutoBadge==='function')refreshAutoBadge();}catch(e){}
         try{if(typeof updateRunSummary==='function')updateRunSummary();}catch(e){}
+        // Leg (CE/PE, ATM/OTM) badle to estimated premium bhi badalna chahiye.
+        try{ if(typeof _refreshDualMirror==='function'){ window._entryPrem=0; _refreshDualMirror(); } }catch(e){}
     }
     let _autoBT=null; function toggleAutoBacktest(on){ if(on){ if(!_autoBT) _autoBT=setTimeout(()=>{try{if(document.getElementById('r-auto')?.checked) runBacktest();}catch(e){}},800); } else { if(_autoBT) clearTimeout(_autoBT); _autoBT=null; } }
     function scheduleAutoBT(){ if(!document.getElementById('r-auto')?.checked) return; if(_autoBT) clearTimeout(_autoBT); _autoBT=setTimeout(()=>{try{runBacktest();}catch(e){}},800); }
@@ -2225,29 +2271,43 @@ let _lastOpenTrdHTML = null;
     // (ATM premium) ke basis par. Premium live chain se; naive ho to ~ spot
     // ke 0.35% * sqrt(dte/7) ATM proxy (BS-ish) estimate.
     let _premEstCache={};
+    const _PREM_STEP={NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:25,SENSEX:100};
     async function _entryPremEst(){
-        try{ const sym=(typeof rSyms==='function'&&rSyms()[0])||''; if(!sym)return null;
-            const _c=_premEstCache[sym]; if(_c&&Date.now()-_c.ts<60000&&_c.v)return _c.v;
-            // FAST PATH (25-11): pehle /api/dashboard/spot + /api/dashboard/option-chain
-            // (dono ~0.5s, real bhavcopy chain). /api/chain/live kabhi-kabhi 30s+
-            // timeout karta tha → estimate text kabhi dikhta hi nahi tha.
-            let spot=_payoffSpot||0;
-            if(!spot){ try{ const _sp=await A('/api/dashboard/spot/'+sym); spot=Number((_sp&&(_sp.spot||_sp.price))||0)||0; }catch(e){} }
-            let v=0;
-            if(spot){
-                try{
-                    const _ch=await A('/api/dashboard/option-chain/'+sym);
-                    const rows=[...( (_ch&&_ch.ce)||[] ),...((_ch&&_ch.pe)||[])].filter(r=>r&&r.strike!=null&&r.ltp!=null&&r.ltp>0);
-                    let best=null;
-                    for(const r of rows){ const dd=Math.abs(Number(r.strike)-spot); if(!best||dd<best.dd) best={dd,r}; }
-                    if(best&&best.dd<=Math.max(spot*0.01,50)) v=Number(best.r.ltp)||0;
-                }catch(e){}
-            }
-            if(!v && spot>0){
-                v=Math.max(5, Math.round(spot*0.004*(typeof _payoffDTE!=='undefined'?Math.sqrt(Math.max(1,_payoffDTE)/7):1)));
-            }
-            if(v>0) _premEstCache[sym]={v,ts:Date.now()};
-            return v>0?v:null;
+        try{
+            const sym=(typeof rSyms==='function'&&rSyms()[0])||''; if(!sym)return null;
+            const leg=(typeof stratLegs!=='undefined'&&stratLegs.length)?stratLegs[0]:{};
+            const opt=String(leg.option_type||((document.getElementById('r-order')||{}).value||'CE-BUY').split('-')[0]).toUpperCase();
+            const sel=String(leg.strike_selection||document.getElementById('r-strike')?.value||'atm').toLowerCase();
+            const dist=Math.abs(parseInt(leg.otm_distance||0)||0);
+            const key=sym+'_'+opt+'_'+sel+'_'+dist;
+            const _c=_premEstCache[key]; if(_c&&Date.now()-_c.ts<60000&&_c.v){window._entryPremSrc=_c.src;return _c.v;}
+            // SHART 1: hamesha FRESH spot for SELECTED symbol (25-11 fix).
+            // Purana code _payoffSpot (default 24500 = NIFTY) use karta tha →
+            // FINNIFTY par ₹98 (24500×0.4%) galat estimate dikhta tha.
+            let spot=0;
+            try{ const _sp=await A('/api/dashboard/spot/'+sym); spot=Number((_sp&&(_sp.spot||_sp.price))||0)||0; }catch(e){}
+            if(!(spot>0)) return null;   // no fake estimate
+            // SHART 2: real chain se USI leg ka premium (ATM / OTM-n / ITM-n).
+            let v=0, src='model';
+            try{
+                const _ch=await A('/api/dashboard/option-chain/'+sym);
+                const rows=((opt==='PE'?(_ch&&_ch.pe):(_ch&&_ch.ce))||[]).filter(r=>r&&r.strike!=null&&r.ltp!=null&&r.ltp>0);
+                let step=_PREM_STEP[sym]||0;
+                if(!step&&rows.length>1) step=Math.abs(Number(rows[1].strike)-Number(rows[0].strike))||50;
+                if(!step) step=50;
+                const atm=Math.round(spot/step)*step;
+                let target=atm;
+                if(sel==='otm') target=atm+((opt==='CE')?1:-1)*dist*step;
+                else if(sel==='itm') target=atm+((opt==='CE')?-1:1)*dist*step;
+                let best=null;
+                for(const r of rows){const dd=Math.abs(Number(r.strike)-target);if(!best||dd<best.dd)best={dd,r};}
+                if(best&&best.dd<=step/2){v=Number(best.r.ltp)||0;src='real '+( _ch&&_ch.date?_ch.date:'chain');}
+            }catch(e){}
+            // SHART 3: chain na mile to spot-based model estimate (honest label).
+            if(!(v>0)) v=Math.max(5, Math.round(spot*0.004*(typeof _payoffDTE!=='undefined'?Math.sqrt(Math.max(1,_payoffDTE)/7):1)));
+            window._entryPremSrc=src;
+            _premEstCache[key]={v,src,ts:Date.now()};
+            return v;
         }catch(e){ return null; }
     }
     function _dualMirror(el,inEl){
@@ -2267,7 +2327,7 @@ let _lastOpenTrdHTML = null;
                     const sell=String(_rbSide())==='sell';
                     const lvl=isSL?(sell?prem+a.v:Math.max(0.05,prem-a.v))
                                   :(sell?Math.max(0.05,prem-a.v):prem+a.v);
-                    txt+=' • est. premium ₹'+prem.toFixed(2)+' → '+(isSL?'SL':'TP')+' ₹'+lvl.toFixed(2);
+                    txt+=' • est. premium ₹'+prem.toFixed(2)+' ('+(window._entryPremSrc||'model')+') → '+(isSL?'SL':'TP')+' ₹'+lvl.toFixed(2);
                 }else{
                     txt+=' • est. premium load ho raha hai…';
                 }
