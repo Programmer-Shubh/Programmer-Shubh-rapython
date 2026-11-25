@@ -227,7 +227,7 @@ def _today_signal(sid, s, today, need_more_than=0):
                 return bool(_shit[1]), str(_shit[2])
         except Exception:
             _sck, _cfgh = None, ""
-        def _sig_store(_fires, _why):
+        def _sig_store(_fires, _why, _strike=None, _price=None):
             try:
                 if _sck:
                     # Negative (abhi signal nahi mila) sirf 5 min cache hota hai -
@@ -236,12 +236,13 @@ def _today_signal(sid, s, today, need_more_than=0):
                     # late/miss ho jati thi. Positive 30 min (heavy backtest na
                     # dobara chale).
                     _ttl = _SIGNAL_TTL if _fires else 300
-                    _SIGNAL_CACHE[_sck] = (time.time(), bool(_fires), str(_why), _ttl)
+                    _SIGNAL_CACHE[_sck] = (time.time(), bool(_fires), str(_why), _ttl,
+                                           _strike, _price)
                     if len(_SIGNAL_CACHE) > 60:
                         _SIGNAL_CACHE.pop(next(iter(_SIGNAL_CACHE)))
             except Exception:
                 pass
-            return _fires, _why
+            return _fires, _why, _strike, _price
         try:
             adv = _js.loads(s.get("advanced_options") or "{}")
         except Exception:
@@ -301,7 +302,9 @@ def _today_signal(sid, s, today, need_more_than=0):
         if _today_tl:
             _n_bt_today = len(_today_tl)
             if int(need_more_than or 0) <= 0:
-                return _sig_store(True, "aaj ka signal mila")
+                _st = _today_tl[0]
+                return _sig_store(True, "aaj ka signal mila",
+                                  _st.get("strike"), float(_st.get("entry_price") or 0))
             if _n_bt_today <= int(need_more_than or 0):
                 return _sig_store(False, f"aaj backtest me sirf {_n_bt_today} signal the, "
                                          f"{int(need_more_than)} already paper-traded - naya signal nahi")
@@ -316,8 +319,10 @@ def _today_signal(sid, s, today, need_more_than=0):
                                              f"(parity: entry backtest ke time par hi)")
             except Exception:
                 pass
-            return _sig_store(True, f"aaj ka signal #{int(need_more_than) + 1} mila "
-                                    f"(backtest me {_n_bt_today})")
+                _st = _today_tl[int(need_more_than)]
+                return _sig_store(True, f"aaj ka signal #{int(need_more_than) + 1} mila "
+                                    f"(backtest me {_n_bt_today})",
+                                  _st.get("strike"), float(_st.get("entry_price") or 0))
         # Lookback fallback: aaj ka signal na ho par pichhle N din me asli
         # signal bana ho AUR us par ab tak koi paper entry na hui ho to lagao
         # (trend-follow, once-per-signal - roz dobara nahi). N =
@@ -358,10 +363,14 @@ def _today_signal(sid, s, today, need_more_than=0):
                                 - _dt2.datetime.strptime(_sd, "%Y-%m-%d").date()).days
                     except Exception:
                         _age = 0
-                    return _sig_store(True, f"{_age} din purana signal {_sd} (trend follow, pehli entry)")
+                    _sig_trade = [t for t in tl if str(t.get("entry_date", ""))[:10] == _sd]
+                    _stk = _sig_trade[0].get("strike") if _sig_trade else None
+                    _stk_px = float(_sig_trade[0].get("entry_price") or 0) if _sig_trade else 0.0
+                    return _sig_store(True, f"{_age} din purana signal {_sd} (trend follow, pehli entry)",
+                                      _stk, _stk_px)
         except Exception:
             pass
-        return _sig_store(False, "aaj koi signal nahi")
+        return _sig_store(False, "aaj koi signal nahi", None, 0.0)
     except Exception as e:
         return False, f"signal-check fail: {e}"[:120]
 
@@ -512,6 +521,14 @@ def _intraday_signal(sid, s, today, need_more_than=0):
                     pass
             _ordered = sorted(_today_tl, key=lambda x: str(x.get("entry_time") or ""))
             _pick = _ordered[min(int(need_more_than or 0), len(_ordered) - 1)] if _ordered else None
+            _sig_strike = None
+            _sig_price = 0.0
+            if _pick:
+                _sig_strike = _pick.get("strike")
+                try:
+                    _sig_price = float(_pick.get("entry_price") or 0)
+                except Exception:
+                    _sig_price = 0.0
             for t in ([_pick] if _pick else []):
                 _o = str(t.get("option_type") or "").upper()
                 _p = str(t.get("position") or "").upper()
@@ -524,13 +541,14 @@ def _intraday_signal(sid, s, today, need_more_than=0):
         except Exception:
             pass
         if fired:
-            return fired, f"{len(fired)} leg(s) fired on 15m"
-        return None, "no 15m signal right now"
+            return fired, f"{len(fired)} leg(s) fired on 15m", _sig_strike, _sig_price
+        return None, "no 15m signal right now", None, 0.0
     except Exception as e:
         return None, f"signal-check fail: {e}"[:120]
 
 
-def _execute_legs(s, legs, db, tm, today, force_paper=False):
+def _execute_legs(s, legs, db, tm, today, force_paper=False,
+                  signal_strike=None, signal_price=None):
     """Shared leg executor: live ATM + place_trade per leg. Returns (placed, notes).
 
     LIVE ROUTING (user fix): is strategy ka Live toggle ON ho + khud REAL
@@ -544,7 +562,11 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
     live detection pura ignore - legs HAMESHA paper me jaati hain. Paper
     button ka FORCE par koi REAL broker order kabhi nahi jayega (real money
     sirf Live button / live worker se). Default False = bilkul purana
-    behavior, auto-worker/live-parity bilkul untouched."""
+    behavior, auto-worker/live-parity bilkul untouched.
+
+    signal_strike/signal_price (25-11 PARITY FIX): backtest signal ke saath
+    SAME strike aur entry price use karo — paper live ATM se alag strike
+    laga raha tha jisse SL immediately hit ho raha tha."""
     import json as _js
     from core.services.live_market_data import LiveMarketData
     from utils.helpers import get_strike_step
@@ -612,11 +634,16 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False):
                 txn = "BUY"
             sel = str(leg.get("strike_selection") or "atm").lower()
             dist = int(leg.get("otm_distance") or 0)
-            strike = atm
-            if sel == "otm":
-                strike = atm + (dist * step if opt == "CE" else -dist * step)
-            elif sel == "itm":
-                strike = atm + (-dist * step if opt == "CE" else dist * step)
+            # PARITY (25-11): backtest signal ke saath hi strike/use karo —
+            # live ATM se alag strike laga ne par SL immediately hit hota tha.
+            if signal_strike:
+                strike = float(signal_strike)
+            else:
+                strike = atm
+                if sel == "otm":
+                    strike = atm + (dist * step if opt == "CE" else -dist * step)
+                elif sel == "itm":
+                    strike = atm + (-dist * step if opt == "CE" else dist * step)
             # ---- OTM cap guard (user rule 27-10-2026: "otm 20 filter") ----
             # Strike live spot se otm_pct_cap % se DUR ho to leg SKIP - far
             # OTM junk stock strikes (BOSCHLTD 47000 CE jab spot ~19K hai)
@@ -868,9 +895,11 @@ def place_for_strategy(sid, signal_check="daily"):
         # Fail-CLOSED: gate me exception aaye to SKIP (place kabhi nahi).
         # Pehle `except: pass` tha - gate crash hone par bina signal entry
         # lag jati thi (andha trade). Ab crash = skip + wajah.
+        _sig_strike = None
+        _sig_price = 0.0
         if signal_check == "daily":
             try:
-                _fires, _why = _today_signal(sid, s, today, need_more_than=n_today_count)
+                _fires, _why, _sig_strike, _sig_price = _today_signal(sid, s, today, need_more_than=n_today_count)
             except Exception as _ge:
                 return {"placed": placed,
                         "notes": [f"{s.get('name')}: signal-check crash - skipped ({str(_ge)[:80]})"]}
@@ -878,14 +907,15 @@ def place_for_strategy(sid, signal_check="daily"):
                 return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
         elif signal_check == "intraday":
             try:
-                _fired, _why = _intraday_signal(sid, s, today, need_more_than=n_today_count)
+                _fired, _why, _sig_strike, _sig_price = _intraday_signal(sid, s, today, need_more_than=n_today_count)
             except Exception as _ge:
                 return {"placed": placed,
                         "notes": [f"{s.get('name')}: live signal-check crash - skipped ({str(_ge)[:80]})"]}
             if not _fired:
                 return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
             use_legs = _fired
-        _pl, _nt = _execute_legs(s, use_legs, db, tm, today)
+        _pl, _nt = _execute_legs(s, use_legs, db, tm, today,
+                                 signal_strike=_sig_strike, signal_price=_sig_price)
         placed.extend(_pl)
         notes.extend(_nt)
     except Exception as e:
