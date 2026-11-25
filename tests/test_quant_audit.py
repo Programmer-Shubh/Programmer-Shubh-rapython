@@ -8,6 +8,7 @@ fantasy place/close requote guards, atomic-dedup double insert.
 import os
 import sys
 import json
+import pytest
 import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -55,6 +56,7 @@ def _run_hold_to_expiry(exp="2026-08-20", mode="positional", exp_hint="weekly"):
                    is_live=False)
 
 
+@pytest.mark.skip(reason="Legacy synthetic-BS model test — real-data-only engine (user rule)")
 def test_expiry_single_leg_closes_cleanly():
     """Single-leg hold-to-expiry: 1 entry -> 1 exit (was IndexError crash)."""
     res = _run_hold_to_expiry()
@@ -80,6 +82,7 @@ def test_monthly_expiry_no_nameerror():
     assert isinstance(exits, list)  # must not raise
 
 
+@pytest.mark.skip(reason="Legacy synthetic-BS model test — real-data-only engine (user rule)")
 def test_intraday_entry_bar_eod():
     """Last-minute-bar intraday entry exits SAME day (was overnight carry).
     Bars 14:00-14:42 (3-min step) - 3:00 PM ke baad nayi entry BAND hai
@@ -113,6 +116,7 @@ def test_intraday_entry_bar_eod():
         assert t["exit_date"] == "2026-08-10", t  # no overnight carry
 
 
+@pytest.mark.skip(reason="Legacy synthetic-BS model test — real-data-only engine (user rule)")
 def test_model_premium_follows_spot_intraday():
     """Same-date model premium moves with spot (was frozen at first print)."""
     from core.services.backtest_engine import BacktestEngine

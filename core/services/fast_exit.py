@@ -481,6 +481,13 @@ def _on_message(message):
                 record_from_ws(sym, v, volume=0)
             except Exception:
                 pass
+            # Zero-copy Parquet lakehouse auto-recorder: ring-buffer + async
+            # batch flush. Non-blocking — order execution never waits on disk.
+            try:
+                from core.services.lakehouse_recorder import enqueue_tick
+                enqueue_tick(sym, v, volume=0, data_mode="tick")
+            except Exception:
+                pass
             tid = _SYM_MAP.get(sym)
             if not tid:
                 continue

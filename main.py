@@ -1,5 +1,6 @@
 import os
 import asyncio
+import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -77,6 +78,20 @@ async def _startup_background():
             except Exception:
                 pass
         asyncio.get_running_loop().create_task(asyncio.to_thread(_init_db))
+    except Exception:
+        pass
+    # Nightly Parquet lakehouse compaction (single small file per partition).
+    def _nightly_compact():
+        import time as _t
+        from core.services.option_lakehouse import compact_lakehouse
+        while True:
+            _t.sleep(86400)
+            try:
+                compact_lakehouse()
+            except Exception:
+                pass
+    try:
+        threading.Thread(target=_nightly_compact, name="lakehouse-nightly-compact", daemon=True).start()
     except Exception:
         pass
     # Process resource monitor (psutil): periodic RSS/CPU log + soft memory
@@ -370,7 +385,8 @@ app.include_router(strategies.router, prefix="/api/strategies", tags=["Strategie
 app.include_router(custom_code.router, prefix="/api/custom-code", tags=["Custom Code"])
 app.include_router(keepalive.router, prefix="/api/keepalive", tags=["Keep-Alive"])
 app.include_router(tvchart.router, prefix="/api/tvchart", tags=["TV Chart"])
-app.include_router(lakehouse_router, prefix="/api/lakehouse", tags=["Option Data Lakehouse"])
+# Router already declares prefix="/api/lakehouse" — do NOT double-prefix here.
+app.include_router(lakehouse_router, tags=["Option Data Lakehouse"])
 
 
 @app.get("/")

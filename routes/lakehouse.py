@@ -22,10 +22,13 @@ from core.services.option_lakehouse import (
     OPTION_TICKS_ROOT,
     REAL_TICK_SOURCES,
     compact_lakehouse,
+    get_lakehouse_library,
     get_lakehouse_status,
+    missing_dates,
     query_option_ticks,
     store_option_ticks,
 )
+from core.services.lakehouse_recorder import get_recorder_status, set_active
 
 router = APIRouter(prefix="/api/lakehouse", tags=["Option Data Lakehouse"])
 
@@ -52,6 +55,56 @@ class TickUploadResponse(BaseModel):
 async def lakehouse_status():
     """Lakehouse health: symbols, modes, date range, storage size."""
     return get_lakehouse_status()
+
+
+@router.get("/library")
+async def lakehouse_library():
+    """Stored Option Data Library: symbols, modes, date ranges, completeness."""
+    return get_lakehouse_library()
+
+
+@router.get("/missing-dates")
+async def lakehouse_missing_dates(
+    symbol: str = "", data_mode: str = "1m_chain",
+    start_date: str = "", end_date: str = "",
+):
+    """Actionable missing-date warning for the requested offline backtest window."""
+    miss = missing_dates(symbol, data_mode, start_date, end_date)
+    return {"symbol": symbol.upper(), "data_mode": data_mode,
+            "missing_dates": miss, "count": len(miss),
+            "message": (f"{len(miss)} dates missing — sync/upload ya chhoti range chuno."
+                        if miss else "Requested dates cached — offline backtest ready.")}
+
+
+@router.get("/auto-record/status")
+async def lakehouse_auto_record_status():
+    """Live auto-recording pill: active/paused, latest date, symbols, size."""
+    return get_recorder_status()
+
+
+@router.post("/auto-record/toggle")
+async def lakehouse_auto_record_toggle(active: bool = True):
+    set_active(active)
+    return {"success": True, **get_recorder_status()}
+
+
+@router.post("/sync-incremental")
+async def lakehouse_incremental_sync(days: int = 5):
+    """Optional incremental historical sync (broker connected only).
+
+    Idempotent: rows flow through the same normalized dedup/merge path.
+    """
+    try:
+        from core.services.nse_option_sync import sync_from_nse
+        from datetime import datetime, timedelta, timezone
+        _ist = timezone(timedelta(hours=5, minutes=30))
+        _end = datetime.now(_ist).strftime("%Y-%m-%d")
+        _start = (datetime.now(_ist) - timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d")
+        res = sync_from_nse(start_date=_start, end_date=_end)
+        return {"success": True, "message": "Incremental sync complete — dedup merge applied",
+                "result": str(res)[:300]}
+    except Exception as e:
+        return {"success": False, "message": f"Broker/NSE sync unavailable: {e}"[:300]}
 
 
 @router.post("/ticks")

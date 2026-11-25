@@ -5,7 +5,7 @@ from typing import List, Dict
 from core.services.indicator_engine import IndicatorEngine
 from core.services.transaction_costs import TransactionCosts
 from core.models.database import Database
-from utils.helpers import get_strike_step, get_lot_size, black_scholes, align_strike_price
+from utils.helpers import get_strike_step, get_lot_size, align_strike_price
 
 
 # Engine version: backtest LOGIC badalne par bump karo (gates/pricer/warmup).
@@ -49,7 +49,7 @@ class BacktestEngine:
         self.premium_cache = {}
         self.bt_symbol = ""
         self.bt_expiry = ""
-        self.implied_volatility = None  # None = per-symbol model_iv (unified)
+        self.implied_volatility = None  # None = us din ka REAL IV (model IV banned)
         self.is_live = is_live  # Unified switch: False=backtest, True=live/paper
         self._cur_bar_time = ""
         self._skip_db = False  # True => synthetic-only fast path, no DB roundtrips
@@ -111,10 +111,8 @@ class BacktestEngine:
             "1m_chain", "1m", "tick", "ticks", "real", "real_option", "option_chain")
         self.bt_expiry = str(legs[0].get("expiry_date", "") if legs else "")[:10]
         self._explicit_expiry = bool(self.bt_expiry)
-        # Unified pricer: paper/live/chain/scan sab model_premium(model_iv)
-        # use karte hain. Backtest me custom IV floor (0.18/0.20) alag premium
-        # deta tha -> wahi winrate divergence. None = per-symbol NSE-typical
-        # (NIFTY 0.13, stocks 0.30); explicit advanced value ho to wahi.
+        # Premium sirf real recorded tick / 1m-chain se. IV sirf user-explicit
+        # ya us din ke real option prints se — koi model IV/model premium nahi.
         self.implied_volatility = advanced_options.get("implied_volatility") or None
         # Quantman: slippage override (user enters estimated slippage % like 0.05, 0.1)
         # NOTE: class attribute TransactionCosts.SLIPPAGE_PCT ko AB mutate NAHI
@@ -541,7 +539,11 @@ class BacktestEngine:
                     trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
                 else:
                     trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
+                    if trade is None:
+                        continue
                     trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
+                if trade is None:
+                    continue
                 # Min-premium guard: Rs20 se saste entries (BUY or SELL) kabhi
                 # nahi - signal-time estimate chook sakta hai, isliye ACTUAL
                 # entry premium par final check. Skip without using the day's
@@ -886,23 +888,18 @@ class BacktestEngine:
                         can_enter = False
                 # Min premium filter: skip SELL entries with premium below threshold
                 if can_enter and min_premium > 0:
-                    # Estimate entry premium for this strike (unified pricer)
+                    # REAL premium only (lakehouse tick/chain -> DB print).
+                    # No Black-Scholes estimate: if real premium is unknown,
+                    # do not reject the signal on a fabricated number.
                     try:
-                        from utils.helpers import model_premium as _bsmp
                         spot_est = float(cur.get("open_price", 0) or cur.get("close_price", 0))
                         strike_est = float(legs[0].get("strike", 0) or 0)
-                        if strike_est == 0:
-                            strike_est = round(spot_est / get_strike_step(symbol)) * get_strike_step(symbol)
                         opt_type = legs[0].get("option_type", option_type)
-                        est_prem = _bsmp(spot_est, strike_est, 5, opt_type,
-                                         symbol=symbol, iv=(self.implied_volatility or None))
-                        if (est_prem or 0) < min_premium:
+                        est_prem = self._entry_premium(str(cur_date)[:10], spot_est, strike_est, opt_type)
+                        if est_prem is not None and float(est_prem) < min_premium:
                             can_enter = False
-                            try:
-                                _key = f"min_premium_lt_{int(min_premium)}"
-                                self._rej[_key] = self._rej.get(_key, 0) + 1
-                            except Exception:
-                                pass
+                            _key = f"min_premium_lt_{int(min_premium)}"
+                            self._rej[_key] = self._rej.get(_key, 0) + 1
                     except Exception:
                         pass
                 # VIX filter: skip entry on high-volatility days (VIX > threshold)
@@ -2016,6 +2013,11 @@ class BacktestEngine:
         qty = lots * get_lot_size(symbol)
         strike = self._select_strike(spot, symbol, option_type, strike_sel, delta_target, otm_dist)
         premium = self._entry_premium(date, spot, strike, option_type)
+        # NO synthetic floor: if real tick/chain data has no price for this
+        # exact contract, skip the trade honestly (never fabricate ₹1.5).
+        if premium is None or float(premium) <= 0:
+            self._rej["no_real_option_premium"] = self._rej.get("no_real_option_premium", 0) + 1
+            return None
         # Dynamic Slippage for Option Selling: SELL entry पर प्राइस और खराब (कम) करें
         # ताकि रियल वर्ल्ड बिड-आस्क स्प्रेड का असर पड़े और बैकटेस्ट लाइव से मिले
         # One shared slippage application only (paper entry does the same).
@@ -2024,7 +2026,7 @@ class BacktestEngine:
         premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live,
                                                        slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
         premium = self._apply_latency(premium, "BUY" if txn_type == "buy" else "SELL")
-        premium = max(premium, 1.5)
+        premium = max(float(premium), 0.05)
         # TICK SIZE 0.05 (rulebook): fill price exchange tick par snap.
         try:
             from core.services.strategy_rulebook import round_tick as _rtick
@@ -2114,24 +2116,36 @@ class BacktestEngine:
         }
 
     def _find_delta_strike(self, spot, symbol, option_type, target_delta):
+        """Resolve a delta-target strike from the REAL option chain's own
+        delta column (zero-copy Parquet lakehouse). No BS delta and no model
+        IV: if real delta is not recorded, stay at ATM instead of guessing."""
         step = get_strike_step(symbol)
-        best = round(spot / step) * step
-        best_diff = 1.0
+        atm = round(spot / step) * step
         try:
-            from utils.helpers import model_iv as _miv
-            _iv = float(self.implied_volatility or _miv(symbol) or 0.25)
+            from core.services.option_lakehouse import query_option_ticks
+            from datetime import datetime, timedelta, timezone
+            _ist = timezone(timedelta(hours=5, minutes=30))
+            _d = str(getattr(self, "_cur_bar_date", "") or datetime.now(_ist).strftime("%Y-%m-%d"))[:10]
+            rows = query_option_ticks(
+                underlying=symbol,
+                data_mode="1m_chain" if self._intraday_bar() else "tick",
+                expiry=str(getattr(self, "bt_expiry", "") or ""),
+                start_date=_d, end_date=_d, option_type=option_type,
+                limit=5000,
+            )
+            if rows is None or len(rows) == 0:
+                return atm
+            best, best_diff = atm, 1.0
+            for r in rows.to_dicts():
+                d = float(r.get("delta") or 0)
+                if d == 0:
+                    continue
+                diff = abs(abs(d) - abs(float(target_delta or 0)))
+                if diff < best_diff:
+                    best_diff, best = diff, float(r.get("strike") or atm)
+            return best
         except Exception:
-            _iv = float(self.implied_volatility or 0.25)
-        for offset in range(-1000, 1001, int(step)):
-            test = round(spot / step) * step + offset
-            if test <= 0:
-                continue
-            delta = abs(self.indicators.calculate_delta(spot, test, _iv, 15 / 365, option_type))
-            diff = abs(delta - abs(target_delta))
-            if diff < best_diff:
-                best_diff = diff
-                best = test
-        return best
+            return atm
 
     def _resolve_sltp(self, leg: dict, risk_management: dict):
         """SL/TP rupees YA percent-of-premium ('2%' / *_pct key) - ek jagah
@@ -2397,97 +2411,60 @@ class BacktestEngine:
                     return self._confirm_tp(_hit, txn_type, tp_level, _oc)
         except Exception:
             pass
-        try:
-            from utils.helpers import black_scholes as _bs
-        except Exception:
-            _bs = None
-        high_spot = float(current.get("high_price", 0) or current["close_price"])
-        low_spot = float(current.get("low_price", 0) or current["close_price"])
-        if high_spot < low_spot:
-            high_spot, low_spot = low_spot, high_spot
-        mid_spot = (high_spot + low_spot) / 2.0
-        cur_d = str(current.get("trade_date", ""))
-        strike = float(entry.get("strike", 0) or 0)
-        t = 5 / 365
-        try:
-            exp = getattr(self, "bt_expiry", "") or ""
-            if not exp and cur_d:
-                # bt_expiry khali (koi fixed contract nahi): bar date ke
-                # exchange expiry se compute karo. Held-into-expiry stale
-                # bt_expiry pehle jaisi hi priority rakhta hai (t floor).
-                try:
-                    exp = self._expiry_for_date(cur_d)
-                except Exception:
-                    exp = ""
-            if exp and cur_d:
-                import datetime as _dt
-                d1 = _dt.datetime.strptime(cur_d, "%Y-%m-%d")
-                d2 = _dt.datetime.strptime(exp, "%Y-%m-%d")
-                t = max(0.003, (d2 - d1).days / 365)
-        except Exception:
-            pass
-        # Unified IV: explicit advanced value else per-symbol model_iv (paper parity)
-        # ---- REALITY: us din ka REAL implied IV (DB ke actual prints se) ----
-        # Model IV (NIFTY 13%) aksar market se door hota hai. Agar IV galat
-        # hai to premium, SL aur TP levels SAB galat hote hain (paper me
-        # broker quote par hote hain) - yahi backtest-vs-paper ka bada gap
-        # tha. Ek query me poore din ke option rows la kar ATM strike ka
-        # IV nikaalte hain (per-day flat IV) - realistic + sasta.
-        iv = self._pricing_iv(cur_d, strike, option_type, mid_spot)
-        # ---- STRICT intrabar option band (vega-free / delta based) ----
-        # Purana: option high/low = Black-Scholes RE-PRICE at underlying ke
-        # high/low. Isme gamma/vega exaggeration hota hai - option ka range
-        # 3-8x bada, jisse ek normal 5-min wiggle bhi target/SL touch kar
-        # deti thi (unreal hits -> 80% backtest win-rate).
-        # Ab: DELTA-based band (anchor = bar ka mid) - real premium bar ke
-        # andar delta x underlying-move jitna hi hota hai.
-        # Knob: advanced.option_band_scale (default 1.0).
-        try:
-            _band_scale = float((getattr(self, "_advanced", {}) or {}).get("option_band_scale", 1.0) or 1.0)
-        except Exception:
-            _band_scale = 1.0
-        prem_mid = 0.0
-        try:
-            prem_mid = self._entry_premium(cur_d, mid_spot, strike, option_type)
-        except Exception:
-            prem_mid = 0.0
-        delta = 0.0
-        if prem_mid and float(prem_mid) > 0 and strike > 0:
-            try:
-                from utils.helpers import bs_delta as _bdelta
-                delta = _bdelta(mid_spot, strike, t, iv, option_type)
-            except Exception:
-                delta = 0.0
-        if delta:
-            prem_high = float(prem_mid) + delta * (high_spot - mid_spot) * _band_scale
-            prem_low = float(prem_mid) + delta * (low_spot - mid_spot) * _band_scale
-            # v7: bar ka CLOSE premium (target confirmation ke liye). Same
-            # delta mapping - close bhi bar ke andar ka ek real point hai.
-            prem_close = float(prem_mid) + delta * (
-                float(current.get("close_price", 0) or mid_spot) - mid_spot) * _band_scale
-            # Gap-aware SL fill: bar ka OPEN premium (bar start par known,
-            # look-ahead nahi). Stop order intrabar breach par LEVEL par
-            # fill hota hai, sirf gap-through par open par.
-            prem_open = float(prem_mid) + delta * (
-                float(current.get("open_price", 0) or mid_spot) - mid_spot) * _band_scale
-        elif _bs and strike > 0:
-            try:
-                prem_high = _bs(high_spot, strike, t, iv, option_type.upper()[:2])
-                prem_low = _bs(low_spot, strike, t, iv, option_type.upper()[:2])
-                prem_close = _bs(float(current.get("close_price", 0) or mid_spot),
-                                 strike, t, iv, option_type.upper()[:2])
-                prem_open = _bs(float(current.get("open_price", 0) or mid_spot),
-                                strike, t, iv, option_type.upper()[:2])
-            except Exception:
-                prem_high, prem_low, prem_close, prem_open = 9999, 0, 0, 0
-        else:
-            prem_high, prem_low, prem_close, prem_open = float("inf"), 0, 0, 0
-        opt_high = max(prem_high, prem_low)
-        opt_low = min(prem_high, prem_low)
-        self._trail_update(entry_idx, opt_high, opt_low, txn_type)
-        _hit = self._check_sl_tp_levels(txn_type, sl_level, tp_level, opt_high, opt_low,
+        # STRICT real-contract bar: high/low/open/close of THIS option from
+        # recorded tick / 1-minute-chain data ONLY. No Black-Scholes and no
+        # delta-synthetic band ? an invented range minted fantasy SL/TP hits.
+        _obar = self._real_option_bar(cur_d, strike, option_type)
+        if not _obar or _obar.get("high") is None:
+            # Real premium unavailable for this bar -> honest no-hit (never
+            # fabricate a modelled option path).
+            return None
+        prem_high, prem_low = _obar["high"], _obar["low"]
+        prem_open, prem_close = _obar["open"], _obar["close"]
+        self._trail_update(entry_idx, prem_high, prem_low, txn_type)
+        _hit = self._check_sl_tp_levels(txn_type, sl_level, tp_level, prem_high, prem_low,
                                         bar_open=prem_open)
         return self._confirm_tp(_hit, txn_type, tp_level, prem_close)
+
+    def _real_option_bar(self, date, strike, option_type):
+        """OHLC of one concrete option contract from the Parquet lakehouse.
+
+        Tick/1m-chain rows are IST-sorted; only prints up to the current bar
+        clock are used (no look-ahead). Returns None honestly when no real
+        data exists — never a modeled Black-Scholes/delta substitute.
+        """
+        try:
+            from core.services.option_lakehouse import query_option_ticks
+            _d = str(date or "")[:10]
+            _clock = str(getattr(self, "_cur_bar_time", "") or "")
+            _expiry = str(getattr(self, "bt_expiry", "") or "")
+            rows = None
+            for _mode in (("1m_chain", "tick") if self._intraday_bar() else ("tick", "1m_chain")):
+                _r = query_option_ticks(
+                    underlying=self.bt_symbol, data_mode=_mode, expiry=_expiry,
+                    start_date=_d, end_date=_d, option_type=option_type,
+                    strike=float(strike) if strike else None, limit=5000)
+                if _r is not None and len(_r) > 0:
+                    rows = _r
+                    break
+            if rows is None or len(rows) == 0:
+                return None
+            recs = rows.to_dicts()
+            if _clock:
+                recs = [r for r in recs if str(r.get("timestamp", ""))[11:16] <= _clock]
+            points = []
+            for r in recs:
+                px = float(r.get("ltp") or r.get("close_price") or 0)
+                hi = float(r.get("high_price") or 0) or px
+                lo = float(r.get("low_price") or 0) or px
+                if px > 0:
+                    points.append((px, hi, lo))
+            if not points:
+                return None
+            return {"open": points[0][0], "close": points[-1][0],
+                    "high": max(p[1] for p in points), "low": min(p[2] for p in points)}
+        except Exception:
+            return None
 
     def _day_iv(self, date, spot=0.0):
         """Us din ka REAL implied volatility (DB ke actual option prints se).
@@ -2554,19 +2531,14 @@ class BacktestEngine:
             return 0.0
 
     def _pricing_iv(self, date, strike, option_type, spot=0.0):
-        """Pricing ke liye IV: explicit advanced -> us din ka REAL IV ->
-        per-symbol model IV."""
+        """Explicit user IV ya us din ka REAL IV — koi model IV nahi."""
         try:
             _exp = getattr(self, "implied_volatility", None)
             if _exp:
                 return float(_exp)
-            _real = self._day_iv(date, spot)
-            if _real and _real > 0:
-                return float(_real)
-            from utils.helpers import model_iv as _miv
-            return float(_miv(getattr(self, "bt_symbol", "")) or 0.25)
+            return float(self._day_iv(date, spot) or 0)
         except Exception:
-            return 0.25
+            return 0.0
 
     def _prem_source(self, date, strike, option_type) -> str:
         """Premium kahan se aaya: db / db_near / live / model / spot (EQ).
@@ -2585,16 +2557,15 @@ class BacktestEngine:
                 return _memo[_ck]
         except Exception:
             _memo = None
-        _src = "model"
+        _src = "no_data"
         try:
             if str(option_type or "").upper() == "EQ":
                 _src = "spot"
             elif getattr(self, "is_live", False):
                 _src = "live"
             elif self._intraday_bar():
-                # Clocked bar never reads the daily bhavcopy print (look-ahead
-                # guard in _entry_premium) - it is model-priced from bar spot.
-                _src = "model"
+                # Clocked bar reads ONLY the real 1m-chain/tick print.
+                _src = "real_ticks" if _ck in getattr(self, "_tick_prem_keys", set()) else "no_data"
             elif not getattr(self, "_skip_db", False):
                 from core.models.database import Database as _DB
                 _db = _DB.get_instance()
@@ -2824,6 +2795,15 @@ class BacktestEngine:
             from core.services.option_lakehouse import query_option_ticks
             _bt = getattr(self, "_cur_bar_time", "") or ""
             _expiry = str(getattr(self, "bt_expiry", "") or "")
+            if not _expiry:
+                # Leg me explicit expiry_date nahi - exchange calendar se
+                # us din ka weekly/monthly expiry nikalpe (real contract).
+                try:
+                    _expiry = str(self._expiry_for_date(str(date)[:10]) or "")
+                except Exception:
+                    _expiry = ""
+            if not _expiry:
+                return None  # no contract identity -> no real premium
             # Query lakehouse for real ticks on this date/strike/type/expiry
             _ticks = query_option_ticks(
                 underlying=self.bt_symbol,
@@ -2950,6 +2930,13 @@ class BacktestEngine:
             from core.services.option_lakehouse import query_option_ticks
             _bt = getattr(self, "_cur_bar_time", "") or ""
             _expiry = str(getattr(self, "bt_expiry", "") or "")
+            if not _expiry:
+                try:
+                    _expiry = str(self._expiry_for_date(str(date)[:10]) or "")
+                except Exception:
+                    _expiry = ""
+            if not _expiry:
+                return None
             _ticks = query_option_ticks(
                 underlying=self.bt_symbol,
                 data_mode="1m_chain" if _intra else "tick",

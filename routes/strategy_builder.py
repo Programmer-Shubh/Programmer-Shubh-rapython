@@ -293,6 +293,51 @@ class BacktestRequest(BaseModel):
     lots: Optional[int] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
+    # In-Sample / Out-of-Sample walk-forward split (optional, offline-safe)
+    is_oos_split: bool = False
+    is_oos_date: Optional[str] = None
+
+
+def _trade_analytics(rows: list) -> dict:
+    """Institutional analytics from the SAME trade rows the UI renders.
+
+    MAE/MFE are in option points when the engine supplied them; expectancy,
+    profit factor, Sharpe, Calmar and max drawdown use net Rs P&L. No model
+    pricing is involved - these are pure statistics over executed fills.
+    """
+    import math
+    out = {"trades": 0, "wins": 0, "win_rate": 0.0, "net_pnl": 0.0,
+           "profit_factor": 0.0, "expectancy": 0.0, "max_drawdown": 0.0,
+           "sharpe_ratio": 0.0, "calmar_ratio": 0.0,
+           "mae_points": 0.0, "mfe_points": 0.0}
+    rows = [r for r in (rows or []) if isinstance(r, dict)]
+    if not rows:
+        return out
+    pnls = [float(r.get("pnl") or 0) for r in rows]
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    gross_win, gross_loss = sum(wins), abs(sum(losses))
+    equity, peak, max_dd = 0.0, 0.0, 0.0
+    for p in pnls:
+        equity += p
+        peak = max(peak, equity)
+        max_dd = max(max_dd, peak - equity)
+    mean = sum(pnls) / len(pnls)
+    sd = math.sqrt(sum((p - mean) ** 2 for p in pnls) / len(pnls))
+    out.update({
+        "trades": len(pnls), "wins": len(wins),
+        "win_rate": round(len(wins) / len(pnls) * 100, 2),
+        "net_pnl": round(sum(pnls), 2),
+        "profit_factor": (round(gross_win / gross_loss, 2) if gross_loss > 0 else (999999.0 if gross_win > 0 else 0.0)),
+        "expectancy": round(mean, 2),
+        "max_drawdown": round(max_dd, 2),
+        "sharpe_ratio": round(mean / sd, 2) if sd > 0 else 0.0,
+        "calmar_ratio": round(sum(pnls) / max_dd, 2) if max_dd > 0 else 0.0,
+        "mae_points": round(max((float(r.get("mae") or 0) for r in rows), default=0), 2),
+        "mfe_points": round(max((float(r.get("mfe") or 0) for r in rows), default=0), 2),
+    })
+    return out
+
 
 def _normalize_legs(raw_legs: list, lots_fallback: int = 1) -> list:
     if not raw_legs:
@@ -2007,8 +2052,8 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             elif (_srcd.get("nse_bhavcopy") or 0) > 0:
                 _tick_src = "real_eod_bhavcopy"
             elif not _tick_n:
-                _tick_reason = ("Real Tick select kiya par is symbol ke liye koi tick data nahi "
-                                "— Black-Scholes fallback (bhavcopy sync hone do ya broker connect karo)")
+                _tick_reason = ("Real Tick select kiya par is symbol ke liye koi cached tick data nahi "
+                                "— koi modeled premium nahi banaya gaya (lakehouse upload/sync karo ya chhoti range)")
     except Exception:
         _tick_n = 0
         _tick_src = ""
@@ -2045,7 +2090,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         # tick_mode tabhi real jab user ne data_mode maanga HO aur ticks store ho.
         "data_source": ("fake_fallback" if _fake_fills > 0 else
                         (_tick_src if (_tick_mode and _tick_n > 0 and _tick_src)
-                         else "black_scholes")),
+                         else "no_real_option_data")),
         "tick_count": _tick_n,
         "tick_source": _tick_src,
         "tick_reason": _tick_reason,  # kyoon Black-Scholes / auto-seed note (UI toast)
@@ -2104,6 +2149,39 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         # _should_overwrite_saved) - warna buggy history hamesha dikhti hai.
         "engine_version": ENGINE_VERSION,
     }
+    # ---- Institutional analytics + ONE data-source badge for every surface ----
+    try:
+        from routes.strategies import data_source_badge as _ds_badge
+        _final_res["data_source_badge"] = _ds_badge(_final_res)
+        _stat = _trade_analytics(m.get("trade_list") or [])
+        for _k in ("mae_points", "mfe_points", "calmar_ratio"):
+            _final_res["metrics"][_k] = _stat[_k]
+        for _k in ("expectancy", "profit_factor", "sharpe_ratio", "max_drawdown"):
+            if not _final_res["metrics"].get(_k):
+                _final_res["metrics"][_k] = _stat[_k]
+        # Per-trade provenance: Trade History rows carry the same badge.
+        for _t in _final_res["trade_list"]:
+            if isinstance(_t, dict):
+                _t["data_source"] = _final_res["data_source"]
+                _t["data_source_badge"] = _final_res["data_source_badge"]
+        # Optional In-Sample / Out-of-Sample (walk-forward) split.
+        if getattr(req, "is_oos_split", False):
+            _cut = str(getattr(req, "is_oos_date", "") or "")[:10]
+            if not _cut:
+                import datetime as _dt
+                _a = _dt.date.fromisoformat(str(start_date)[:10])
+                _b = _dt.date.fromisoformat(str(end_date)[:10])
+                _cut = (_a + (_b - _a) / 2).isoformat()
+            _rows = _final_res["trade_list"] or []
+            _final_res["is_oos"] = {
+                "split_date": _cut,
+                "in_sample": _trade_analytics([r for r in _rows
+                                               if str(r.get("entry_date") or "")[:10] < _cut]),
+                "out_of_sample": _trade_analytics([r for r in _rows
+                                                   if str(r.get("entry_date") or "")[:10] >= _cut]),
+            }
+    except Exception:
+        pass
     try:
         if '_rk' in locals() and _rk:
             _BT_RESULT_CACHE[_rk]=(_t0m.time(), _final_res)

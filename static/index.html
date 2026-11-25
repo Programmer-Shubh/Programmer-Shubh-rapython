@@ -517,13 +517,27 @@
                         <div class="col-md-2"><label class="form-label small">End Date</label><input type="date" id="r-end" class="form-control form-control-sm" value="2026-08-20"></div>
                         <div class="col-md-2"><label class="form-label small" title="Auto paper: aaj ka signal na mile to kitne din purana signal chalega (0 = sirf aaj)">Signal Lookback (din)</label><input type="number" id="r-slb" class="form-control form-control-sm" value="0" min="0" max="15"></div>
                         <div class="col-md-2"><label class="form-label small">Chart Timeframe</label><select id="r-timeframe" class="form-select form-select-sm"><option value="1d">Daily</option><option value="5m" selected>5 Minute</option><option value="15m">15 Minute</option><option value="30m">30 Minute</option><option value="1h">1 Hour</option><option value="1m">1 Minute</option></select></div>
-                        <div class="col-md-2"><label class="form-label small" title="Real option tick/chain data se backtest (recorded 1-min LTP) ya Black-Scholes model">Premium Data</label><select id="r-data-mode" class="form-select form-select-sm"><option value="model">Black-Scholes (model)</option><option value="1m_chain" selected>Real Tick (1M chain)</option></select></div>
+                        <div class="col-md-2"><label class="form-label small" title="Backtest sirf asli recorded option data par chalta hai — koi modeled Black-Scholes premium nahi">Premium Data</label><select id="r-data-mode" class="form-select form-select-sm"><option value="tick">High-Frequency Option Tick Data</option><option value="1m_chain" selected>1-Minute Option Chain Data</option></select></div>
+                        <div class="col-md-2"><label class="form-label small" title="In-Sample / Out-of-Sample walk-forward split — overfit check">IS / OOS Split</label><div class="d-flex align-items-center gap-1"><input type="checkbox" id="r-is-oos" onchange="document.getElementById('r-oos-date').disabled=!this.checked"><input type="date" id="r-oos-date" disabled class="form-control form-control-sm" style="width:130px"></div></div>
                     </div>
                     <div class="row g-1 mt-1">
                         <div class="col-md-2"><label class="form-label small">Momentum</label><input type="range" class="form-range" id="s-momentum" min="0" max="20" value="0"></div>
                         <div class="col-md-3 d-flex align-items-end"><small class="text-muted" style="font-size:10px">Slippage 0.5% realistic | Drawdown Days + Badge as per strategy Mar 2025 update</small></div>
                     </div>
                     </div>
+                <div class="card mt-3 slab-card" id="lh-card">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1"><span><span class="slab-num">2A</span><i class="bi bi-hdd-stack"></i> Stored Option Data Library <span class="badge bg-light text-dark">Offline ready</span></span><span id="lh-record-pill" class="badge bg-secondary">Auto-recorder: checking…</span></div>
+                    <div class="card-body p-2">
+                        <div id="lh-library" class="small text-muted mb-2">Cached symbols, date ranges, completeness and modes load ho rahe hain…</div>
+                        <div id="lh-missing" class="mb-2"></div>
+                        <div id="lh-drop" class="border rounded p-2 mb-2" style="border-style:dashed!important;background:#f8f9fa">
+                            <div class="small fw-bold"><i class="bi bi-cloud-arrow-up"></i> One-time CSV / Parquet upload (idempotent — dedup by timestamp, expiry, strike, CE/PE)</div>
+                            <div class="d-flex flex-wrap gap-2 align-items-center mt-1"><input type="file" id="lh-file" accept=".csv,.parquet" multiple class="form-control form-control-sm" style="width:280px"><select id="lh-mode" class="form-select form-select-sm" style="width:210px"><option value="tick">High-Frequency Tick Data</option><option value="1m_chain" selected>1-Minute Option Chain</option></select><input id="lh-symbol" class="form-control form-control-sm" style="width:130px" placeholder="Symbol (optional)"><button class="btn btn-sm btn-primary" onclick="lhUpload()"><i class="bi bi-upload"></i> Upload</button><button class="btn btn-sm btn-outline-secondary" onclick="lhRefresh()">Refresh Library</button><button class="btn btn-sm btn-outline-info" onclick="lhCompact()">Compact</button><button class="btn btn-sm btn-outline-success" id="lh-sync-btn" onclick="lhIncrementalSync()" title="Sirf broker connected ho tab">Incremental Sync</button></div>
+                            <div id="lh-upload-status" class="small mt-1"></div>
+                        </div>
+                        <div class="small text-muted"><i class="bi bi-info-circle"></i> User-Configured data setup — real recorded option data hi store hoti hai. Platform koi trading tip ya recommendation nahi deta. Backtest offline chal sakta hai (broker disconnected / token expire / market band).</div>
+                    </div>
+                </div>
                 <div class="card mt-3 slab-card">
                     <div class="card-header"><span class="slab-num">3</span><i class="bi bi-play-circle"></i> Run & Backtest</div>
                     <div class="card-body">
@@ -836,7 +850,7 @@
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     async function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();try{await loadStrats();}catch(e){}loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();try{await loadStrats();}catch(e){}loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();try{lhInit();}catch(e){}setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     // OTM filter cache-first: memory (15-min) -> localStorage (60-min) -> network.
     // "Loading symbols..." kabhi atakta nahi - pehli baar ke baad turant list.
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
@@ -1523,7 +1537,26 @@ let _lastOpenTrdHTML = null;
                 }
             }
         }catch(e){ console.error('loadTrades failed',e); }
-        try{const c=await A('/api/trades/history');if(c.trades&&c.trades.length){const _w=(c.winning_trades!=null?c.winning_trades:c.trades.filter(t=>Number(t.pnl||0)>0).length);const _wr=(c.win_rate!=null?c.win_rate:(c.trades.length?(_w/c.trades.length*100):0));let h='<div class="small text-muted mb-1">Closed ('+c.trades.length+') • Win '+_w+'/'+c.trades.length+' ('+Number(_wr).toFixed(1)+'%) — win = net P&L > ₹0</div><table><tr><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Badge</th><th>Action</th></tr>';c.trades.forEach(t=>{const status=exitStatusLabel(t.exit_status);const sbg=(Number(t.pnl||0)>0)?'badge-buy':'badge-sell';const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''), (t.transaction_type==='BUY'?'buy':'sell'));const badge=B(t.trade_mode==='live'?'LIVE':'PAPER', t.trade_mode==='live'?'sell':'buy');const ed=t.entry_date||t.date, ex=t.exit_date||'-';h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>₹${t.entry.toFixed(2)}</td><td>₹${t.exit.toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted}</td><td>${badge}</td><td><button class="btn btn-sm btn-danger" onclick="deleteTrade(${t.id})">Delete</button></td></tr>`;});h+='</table>';document.getElementById('closed-trd').innerHTML=h;}else{if(!document.getElementById('closed-trd').innerHTML.includes('<table>')){document.getElementById('closed-trd').innerHTML='<div class="text-center p-4"><i class="bi bi-journal-text" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No trade history yet</p><small class="text-muted">Completed trades will be listed here</small></div>';}}
+        try{const c=await A('/api/trades/history');
+            const cl=(c.trades||[]).slice(), bl=(c.bt_trades||[]).slice(), all=bl.concat(cl);
+            if(all.length){
+                const _w=(c.winning_trades!=null?c.winning_trades:cl.filter(t=>Number(t.pnl||0)>0).length);
+                const _wr=(c.win_rate!=null?c.win_rate:(cl.length?(_w/cl.length*100):0));
+                let h='<div class="small text-muted mb-1">Closed ('+cl.length+') ? Win '+_w+'/'+cl.length+' ('+Number(_wr).toFixed(1)+'%) ? BT rows '+bl.length+' (latest saved run) ? win = net P&L > ?0</div><table><tr><th>Entry Date</th><th>Entry Time</th><th>Exit Date</th><th>Exit Time</th><th>Symbol</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Entry ?</th><th>Exit ?</th><th>Status</th><th>P&L</th><th>Badge</th><th>Data Source</th><th>Action</th></tr>';
+                all.forEach(t=>{
+                    const status=exitStatusLabel(t.exit_status);const sbg=(Number(t.pnl||0)>0)?'badge-buy':'badge-sell';
+                    const typeBadge=B((t.transaction_type||'')+' '+(t.option_type||''),(t.transaction_type==='BUY'?'buy':'sell'));
+                    const mode=t.is_bt?'bt':(t.trade_mode==='live'?'live':'paper');
+                    const badge=B(mode.toUpperCase(),mode==='live'?'sell':(mode==='bt'?'ce':'buy'));
+                    const _bs=((c.bt_by_strategy||{})[t.strategy_id||0])||{};
+                    const _ds=t.data_source_badge||_bs.data_source_badge||'';
+                    const _summ=t.bt_summary||_bs.bt_badge||'';
+                    const dsBadge=_ds?`<span class="badge bg-info" title="${(_summ||'Latest saved backtest').replace(/"/g,'&quot;')}">${_ds}</span>`:'<small class="text-muted">?</small>';
+                    const ed=t.entry_date||t.date||'-', ex=t.exit_date||'-';
+                    h+=`<tr><td>${ed}</td><td class="text-muted small">${t.entry_time||'-'}</td><td>${ex}</td><td class="text-muted small">${t.exit_time||'-'}</td><td>${t.symbol}</td><td>${typeBadge||B(t.option_type,t.option_type==='CE'?'ce':'pe')}</td><td>${t.strike}</td><td>${t.expiry_date||'-'}</td><td>?${Number(t.entry||0).toFixed(2)}</td><td>?${Number(t.exit||0).toFixed(2)}</td><td>${B(status,sbg==='badge-buy'?'buy':'sell')}</td><td class="${C(t.pnl)}">${t.pnl_formatted||F(t.pnl||0)}</td><td>${badge}</td><td>${dsBadge}</td><td>${t.is_bt?'<small class="text-muted">Saved BT</small>':'<button class="btn btn-sm btn-danger" onclick="deleteTrade('+t.id+')">Delete</button>'}</td></tr>`;
+                });
+                h+='</table>';document.getElementById('closed-trd').innerHTML=h;
+            }else{if(!document.getElementById('closed-trd').innerHTML.includes('<table>')){document.getElementById('closed-trd').innerHTML='<div class="text-center p-4"><i class="bi bi-journal-text" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2 mb-0">No trade history yet</p><small class="text-muted">Completed trades will be listed here</small></div>';}}
         }catch(e){}
         // Drawdown Days in stats
         try{ if(window._lastBacktestMetrics && window._lastBacktestMetrics.max_dd_duration!==undefined) document.getElementById('q-drawdown').textContent='Drawdown Days: '+(window._lastBacktestMetrics.max_dd_duration||0)+' | Trades in DD: '+(window._lastBacktestMetrics.max_trades_in_dd||0); }catch(e){}
@@ -1590,9 +1623,10 @@ let _lastOpenTrdHTML = null;
         // use karta hai (index 13-15%, stock 30%) - wahi paper/live/scanner
         // use karte hain. Pehle yahan hardcoded 0.14 jata tha (index ka IV)
         // to stock options ka premium 5x chhota dikhta tha.
-        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:trailOn,trailing:trailOn?String(_trailStep):'Off',max_holding_bars:rType==='intraday'?0:(momentum>0?Math.max(5,20-momentum):20),strict_trend:(indicators||[]).some(i=>['adx','vwap','market_regime','combo_rsi_vwap_pcr'].includes(String(i.id||i).toLowerCase())),allow_intraday_time_exit:false,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'No Re-entry',reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'RE ASAP',lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,lock_profit_unit:'pt',dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip,data_mode:(document.getElementById('r-data-mode')?.value||'1m_chain')},risk:{max_trades_per_day:mtd,daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,sl_unit:slUnit,tp_unit:tpUnit,signal_lookback_days:slb}};
+        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,is_oos_split:!!document.getElementById('r-is-oos')?.checked,is_oos_date:document.getElementById('r-oos-date')?.value||'',indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:trailOn,trailing:trailOn?String(_trailStep):'Off',max_holding_bars:rType==='intraday'?0:(momentum>0?Math.max(5,20-momentum):20),strict_trend:(indicators||[]).some(i=>['adx','vwap','market_regime','combo_rsi_vwap_pcr'].includes(String(i.id||i).toLowerCase())),allow_intraday_time_exit:false,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'No Re-entry',reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'RE ASAP',lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,lock_profit_unit:'pt',dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip,data_mode:(document.getElementById('r-data-mode')?.value||'1m_chain')},risk:{max_trades_per_day:mtd,daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,sl_unit:slUnit,tp_unit:tpUnit,signal_lookback_days:slb}};
     }
     async function runBacktest(opts){
+        try{lhCheckMissing();}catch(e){}
         // opts.direct: saved-strategy endpoint ka ready result - dobara fetch nahi, sidha render.
         // Har EXPLICIT click (Backtest Detail / Backtest button) ek naya
         // request-seq bump karta hai: purana slow response kabhi naya result
@@ -1742,6 +1776,8 @@ let _lastOpenTrdHTML = null;
                     _dsBadge=' • <span class="badge bg-info" title="Premium data source: '+_ds.replace(/"/g,'&quot;')+'">'+_ds+'</span>';
                 }
             }catch(_dse){_dsBadge='';}
+            // Server-authorized single-source label (TICK DATA / 1M OPTION CHAIN) overrides guesses
+            if(r.data_source_badge)_dsBadge=' • <span class="badge bg-success" title="Backtest data source — latest saved run">'+r.data_source_badge+'</span>';
             //tick-reason: 'Real Tick' select kiya par data na hone par kyun fallback hua - clear batayein.
             let _trBadge='';
             try{ if(r.tick_reason) _trBadge=' • <span class="badge bg-warning text-dark" title="'+String(r.tick_reason).replace(/"/g,'&quot;')+'">ℹ '+String(r.tick_reason).slice(0,90)+'</span>'; }catch(e){}
@@ -1846,6 +1882,13 @@ let _lastOpenTrdHTML = null;
                     }
                 }catch(_){}
             }catch(e){}
+            // In-Sample / Out-of-Sample (walk-forward) overfit check
+            try{
+                if(r.is_oos){const s=r.is_oos;
+                    const _oos=document.createElement('div');_oos.className='alert alert-info py-2 mb-2 small';
+                    _oos.innerHTML='<strong><i class="bi bi-split"></i> IS / OOS split</strong> (cut '+s.split_date+') — IS: '+(s.in_sample.trades||0)+' trades • ₹'+(s.in_sample.net_pnl||0).toFixed(2)+' • PF '+(s.in_sample.profit_factor||0)+' | OOS: '+(s.out_of_sample.trades||0)+' trades • ₹'+(s.out_of_sample.net_pnl||0).toFixed(2)+' • PF '+(s.out_of_sample.profit_factor||0)+' | MAE '+(m.mae_points||0)+' • MFE '+(m.mfe_points||0)+' • Calmar '+(m.calmar_ratio||0);
+                    const _mb=document.getElementById('bt-metrics');if(_mb)_mb.prepend(_oos);}
+            }catch(_){}
         }catch(e){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Render error: '+e.message+'</p>';}
     }
     async function _runBacktestInner(_seq){
@@ -2484,7 +2527,7 @@ let _lastOpenTrdHTML = null;
                 if(_ao.entry_time)document.getElementById('r-entry').value=_ao.entry_time;
                 if(_ao.exit_time)document.getElementById('r-exit').value=_ao.exit_time;
                 if(_ao.timeframe||s.timeframe)document.getElementById('r-timeframe').value=_ao.timeframe||s.timeframe;
-                if(_ao.data_mode)document.getElementById('r-data-mode').value=_ao.data_mode;
+                if(_ao.data_mode){const _dm=document.getElementById('r-data-mode');if(_dm){const _want=String(_ao.data_mode).toLowerCase();_dm.value=(_want==='model'||_want==='bs')?'1m_chain':(_want==='1m'?'1m_chain':_want);if(!_dm.value)_dm.value='1m_chain';}}
             }catch(e){}
             try{
                 _rm=(typeof s.risk_management==='string')?JSON.parse(s.risk_management||'{}'):(s.risk_management||{});
@@ -2632,10 +2675,85 @@ let _lastOpenTrdHTML = null;
             }},300);
         }catch(e){try{_btnBusy(el,false);}catch(_){}alert('Error: '+(e.message||e));}
     }catch(e){try{_btnBusy(el,false);}catch(_){}alert('Error: '+(e.message||e));}}
+    // SINGLE SOURCE OF TRUTH: har Saved BT surface yahi helper use karta hai.
+    // Backend /api/strategies/list -> s.bt (latest saved backtest record).
+    function _dsPill(label){return label&&label!=='—'?`<span class="badge bg-info ms-1" title="Backtest data source — asli recorded option data">${label}</span>`:'';}
+    function savedBtHtml(s,compact){
+        const bt=s&&s.bt;
+        if(!bt||bt.trades==null)return '<small class="text-muted">No BT yet — click Backtest</small>';
+        const pf=bt.profit_factor_infinite?'∞':(bt.profit_factor!=null?Number(bt.profit_factor).toFixed(2):'—');
+        const num=`<strong>${bt.trades} trades</strong> • <span class="${(bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(bt.net_pnl||0)}</span> • Win ${bt.win_rate||0}% • PF ${pf}`;
+        const meta=`<br><small class="text-muted">${bt.stored_at||'saved'}${bt.run_id?(' • '+bt.run_id):''}</small>`;
+        const stale=bt.stale_engine?'<span class="badge bg-danger ms-1" style="font-size:10px">purana engine</span>':'';
+        return `<div class="mb-2 small">Saved BT: ${num}${_dsPill(bt.data_source_badge)}${stale}${compact?'':meta}</div>`;
+    }
+    // ---- Stored Option Data Library + async auto-recorder status -------------
+    let _lhInited=false;
+    function lhInit(){
+        if(_lhInited)return; _lhInited=true;
+        try{const d=document.getElementById('lh-drop');
+            d.addEventListener('dragover',e=>{e.preventDefault();d.style.background='#e7f1ff';});
+            d.addEventListener('dragleave',e=>{e.preventDefault();d.style.background='#f8f9fa';});
+            d.addEventListener('drop',e=>{e.preventDefault();d.style.background='#f8f9fa';const f=document.getElementById('lh-file');if(f&&e.dataTransfer&&e.dataTransfer.files.length){f.files=e.dataTransfer.files;lhUpload();}});
+        }catch(e){}
+        lhRefresh();lhCheckMissing();
+    }
+    async function lhRefresh(){
+        try{
+            const [st,rec]=await Promise.all([A('/api/lakehouse/status').catch(()=>({})),A('/api/lakehouse/auto-record/status').catch(()=>({}))]);
+            const syms=(st.symbols||[]).slice();
+            const el=document.getElementById('lh-library');
+            if(el){
+                if(!syms.length){el.innerHTML='<div class="alert alert-warning py-1 px-2 mb-0">Koi cached option data nahi hai. CSV/Parquet upload karo ya broker connect karke incremental sync chalao — backtest tab bhi offline chalega.</div>';}
+                else{
+                    el.innerHTML='<div class="row g-1">'+syms.map(s=>{
+                        const m=(st.library||[]).find(x=>x.symbol===s)||{};
+                        const modes=(m.modes||[]).map(x=>`<span class="badge ${x==='tick'?'bg-primary':'bg-success'} ms-1">${x==='tick'?'TICK DATA':'1M OPTION CHAIN'}</span>`).join('');
+                        const pct=Number(m.completeness_pct||0);
+                        return `<div class="col-md-6"><div class="border rounded p-1"><strong>${s}</strong>${modes}<div class="small text-muted">${m.start||st.date_range?.start||'-'} → ${m.end||st.date_range?.end||'-'} • ${m.days||0} din • completeness ${pct.toFixed(0)}%</div><div class="progress" style="height:4px"><div class="progress-bar ${pct>=90?'bg-success':'bg-warning'}" style="width:${Math.min(100,pct)}%"></div></div></div></div>`;
+                    }).join('')+'</div><div class="small text-muted mt-1">Total cached: '+(st.total_size_mb||0)+' MB • '+(st.partition_count||0)+' partitions • modes: '+(st.modes||[]).join(', ')+'</div>';
+                }
+            }
+            const rp=document.getElementById('lh-record-pill');
+            if(rp){const act=!!rec.active;rp.className='badge '+(act?'bg-success':'bg-secondary');rp.textContent=(act?'● Auto-recording ACTIVE':'⏸ Auto-recorder paused')+' • latest '+(rec.latest_date||'—')+' • '+(rec.tracked_symbols||[]).length+' symbols • '+(rec.total_size_mb||st.total_size_mb||0)+' MB';rp.title=JSON.stringify(rec);}
+        }catch(e){console.warn('lhRefresh',e);}
+    }
+    async function lhCheckMissing(){
+        try{
+            const s=document.getElementById('r-start')?.value||document.getElementById('r-start-date')?.value||'';
+            const e=document.getElementById('r-end')?.value||document.getElementById('r-end-date')?.value||'';
+            if(!s||!e)return;
+            const sym=document.getElementById('r-symbol')?.value||document.getElementById('s-symbol')?.value||'';
+            const mode=document.getElementById('r-data-mode')?.value||'1m_chain';
+            const r=await A('/api/lakehouse/missing-dates?symbol='+encodeURIComponent(sym)+'&data_mode='+encodeURIComponent(mode)+'&start_date='+s+'&end_date='+e);
+            const el=document.getElementById('lh-missing');if(!el)return;
+            const miss=r.missing_dates||[];
+            el.innerHTML=miss.length?`<div class="alert alert-warning py-1 px-2 mb-0 small"><i class="bi bi-exclamation-triangle"></i> <strong>${miss.length} dates missing</strong> (${miss.slice(0,6).join(', ')}${miss.length>6?'…':''}) for ${sym||'selected symbol'} / ${mode}. <button class="btn btn-sm btn-outline-warning py-0" onclick="lhIncrementalSync()">Sync now</button> ya chhoti date range chuno — bina data backtest honest 0 trades dega.</div>`:'<div class="small text-success"><i class="bi bi-check-circle"></i> Requested dates cached — offline backtest ready.</div>';
+        }catch(e){}
+    }
+    async function lhUpload(){
+        const f=document.getElementById('lh-file');const st=document.getElementById('lh-upload-status');
+        if(!f||!f.files||!f.files.length){if(st)st.textContent='Pehle CSV/Parquet file chuno.';return;}
+        try{
+            if(st)st.textContent='Uploading '+f.files.length+' file(s) — dedup + atomic merge…';
+            for(const file of f.files){
+                const fd=new FormData();fd.append('file',file);
+                fd.append('data_mode',document.getElementById('lh-mode').value);
+                fd.append('source','csv_upload');
+                const sym=document.getElementById('lh-symbol').value.trim();if(sym)fd.append('symbol',sym.toUpperCase());
+                const r=await fetch('/api/lakehouse/upload',{method:'POST',body:fd}).then(x=>x.json());
+                if(st)st.textContent=(file.name+': '+(r.message||JSON.stringify(r)));
+            }
+            f.value='';await lhRefresh();await lhCheckMissing();
+        }catch(e){if(st)st.textContent='Upload failed: '+e.message;}
+    }
+    async function lhCompact(){try{const r=await P('/api/lakehouse/compact',{method:'POST'});alert('Compacted '+(r.compacted_partitions||0)+' partitions');await lhRefresh();}catch(e){alert(e.message);}}
+    async function lhIncrementalSync(){try{const r=await P('/api/lakehouse/sync-incremental',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});alert(r.message||JSON.stringify(r));await lhRefresh();await lhCheckMissing();}catch(e){alert(e.message);}}
+
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{try{const _sc=localStorage.getItem('stratCardsCache'); if(_sc && cards && !cards.innerHTML.includes('card')) cards.innerHTML=_sc;}catch(e){} const [r,o]=await Promise.all([A('/api/strategies/list'), A('/api/trades/open/fast').catch(()=>({positions:[]}))]);const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3"><div class="text-center p-4"><i class="bi bi-lightbulb" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">No strategies yet</p><small class="text-muted">Create your first strategy to get started</small></div></p>';return;}
     // Running status per strategy: count open paper/live trades by strategy_id
     let runMap={};(o.positions||[]).forEach(t=>{const sid=t.strategy_id||0;if(!sid)return;runMap[sid]=runMap[sid]||{paper:0,live:0};if((t.trade_mode||'paper')==='live'&&(t.broker_order_id&&String(t.broker_order_id).trim()))runMap[sid].live++;else runMap[sid].paper++;});
-    let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const rm=_parseJsonField(s.risk_management,{});const _slFmt=(rm,d)=>(rm.daily_stop_loss_pct?rm.daily_stop_loss_pct+'%':((rm.sl_unit==='pt')?((rm.daily_stop_loss||'—')+' pts'):('₹'+(rm[d]||'—'))));const _tpFmt=(rm,d)=>(rm.daily_take_profit_pct?rm.daily_take_profit_pct+'%':((rm.tp_unit==='pt')?((rm.daily_take_profit||'—')+' pts'):('₹'+(rm[d]||'—'))));const _slTxt=_slFmt(rm,'daily_stop_loss');const _tpTxt=_tpFmt(rm,'daily_take_profit');const slH='<div class="mb-2 small"><span class="me-2">SL: <strong>'+_slTxt+'</strong> | TP: <strong>'+_tpTxt+'</strong></span><button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:11px" onclick="stratEditSltp('+s.id+')" title="Strategy ka SL/TP edit karo - Fyers execution inhi values ko use karega">✏ Edit SL/TP</button></div>';const disclH='<div class="small mb-2" style="color:#8a93a3"><i class="bi bi-info-circle"></i> User-Configured analytical setup — backtest/paper results future live returns ki guarantee nahi hote. Deploy = User Defined.</div>';const disp=s.display_status||s.status||'active';const isExp=(s.expired===true||disp==='expired');const statusCls=isExp?'expired':s.status==='active'?'active':s.status==='draft'?'draft':'paused';const statusLbl=isExp?'expired':(s.status||'active');const run=runMap[s.id]||{paper:0,live:0};const runH=(run.paper?`<span class="badge bg-success ms-1">● PAPER (${run.paper})</span>`:'')+(run.live?`<span class="badge bg-danger ms-1">● LIVE (${run.live})</span>`:'');const dis=isExp?'title="Expired - trade lagane par next expiry par auto-shift hoga"':`<small class="text-muted">No BT yet \u2014 click Backtest</small>`;const btH=(s.bt&&s.bt.trades!=null)?`<div class="mb-2 small">Saved BT: <strong>${s.bt.trades} trades</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span> • Win ${s.bt.win_rate||0}% ${(s.bt.stale_engine?'<span class="badge bg-danger" style="font-size:10px">purana engine</span>':'')} <span class="text-muted">(${s.bt.stored_at||'saved'})</span></div>`:`<div class="mb-2 small text-muted">Saved BT: No BT yet — click Backtest</div>`;h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px;${isExp?'opacity:0.65':''}"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name} <span class="badge bg-secondary ms-1">#${s.id}</span><span class="badge bg-light text-dark ms-1" title="Yeh strategy user ne khud configure ki hai - platform koi tip ya recommendation nahi deta">User Configured</span>${s.protected?'<span class="badge bg-info ms-1" title="Default strategy - delete lock on">DEFAULT</span>':''}</h6><span><span class="badge badge-${statusCls}">${statusLbl}</span>${isExp?' <button class="btn btn-sm btn-outline-warning py-0 px-1" style="font-size:11px" onclick="stratRenew('+s.id+',this)" title="Next expiry par renew karke active karo - auto-paper worker dobara trade laga sakta hai">↻ Renew</button>':''}${runH}</span></div><p class="text-muted small mb-2">${s.description||'No description (user-configured)'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}<span class="d-inline-flex align-items-center ms-2" style="gap:3px;font-size:11px">Lots: <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="stratLots(${s.id},${Math.max(1,(parseInt((s.legs||[])[0]&&((s.legs||[])[0].lots||1))||1)-1)})">−</button><strong id="st-lots-${s.id}">${Math.max(1,parseInt((s.legs||[])[0]&&((s.legs||[])[0].lots||1))||1)}</strong><button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="stratLots(${s.id},${(Math.max(1,parseInt(((s.legs||[])[0]||{}).lots)||1))+1})">+</button></span></div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div>${btH}${slH}${disclH}<div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-sm ${(s.live_enabled?'btn-danger':'btn-outline-secondary')}" id="st-live-${s.id}" onclick="stratLiveToggle(${s.id},${!s.live_enabled})" title="Deploy to Live (User Defined) - platform koi tip nahi deta; real order user ke apne ON/OFF se">${s.live_enabled?'Deploy Live: ON':'Deploy Live: OFF'}</button><button class="btn btn-sm ${s.status==='active'?'btn-success':'btn-outline-secondary'}" onclick="atFromStrat(${s.id},'${s.status}')" title="Deploy to Paper (User Defined) - auto-paper worker isi par user ke config par trade lagata hai">${s.status==='active'?'Deploy Paper: ON':'Deploy Paper: OFF'}</button><button class="btn btn-sm btn-info" onclick="backtestStrat(${s.id},false,this)">Backtest Detail</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')" title="Saved backtest result history - purane saved versions dekho">History</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})" title="Saved strategy edit karo - symbol, SL/TP, lots, indicators badlo">${s.live_enabled?'✏ Edit':'Edit'}</button><button class="btn btn-sm btn-outline-primary" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button>${s.protected?'':'<button class="btn btn-sm btn-outline-info" onclick="stratSetDefault('+s.id+')" title="Default bana do - delete lock (purge par bachega)">Set Default</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat('+s.id+')">Delete</button>'}</div></div></div></div>`;});cards.innerHTML=h;try{localStorage.setItem('stratCardsCache',h);}catch(e){}}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
+    let h='';strats.forEach(s=>{const indicators=Array.isArray(s.indicators)?s.indicators:[];const indH=indicators.slice(0,3).map(i=>`<span class="badge badge-buy">${i.id||i}</span>`).join('');const rm=_parseJsonField(s.risk_management,{});const _slFmt=(rm,d)=>(rm.daily_stop_loss_pct?rm.daily_stop_loss_pct+'%':((rm.sl_unit==='pt')?((rm.daily_stop_loss||'—')+' pts'):('₹'+(rm[d]||'—'))));const _tpFmt=(rm,d)=>(rm.daily_take_profit_pct?rm.daily_take_profit_pct+'%':((rm.tp_unit==='pt')?((rm.daily_take_profit||'—')+' pts'):('₹'+(rm[d]||'—'))));const _slTxt=_slFmt(rm,'daily_stop_loss');const _tpTxt=_tpFmt(rm,'daily_take_profit');const slH='<div class="mb-2 small"><span class="me-2">SL: <strong>'+_slTxt+'</strong> | TP: <strong>'+_tpTxt+'</strong></span><button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:11px" onclick="stratEditSltp('+s.id+')" title="Strategy ka SL/TP edit karo - Fyers execution inhi values ko use karega">✏ Edit SL/TP</button></div>';const disclH='<div class="small mb-2" style="color:#8a93a3"><i class="bi bi-info-circle"></i> User-Configured analytical setup — backtest/paper results future live returns ki guarantee nahi hote. Deploy = User Defined.</div>';const disp=s.display_status||s.status||'active';const isExp=(s.expired===true||disp==='expired');const statusCls=isExp?'expired':s.status==='active'?'active':s.status==='draft'?'draft':'paused';const statusLbl=isExp?'expired':(s.status||'active');const run=runMap[s.id]||{paper:0,live:0};const runH=(run.paper?`<span class="badge bg-success ms-1">● PAPER (${run.paper})</span>`:'')+(run.live?`<span class="badge bg-danger ms-1">● LIVE (${run.live})</span>`:'');const dis=isExp?'title="Expired - trade lagane par next expiry par auto-shift hoga"':`<small class="text-muted">No BT yet \u2014 click Backtest</small>`;const btH=savedBtHtml(s);h+=`<div class="col-md-4"><div class="card" style="margin-bottom:12px;${isExp?'opacity:0.65':''}"><div class="card-body"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px"><h6 class="fw-bold mb-0">${s.name} <span class="badge bg-secondary ms-1">#${s.id}</span><span class="badge bg-light text-dark ms-1" title="Yeh strategy user ne khud configure ki hai - platform koi tip ya recommendation nahi deta">User Configured</span>${s.protected?'<span class="badge bg-info ms-1" title="Default strategy - delete lock on">DEFAULT</span>':''}</h6><span><span class="badge badge-${statusCls}">${statusLbl}</span>${isExp?' <button class="btn btn-sm btn-outline-warning py-0 px-1" style="font-size:11px" onclick="stratRenew('+s.id+',this)" title="Next expiry par renew karke active karo - auto-paper worker dobara trade laga sakta hai">↻ Renew</button>':''}${runH}</span></div><p class="text-muted small mb-2">${s.description||'No description (user-configured)'}</p><div class="mb-2"><span class="badge badge-draft me-1">${s.symbol}</span>${indH}<span class="d-inline-flex align-items-center ms-2" style="gap:3px;font-size:11px">Lots: <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="stratLots(${s.id},${Math.max(1,(parseInt((s.legs||[])[0]&&((s.legs||[])[0].lots||1))||1)-1)})">−</button><strong id="st-lots-${s.id}">${Math.max(1,parseInt((s.legs||[])[0]&&((s.legs||[])[0].lots||1))||1)}</strong><button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="stratLots(${s.id},${(Math.max(1,parseInt(((s.legs||[])[0]||{}).lots)||1))+1})">+</button></span></div><div class="mb-2 text-muted small">${s.start_date||''} → ${s.end_date||''} | ${s.timeframe}</div>${btH}${slH}${disclH}<div style="display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-sm ${(s.live_enabled?'btn-danger':'btn-outline-secondary')}" id="st-live-${s.id}" onclick="stratLiveToggle(${s.id},${!s.live_enabled})" title="Deploy to Live (User Defined) - platform koi tip nahi deta; real order user ke apne ON/OFF se">${s.live_enabled?'Deploy Live: ON':'Deploy Live: OFF'}</button><button class="btn btn-sm ${s.status==='active'?'btn-success':'btn-outline-secondary'}" onclick="atFromStrat(${s.id},'${s.status}')" title="Deploy to Paper (User Defined) - auto-paper worker isi par user ke config par trade lagata hai">${s.status==='active'?'Deploy Paper: ON':'Deploy Paper: OFF'}</button><button class="btn btn-sm btn-info" onclick="backtestStrat(${s.id},false,this)">Backtest Detail</button> <button class="btn btn-sm btn-outline-secondary" onclick="stratHistory(${s.id},'${(s.name||'').replace(/'/g,'')}')" title="Saved backtest result history - purane saved versions dekho">History</button><button class="btn btn-sm btn-outline-primary" onclick="editStrat(${s.id})" title="Saved strategy edit karo - symbol, SL/TP, lots, indicators badlo">${s.live_enabled?'✏ Edit':'Edit'}</button><button class="btn btn-sm btn-outline-primary" onclick="stratDetail(${s.id},'${s.name||''}')">Paper Detail</button>${s.protected?'':'<button class="btn btn-sm btn-outline-info" onclick="stratSetDefault('+s.id+')" title="Default bana do - delete lock (purge par bachega)">Set Default</button><button class="btn btn-sm btn-outline-danger" onclick="delStrat('+s.id+')">Delete</button>'}</div></div></div></div>`;});cards.innerHTML=h;try{localStorage.setItem('stratCardsCache',h);}catch(e){}}catch(e){cards.innerHTML='<p class="text-muted">Error loading strategies</p>';}}
 
     async function ptFromStrat(id,force){try{
         try{const _mk=isMarketOpenIST();if(!_mk.open){alert(_mk.reason+'\n\nOrder market open par hi lagega (Mon-Fri 9:15-3:30 IST).');return;}}catch(e){}
@@ -2889,7 +3007,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                 // "Paper Trade"/"Live Trade" action buttons hata diye (orders
                 // signal se hi lagte hain; manual force ki zaroorat nahi).
                 // Action column me status: sirf LIVE ON / PAPER ON / BOTH ON / OFF
-                const btH=(s.bt&&s.bt.trades!=null)?`<strong>${s.bt.trades}</strong> • <span class="${(s.bt.net_pnl||0)>=0?'price-up':'price-down'}">${F(s.bt.net_pnl||0)}</span><br><small class="text-muted">${s.bt.win_rate||0}% • ${s.bt.stored_at||'saved'}</small>`:'<small class="text-muted">No BT yet — click Backtest</small>';
+                const btH=savedBtHtml(s,true);
                 // Action status badge: dono ON / sirf LIVE / sirf PAPER / OFF
                 let onH='';
                 if(pe&&lv) onH='<span class="badge bg-danger" title="Paper + Live dono ON - signal par PAPER copy aur LIVE broker order dono lagte hain">BOTH ON</span> ';

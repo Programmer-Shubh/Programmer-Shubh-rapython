@@ -341,8 +341,53 @@ def _resolve_saved_result(row):
     return None, (row.get("last_backtest_at") or ""), ""
 
 
+def data_source_badge(result) -> str:
+    """Single-source badge label for a saved backtest result.
+
+    Exactly one label everywhere (Saved BT pill, strategy card, Paper ON/OFF
+    table, Trade History): TICK DATA / 1M OPTION CHAIN / EOD BHAVCOPY / MODEL.
+    No UI code should re-derive this from raw field names.
+    """
+    _r = result if isinstance(result, dict) else {}
+    _params = _r.get("params") if isinstance(_r.get("params"), dict) else {}
+    _advanced = _params.get("advanced") if isinstance(_params.get("advanced"), dict) else {}
+    _raw = str(_r.get("data_source") or _params.get("data_mode")
+               or _advanced.get("data_mode") or "").lower()
+    def _label(s):
+        s = str(s or "").lower()
+        if any(k in s for k in ("1m_chain", "1m option chain", "real_1m", "option_chain")):
+            return "1M OPTION CHAIN"
+        if any(k in s for k in ("tick", "fyers_ws", "parquet")):
+            return "TICK DATA"
+        if any(k in s for k in ("bhavcopy", "eod", "db_near", "db")):
+            return "EOD BHAVCOPY"
+        if any(k in s for k in ("black_scholes", "model", "bs")):
+            return "MODEL"
+        if any(k in s for k in ("no_real", "no_data", "fake_fallback")):
+            return "NO CACHED DATA"
+        return ""
+    _hit = _label(_raw)
+    if _hit:
+        return _hit
+    # Legacy saved results have no result-level field: derive provenance from
+    # the executed fills themselves (never guess a real-data label).
+    _srcs = []
+    for _t in (_r.get("trade_list") or [])[:50]:
+        if isinstance(_t, dict):
+            _srcs.append(str(_t.get("entry_src") or _t.get("exit_src") or _t.get("source") or ""))
+    for _key in ("real_ticks", "db", "model"):
+        if any(_key in s for s in _srcs):
+            return _label(_key)
+    return _label(str(((_r.get("trade_list") or [{}])[0] or {}).get("source") or "")) or "—"
+
+
 def _bt_summary(row) -> dict:
-    """List/cards ke liye halka summary (poora JSON nahi - list halki rahe)."""
+    """SINGLE SOURCE OF TRUTH for every compact 'Saved BT' surface.
+
+    Cards, Paper ON/OFF table, Saved BT pill and Trade History all read this
+    very same summary from the latest saved backtest record. Custom user notes
+    are never stored here (they stay a separate field on the strategy).
+    """
     import json as _js
     try:
         raw = row.get("last_backtest") or ""
@@ -380,15 +425,36 @@ def _bt_summary(row) -> dict:
                 pass
         if not isinstance(_m, dict) or "total_trades" not in _m:
             return {}
+        _pf = _m.get("profit_factor")
+        try:
+            _pf = None if _pf is None or str(_pf).lower() in ("inf", "infinity", "none") else round(float(_pf), 2)
+        except Exception:
+            _pf = None
         return {"trades": int(_m.get("total_trades") or 0),
-                "win_rate": float(_m.get("win_rate") or 0),
-                "net_pnl": float(_m.get("net_pnl") or 0),
+                "win_rate": round(float(_m.get("win_rate") or 0), 2),
+                "net_pnl": round(float(_m.get("net_pnl") or 0), 2),
+                "profit_factor": _pf,
+                "profit_factor_infinite": bool(_m.get("profit_factor_infinite")),
+                "data_source": (_r or {}).get("data_source") or "",
+                "data_source_badge": data_source_badge(_r),
                 "run_id": (_r or {}).get("run_id") or "",
                 # Cards ko batao saved result purane engine ka hai (red chip)
                 "stale_engine": _stored_engine_stale(_r),
                 "stored_at": _stored_at}
     except Exception:
         return {}
+
+
+def bt_pill_text(bt) -> str:
+    """Exact same numbers as the Saved BT pill / strategy card, as plain text.
+    Used by Trade History rows so no surface can drift from the saved record."""
+    if not isinstance(bt, dict) or bt.get("trades") is None:
+        return ""
+    pf = bt.get("profit_factor")
+    pf_t = "∞" if bt.get("profit_factor_infinite") else (str(pf) if pf is not None else "—")
+    return (f"{int(bt.get('trades') or 0)} trades • ₹{float(bt.get('net_pnl') or 0):,.2f} • "
+            f"Win {float(bt.get('win_rate') or 0):.1f}% • PF {pf_t} • "
+            f"{bt.get('stored_at') or 'saved'}")
 
 
 def _ist_today():
@@ -1654,6 +1720,9 @@ def strategy_saved_result(strat_id: int):
         res = dict(res)
         res["stored"] = True
         res["stored_at"] = _stored_at or ""
+        # Detail aur Saved BT pill/progress card aisi hi summary dikhate hain.
+        res["bt"] = _bt_summary(row)
+        res["data_source_badge"] = data_source_badge(res)
         if _source == "history":
             res["from_history"] = True
             res.setdefault("note", "")

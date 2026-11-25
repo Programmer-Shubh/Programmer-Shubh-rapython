@@ -639,7 +639,65 @@ def get_history():
     # Ab dono jagah same rule: net pnl > 0, denominator = sab closed trades.
     _shown = closed[:30]
     _w = sum(1 for t in closed if float(t.get("pnl") or 0) > 0)
+    # ---- Single source of truth: latest saved backtest for every strategy ----
+    # Trade History BT rows and every Saved BT pill read the SAME record from
+    # strategies.last_backtest / strategy_results (no second calculation).
+    _bt_by_strategy = {}
+    _bt_rows = []
+    _bt_trades = []
+    try:
+        from routes.strategies import (_bt_summary, _resolve_saved_result,
+                                       bt_pill_text, data_source_badge)
+        _bt_rows = trade_model.db.fetch_all("SELECT * FROM strategies") or []
+        for _s in _bt_rows:
+            _sid = int(_s.get("id") or 0)
+            _summ = _bt_summary(_s) or {}
+            if _summ:
+                _bt_by_strategy[_sid] = {
+                    "bt": _summ,
+                    "bt_badge": bt_pill_text(_summ),
+                    "data_source_badge": _summ.get("data_source_badge") or "—",
+                    "strategy_name": _s.get("name") or "",
+                }
+            _res, _, _ = _resolve_saved_result(_s)
+            if not isinstance(_res, dict):
+                continue
+            _ds = _summ.get("data_source_badge") or data_source_badge(_res)
+            for _i, _t in enumerate((_res.get("trade_list") or [])):
+                if not isinstance(_t, dict):
+                    continue
+                _pos = str(_t.get("position") or _t.get("signal_side") or "").upper()
+                _pnl = float(_t.get("pnl") or _t.get("net_pnl") or 0)
+                _bt_trades.append({
+                    "id": -(1000000 + _sid * 10000 + _i),  # negative id = BT row (never deletable as a paper order)
+                    "is_bt": True,
+                    "date": _t.get("entry_date") or "",
+                    "entry_date": _t.get("entry_date") or "",
+                    "entry_time": _t.get("entry_time") or "",
+                    "exit_date": _t.get("exit_date") or "",
+                    "exit_time": _t.get("exit_time") or "",
+                    "symbol": _t.get("symbol") or _s.get("symbol") or "",
+                    "option_type": _t.get("option_type") or "",
+                    "transaction_type": "BUY" if "BUY" in _pos else ("SELL" if "SELL" in _pos else ""),
+                    "strike": _t.get("strike") or "",
+                    "expiry_date": _t.get("expiry") or "",
+                    "entry": float(_t.get("entry_price") or 0),
+                    "exit": float(_t.get("exit_price") or 0),
+                    "pnl": round(_pnl, 2),
+                    "pnl_formatted": format_currency(_pnl),
+                    "exit_status": _t.get("exit_reason") or _t.get("reason") or "",
+                    "trade_mode": "bt",
+                    "strategy_id": _sid,
+                    "strategy_name": _s.get("name") or "",
+                    "bt_badge": "BT",
+                    "data_source_badge": _ds,
+                    "bt_summary": _summ.get("trades") is not None and bt_pill_text(_summ) or "",
+                })
+    except Exception:
+        pass
     return {
+        "bt_by_strategy": _bt_by_strategy,
+        "bt_trades": _bt_trades,
         "count": len(closed),
         "total_pnl": round(total_pnl, 2),
         "total_pnl_formatted": format_currency(total_pnl),
@@ -675,6 +733,11 @@ def get_history():
                                else "paper"),
                 "strategy_id": int(t.get("strategy_id") or 0),
                 "strategy_name": _smap.get(int(t.get("strategy_id") or 0), ""),
+                "bt_badge": "BT" if int(t.get("strategy_id") or 0) in _bt_by_strategy else "",
+                "data_source_badge": (_bt_by_strategy.get(int(t.get("strategy_id") or 0), {})
+                                      .get("data_source_badge") or ""),
+                "bt_summary": (_bt_by_strategy.get(int(t.get("strategy_id") or 0), {})
+                               .get("bt_badge") or ""),
                 "calc": f"({t.get('exit_price',0):.2f}-{t['entry_price']:.2f})×{t.get('lot_size',50)}" if t.get("transaction_type")=="BUY" else f"({t['entry_price']:.2f}-{t.get('exit_price',0):.2f})×{t.get('lot_size',50)}",
                 "analysis": f"{t.get('transaction_type','')} {t['option_type']} {'profit' if ((t.get('exit_price',0)-t['entry_price'])>0 if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0))>0) else 'loss'}: ₹{t['entry_price']:.2f}→₹{t.get('exit_price',0):.2f} × Lot {t.get('lot_size',50)} = Gross ₹{((t.get('exit_price',0)-t['entry_price']) if t.get('transaction_type')=='BUY' else (t['entry_price']-t.get('exit_price',0)))*t.get('quantity',1)*t.get('lot_size',50):,.2f} - Costs = Net {format_currency(t['pnl'])}",
             }

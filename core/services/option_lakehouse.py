@@ -130,8 +130,10 @@ def _normalize_tick_dict(tick: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "high_price": round(float(tick.get("high_price") or ltp), 2),
             "low_price": round(float(tick.get("low_price") or ltp), 2),
             "close_price": round(float(tick.get("close_price") or ltp), 2),
-            "bid": round(float(tick.get("bid") or 0), 2),
-            "ask": round(float(tick.get("ask") or 0), 2),
+            # Schema fallback: missing bid/ask -> LTP/close (never fabricated
+            # mid-price; the real print is the honest executable proxy).
+            "bid": round(float(tick.get("bid") or tick.get("close_price") or tick.get("close") or ltp), 2),
+            "ask": round(float(tick.get("ask") or tick.get("close_price") or tick.get("close") or ltp), 2),
             "oi": int(float(tick.get("oi") or 0) or 0),
             "volume": int(float(tick.get("volume") or 0) or 0),
             "iv": float(tick.get("iv") or 0),
@@ -151,7 +153,9 @@ def _write_partition_parquet(partition_path: Path, rows: List[Dict[str, Any]]) -
     # Sort by timestamp IST for predicate pushdown efficiency
     rows.sort(key=lambda r: r.get("timestamp", ""))
     df = pl.DataFrame(rows, schema=OPTION_TICK_SCHEMA)
-    file_path = partition_path / f"part_{_ist_now_str().replace(' ', '_').replace(':', '')}.parquet"
+    import uuid
+    file_path = partition_path / (
+        f"part_{_ist_now_str().replace(' ', '_').replace(':', '')}_{uuid.uuid4().hex[:8]}.parquet")
     df.write_parquet(
         file_path,
         compression=_COMPRESSION,
@@ -190,7 +194,40 @@ def store_option_ticks(ticks: List[Dict[str, Any]]) -> int:
 
     total = 0
     for p, rows in by_partition.items():
-        total += _write_partition_parquet(p, rows)
+        # Idempotent atomic merge: read THIS partition's existing keys, drop
+        # rows already cached, then rewrite the partition in one shot. A file
+        # re-uploaded tomorrow is a no-op — never duplicate storage.
+        existing = []
+        if p.is_dir():
+            for fp in p.glob("*.parquet"):
+                try:
+                    existing.extend(pl.read_parquet(fp).to_dicts())
+                except Exception:
+                    pass
+        keys = {(r.get("timestamp"), r.get("expiry"), r.get("strike"),
+                 r.get("option_type"), r.get("underlying"), r.get("data_mode"))
+                for r in existing}
+        fresh = [r for r in rows if (r["timestamp"], r["expiry"], r["strike"],
+                                     r["option_type"], r["underlying"], r["data_mode"]) not in keys]
+        if not fresh:
+            continue
+        combined = existing + fresh
+        df = pl.DataFrame(combined, schema=OPTION_TICK_SCHEMA).unique(
+            subset=["timestamp", "expiry", "strike", "option_type", "underlying", "data_mode"],
+            keep="last").sort("timestamp")
+        p.mkdir(parents=True, exist_ok=True)
+        import uuid
+        old_files = list(p.glob("*.parquet"))
+        tmp = p / f".merge_{uuid.uuid4().hex}.parquet"
+        df.write_parquet(tmp, compression=_COMPRESSION, row_group_size=_ROW_GROUP_SIZE,
+                         statistics=True)
+        for fp in old_files:
+            try:
+                fp.unlink()
+            except Exception:
+                pass
+        os.replace(tmp, p / "part_merged.parquet")
+        total += len(fresh)
     return total
 
 
@@ -224,47 +261,49 @@ def query_option_ticks(
     Uses predicate pushdown + row-group pruning (only reads matching partitions).
     Returns a Polars DataFrame (lazy-compatible)."""
     conn = _duckdb_conn()
-    # Build partition-pruned glob: only scan relevant date/expiry dirs
-    glob_pattern = str(
-        OPTION_TICKS_ROOT
-        / f"underlying={underlying}"
-        / f"data_mode={data_mode}"
-        / f"expiry={expiry}"
-        / f"date={{{start_date}..{end_date}}}"
-        / "*.parquet"
-    )
-    # DuckDB cannot do date-range glob natively easily; we scan the partition dir.
-    # For safety, we read all files under that expiry dir and filter by date.
-    expiry_dir = str(
-        OPTION_TICKS_ROOT
-        / f"underlying={underlying}"
-        / f"data_mode={data_mode}"
-        / f"expiry={expiry}"
-    )
-    if not os.path.isdir(expiry_dir):
+    expiry_dir = OPTION_TICKS_ROOT / f"underlying={underlying}" / f"data_mode={data_mode}" / f"expiry={expiry}"
+    if not expiry_dir.is_dir():
         return pl.DataFrame(schema=OPTION_TICK_SCHEMA)
 
+    # Partition pruning BEFORE DuckDB: pass only files from date folders in
+    # range. DuckDB then applies predicate pushdown + row-group statistics
+    # on timestamp / strike / option_type, with zero-copy Arrow -> Polars.
+    files: List[str] = []
+    for date_dir in sorted(expiry_dir.glob("date=*")):
+        d = date_dir.name.split("=", 1)[-1]
+        if (not start_date or d >= str(start_date)[:10]) and (not end_date or d <= str(end_date)[:10]):
+            files.extend(str(p) for p in date_dir.glob("*.parquet"))
+    if not files:
+        return pl.DataFrame(schema=OPTION_TICK_SCHEMA)
+
+    def _q(s) -> str:
+        return str(s).replace("'", "''")
+
+    file_list = "[" + ",".join(f"'{_q(f)}'" for f in files) + "]"
     query = f"""
     SELECT timestamp, underlying, expiry, option_type, strike, ltp,
            open_price, high_price, low_price, close_price, bid, ask, oi,
            volume, iv, delta, data_mode, source
-    FROM read_parquet('{expiry_dir}/date=*/*.parquet', hive_partitioning=1)
-    WHERE underlying = '{underlying}'
-      AND data_mode = '{data_mode}'
-      AND expiry = '{expiry}'
-      AND CAST(timestamp AS DATE) >= DATE '{start_date}'
-      AND CAST(timestamp AS DATE) <= DATE '{end_date}'
+    FROM read_parquet({file_list}, hive_partitioning=1)
+    WHERE underlying = '{_q(underlying)}'
+      AND data_mode = '{_q(data_mode)}'
+      AND expiry = '{_q(expiry)}'
     """
+    if start_date:
+        query += f" AND CAST(timestamp AS DATE) >= DATE '{_q(str(start_date)[:10])}'"
+    if end_date:
+        query += f" AND CAST(timestamp AS DATE) <= DATE '{_q(str(end_date)[:10])}'"
     if option_type:
-        query += f" AND option_type = '{option_type}'"
+        query += f" AND option_type = '{_q(str(option_type).upper())}'"
     if strike is not None:
         query += f" AND strike = {float(strike)}"
     query += f" ORDER BY timestamp ASC LIMIT {int(limit)}"
 
     try:
-        result = conn.execute(query).pl()
-        return result
-    except Exception as e:
+        # Zero-copy Apache Arrow stream -> Polars (no Python row materialization).
+        arrow = conn.sql(query).to_arrow_table()
+        return pl.from_arrow(arrow)
+    except Exception:
         # Fail-open: return empty schema-correct frame on any query error
         return pl.DataFrame(schema=OPTION_TICK_SCHEMA)
 
@@ -299,10 +338,10 @@ def get_lakehouse_status() -> Dict[str, Any]:
                         if "=" in part:
                             k, v = part.split("=", 1)
                             part_map[k] = v
-                        seen_symbols.add(part_map.get("underlying"))
-                        seen_modes.add(part_map.get("data_mode"))
-                        seen_expiries.add(part_map.get("expiry"))
-                        seen_dates.add(part_map.get("date"))
+                    seen_symbols.add(part_map.get("underlying"))
+                    seen_modes.add(part_map.get("data_mode"))
+                    seen_expiries.add(part_map.get("expiry"))
+                    seen_dates.add(part_map.get("date"))
         status["symbols"] = sorted([s for s in seen_symbols if s])
         status["modes"] = sorted([m for m in seen_modes if m])
         status["expiries"] = sorted([e for e in seen_expiries if e])
@@ -317,6 +356,89 @@ def get_lakehouse_status() -> Dict[str, Any]:
     except Exception as e:
         status["error"] = str(e)
     return status
+
+
+def get_lakehouse_library() -> Dict[str, Any]:
+    """Stored Option Data Library: per symbol/mode date ranges, cached days,
+    completeness % (trading days represented in the requested range) and size."""
+    import calendar
+    status = get_lakehouse_status()
+    lib = []
+    for sym in status.get("symbols", []):
+        sym_root = OPTION_TICKS_ROOT / f"underlying={sym}"
+        for mode_dir in sorted(sym_root.glob("data_mode=*")):
+            mode = mode_dir.name.split("=", 1)[-1]
+            dates = set()
+            size = 0
+            expiries = set()
+            for p in mode_dir.rglob("*.parquet"):
+                parts = {k.split("=", 1)[0]: k.split("=", 1)[-1]
+                         for k in p.relative_to(mode_dir).parts if "=" in k}
+                if parts.get("date"):
+                    dates.add(parts["date"])
+                if parts.get("expiry"):
+                    expiries.add(parts["expiry"])
+                try:
+                    size += p.stat().st_size
+                except Exception:
+                    pass
+            if not dates:
+                continue
+            start, end = min(dates), max(dates)
+            # Completeness vs weekday (trading) calendar in the cached window.
+            try:
+                import datetime as _dt
+                a = _dt.date.fromisoformat(start)
+                b = _dt.date.fromisoformat(end)
+                weekdays = sum(1 for i in range((b - a).days + 1)
+                               if (a + _dt.timedelta(days=i)).weekday() < 5)
+            except Exception:
+                weekdays = len(dates)
+            lib.append({
+                "symbol": sym, "mode": mode,
+                "modes": [mode],
+                "label": "TICK DATA" if mode == "tick" else "1M OPTION CHAIN",
+                "start": start, "end": end, "days": len(dates),
+                "completeness_pct": round(min(100.0, len(dates) / max(1, weekdays) * 100), 1),
+                "expiries": sorted(expiries),
+                "size_mb": round(size / (1024 * 1024), 3),
+            })
+    # Merge modes per symbol for the compact UI card.
+    merged: Dict[str, Dict[str, Any]] = {}
+    for item in lib:
+        s = merged.setdefault(item["symbol"], {
+            "symbol": item["symbol"], "modes": [], "label": item["label"], "start": item["start"],
+            "end": item["end"], "days": 0, "completeness_pct": 0.0,
+            "size_mb": 0.0, "expiries": []})
+        s["modes"].append(item["mode"])
+        s["start"] = min(s["start"], item["start"])
+        s["end"] = max(s["end"], item["end"])
+        s["days"] = max(s["days"], item["days"])
+        s["completeness_pct"] = max(s["completeness_pct"], item["completeness_pct"])
+        s["size_mb"] += item["size_mb"]
+        s["expiries"] = sorted(set(s["expiries"]) | set(item["expiries"]))
+    return {"status": status, "library": list(merged.values()), "entries": lib}
+
+
+def missing_dates(underlying: str, data_mode: str, start_date: str, end_date: str) -> List[str]:
+    """Actionable warning: weekdays in range with no cached Parquet partition."""
+    import datetime as _dt
+    root = OPTION_TICKS_ROOT / f"underlying={str(underlying or '').upper()}" / f"data_mode={data_mode}"
+    have = set()
+    for p in root.rglob("*.parquet"):
+        have.add(p.parent.name.split("=", 1)[-1])
+    try:
+        a = _dt.date.fromisoformat(str(start_date)[:10])
+        b = _dt.date.fromisoformat(str(end_date)[:10])
+    except Exception:
+        return []
+    out = []
+    d = a
+    while d <= b:
+        if d.weekday() < 5 and d.isoformat() not in have:
+            out.append(d.isoformat())
+        d += _dt.timedelta(days=1)
+    return out
 
 
 def compact_lakehouse() -> Dict[str, Any]:
