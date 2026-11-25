@@ -354,7 +354,8 @@ async def add_cache_header(request, call_next):
     return response
 
 
-from routes import dashboard, option_chain, paper_trade, strategy_builder, scanner, broker, webhook, websocket, email_alerts, strategies, custom_code, keepalive, tvchart, lakehouse
+from routes import dashboard, option_chain, paper_trade, strategy_builder, scanner, broker, webhook, websocket, email_alerts, strategies, custom_code, keepalive, tvchart
+from routes.lakehouse import router as lakehouse_router
 
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(option_chain.router, prefix="/api/chain", tags=["Option Chain"])
@@ -369,7 +370,7 @@ app.include_router(strategies.router, prefix="/api/strategies", tags=["Strategie
 app.include_router(custom_code.router, prefix="/api/custom-code", tags=["Custom Code"])
 app.include_router(keepalive.router, prefix="/api/keepalive", tags=["Keep-Alive"])
 app.include_router(tvchart.router, prefix="/api/tvchart", tags=["TV Chart"])
-app.include_router(lakehouse.router, prefix="/api/lakehouse", tags=["Option Data Lakehouse"])
+app.include_router(lakehouse_router, prefix="/api/lakehouse", tags=["Option Data Lakehouse"])
 
 
 @app.get("/")
