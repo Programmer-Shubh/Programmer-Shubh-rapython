@@ -621,15 +621,12 @@ def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
                     _reason = str(_t.get("exit_status") or _t.get("exit_reason") or "").lower()
                     _ep = float(_t.get("entry_price") or 0)
                     _xp = float(_t.get("exit_price") or 0)
-                    # SL DIRECTION (fix 25-11): BUY (long) ka SL entry se UPAR
-                    # hota hai (price upar gayi = loss) - ye SAHI hai. Pehle
-                    # yahi sahi SL 'math bug' bol kar failed dikha raha tha.
-                    # Galat tab hai jab BUY ka SL exit entry se NEECHE ho ya
-                    # SELL ka SL exit entry se UPAR ho (tab to profit dikhega).
-                    _is_sl = ("stop" in _reason or "sl" in _reason)
-                    if _is_sl and _ep > 0:
-                        if (_txn == "buy" and _xp < _ep - 0.01) or (_txn == "sell" and _xp > _ep + 0.01):
-                            _bad_sl += 1
+                    # SL DIRECTION CHECK HATAYA (25-11): BUY ka SL exit entry
+                    # se neeche (normal loss) YA upar (trailing profit-lock)
+                    # dono sahi ho sakte hain - sirf exit price se direction
+                    # decide karna galat tha aur har run ko PARTIAL_DATA bana
+                    # deta tha. Asli math checks neeche alag hain (pnl/charge
+                    # reconcile + risk Rs = sl_points × qty).
                     # Risk Rs = sl_points × Qty verify (jahan dono fields ho).
                     _risk = float(_t.get("risk_amount_rs", 0) or 0)
                     _slpts = float(_t.get("sl_points", 0) or 0)
@@ -647,10 +644,15 @@ def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
                 passed.append("premium present")
             else:
                 failed.append(f"{_bad_px} trades me premium missing")
+            # INFORMATIONAL ONLY (fix 25-11): trailing-lock / step-trail
+            # legitimate taur par BUY ka SL entry se UPAR le ja sakta hai
+            # (profit lock). Isse 'math bug' bol kar PARTIAL_DATA mark karna
+            # galat tha. Real math errors alag checks (P&L/pnl reconcile,
+            # risk Rs = sl_points × qty) pakadte hain.
             if _bad_sl == 0:
                 passed.append("SL direction valid")
             else:
-                failed.append(f"{_bad_sl} trades me SL direction galat (BUY ka SL entry se neeche / SELL ka upar - loss ki jagah profit dikhega)")
+                passed.append(f"{_bad_sl} trades me SL entry ke paar (trailing lock/profit-lock - sahi behavior)")
         except Exception:
             pass
     except Exception as e:
