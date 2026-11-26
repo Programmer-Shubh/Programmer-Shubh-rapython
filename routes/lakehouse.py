@@ -88,6 +88,22 @@ async def lakehouse_auto_record_toggle(active: bool = True):
     return {"success": True, **get_recorder_status()}
 
 
+@router.post("/fetch-real")
+async def lakehouse_fetch_real(
+    start_date: str = "", end_date: str = "",
+    symbols: str = "", max_days: int = 12,
+):
+    """One-click real NSE F&O data fetch + lakehouse cache (offline backtest ke liye)."""
+    from starlette.concurrency import run_in_threadpool
+    from core.services.option_data_bootstrap import fetch_real_option_data
+    syms = [s for s in str(symbols or "").replace(" ", ",").split(",") if s]
+    try:
+        return await run_in_threadpool(
+            fetch_real_option_data, start_date, end_date, syms, max_days)
+    except Exception as e:
+        return {"success": False, "message": f"Fetch failed: {e}"[:300]}
+
+
 @router.post("/sync-incremental")
 async def lakehouse_incremental_sync(days: int = 5):
     """Optional incremental historical sync (broker connected only).

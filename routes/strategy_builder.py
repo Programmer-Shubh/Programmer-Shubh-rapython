@@ -1374,7 +1374,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             _needY = []
             for _s in list(_syms):
                 _b0 = _preDB.get(_s) or []
-                if len(_b0) < 15:
+                if len(_b0) < 8:
                     _needY.append(_s)
                     continue
                 if _rq_set:
@@ -1500,14 +1500,14 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         _db_hist = _load_db_history(_sym, start_date, end_date)
                 except Exception:
                     _db_hist = []
-                if _cache_ok and not (_db_hist and len(_db_hist) >= 15):
+                if _cache_ok and not (_db_hist and len(_db_hist) >= 8):
                     historical = _ce[1]
                     try:
                         _hist_src = _ce[2] if len(_ce) > 2 else "cache"
                         _hist_status = _ce[3] if len(_ce) > 3 else ""
                     except Exception:
                         _hist_src = "cache"
-                elif _db_hist and len(_db_hist) >= 15:
+                elif _db_hist and len(_db_hist) >= 8:
                     historical = _db_hist[-_bar_cap:] if len(_db_hist) > _bar_cap else _db_hist
                     _use_db = True
                     # Coverage <70% ho to fallback full-range se compare karo -
@@ -1533,7 +1533,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                                 _ybc, _ybsrc = [], ""
                             _yhave = {str(h.get("trade_date", ""))[:10] for h in (_ybc or [])}
                             _cov1 = sum(1 for _d in _rq if _d in _yhave)
-                            if _ybc and len(_ybc) >= 15 and _cov1 > _cov0:
+                            if _ybc and len(_ybc) >= 8 and _cov1 > _cov0:
                                 historical = _ybc
                                 _use_db = False
                                 _hist_src = _ybsrc or "nsepython_daily"
@@ -1566,7 +1566,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         except Exception:
                             _hist_status = "SECONDARY_ONLY"
                     else:
-                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<15, NSE/Fyers fail) - fabricated data nahi banate", "total_trades": 0,
+                        _per_symbol[_sym] = {"error": f"INSUFFICIENT_DATA: {_sym} ke liye real bars nahi (DB<8, NSE/Fyers fail) - fabricated data nahi banate", "total_trades": 0,
                                              "winning_trades": 0, "losing_trades": 0, "win_rate": 0, "net_pnl": 0,
                                              "data": {"source": "none", "status": "INSUFFICIENT", "bars": 0}}
                         _fire_prog(_sym)
@@ -2053,7 +2053,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 _tick_src = "real_eod_bhavcopy"
             elif not _tick_n:
                 _tick_reason = ("Real Tick select kiya par is symbol ke liye koi cached tick data nahi "
-                                "— koi modeled premium nahi banaya gaya (lakehouse upload/sync karo ya chhoti range)")
+                                "— koi modeled premium nahi banaya gaya (Library me 'Fetch Real Data (NSE)' dabao ya CSV upload karo)")
     except Exception:
         _tick_n = 0
         _tick_src = ""

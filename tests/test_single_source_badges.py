@@ -60,6 +60,8 @@ def test_ui_uses_shared_helper_and_badge_column():
     assert "<th>Data Source</th>" in html          # Trade History
     assert "data_source_badge" in html
     assert "bt_trades" in html
+    assert "r-is-oos" not in html          # IS/OOS toggle removed (user rule)
+    assert "Fetch Real Data (NSE)" in html
 
 
 def test_only_high_frequency_tick_data_mode_is_visible():

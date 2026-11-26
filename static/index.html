@@ -518,7 +518,6 @@
                         <div class="col-md-2"><label class="form-label small" title="Auto paper: aaj ka signal na mile to kitne din purana signal chalega (0 = sirf aaj)">Signal Lookback (din)</label><input type="number" id="r-slb" class="form-control form-control-sm" value="0" min="0" max="15"></div>
                         <div class="col-md-2"><label class="form-label small">Chart Timeframe</label><select id="r-timeframe" class="form-select form-select-sm"><option value="1d">Daily</option><option value="5m" selected>5 Minute</option><option value="15m">15 Minute</option><option value="30m">30 Minute</option><option value="1h">1 Hour</option><option value="1m">1 Minute</option></select></div>
                         <div class="col-md-2"><label class="form-label small" title="Backtest sirf asli recorded option data par chalta hai — koi modeled Black-Scholes premium nahi">Premium Data</label><select id="r-data-mode" class="form-select form-select-sm"><option value="tick" selected>High-Frequency Option Tick Data</option></select></div>
-                        <div class="col-md-2"><label class="form-label small" title="In-Sample / Out-of-Sample walk-forward split — overfit check">IS / OOS Split</label><div class="d-flex align-items-center gap-1"><input type="checkbox" id="r-is-oos" onchange="document.getElementById('r-oos-date').disabled=!this.checked"><input type="date" id="r-oos-date" disabled class="form-control form-control-sm" style="width:130px"></div></div>
                     </div>
                     <div class="row g-1 mt-1">
                         <div class="col-md-2"><label class="form-label small">Momentum</label><input type="range" class="form-range" id="s-momentum" min="0" max="20" value="0"></div>
@@ -532,7 +531,7 @@
                         <div id="lh-missing" class="mb-2"></div>
                         <div id="lh-drop" class="border rounded p-2 mb-2" style="border-style:dashed!important;background:#f8f9fa">
                             <div class="small fw-bold"><i class="bi bi-cloud-arrow-up"></i> One-time CSV / Parquet upload (idempotent — dedup by timestamp, expiry, strike, CE/PE)</div>
-                            <div class="d-flex flex-wrap gap-2 align-items-center mt-1"><input type="file" id="lh-file" accept=".csv,.parquet" multiple class="form-control form-control-sm" style="width:280px"><select id="lh-mode" class="form-select form-select-sm" style="width:210px"><option value="tick" selected>High-Frequency Tick Data</option></select><input id="lh-symbol" class="form-control form-control-sm" style="width:130px" placeholder="Symbol (optional)"><button class="btn btn-sm btn-primary" onclick="lhUpload()"><i class="bi bi-upload"></i> Upload</button><button class="btn btn-sm btn-outline-secondary" onclick="lhRefresh()">Refresh Library</button><button class="btn btn-sm btn-outline-info" onclick="lhCompact()">Compact</button><button class="btn btn-sm btn-outline-success" id="lh-sync-btn" onclick="lhIncrementalSync()" title="Sirf broker connected ho tab">Incremental Sync</button></div>
+                            <div class="d-flex flex-wrap gap-2 align-items-center mt-1"><input type="file" id="lh-file" accept=".csv,.parquet" multiple class="form-control form-control-sm" style="width:280px"><select id="lh-mode" class="form-select form-select-sm" style="width:210px"><option value="tick" selected>High-Frequency Tick Data</option></select><input id="lh-symbol" class="form-control form-control-sm" style="width:130px" placeholder="Symbol (optional)"><button class="btn btn-sm btn-primary" onclick="lhUpload()"><i class="bi bi-upload"></i> Upload</button><button class="btn btn-sm btn-outline-secondary" onclick="lhRefresh()">Refresh Library</button><button class="btn btn-sm btn-outline-info" onclick="lhCompact()">Compact</button><button class="btn btn-sm btn-success" id="lh-fetch-btn" onclick="lhFetchReal()" title="NSE official F&O bhavcopy se ASLI option data fetch karo — offline backtest ke liye">Fetch Real Data (NSE)</button><button class="btn btn-sm btn-outline-success" id="lh-sync-btn" onclick="lhIncrementalSync()" title="Sirf broker connected ho tab">Incremental Sync</button></div>
                             <div id="lh-upload-status" class="small mt-1"></div>
                         </div>
                         <div class="small text-muted"><i class="bi bi-info-circle"></i> User-Configured data setup — real recorded option data hi store hoti hai. Platform koi trading tip ya recommendation nahi deta. Backtest offline chal sakta hai (broker disconnected / token expire / market band).</div>
@@ -1623,7 +1622,7 @@ let _lastOpenTrdHTML = null;
         // use karta hai (index 13-15%, stock 30%) - wahi paper/live/scanner
         // use karte hain. Pehle yahan hardcoded 0.14 jata tha (index ka IV)
         // to stock options ka premium 5x chhota dikhta tha.
-        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,is_oos_split:!!document.getElementById('r-is-oos')?.checked,is_oos_date:document.getElementById('r-oos-date')?.value||'',indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:trailOn,trailing:trailOn?String(_trailStep):'Off',max_holding_bars:rType==='intraday'?0:(momentum>0?Math.max(5,20-momentum):20),strict_trend:(indicators||[]).some(i=>['adx','vwap','market_regime','combo_rsi_vwap_pcr'].includes(String(i.id||i).toLowerCase())),allow_intraday_time_exit:false,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'No Re-entry',reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'RE ASAP',lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,lock_profit_unit:'pt',dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip,data_mode:(document.getElementById('r-data-mode')?.value||'tick')},risk:{max_trades_per_day:mtd,daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,sl_unit:slUnit,tp_unit:tpUnit,signal_lookback_days:slb}};
+        return {symbol:sym,symbols:_syms,start_date:s,end_date:e,indicators:indicators,entry_conditions:(window._stratEntryConds||[]),exit_conditions:(window._stratExitConds||[]),legs:legs,advanced:{allow_multi:true,trailing_sl:trailOn,trailing:trailOn?String(_trailStep):'Off',max_holding_bars:rType==='intraday'?0:(momentum>0?Math.max(5,20-momentum):20),strict_trend:(indicators||[]).some(i=>['adx','vwap','market_regime','combo_rsi_vwap_pcr'].includes(String(i.id||i).toLowerCase())),allow_intraday_time_exit:false,strike_selection:legs[0].strike_selection,otm_distance:legs[0].otm_distance||0,trade_mode:rType,timeframe:timeframe,early_exit_time:exitTime,expiry:legs[0].expiry||'weekly',entry_time:entryTime,exit_time:exitTime,momentum:momentum,no_reentry_after:document.getElementById('s-no-reentry')?.value,reentry_on_sl:document.getElementById('s-reentry-sl')?.value||'No Re-entry',reentry_on_tp:document.getElementById('s-reentry-tp')?.value||'RE ASAP',lock_profit_at:parseFloat(document.getElementById('s-lock-profit')?.value)||0,lock_profit:parseFloat(document.getElementById('s-lock-amount')?.value)||0,lock_profit_unit:'pt',dte:legs[0].dte||7,slippage_pct:qSlip,slippage:qSlip,data_mode:(document.getElementById('r-data-mode')?.value||'tick')},risk:{max_trades_per_day:mtd,daily_stop_loss:['rs','pt'].includes(slUnit)?sl:0,daily_take_profit:['rs','pt'].includes(tpUnit)?tp:0,daily_stop_loss_pct:slUnit==='pct'?sl:0,daily_take_profit_pct:tpUnit==='pct'?tp:0,sl_unit:slUnit,tp_unit:tpUnit,signal_lookback_days:slb}};
     }
     async function runBacktest(opts){
         try{lhCheckMissing();}catch(e){}
@@ -1886,13 +1885,6 @@ let _lastOpenTrdHTML = null;
                     }
                 }catch(_){}
             }catch(e){}
-            // In-Sample / Out-of-Sample (walk-forward) overfit check
-            try{
-                if(r.is_oos){const s=r.is_oos;
-                    const _oos=document.createElement('div');_oos.className='alert alert-info py-2 mb-2 small';
-                    _oos.innerHTML='<strong><i class="bi bi-split"></i> IS / OOS split</strong> (cut '+s.split_date+') — IS: '+(s.in_sample.trades||0)+' trades • ₹'+(s.in_sample.net_pnl||0).toFixed(2)+' • PF '+(s.in_sample.profit_factor||0)+' | OOS: '+(s.out_of_sample.trades||0)+' trades • ₹'+(s.out_of_sample.net_pnl||0).toFixed(2)+' • PF '+(s.out_of_sample.profit_factor||0)+' | MAE '+(m.mae_points||0)+' • MFE '+(m.mfe_points||0)+' • Calmar '+(m.calmar_ratio||0);
-                    const _mb=document.getElementById('bt-metrics');if(_mb)_mb.prepend(_oos);}
-            }catch(_){}
         }catch(e){document.getElementById('bt-results').classList.remove('hidden');document.getElementById('bt-metrics').innerHTML='<p class="text-danger p-3">Render error: '+e.message+'</p>';}
     }
     async function _runBacktestInner(_seq){
@@ -2708,7 +2700,7 @@ let _lastOpenTrdHTML = null;
             const syms=(st.symbols||[]).slice();
             const el=document.getElementById('lh-library');
             if(el){
-                if(!syms.length){el.innerHTML='<div class="alert alert-warning py-1 px-2 mb-0">Koi cached option data nahi hai. CSV/Parquet upload karo ya broker connect karke incremental sync chalao — backtest tab bhi offline chalega.</div>';}
+                if(!syms.length){el.innerHTML='<div class="alert alert-warning py-1 px-2 mb-0">Koi cached option data nahi hai. <strong>Fetch Real Data (NSE)</strong> dabao ya CSV/Parquet upload karo — backtest tab bhi offline chalega.</div>';}
                 else{
                     el.innerHTML='<div class="row g-1">'+syms.map(s=>{
                         const m=(st.library||[]).find(x=>x.symbol===s)||{};
@@ -2732,7 +2724,7 @@ let _lastOpenTrdHTML = null;
             const r=await A('/api/lakehouse/missing-dates?symbol='+encodeURIComponent(sym)+'&data_mode='+encodeURIComponent(mode)+'&start_date='+s+'&end_date='+e);
             const el=document.getElementById('lh-missing');if(!el)return;
             const miss=r.missing_dates||[];
-            el.innerHTML=miss.length?`<div class="alert alert-warning py-1 px-2 mb-0 small"><i class="bi bi-exclamation-triangle"></i> <strong>${miss.length} dates missing</strong> (${miss.slice(0,6).join(', ')}${miss.length>6?'…':''}) for ${sym||'selected symbol'} / ${mode}. <button class="btn btn-sm btn-outline-warning py-0" onclick="lhIncrementalSync()">Sync now</button> ya chhoti date range chuno — bina data backtest honest 0 trades dega.</div>`:'<div class="small text-success"><i class="bi bi-check-circle"></i> Requested dates cached — offline backtest ready.</div>';
+            el.innerHTML=miss.length?`<div class="alert alert-warning py-1 px-2 mb-0 small"><i class="bi bi-exclamation-triangle"></i> <strong>${miss.length} dates missing</strong> (${miss.slice(0,6).join(', ')}${miss.length>6?'…':''}) for ${sym||'selected symbol'} / ${mode}. <button class="btn btn-sm btn-warning py-0" onclick="lhFetchReal()">Fetch Real Data abhi</button> ya chhoti date range chuno — bina data backtest honest 0 trades dega.</div>`:'<div class="small text-success"><i class="bi bi-check-circle"></i> Requested dates cached — offline backtest ready.</div>';
         }catch(e){}
     }
     async function lhUpload(){
@@ -2752,6 +2744,21 @@ let _lastOpenTrdHTML = null;
         }catch(e){if(st)st.textContent='Upload failed: '+e.message;}
     }
     async function lhCompact(){try{const r=await P('/api/lakehouse/compact',{method:'POST'});alert('Compacted '+(r.compacted_partitions||0)+' partitions');await lhRefresh();}catch(e){alert(e.message);}}
+    async function lhFetchReal(){
+        const btn=document.getElementById('lh-fetch-btn'), st=document.getElementById('lh-upload-status');
+        try{
+            if(btn){btn.disabled=true;btn.textContent='Fetching real data…';}
+            if(st)st.textContent='NSE official F&O bhavcopy se asli option data aa rahi hai (ye real prints hain, koi modeled premium nahi)…';
+            const s=document.getElementById('r-start')?.value||'';
+            const e=document.getElementById('r-end')?.value||'';
+            const sym=(document.getElementById('r-symbol')?.value||document.getElementById('lh-symbol')?.value||'').trim();
+            const r=await P('/api/lakehouse/fetch-real',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:s,end_date:e,symbols:sym,max_days:12})});
+            if(st)st.textContent=r.message||JSON.stringify(r);
+            if(r.success)showToast('Asli option data cache ho gaya — ab Run Backtest dabao','success');
+            await lhRefresh();await lhCheckMissing();
+        }catch(e){if(st)st.textContent='Fetch failed: '+e.message;}
+        finally{if(btn){btn.disabled=false;btn.textContent='Fetch Real Data (NSE)';}}
+    }
     async function lhIncrementalSync(){try{const r=await P('/api/lakehouse/sync-incremental',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});alert(r.message||JSON.stringify(r));await lhRefresh();await lhCheckMissing();}catch(e){alert(e.message);}}
 
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{try{const _sc=localStorage.getItem('stratCardsCache'); if(_sc && cards && !cards.innerHTML.includes('card')) cards.innerHTML=_sc;}catch(e){} const [r,o]=await Promise.all([A('/api/strategies/list'), A('/api/trades/open/fast').catch(()=>({positions:[]}))]);const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3"><div class="text-center p-4"><i class="bi bi-lightbulb" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">No strategies yet</p><small class="text-muted">Create your first strategy to get started</small></div></p>';return;}

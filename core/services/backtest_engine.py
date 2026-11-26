@@ -2382,15 +2382,14 @@ class BacktestEngine:
                         float(current.get("close_price", 0) or 0))
             except Exception:
                 pass
-        # SL/TP is on OPTION PREMIUM, not spot. Prefer the option's OWN
-        # bar high/low (same DB source as entry) when cached; else estimate
-        # via Black-Scholes at bar high/low spot. Mixing DB-entry with
-        # model-range on one bar minted instant fantasy exits (BPCL 2.86->1.20).
+        # SL/TP is on OPTION PREMIUM, not spot. Only the option's OWN real
+        # print high/low is used — never a modeled Black-Scholes range.
         strike = float(entry.get("strike", 0) or 0)
+        cur_d = str(current.get("trade_date", ""))[:10]
         # Daily high/low cache is a WHOLE-SESSION range. On a 5m/15m bar it
         # contains prices from before/after this bar (look-ahead) - that is
         # how a 12:05 sell hit TP on the 09:15 low. Clocked bars must use
-        # their own spot high/low (Black-Scholes path below).
+        # their own real option bar (below).
         try:
             if not self._intraday_bar():
                 _bd = str(current.get("trade_date", ""))[:10]
