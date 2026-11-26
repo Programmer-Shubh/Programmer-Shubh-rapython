@@ -1146,7 +1146,8 @@
             if(state==='live'){
                 if(_connFailTimer){clearTimeout(_connFailTimer);_connFailTimer=null;}
                 _connFails=0; _connEverOk=true; _connLastOkAt=Date.now();
-                el.innerHTML='<span class="live-dot"></span> Live Streaming'; return;
+                const _t=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+                el.innerHTML='<span class="live-dot"></span> Live Streaming <small style="opacity:.75">'+_t+'</small>'; return;
             }
             if(state==='ok'){
                 if(_connFailTimer){clearTimeout(_connFailTimer);_connFailTimer=null;}
@@ -3855,7 +3856,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
             const proto=location.protocol==='https:'?'wss:':'ws:';
             _dashWS=new WebSocket(proto+'//'+location.host+'/api/ws/live');
             let _prevSpots={};
-            _dashWS.onopen=()=>{ _dashWSRetry=0; _dashWSDownSince=0; _connWsOpen=true; _setConnStatus('live'); };
+            _dashWS.onopen=()=>{ _dashWSRetry=0; _dashWSDownSince=0; _connWsOpen=true; _setConnStatus('ok'); };
             _dashWS.onmessage=e=>{
                 try{
                     const msg=JSON.parse(e.data);

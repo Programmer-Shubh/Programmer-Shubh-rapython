@@ -778,33 +778,12 @@ def _fallback_ltp(symbol, strike, option_type, expiry_ymd, with_source=False):
             return (float(row["close_price"]), "db-close") if with_source else float(row["close_price"])
     except Exception:
         pass
-    # Model with CURRENT iv + real DTE (same formula chain and positions share)
-    try:
-        from utils.helpers import model_premium, model_iv
-        from core.services.live_market_data import LiveMarketData
-        spot = 0
-        try:
-            sp = LiveMarketData().get_live_spot(sym)
-            if sp and sp.get("spot"):
-                spot = float(sp["spot"])
-        except Exception:
-            pass
-        if spot <= 0:
-            return (None, "none") if with_source else None
-        import datetime as _dt
-        dte = 7
-        if expiry_ymd:
-            try:
-                exp_dt = _dt.datetime.strptime(str(expiry_ymd)[:10], "%Y-%m-%d")
-                dte = max(1, (exp_dt - _dt.datetime.now()).days)
-            except Exception:
-                dte = 7
-        bs = model_premium(spot, strike_f, dte, option_type, symbol=sym, iv=model_iv(sym))
-        if bs and float(bs) > 0:
-            return (round(float(bs), 2), "model") if with_source else round(float(bs), 2)
-        return (None, "none") if with_source else None
-    except Exception:
-        return (None, "none") if with_source else None
+    # NO synthetic/Black-Scholes premium (user rule): backtest uses real ticks
+    # / bhavcopy only and REFUSES a trade when the exact contract has no real
+    # print. Paper/live must follow the same rule or BT != paper P&L. If the
+    # broker quote and fresh-today DB close are both unavailable, return None
+    # so the caller skips the order instead of filling on a modeled number.
+    return (None, "none") if with_source else None
 
 
 # ---------------- Tier 0: NSE full-chain map (local only, expiry-matched) ----------------

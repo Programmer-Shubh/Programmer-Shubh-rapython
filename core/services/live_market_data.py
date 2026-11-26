@@ -14,7 +14,7 @@ except Exception:
 
 from collections import OrderedDict
 _LIVE_CACHE = OrderedDict()
-_LIVE_CACHE_TTL = 60
+_LIVE_CACHE_TTL = 12
 _LIVE_CACHE_MAX = 50
 _CHAIN_CACHE = OrderedDict()
 _CHAIN_CACHE_TTL = 300

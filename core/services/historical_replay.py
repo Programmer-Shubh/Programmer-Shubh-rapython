@@ -323,6 +323,14 @@ class HistoricalReplayEngine:
                     trade = self.bt_engine._enter_single(cur_date, spot, self.symbol, self.legs[0],
                                                          strike_sel, delta_target, otm_dist)
 
+                # NO synthetic premium: engine None return karta hai jab kisi
+                # exact contract ka asli premium nahi milta - replay bhi wahi
+                # trade skip kare ( BT == replay parity).
+                if trade is None:
+                    self.pending_entry = None
+                    self.pending_auto_buy = None
+                    continue
+
                 # Min-premium guard (same as backtest engine): Rs20 se saste
                 # BUY aur SELL entries dono skip (spreads exempt)
                 try:

@@ -2024,6 +2024,7 @@ class BacktestEngine:
         # NO synthetic floor: if real tick/chain data has no price for this
         # exact contract, skip the trade honestly (never fabricate ₹1.5).
         if premium is None or float(premium) <= 0:
+            self._rej = getattr(self, "_rej", None) or {}
             self._rej["no_real_option_premium"] = self._rej.get("no_real_option_premium", 0) + 1
             return None
         # Dynamic Slippage for Option Selling: SELL entry पर प्राइस और खराब (कम) करें
