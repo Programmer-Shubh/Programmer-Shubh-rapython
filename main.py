@@ -80,6 +80,15 @@ async def _startup_background():
         asyncio.get_running_loop().create_task(asyncio.to_thread(_init_db))
     except Exception:
         pass
+    # Seed bundled REAL NSE F&O bhavcopy so free-tier/ephemeral DBs have
+    # option prints instantly (backtests work offline + fast, no slow NSE fetch).
+    try:
+        import threading as _th_seed
+        _th_seed.Thread(target=lambda: __import__(
+            "core.services.seed_data", fromlist=["seed_if_needed"]).seed_if_needed(),
+            name="seed-data", daemon=True).start()
+    except Exception:
+        pass
     # Nightly Parquet lakehouse compaction (single small file per partition).
     def _nightly_compact():
         import time as _t
