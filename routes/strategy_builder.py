@@ -2022,7 +2022,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return {"error": f"Internal error: {str(e)}"}
+        return {"error": f"Internal error: {str(e)} | {traceback.format_exc()[-800:]}"}
     # Disclose the SuperTrend-only retry: results below came from relaxed
     # indicators, not the user's exact setup.
     try:
