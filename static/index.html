@@ -432,7 +432,7 @@
                             <label class="form-label small mb-1">Symbol</label>
                             <select id="eb-symbol" class="form-select form-select-sm" onchange="posOnSymbolChange();ebUpdateSummary()"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select>
                             <label class="form-label small mb-1 mt-2">Timeframe</label>
-                            <select id="eb-tf" class="form-select form-select-sm" onchange="ebUpdateSummary()"><option value="1m">1 Min</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1d">Daily</option></select>
+                            <select id="eb-tf" class="form-select form-select-sm" onchange="ebUpdateSummary()" oninput="ebUpdateSummary()"><option value="1m">1 Min</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1d">Daily</option></select>
                         </div>
                         <div class="col-md-4">
                             <div class="small fw-bold mb-1"><i class="bi bi-graph-up"></i> Indicators (multi-select)</div>
@@ -466,7 +466,9 @@
                             <label class="form-label small mb-0">Quick Template</label>
                             <select id="pos-template" class="form-select form-select-sm" onchange="posApplyTemplate(this.value)">
                                 <option value="">— Custom (edit legs below) —</option>
-                                <option value="single">Single Leg (CE ATM Buy)</option>
+                                <option value="single">Single Leg — BUY CE ATM (bullish / BUY signal)</option>
+                                <option value="single_pe">Single Leg — BUY PE ATM (bearish / SELL signal)</option>
+                                <option value="single_sellce">Single Leg — SELL CE OTM2 (bearish / SELL signal)</option>
                                 <option value="bullcall">Bull Call Spread (CE ATM Buy + CE OTM2 Sell)</option>
                                 <option value="bearput">Bear Put Spread (PE ATM Buy + PE OTM2 Sell)</option>
                                 <option value="bearcall">Bear Call Spread (CE OTM2 Sell + CE OTM5 Buy)</option>
@@ -2723,12 +2725,24 @@ let _lastOpenTrdHTML = null;
         const sym=g('eb-symbol')||'NIFTY', tf=g('eb-tf')||'5m';
         const sl=g('eb-sl')||'0', tp=g('eb-tp')||'0', mode=g('eb-mode')||'intraday';
         const inds=[...document.querySelectorAll('.eb-ind:checked')].map(x=>x.value);
-        const legs=(typeof posLegs!=='undefined'?posLegs:[]).map(posLegLabel);
+        const curLegs=(typeof posLegs!=='undefined'?posLegs:[]);
+        const legs=curLegs.map(posLegLabel);
         const from=g('eb-start')||'auto', to=g('eb-end')||'today';
+        // Single leg ka signal-direction rule summary me hi saaf dikhao, taaki
+        // BUY PE / SELL CE par 0 trade aane par user ko turant pata chale.
+        let dirHint='';
+        if(curLegs.length===1){
+            const l=curLegs[0]||{}; const tx=String(l.transaction||'buy').toLowerCase(), op=String(l.option_type||'CE').toUpperCase();
+            const bearish=(tx==='sell'&&op==='CE')||(tx==='buy'&&op==='PE');
+            dirHint=' · <span class="badge bg-light text-dark border">'+(bearish?'needs SELL signal':'needs BUY signal')+'</span>';
+        }
         const el=document.getElementById('eb-summary');
         if(el) el.innerHTML='<strong>Summary:</strong> '+sym+' · '+tf+' · '+(inds.join(', ')||'SuperTrend')+' · '+mode+' · SL '+sl+' pts / TP '+tp+' pts · '+from+' → '+to+
-            '<br><strong>Legs ('+legs.length+'):</strong> '+(legs.join(' + ')||'none — Add Leg ya template chuno')+' · Payoff aur backtest results neeche apne aap update hote hain.';
+            '<br><strong>Legs ('+legs.length+'):</strong> '+(legs.join(' + ')||'none — Add Leg ya template chuno')+dirHint+' · Payoff aur backtest results neeche apne aap update hote hain.';
     }catch(e){}}
+    // Har control change par summary turant fresh (keyboard/selection dono).
+    document.addEventListener('input',e=>{if(e.target&&e.target.closest&&e.target.closest('#easy-bt-card')){try{ebUpdateSummary();}catch(_){}}});
+    document.addEventListener('change',e=>{if(e.target&&e.target.closest&&e.target.closest('#easy-bt-card')){try{ebUpdateSummary();}catch(_){}}});
 
     // ===== Integrated legs table + payoff + backtest =====
     // Backend nets multiple legs (_enter_spread), so OTM5 Buy + OTM2 Sell etc.
@@ -2806,6 +2820,8 @@ let _lastOpenTrdHTML = null;
         const mk=(ot,tx,s,d)=>({option_type:ot,transaction:tx,strike_selection:s,otm_distance:d,lots:1,expiry:'weekly'});
         const M={
             single:[mk('CE','buy','atm',0)],
+            single_pe:[mk('PE','buy','atm',0)],
+            single_sellce:[mk('CE','sell','otm',2)],
             bullcall:[mk('CE','buy','atm',0),mk('CE','sell','otm',2)],
             bearput:[mk('PE','buy','atm',0),mk('PE','sell','otm',2)],
             bearcall:[mk('CE','sell','otm',2),mk('CE','buy','otm',5)],
@@ -2914,7 +2930,14 @@ let _lastOpenTrdHTML = null;
         const card=document.getElementById('pos-results-card'); if(!card) return;
         card.style.display='block';
         const m=(res&&res.metrics)||{};
-        const badge=document.getElementById('pos-res-badge'); if(badge) badge.innerHTML='<span class="badge bg-info">'+posBadge(res)+'</span> <small class="text-muted">'+(res&&res.run_id||'')+'</small>';
+        const badge=document.getElementById('pos-res-badge');
+        if(badge){
+            const p=(res&&res.params)||{}, tfRun=String(p.timeframe||''), tfSel=document.getElementById('eb-tf')?.value||'';
+            const tfBadge=tfRun? (tfSel&&tfRun!==tfSel
+                ? ' <span class="badge bg-warning text-dark" title="Real 1M option data na hone par app imaandaari se daily bhavcopy par chalti hai (koi fake bar nahi)">Requested '+tfSel+' → executed '+tfRun+'</span>'
+                : ' <span class="badge bg-light text-dark border">'+tfRun+'</span>') : '';
+            badge.innerHTML='<span class="badge bg-info">'+posBadge(res)+'</span>'+tfBadge+' <small class="text-muted">'+(res&&res.run_id||'')+'</small>';
+        }
         const fm=document.getElementById('pos-metrics');
         if(fm){
             const pnl=Number(m.net_pnl||0), win=Number(m.win_rate||0), tr=Number(m.total_trades||0);
@@ -2928,7 +2951,7 @@ let _lastOpenTrdHTML = null;
         const tl=document.getElementById('pos-trade-list');
         if(tl){
             const rows=(res&&res.trade_list)||[];
-            tl.innerHTML=exitMixHtml(rows)+(rows.length? '<table class="table table-sm table-bordered" style="font-size:11px;min-width:860px"><thead class="table-light"><tr><th>#</th><th>Symbol</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Position</th><th>Entry ₹</th><th>Exit ₹</th><th>Exit Reason</th><th>P/L</th></tr></thead><tbody>'+
+            tl.innerHTML=(res&&res.data_note?'<div class="small text-muted mb-2"><i class="bi bi-info-circle"></i> '+String(res.data_note)+'</div>':'')+exitMixHtml(rows)+(rows.length? '<table class="table table-sm table-bordered" style="font-size:11px;min-width:860px"><thead class="table-light"><tr><th>#</th><th>Symbol</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Position</th><th>Entry ₹</th><th>Exit ₹</th><th>Exit Reason</th><th>P/L</th></tr></thead><tbody>'+
               rows.map((t,i)=>{
                 const pl=Number(t.pnl||t.net_pnl||0);
                 const pos=String(t.position||t.type||'')+((t.option_type&&t.option_type!=='Spread')?(' '+t.option_type):'');
