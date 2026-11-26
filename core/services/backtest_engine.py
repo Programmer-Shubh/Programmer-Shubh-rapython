@@ -3638,6 +3638,7 @@ class BacktestEngine:
                     "exit_latency_fills": int(getattr(self, "_n_exit_latency", 0) or 0),
                     "fake_premium_fills": _fake_n,
                     "tick_priced_fills": len(getattr(self, "_tick_prem_keys", set()) or ()),
+                    "db_priced_fills": len(getattr(self, "_db_prem_keys", set()) or ()),
                     "warnings": _warn,
                 },
                 "equity_curve": equity,

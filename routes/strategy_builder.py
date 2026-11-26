@@ -2105,11 +2105,25 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     # DATA HONESTY: engine ne ₹5 fake fallback se fill diya ho to result ko
     # 'real tick' ya 'black_scholes' nahi bolna - 'fake_fallback' label do.
     _fake_fills = 0
+    _real_priced = 0
     try:
-        _fake_fills = int((((m or {}).get("metrics") or {}).get("realism") or {})
-                          .get("fake_premium_fills") or 0)
+        _realism = ((m or {}).get("metrics") or {}).get("realism") or {}
+        _fake_fills = int(_realism.get("fake_premium_fills") or 0)
+        _real_priced = (int(_realism.get("tick_priced_fills") or 0)
+                        + int(_realism.get("db_priced_fills") or 0))
     except Exception:
         _fake_fills = 0
+        _real_priced = 0
+    # Engine ne real bhavcopy prints se fills kiye to badge ko 'NO CACHED
+    # DATA' mat bolo chahe option_ticks mirror khali ho (source of truth=DB).
+    if _real_priced > 0 and not _fake_fills:
+        try:
+            if not _tick_src:
+                _tick_src = "real_eod_bhavcopy"
+            _tick_n = max(int(_tick_n or 0), 1)
+            _tick_reason = ""
+        except Exception:
+            pass
     _final_res = {
         "success": True,
         "run_id": _run_id,
