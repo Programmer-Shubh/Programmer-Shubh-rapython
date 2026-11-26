@@ -69,8 +69,7 @@ def test_only_high_frequency_tick_data_mode_is_visible():
     html = open(os.path.join(os.path.dirname(__file__), "..", "static", "index.html"),
                 encoding="utf-8").read()
     assert "1-Minute Option Chain" not in html
-    for select_id in ("r-data-mode", "lh-mode"):
-        marker = f'<select id="{select_id}"'
-        chunk = html.split(marker, 1)[1].split("</select>", 1)[0]
-        assert chunk.count("<option") == 1, chunk
-        assert 'value="tick"' in chunk and "High-Frequency" in chunk
+    # PRO data-mode dropdowns removed with the full builder; Easy Builder
+    # hardcodes real tick data in its request.
+    assert '<select id="r-data-mode"' not in html and '<select id="lh-mode"' not in html
+    assert "data_mode:'tick'" in html
