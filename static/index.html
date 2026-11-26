@@ -301,7 +301,7 @@
     <div class="nav">
         <button class="active" onclick="go('dashboard',this)"><i class="bi bi-speedometer2"></i> Dashboard</button>
         <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
-        <button onclick="go('positions',this)"><i class="bi bi-diagram-3"></i> Positions</button>
+        <button onclick="goPositions(this)"><i class="bi bi-diagram-3"></i> Positions</button>
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Backtest</button>
 
@@ -404,7 +404,69 @@
         </div>
 
         <!-- POSITIONS — Multi-leg builder + payoff graph -->
-        <div id="pg-positions" class="pg hidden" style="background:#f8fafc; padding:8px; border-radius:12px">
+        <!-- STRATEGY BUILDER — Advanced style -->
+        <div id="pg-strategy" class="pg hidden" style="background:#f8fafc; padding:8px; border-radius:12px">
+            <div class="card mb-2 slab-hero" style="background:linear-gradient(135deg,#0d6efd 0%,#6610f2 50%,#00d4ff 100%);border:none">
+                <div class="card-body py-2 px-3">
+                    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                        <div class="d-flex align-items-center gap-2">
+                            <h4 class="fw-bold mb-0 text-white" style="font-size:16px"><i class="bi bi-robot"></i> Strategy Backtest <span class="badge bg-white text-primary ms-2" style="font-size:11px">PRO • Backtest + Robot</span></h4>
+                            <small class="text-white-50">Setup → Templates → Indicators → Backtest → Live/Paper</small>
+                        </div>
+                        <div class="d-flex gap-2 align-items-center bg-white rounded-pill p-1 shadow-sm">
+                            <input type="hidden" id="s-name" value="">
+                            <button class="btn btn-sm btn-light rounded-pill" onclick="resetStrat()" title="Reset"><i class="bi bi-arrow-counterclockwise"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+                <!-- Easy Backtest Builder (3-step guided) -->
+                <div class="card mt-3 slab-card" id="easy-bt-card">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1"><span><span class="slab-num">0</span><i class="bi bi-lightning-charge"></i> Easy Backtest Builder <span class="badge bg-light text-dark">30-sec setup</span></span></div>
+                    <div class="card-body p-2">
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <div class="small fw-bold mb-1">Step 1 — Symbol &amp; Direction</div>
+                                <select id="eb-symbol" class="form-select form-select-sm mb-1"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select>
+                                <div class="btn-group btn-group-sm w-100" role="group">
+                                    <button type="button" class="btn btn-outline-primary eb-leg" data-leg="CE" data-txn="buy" onclick="ebSelLeg(this)">Buy Call</button>
+                                    <button type="button" class="btn btn-outline-primary eb-leg" data-leg="PE" data-txn="buy" onclick="ebSelLeg(this)">Buy Put</button>
+                                    <button type="button" class="btn btn-outline-danger eb-leg" data-leg="CE" data-txn="sell" onclick="ebSelLeg(this)">Sell Call</button>
+                                    <button type="button" class="btn btn-outline-danger eb-leg" data-leg="PE" data-txn="sell" onclick="ebSelLeg(this)">Sell Put</button>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="small fw-bold mb-1">Step 2 — Signal &amp; Timeframe</div>
+                                <select id="eb-tf" class="form-select form-select-sm mb-1"><option value="1d">Daily</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1m">1 Min</option></select>
+                                <div class="small fw-bold mb-1" style="color:#0d6efd"><i class="bi bi-graph-up"></i> Indicators (multi-select)</div>
+                                <div class="d-flex flex-wrap gap-2 p-2 mb-1" id="eb-inds" style="border:1px solid #dee2e6;border-radius:6px;background:#f8fafc;min-height:44px">
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="supertrend" checked> SuperTrend</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="adx"> ADX</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="rsi"> RSI</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="macd"> MACD</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="ema_cross"> EMA Cross</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="bollinger"> Bollinger</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="vwap"> VWAP</label>
+                                </div>
+                                <div class="small text-muted" style="font-size:10px">Indicators select karke signal banao (ek ya zyada)</div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="small fw-bold mb-1">Step 3 — Risk &amp; Dates</div>
+                                <div class="d-flex gap-1 mb-1"><input type="date" id="eb-start" class="form-control form-control-sm"><input type="date" id="eb-end" class="form-control form-control-sm"></div>
+                                <div class="d-flex gap-1 mb-1"><input type="number" id="eb-sl" class="form-control form-control-sm" placeholder="SL pts" value="50"><input type="number" id="eb-tp" class="form-control form-control-sm" placeholder="TP pts" value="120"></div>
+                                <select id="eb-mode" class="form-select form-select-sm"><option value="intraday">Intraday</option><option value="positional">Positional</option></select>
+                            </div>
+                        </div>
+                        <div id="eb-summary" class="alert alert-info py-1 px-2 mb-2 small mt-2"></div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-success" onclick="runEasyBacktest()"><i class="bi bi-play-fill"></i> Run Easy Backtest</button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="saveEasyBacktest()" title="Backtest chalane ke baad result ko strategy ke saath save karo"><i class="bi bi-save"></i> Save Strategy</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="ebUpdateSummary()">Refresh Summary</button>
+                        </div>
+                        <div class="small text-muted mt-1"><i class="bi bi-info-circle"></i> User-Configured analytical setup — results are historical, not a guarantee of future returns. SEBI non-advisory.</div>
+                    </div>
+                </div>
+        <div id="positions-section" class="mt-3" style="background:#f8fafc; padding:8px; border-radius:12px">
             <div class="card mb-2" style="border:none;background:linear-gradient(135deg,#6610f2 0%,#0d6efd 55%,#00d4ff 100%)">
                 <div class="card-body py-2 px-3 text-white">
                     <h4 class="fw-bold mb-0" style="font-size:16px"><i class="bi bi-diagram-3"></i> Multi-Leg Position Builder <span class="badge bg-white text-primary ms-2" style="font-size:11px">BACKTEST + PAYOFF</span></h4>
@@ -469,68 +531,7 @@
                 </div>
             </div>
         </div>
-        <!-- STRATEGY BUILDER — Advanced style -->
-        <div id="pg-strategy" class="pg hidden" style="background:#f8fafc; padding:8px; border-radius:12px">
-            <div class="card mb-2 slab-hero" style="background:linear-gradient(135deg,#0d6efd 0%,#6610f2 50%,#00d4ff 100%);border:none">
-                <div class="card-body py-2 px-3">
-                    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
-                        <div class="d-flex align-items-center gap-2">
-                            <h4 class="fw-bold mb-0 text-white" style="font-size:16px"><i class="bi bi-robot"></i> Strategy Backtest <span class="badge bg-white text-primary ms-2" style="font-size:11px">PRO • Backtest + Robot</span></h4>
-                            <small class="text-white-50">Setup → Templates → Indicators → Backtest → Live/Paper</small>
-                        </div>
-                        <div class="d-flex gap-2 align-items-center bg-white rounded-pill p-1 shadow-sm">
-                            <input type="hidden" id="s-name" value="">
-                            <button class="btn btn-sm btn-light rounded-pill" onclick="resetStrat()" title="Reset"><i class="bi bi-arrow-counterclockwise"></i></button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-                <!-- Easy Backtest Builder (3-step guided) -->
-                <div class="card mt-3 slab-card" id="easy-bt-card">
-                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1"><span><span class="slab-num">0</span><i class="bi bi-lightning-charge"></i> Easy Backtest Builder <span class="badge bg-light text-dark">30-sec setup</span></span></div>
-                    <div class="card-body p-2">
-                        <div class="row g-2">
-                            <div class="col-md-4">
-                                <div class="small fw-bold mb-1">Step 1 — Symbol &amp; Direction</div>
-                                <select id="eb-symbol" class="form-select form-select-sm mb-1"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select>
-                                <div class="btn-group btn-group-sm w-100" role="group">
-                                    <button type="button" class="btn btn-outline-primary eb-leg" data-leg="CE" data-txn="buy" onclick="ebSelLeg(this)">Buy Call</button>
-                                    <button type="button" class="btn btn-outline-primary eb-leg" data-leg="PE" data-txn="buy" onclick="ebSelLeg(this)">Buy Put</button>
-                                    <button type="button" class="btn btn-outline-danger eb-leg" data-leg="CE" data-txn="sell" onclick="ebSelLeg(this)">Sell Call</button>
-                                    <button type="button" class="btn btn-outline-danger eb-leg" data-leg="PE" data-txn="sell" onclick="ebSelLeg(this)">Sell Put</button>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="small fw-bold mb-1">Step 2 — Signal &amp; Timeframe</div>
-                                <select id="eb-tf" class="form-select form-select-sm mb-1"><option value="1d">Daily</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1m">1 Min</option></select>
-                                <div class="small fw-bold mb-1" style="color:#0d6efd"><i class="bi bi-graph-up"></i> Indicators (multi-select)</div>
-                                <div class="d-flex flex-wrap gap-2 p-2 mb-1" id="eb-inds" style="border:1px solid #dee2e6;border-radius:6px;background:#f8fafc;min-height:44px">
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="supertrend" checked> SuperTrend</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="adx"> ADX</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="rsi"> RSI</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="macd"> MACD</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="ema_cross"> EMA Cross</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="bollinger"> Bollinger</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="vwap"> VWAP</label>
-                                </div>
-                                <div class="small text-muted" style="font-size:10px">Indicators select karke signal banao (ek ya zyada)</div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="small fw-bold mb-1">Step 3 — Risk &amp; Dates</div>
-                                <div class="d-flex gap-1 mb-1"><input type="date" id="eb-start" class="form-control form-control-sm"><input type="date" id="eb-end" class="form-control form-control-sm"></div>
-                                <div class="d-flex gap-1 mb-1"><input type="number" id="eb-sl" class="form-control form-control-sm" placeholder="SL pts" value="50"><input type="number" id="eb-tp" class="form-control form-control-sm" placeholder="TP pts" value="120"></div>
-                                <select id="eb-mode" class="form-select form-select-sm"><option value="intraday">Intraday</option><option value="positional">Positional</option></select>
-                            </div>
-                        </div>
-                        <div id="eb-summary" class="alert alert-info py-1 px-2 mb-2 small mt-2"></div>
-                        <div class="d-flex gap-2 flex-wrap">
-                            <button class="btn btn-sm btn-success" onclick="runEasyBacktest()"><i class="bi bi-play-fill"></i> Run Easy Backtest</button>
-                            <button class="btn btn-sm btn-outline-primary" onclick="saveEasyBacktest()" title="Backtest chalane ke baad result ko strategy ke saath save karo"><i class="bi bi-save"></i> Save Strategy</button>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="ebUpdateSummary()">Refresh Summary</button>
-                        </div>
-                        <div class="small text-muted mt-1"><i class="bi bi-info-circle"></i> User-Configured analytical setup — results are historical, not a guarantee of future returns. SEBI non-advisory.</div>
-                    </div>
-                </div>
+        <!-- END embedded positions section -->
                 <!-- Payoff Diagram -->
                 <div class="card mt-3 payoff-card" id="payoffCard" style="display:none">
                     <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-graph-up"></i> Payoff Diagram (Expiry) — Strategy View</strong><span class="badge bg-primary" id="payoff-spot">Spot: -</span></div>
@@ -816,7 +817,13 @@
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     async function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();try{await loadStrats();}catch(e){}loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();try{lhInit();}catch(e){}setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='positions'){try{posFillDates();posRenderLegs();}catch(e){}setTimeout(()=>{try{posUpdatePayoff();}catch(e){}},200);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();try{await loadStrats();}catch(e){}loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();try{lhInit();}catch(e){}setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);try{posFillDates();posRenderLegs();}catch(e){}setTimeout(()=>{try{posUpdatePayoff();}catch(e){}},250);}if(id==='positions'){try{posFillDates();posRenderLegs();}catch(e){}setTimeout(()=>{try{posUpdatePayoff();}catch(e){}},200);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+    // Positions nav: multi-leg builder ab Strategy Backtest page ke ANDAR hai
+    // (alag page thi to bar-bar gayab ho rahi thi). Strategy page kholo + scroll.
+    function goPositions(btn){
+        try{go('strategy',btn);}catch(e){}
+        setTimeout(()=>{try{const el=document.getElementById('positions-section');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});}catch(e){}},180);
+    }
     // OTM filter cache-first: memory (15-min) -> localStorage (60-min) -> network.
     // "Loading symbols..." kabhi atakta nahi - pehli baar ke baad turant list.
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
@@ -3021,7 +3028,7 @@ let _lastOpenTrdHTML = null;
         if(!posLegs.length){alert('Pehle leg add karo (Add Leg ya template).');return;}
         try{
             const req=posReq();
-            const btn=Array.from(document.querySelectorAll('#pg-positions button')).find(b=>b.textContent.includes('Run Backtest'));
+            const btn=Array.from(document.querySelectorAll('#positions-section button')).find(b=>b.textContent.includes('Run Backtest'));
             if(btn){btn.disabled=true;btn.textContent='Running...';}
             const r=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
             let res=r.result||null;
@@ -3029,7 +3036,7 @@ let _lastOpenTrdHTML = null;
             if(!res||res.error)throw new Error((res&&res.error)||'no result');
             renderPosResults(res);
         }catch(err){alert('Multi-leg backtest error: '+err.message);}
-        finally{const btn=Array.from(document.querySelectorAll('#pg-positions button')).find(b=>b.textContent.includes('Run Backtest')||b.textContent==='Running...');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Backtest';}}
+        finally{const btn=Array.from(document.querySelectorAll('#positions-section button')).find(b=>b.textContent.includes('Run Backtest')||b.textContent==='Running...');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Backtest';}}
     }
     function posOpenFullResults(){
         if(!window._posBT){alert('Pehle Run Backtest karo.');return;}
@@ -3046,13 +3053,13 @@ let _lastOpenTrdHTML = null;
                 description:'Multi-Leg Position — '+posLegs.map(posLegLabel).join(' + '),
                 indicators:req.indicators,entry_conditions:[],exit_conditions:[],legs:req.legs,
                 advanced_options:req.advanced,risk_management:req.risk,status:'active',last_backtest:window._posBT};
-            const btn=Array.from(document.querySelectorAll('#pg-positions button')).find(b=>b.textContent.includes('Save Strategy'));
+            const btn=Array.from(document.querySelectorAll('#positions-section button')).find(b=>b.textContent.includes('Save Strategy'));
             if(btn){btn.disabled=true;btn.textContent='Saving...';}
             const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             if(r.id){alert('✅ Multi-leg strategy saved! ID: '+r.id+'\n\nTrading Center me card dikhega.');try{await loadStrats();}catch(e){}try{await loadRobotSaved();}catch(e){}}
             else alert('Error saving strategy'+(r.error?': '+JSON.stringify(r.error):''));
         }catch(err){alert('Save error: '+err.message);}
-        finally{const btn=Array.from(document.querySelectorAll('#pg-positions button')).find(b=>b.textContent.includes('Save Strategy')||b.textContent==='Saving...');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-save"></i> Save Strategy';}}
+        finally{const btn=Array.from(document.querySelectorAll('#positions-section button')).find(b=>b.textContent.includes('Save Strategy')||b.textContent==='Saving...');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-save"></i> Save Strategy';}}
     }
     try{setTimeout(()=>{posFillDates();posRenderLegs();},350);}catch(e){}
     function ebFillDates(){try{
