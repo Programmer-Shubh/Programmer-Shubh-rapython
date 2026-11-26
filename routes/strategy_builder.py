@@ -2124,7 +2124,8 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     _fake_fills = 0
     _real_priced = 0
     try:
-        _realism = ((m or {}).get("metrics") or {}).get("realism") or {}
+        _realism = (((_per_symbol or {}).get(str(req.symbol or "").upper()) or {})
+                .get("realism") or {})
         _fake_fills = int(_realism.get("fake_premium_fills") or 0)
         _real_priced = (int(_realism.get("tick_priced_fills") or 0)
                         + int(_realism.get("db_priced_fills") or 0))
@@ -2133,14 +2134,17 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         _real_priced = 0
     # Engine ne real bhavcopy prints se fills kiye to badge ko 'NO CACHED
     # DATA' mat bolo chahe option_ticks mirror khali ho (source of truth=DB).
+    pass
     if _real_priced > 0 and not _fake_fills:
         try:
             if not _tick_src:
                 _tick_src = "real_eod_bhavcopy"
             _tick_n = max(int(_tick_n or 0), 1)
             _tick_reason = ""
+            _tick_mode = True
         except Exception:
             pass
+    pass
     _final_res = {
         "success": True,
         "run_id": _run_id,
