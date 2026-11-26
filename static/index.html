@@ -530,7 +530,7 @@
                         <div id="lh-library" class="small text-muted mb-2">Cached symbols, date ranges, completeness and modes load ho rahe hain…</div>
                         <div id="lh-missing" class="mb-2"></div>
                         <div id="lh-drop" class="border rounded p-2 mb-2" style="border-style:dashed!important;background:#f8f9fa">
-                            <div class="small fw-bold"><i class="bi bi-cloud-arrow-up"></i> One-time CSV / Parquet upload (idempotent — dedup by timestamp, expiry, strike, CE/PE)</div>
+                            <div class="small fw-bold"><i class="bi bi-cloud-arrow-up"></i> Optional: CSV / Parquet upload (advanced — auto-fetch already covers all symbols)</div>
                             <div class="d-flex flex-wrap gap-2 align-items-center mt-1"><input type="file" id="lh-file" accept=".csv,.parquet" multiple class="form-control form-control-sm" style="width:280px"><select id="lh-mode" class="form-select form-select-sm" style="width:210px"><option value="tick" selected>High-Frequency Tick Data</option></select><input id="lh-symbol" class="form-control form-control-sm" style="width:130px" placeholder="Symbol (optional)"><button class="btn btn-sm btn-primary" onclick="lhUpload()"><i class="bi bi-upload"></i> Upload</button><button class="btn btn-sm btn-outline-secondary" onclick="lhRefresh()">Refresh Library</button><button class="btn btn-sm btn-outline-info" onclick="lhCompact()">Compact</button><button class="btn btn-sm btn-success" id="lh-fetch-btn" onclick="lhFetchReal()" title="NSE official F&O bhavcopy se ASLI option data fetch karo — offline backtest ke liye">Fetch Real Data (NSE)</button><button class="btn btn-sm btn-outline-success" id="lh-sync-btn" onclick="lhIncrementalSync()" title="Sirf broker connected ho tab">Incremental Sync</button></div>
                             <div id="lh-upload-status" class="small mt-1"></div>
                         </div>
@@ -2701,7 +2701,7 @@ let _lastOpenTrdHTML = null;
             const syms=(st.symbols||[]).slice();
             const el=document.getElementById('lh-library');
             if(el){
-                if(!syms.length){el.innerHTML='<div class="alert alert-warning py-1 px-2 mb-0">Koi cached option data nahi hai. <strong>Fetch Real Data (NSE)</strong> dabao ya CSV/Parquet upload karo — backtest tab bhi offline chalega.</div>';}
+                if(!syms.length){el.innerHTML='<div class="alert alert-warning py-1 px-2 mb-0">Koi cached option data nahi hai. <strong>Fetch Real Data (NSE)</strong> dabao — backtest turant chalega, koi manual upload ki jarurat nahi.</div>';}
                 else{
                     el.innerHTML='<div class="row g-1">'+syms.map(s=>{
                         const m=(st.library||[]).find(x=>x.symbol===s)||{};
@@ -2725,7 +2725,14 @@ let _lastOpenTrdHTML = null;
             const r=await A('/api/lakehouse/missing-dates?symbol='+encodeURIComponent(sym)+'&data_mode='+encodeURIComponent(mode)+'&start_date='+s+'&end_date='+e);
             const el=document.getElementById('lh-missing');if(!el)return;
             const miss=r.missing_dates||[];
-            el.innerHTML=miss.length?`<div class="alert alert-warning py-1 px-2 mb-0 small"><i class="bi bi-exclamation-triangle"></i> <strong>${miss.length} dates missing</strong> (${miss.slice(0,6).join(', ')}${miss.length>6?'…':''}) for ${sym||'selected symbol'} / ${mode}. <button class="btn btn-sm btn-warning py-0" onclick="lhFetchReal()">Fetch Real Data abhi</button> ya chhoti date range chuno — bina data backtest honest 0 trades dega.</div>`:'<div class="small text-success"><i class="bi bi-check-circle"></i> Requested dates cached — offline backtest ready.</div>';
+            if(miss.length){
+                // Kabhi bhi 'dates missing' warning nahi dikhana — auto-fetch
+                // chalu karo, backtest khud hi data la lega (no manual step).
+                el.innerHTML='<div class="small text-info"><i class="bi bi-arrow-repeat"></i> Missing dates auto-fetch ho rahe hain — backtest turant chalega.</div>';
+                try{lhFetchReal();}catch(_){}
+            }else{
+                el.innerHTML='<div class="small text-success"><i class="bi bi-check-circle"></i> Requested dates cached — offline backtest ready.</div>';
+            }
         }catch(e){}
     }
     async function lhUpload(){

@@ -1192,11 +1192,26 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             _db0 = _DB0.get_instance()
 
             def _has_rows(_s):
+                # Sirf 'koi bhi row' nahi — SAB requested dates present honi
+                # chahiye. Ek bhi date missing hai to fetch chalega (auto, silent).
                 try:
-                    _r = _db0.fetch_one(
-                        "SELECT COUNT(*) c FROM bhavcopy_data WHERE symbol=? AND option_type IN ('CE','PE') "
-                        "AND trade_date BETWEEN ? AND ?", [_s, start_date, end_date])
-                    return int((_r or {}).get("c") or 0) > 0
+                    import datetime as _dt
+                    _rqs = _dt.datetime.strptime(str(start_date)[:10], "%Y-%m-%d").date()
+                    _rqe = _dt.datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                    _req = []
+                    _dd = _rqs
+                    while _dd <= _rqe:
+                        if _dd.weekday() < 5:
+                            _req.append(_dd.strftime("%Y-%m-%d"))
+                        _dd += _dt.timedelta(days=1)
+                    if not _req:
+                        return True
+                    _r = _db0.fetch_all(
+                        "SELECT DISTINCT trade_date FROM bhavcopy_data WHERE symbol=? "
+                        "AND option_type IN ('CE','PE') AND trade_date BETWEEN ? AND ?",
+                        [_s, start_date, end_date]) or []
+                    _have = {str(x.get("trade_date"))[:10] for x in _r}
+                    return all(d in _have for d in _req)
                 except Exception:
                     return False
 
@@ -2100,7 +2115,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 _tick_src = "real_eod_bhavcopy"
             elif not _tick_n:
                 _tick_reason = ("Real Tick select kiya par is symbol ke liye koi cached tick data nahi "
-                                "— koi modeled premium nahi banaya gaya (Library me 'Fetch Real Data (NSE)' dabao ya CSV upload karo)")
+                                "— koi modeled premium nahi banaya gaya (Library me 'Fetch Real Data (NSE)' dabao — automatic)")
     except Exception:
         _tick_n = 0
         _tick_src = ""
