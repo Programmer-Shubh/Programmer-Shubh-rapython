@@ -1921,6 +1921,33 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                             "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
                             "Strategy Target/SL bahut tight to nahi — pehle bina SL/TP chalakar dekho",
                         ]
+                    # Direction mismatch (single leg): SELL CE / BUY PE need a
+                    # SELL signal, BUY CE / SELL PE need a BUY signal. The engine
+                    # never enters on the opposite signal - say so plainly
+                    # instead of leaving the user guessing why 0 trades.
+                    try:
+                        if len(legs or []) == 1 and not (entry_conditions or []):
+                            _l0 = legs[0] or {}
+                            _tx = str(_l0.get("transaction", "buy")).lower()
+                            _op = str(_l0.get("option_type", "CE")).upper()
+                            _bearish = (_tx == "sell" and _op == "CE") or (_tx == "buy" and _op == "PE")
+                            _bullish = (_tx == "buy" and _op == "CE") or (_tx == "sell" and _op == "PE")
+                            _nb, _ns = int(_diag_buy or 0), int(_diag_sell or 0)
+                            if ((_bearish and _nb > 0 and _ns == 0) or
+                                    (_bullish and _ns > 0 and _nb == 0)):
+                                _need = "SELL" if _bearish else "BUY"
+                                _got = "BUY" if _bearish else "SELL"
+                                _got_n = _nb if _got == "BUY" else _ns
+                                _zero_note += (
+                                    f" Aapki '{_leg_txt}' leg ko {_need} signal chahiye, par is period me "
+                                    f"indicators ne sirf {_got} signal ({_got_n}) diye — {_need} signal 0. "
+                                    "Signal aur leg ka direction match na hone se 0 trades (ye rule hai, bug nahi).")
+                                _zero_tips.insert(0, (
+                                    f"Leg badlo: {_need} signal wali leg chuno — "
+                                    + ("BUY CE (ya SELL PE)" if _bearish else "SELL CE (ya BUY PE)")
+                                    + ", ya RSI/ADX add karo taaki opposite signal bane."))
+                    except Exception:
+                        pass
                     # Combo RVP ka apna kaaran: RSI-70 ignition + ST + VWAP +
                     # PCR + volume-spike paancho ek saath chahiye (strict
                     # quality filter). Aksar window me ignition hi nahi banta.
