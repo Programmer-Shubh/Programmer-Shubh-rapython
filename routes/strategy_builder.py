@@ -1159,9 +1159,11 @@ def _dummy_trades_all_symbols(syms, start_date, end_date, legs, indicators):
 def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     import time as _t0m, hashlib, json
     _t0 = _t0m.time()
-    # Algotest-like instant: result cache keyed by request hash (10min TTL)
+    # Algotest-like instant: result cache keyed by request hash (10min TTL).
+    # Use the SAME hasher as run_backtest_async (_bt_req_hash) so the two
+    # layers always agree on the cache key (otherwise repeat clicks never hit).
     try:
-        _rk = hashlib.md5(json.dumps(req.model_dump() if hasattr(req,'model_dump') else req.dict(), sort_keys=True, default=str).encode()).hexdigest()
+        _rk = _bt_req_hash(req.model_dump() if hasattr(req, "model_dump") else req.dict())
         _rc = _BT_RESULT_CACHE.get(_rk)
         if _rc and _t0 - _rc[0] < 1800:
             # return cached instantly with fresh took_ms AND fresh run_id
@@ -1739,8 +1741,8 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 _diag_sell += int(_sm.get("signals_sell", 0) or 0)
                 if progress_cb:
                     _fire_prog(_sym, _extra=1)
-                for _rk, _rv in ((_sm.get("rejected") or {}).items()):
-                    _diag_rej[_rk] = _diag_rej.get(_rk, 0) + int(_rv or 0)
+                for _rjk, _rv in ((_sm.get("rejected") or {}).items()):
+                    _diag_rej[_rjk] = _diag_rej.get(_rjk, 0) + int(_rv or 0)
                 if isinstance(_sm.get("coverage"), dict):
                     _cov_by_sym[_sym] = _sm.get("coverage")
             except Exception:
