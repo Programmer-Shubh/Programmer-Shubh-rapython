@@ -2414,6 +2414,22 @@ class BacktestEngine:
                     _oc = float(self.premium_cache.get(f"{_bd}_{_sp}_{option_type}_c", 0) or 0)
                     if _oh > 0 and _ol > 0:
                         break
+                if not (_oh > 0 and _ol > 0):
+                    # BUG FIX: premium _db_premium() nearest TRADED strike se
+                    # aata hai (aligned strike nahi hota to +/-2 steps), aur
+                    # prefetch H/L sirf us DB strike ke key par rakhta hai.
+                    # SL/TP ne requested strike ka _h/_l maanga -> kabhi nahi
+                    # mila -> har trade EOD ('intraday') par nikalta tha,
+                    # stop/target kabhi dikhte hi nahi the. Ab USI real DB
+                    # contract ka H/L lo jo entry premium bhi de chuka hai.
+                    _bar = self._db_option_bar(_bd, strike, option_type)
+                    if _bar:
+                        _oh, _ol, _oc = _bar["high"], _bar["low"], _bar["close"]
+                        for _sp2 in (str(strike), str(int(float(strike)))
+                                     if float(strike) == int(float(strike)) else str(strike)):
+                            self.premium_cache.setdefault(f"{_bd}_{_sp2}_{option_type}_h", _oh)
+                            self.premium_cache.setdefault(f"{_bd}_{_sp2}_{option_type}_l", _ol)
+                            self.premium_cache.setdefault(f"{_bd}_{_sp2}_{option_type}_c", _oc)
                 if _oh > 0 and _ol > 0:
                     _eh, _el = max(_oh, _ol), min(_oh, _ol)
                     self._trail_update(entry_idx, _eh, _el, txn_type)
@@ -2987,6 +3003,51 @@ class BacktestEngine:
                     return val
         except Exception:
             return None
+        return None
+
+    def _db_option_bar(self, date, strike, option_type):
+        """REAL bhavcopy OHLC of the very contract `_db_premium` prices.
+
+        Entry/exit premium uses the nearest traded strike when the requested
+        strike has no print. The old SL/TP cache lookup only knew the exact
+        requested strike, so high/low were missing and SL/TP never fired
+        (every trade exited at EOD). Same source, same nearest-strike rule --
+        no modelled/back-filled prices are introduced here.
+        """
+        if getattr(self, "_skip_db", False):
+            return None
+        d = str(date or "")[:10]
+        if not d or not strike:
+            return None
+        try:
+            db = Database.get_instance()
+            cols = "open_price, high_price, low_price, close_price"
+            row = db.fetch_one(
+                f"SELECT {cols} FROM bhavcopy_data WHERE symbol=? AND trade_date=? "
+                "AND ABS(strike_price-?)<0.01 AND option_type=?",
+                [self.bt_symbol, d, float(strike), option_type])
+            if not row or not (float(row.get("high_price") or 0) > 0
+                               and float(row.get("low_price") or 0) > 0):
+                from utils.helpers import get_strike_step
+                step = get_strike_step(self.bt_symbol)
+                row = db.fetch_one(
+                    f"SELECT {cols} FROM bhavcopy_data WHERE symbol=? AND option_type=? "
+                    "AND trade_date=? AND ABS(strike_price-?) <= ?*2 "
+                    "ORDER BY ABS(strike_price-?) LIMIT 1",
+                    [self.bt_symbol, option_type, d, float(strike), step, float(strike)])
+            if row:
+                o = float(row.get("open_price") or 0)
+                h = float(row.get("high_price") or 0)
+                l = float(row.get("low_price") or 0)
+                c = float(row.get("close_price") or 0)
+                if h > 0 and l > 0:
+                    if o <= 0:
+                        o = c or h
+                    if c <= 0:
+                        c = o or l
+                    return {"open": o, "high": h, "low": l, "close": c}
+        except Exception:
+            pass
         return None
 
     def _entry_premium(self, date, spot, strike, option_type):

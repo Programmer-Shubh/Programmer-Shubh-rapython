@@ -301,7 +301,6 @@
     <div class="nav">
         <button class="active" onclick="go('dashboard',this)"><i class="bi bi-speedometer2"></i> Dashboard</button>
         <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
-        <button onclick="goPositions(this)"><i class="bi bi-diagram-3"></i> Positions</button>
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Backtest</button>
 
@@ -403,15 +402,14 @@
             </div>
         </div>
 
-        <!-- POSITIONS — Multi-leg builder + payoff graph -->
-        <!-- STRATEGY BUILDER — Advanced style -->
+        <!-- MULTI-LEG EASY STRATEGY BUILDER — one integrated builder -->
         <div id="pg-strategy" class="pg hidden" style="background:#f8fafc; padding:8px; border-radius:12px">
             <div class="card mb-2 slab-hero" style="background:linear-gradient(135deg,#0d6efd 0%,#6610f2 50%,#00d4ff 100%);border:none">
                 <div class="card-body py-2 px-3">
                     <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
                         <div class="d-flex align-items-center gap-2">
-                            <h4 class="fw-bold mb-0 text-white" style="font-size:16px"><i class="bi bi-robot"></i> Strategy Backtest <span class="badge bg-white text-primary ms-2" style="font-size:11px">PRO • Backtest + Robot</span></h4>
-                            <small class="text-white-50">Setup → Templates → Indicators → Backtest → Live/Paper</small>
+                            <h4 class="fw-bold mb-0 text-white" style="font-size:16px"><i class="bi bi-robot"></i> Strategy Backtest <span class="badge bg-white text-primary ms-2" style="font-size:11px">EASY • MULTI-LEG</span></h4>
+                            <small class="text-white-50">Setup → Template → Legs → Backtest + Payoff</small>
                         </div>
                         <div class="d-flex gap-2 align-items-center bg-white rounded-pill p-1 shadow-sm">
                             <input type="hidden" id="s-name" value="">
@@ -420,110 +418,108 @@
                     </div>
                 </div>
             </div>
-                <!-- Easy Backtest Builder (3-step guided) -->
-                <div class="card mt-3 slab-card" id="easy-bt-card">
-                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1"><span><span class="slab-num">0</span><i class="bi bi-lightning-charge"></i> Easy Backtest Builder <span class="badge bg-light text-dark">30-sec setup</span></span></div>
-                    <div class="card-body p-2">
-                        <div class="row g-2">
-                            <div class="col-md-4">
-                                <div class="small fw-bold mb-1">Step 1 — Symbol &amp; Direction</div>
-                                <select id="eb-symbol" class="form-select form-select-sm mb-1"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select>
-                                <div class="btn-group btn-group-sm w-100" role="group">
-                                    <button type="button" class="btn btn-outline-primary eb-leg" data-leg="CE" data-txn="buy" onclick="ebSelLeg(this)">Buy Call</button>
-                                    <button type="button" class="btn btn-outline-primary eb-leg" data-leg="PE" data-txn="buy" onclick="ebSelLeg(this)">Buy Put</button>
-                                    <button type="button" class="btn btn-outline-danger eb-leg" data-leg="CE" data-txn="sell" onclick="ebSelLeg(this)">Sell Call</button>
-                                    <button type="button" class="btn btn-outline-danger eb-leg" data-leg="PE" data-txn="sell" onclick="ebSelLeg(this)">Sell Put</button>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="small fw-bold mb-1">Step 2 — Signal &amp; Timeframe</div>
-                                <select id="eb-tf" class="form-select form-select-sm mb-1"><option value="1d">Daily</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1m">1 Min</option></select>
-                                <div class="small fw-bold mb-1" style="color:#0d6efd"><i class="bi bi-graph-up"></i> Indicators (multi-select)</div>
-                                <div class="d-flex flex-wrap gap-2 p-2 mb-1" id="eb-inds" style="border:1px solid #dee2e6;border-radius:6px;background:#f8fafc;min-height:44px">
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="supertrend" checked> SuperTrend</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="adx"> ADX</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="rsi"> RSI</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="macd"> MACD</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="ema_cross"> EMA Cross</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="bollinger"> Bollinger</label>
-                                    <label class="small"><input type="checkbox" class="eb-ind" value="vwap"> VWAP</label>
-                                </div>
-                                <div class="small text-muted" style="font-size:10px">Indicators select karke signal banao (ek ya zyada)</div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="small fw-bold mb-1">Step 3 — Risk &amp; Dates</div>
-                                <div class="d-flex gap-1 mb-1"><input type="date" id="eb-start" class="form-control form-control-sm"><input type="date" id="eb-end" class="form-control form-control-sm"></div>
-                                <div class="d-flex gap-1 mb-1"><input type="number" id="eb-sl" class="form-control form-control-sm" placeholder="SL pts" value="50"><input type="number" id="eb-tp" class="form-control form-control-sm" placeholder="TP pts" value="120"></div>
-                                <select id="eb-mode" class="form-select form-select-sm"><option value="intraday">Intraday</option><option value="positional">Positional</option></select>
-                            </div>
-                        </div>
-                        <div id="eb-summary" class="alert alert-info py-1 px-2 mb-2 small mt-2"></div>
-                        <div class="d-flex gap-2 flex-wrap">
-                            <button class="btn btn-sm btn-outline-secondary" onclick="ebUpdateSummary()">Refresh Summary</button>
-                            <small class="text-muted align-self-center">⬇ Run Backtest button neeche multi-leg section me hai (ek hi jagah)</small>
-                        </div>
-                        <div class="small text-muted mt-1"><i class="bi bi-info-circle"></i> User-Configured analytical setup — results are historical, not a guarantee of future returns. SEBI non-advisory.</div>
-                    </div>
-                </div>
-        <div id="positions-section" class="mt-3" style="background:#f8fafc; padding:8px; border-radius:12px">
-            <div class="card mb-2" style="border:none;background:linear-gradient(135deg,#6610f2 0%,#0d6efd 55%,#00d4ff 100%)">
-                <div class="card-body py-2 px-3 text-white">
-                    <h4 class="fw-bold mb-0" style="font-size:16px"><i class="bi bi-diagram-3"></i> Multi-Leg Position Builder <span class="badge bg-white text-primary ms-2" style="font-size:11px">BACKTEST + PAYOFF</span></h4>
-                    <small class="text-white-50">Ek se zyada option legs (e.g. OTM5 Buy + OTM2 Sell) bana kar asli tick data par backtest karein — net premium, spread P&amp;L aur expiry payoff</small>
-                </div>
-            </div>
 
-            <div class="card mb-3 slab-card">
+            <div class="card mt-2 slab-card" id="easy-bt-card">
                 <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1">
-                    <span><span class="slab-num">1</span><i class="bi bi-layers"></i> Position Setup <small class="text-muted">Legs + Risk + Dates</small></span>
+                    <span><span class="slab-num">1</span><i class="bi bi-lightning-charge"></i> Multi-Leg Easy Strategy Builder <span class="badge bg-light text-dark">One source • Backtest + Payoff</span></span>
                     <button class="btn btn-sm btn-outline-secondary" onclick="posFillDates()" title="Start/End ko 20 din se auto-fill karo"><i class="bi bi-calendar"></i> 20-Day Dates</button>
                 </div>
                 <div class="card-body p-2">
-                    <div class="alert alert-light py-1 px-2 mb-2 small">Symbol, Dates, Indicators, SL/TP — sab <strong>upar Easy Builder</strong> se liye jate hain (ek hi source). Neeche sirf legs add karo.</div>
+                    <!-- STEP 1 — all shared settings in one place -->
+                    <div class="small fw-bold text-primary mb-1"><i class="bi bi-sliders"></i> 1 · Setup — Symbol, Timeframe, Indicators, Risk &amp; Dates</div>
                     <div class="row g-2">
-                        <div class="col-md-8"><label class="form-label small mb-0">Quick Template</label><select id="pos-template" class="form-select form-select-sm" onchange="posApplyTemplate(this.value)"><option value="">— Custom / select template —</option><option value="bullcall">Bull Call Spread (CE ATM Buy + CE OTM2 Sell)</option><option value="bearput">Bear Put Spread (PE ATM Buy + PE OTM2 Sell)</option><option value="bearcall">Bear Call Spread (CE OTM2 Sell + CE OTM5 Buy)</option><option value="bullput">Bull Put Spread (PE OTM2 Sell + PE OTM5 Buy)</option><option value="straddle">Long Straddle (CE ATM Buy + PE ATM Buy)</option><option value="strangle">Long Strangle (CE OTM2 Buy + PE OTM2 Buy)</option><option value="ironcondor">Iron Condor (4 legs)</option><option value="custom2">OTM5 Buy + OTM2 Sell (example)</option></select></div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1">Symbol</label>
+                            <select id="eb-symbol" class="form-select form-select-sm" onchange="posOnSymbolChange();ebUpdateSummary()"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select>
+                            <label class="form-label small mb-1 mt-2">Timeframe</label>
+                            <select id="eb-tf" class="form-select form-select-sm" onchange="ebUpdateSummary()"><option value="1m">1 Min</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1d">Daily</option></select>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="small fw-bold mb-1"><i class="bi bi-graph-up"></i> Indicators (multi-select)</div>
+                            <div class="d-flex flex-wrap gap-2 p-2 mb-1" id="eb-inds" style="border:1px solid #dee2e6;border-radius:6px;background:#f8fafc;min-height:44px">
+                                <label class="small"><input type="checkbox" class="eb-ind" value="supertrend" checked onchange="ebUpdateSummary()"> SuperTrend</label>
+                                <label class="small"><input type="checkbox" class="eb-ind" value="adx" onchange="ebUpdateSummary()"> ADX</label>
+                                <label class="small"><input type="checkbox" class="eb-ind" value="rsi" onchange="ebUpdateSummary()"> RSI</label>
+                                <label class="small"><input type="checkbox" class="eb-ind" value="macd" onchange="ebUpdateSummary()"> MACD</label>
+                                <label class="small"><input type="checkbox" class="eb-ind" value="ema_cross" onchange="ebUpdateSummary()"> EMA Cross</label>
+                                <label class="small"><input type="checkbox" class="eb-ind" value="bollinger" onchange="ebUpdateSummary()"> Bollinger</label>
+                                <label class="small"><input type="checkbox" class="eb-ind" value="vwap" onchange="ebUpdateSummary()"> VWAP</label>
+                            </div>
+                            <div class="small text-muted" style="font-size:10px">Ek ya zyada indicators chuno — signal inhi se banta hai.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1">Risk Mode</label>
+                            <select id="eb-mode" class="form-select form-select-sm mb-2" onchange="ebUpdateSummary()"><option value="intraday">Intraday</option><option value="positional">Positional</option></select>
+                            <label class="form-label small mb-1">Date Range</label>
+                            <div class="d-flex gap-1 mb-2"><input type="date" id="eb-start" class="form-control form-control-sm" onchange="ebUpdateSummary()"><input type="date" id="eb-end" class="form-control form-control-sm" onchange="ebUpdateSummary()"></div>
+                            <label class="form-label small mb-1">SL / TP (premium points)</label>
+                            <div class="d-flex gap-1"><input type="number" id="eb-sl" class="form-control form-control-sm" placeholder="SL pts" value="50" onchange="ebUpdateSummary()"><input type="number" id="eb-tp" class="form-control form-control-sm" placeholder="TP pts" value="120" onchange="ebUpdateSummary()"></div>
+                        </div>
+                    </div>
+                    <!-- ONE live summary for the whole builder -->
+                    <div id="eb-summary" class="alert alert-info py-1 px-2 mb-2 small mt-2">Summary loading…</div>
+
+                    <!-- STEP 2 — templates + legs together -->
+                    <div class="small fw-bold text-primary mb-1"><i class="bi bi-layers"></i> 2 · Quick Template &amp; Legs</div>
+                    <div class="row g-2">
+                        <div class="col-md-8">
+                            <label class="form-label small mb-0">Quick Template</label>
+                            <select id="pos-template" class="form-select form-select-sm" onchange="posApplyTemplate(this.value)">
+                                <option value="">— Custom (edit legs below) —</option>
+                                <option value="single">Single Leg (CE ATM Buy)</option>
+                                <option value="bullcall">Bull Call Spread (CE ATM Buy + CE OTM2 Sell)</option>
+                                <option value="bearput">Bear Put Spread (PE ATM Buy + PE OTM2 Sell)</option>
+                                <option value="bearcall">Bear Call Spread (CE OTM2 Sell + CE OTM5 Buy)</option>
+                                <option value="bullput">Bull Put Spread (PE OTM2 Sell + PE OTM5 Buy)</option>
+                                <option value="straddle">Long Straddle (CE ATM Buy + PE ATM Buy)</option>
+                                <option value="strangle">Long Strangle (CE OTM2 Buy + PE OTM2 Buy)</option>
+                                <option value="ironcondor">Iron Condor (4 legs)</option>
+                                <option value="custom2">OTM5 Buy + OTM2 Sell (example)</option>
+                            </select>
+                        </div>
                         <div class="col-md-4 d-flex align-items-end"><small class="text-muted" id="pos-spot-info">Spot: — | Lot: —</small></div>
                     </div>
                     <div class="table-responsive mt-2" style="overflow-x:auto">
                         <table class="table table-sm table-bordered align-middle mb-1" style="font-size:12px;min-width:660px">
-                            <thead class="table-light"><tr><th style="width:30px">#</th><th style="width:100px">Side</th><th style="width:90px">Type</th><th style="width:110px">Strike</th><th style="width:80px">Lots</th><th style="width:100px">Expiry</th><th style="width:40px"></th></tr></thead>
+                            <thead class="table-light"><tr><th style="width:30px">#</th><th style="width:100px">Side</th><th style="width:90px">Option Type</th><th style="width:110px">Strike</th><th style="width:80px">Lots</th><th style="width:100px">Expiry</th><th style="width:40px"></th></tr></thead>
                             <tbody id="pos-legs-body"></tbody>
                         </table>
                     </div>
                     <div class="d-flex gap-2 flex-wrap align-items-center mt-1">
                         <button class="btn btn-sm btn-outline-primary" onclick="posAddLeg()"><i class="bi bi-plus-lg"></i> Add Leg</button>
                         <button class="btn btn-sm btn-outline-danger" onclick="posClearLegs()"><i class="bi bi-x-lg"></i> Clear</button>
-                        <span class="small fw-bold" id="pos-net-summary">No legs</span>
                     </div>
-                    <div id="pos-summary" class="alert alert-info py-1 px-2 mb-2 mt-2 small">Leg join karo — payoff graph aur backtest automatically update hote hain.</div>
-                    <div class="d-flex gap-2 flex-wrap">
-                        <button class="btn btn-sm btn-success" onclick="runPosBacktest()"><i class="bi bi-play-fill"></i> Run Backtest</button>
-                        <button class="btn btn-sm btn-outline-primary" onclick="savePosStrategy()"><i class="bi bi-save"></i> Save Strategy</button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="posUpdatePayoff()"><i class="bi bi-graph-up"></i> Refresh Payoff</button>
+
+                    <!-- STEP 3 — one clear primary action -->
+                    <div class="small fw-bold text-primary mt-3 mb-1"><i class="bi bi-play-circle"></i> 3 · Run &amp; Results</div>
+                    <div class="d-flex gap-2 flex-wrap align-items-center">
+                        <button id="builder-run-btn" class="btn btn-success" onclick="runPosBacktest()"><i class="bi bi-play-fill"></i> Run Backtest</button>
+                        <button id="builder-save-btn" class="btn btn-outline-primary" onclick="savePosStrategy()"><i class="bi bi-save"></i> Save Strategy</button>
+                        <button class="btn btn-outline-secondary" onclick="posUpdatePayoff()"><i class="bi bi-graph-up"></i> Refresh Payoff</button>
                     </div>
-                    <div class="small text-muted mt-1"><i class="bi bi-info-circle"></i> User-Configured analytical setup — results are historical, not a guarantee of future returns. SEBI non-advisory.</div>
-                </div>
-            </div>
+                    <div class="small text-muted mt-2"><i class="bi bi-info-circle"></i> User-Configured analytical setup — results are historical, not a guarantee of future returns. SEBI non-advisory.</div>
 
-            <div class="card mb-3 payoff-card" id="pos-payoff-card">
-                <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-1"><strong class="small"><i class="bi bi-graph-up"></i> Payoff Diagram (Expiry) — Multi-Leg Net P&amp;L</strong><span class="badge bg-primary" id="pos-payoff-spot">Spot: —</span></div>
-                <div class="card-body p-2">
-                    <div style="overflow-x:auto"><div id="pos-payoff-chart" style="height:300px;min-width:600px"></div></div>
-                    <div class="row g-2 mt-2" id="pos-payoff-metrics"></div>
-                    <div class="small text-muted mt-1">Premium proxy: Black-Scholes (IV 20%, DTE 7). Net P&amp;L across all legs at expiry. Backtest asli recorded option data par chalta hai.</div>
-                </div>
-            </div>
+                    <!-- Expiry payoff — updates with every leg change -->
+                    <div class="card mt-3 payoff-card" id="pos-payoff-card">
+                        <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-1"><strong class="small"><i class="bi bi-graph-up"></i> Expiry Payoff — Multi-Leg Net P&amp;L</strong><span class="badge bg-primary" id="pos-payoff-spot">Spot: —</span></div>
+                        <div class="card-body p-2">
+                            <div style="overflow-x:auto"><div id="pos-payoff-chart" style="height:300px;min-width:600px"></div></div>
+                            <div class="row g-2 mt-2" id="pos-payoff-metrics"></div>
+                            <div class="small text-muted mt-1">Premium proxy: Black-Scholes (IV 20%, DTE 7). Net P&amp;L across all legs at expiry. Backtest asli recorded option data par chalta hai.</div>
+                        </div>
+                    </div>
 
-            <div class="card mb-3" id="pos-results-card" style="display:none">
-                <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bar-chart"></i> Backtest Results</strong><span id="pos-res-badge"></span></div>
-                <div class="card-body p-2">
-                    <div class="row g-2" id="pos-metrics"></div>
-                    <div class="mt-2" id="pos-trade-list" style="overflow-x:auto"></div>
-                    <div class="mt-2"><button class="btn btn-sm btn-outline-info" onclick="posOpenFullResults()"><i class="bi bi-arrow-right"></i> Full Results (equity charts) me dekho</button></div>
+                    <!-- Backtest results — same single source -->
+                    <div class="card mt-3" id="pos-results-card" style="display:none">
+                        <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bar-chart"></i> Backtest Results</strong><span id="pos-res-badge"></span></div>
+                        <div class="card-body p-2">
+                            <div class="row g-2" id="pos-metrics"></div>
+                            <div class="mt-2" id="pos-trade-list" style="overflow-x:auto"></div>
+                            <div class="mt-2"><button class="btn btn-sm btn-outline-info" onclick="posOpenFullResults()"><i class="bi bi-arrow-right"></i> Full Results (equity charts) me dekho</button></div>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
-        <!-- END embedded positions section -->
                 <!-- Payoff Diagram -->
                 <div class="card mt-3 payoff-card" id="payoffCard" style="display:none">
                     <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-graph-up"></i> Payoff Diagram (Expiry) — Strategy View</strong><span class="badge bg-primary" id="payoff-spot">Spot: -</span></div>
@@ -799,13 +795,7 @@
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     async function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();try{await loadStrats();}catch(e){}loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();try{lhInit();}catch(e){}setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);try{posFillDates();posRenderLegs();}catch(e){}setTimeout(()=>{try{posUpdatePayoff();}catch(e){}},250);}if(id==='positions'){try{posFillDates();posRenderLegs();}catch(e){}setTimeout(()=>{try{posUpdatePayoff();}catch(e){}},200);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
-    // Positions nav: multi-leg builder ab Strategy Backtest page ke ANDAR hai
-    // (alag page thi to bar-bar gayab ho rahi thi). Strategy page kholo + scroll.
-    function goPositions(btn){
-        try{go('strategy',btn);}catch(e){}
-        setTimeout(()=>{try{const el=document.getElementById('positions-section');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});}catch(e){}},180);
-    }
+        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();try{await loadStrats();}catch(e){}loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();try{lhInit();}catch(e){}setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);try{posFillDates();posRenderLegs();}catch(e){}setTimeout(()=>{try{posUpdatePayoff();}catch(e){}},250);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     // OTM filter cache-first: memory (15-min) -> localStorage (60-min) -> network.
     // "Loading symbols..." kabhi atakta nahi - pehli baar ke baad turant list.
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
@@ -1792,11 +1782,11 @@ let _lastOpenTrdHTML = null;
                         try{
                             const _gr=t.gross_pnl!=null?`<td class="${C(t.gross_pnl)}">${F(t.gross_pnl)}</td>`:'<td>-</td>';
                             const _sl=t.slippage!=null?`<td class="text-muted small">${F(t.slippage)}</td>`:'<td>-</td>';
-                            h+=`<tr><td>${++tradeIdx}</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date||''}</td><td>${t.entry_time||''}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike||''}</td><td>${t.position||''}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+Number(t.entry_price).toFixed(2):'-'}</td><td>${t.exit_price?'₹'+Number(t.exit_price).toFixed(2):'-'}</td>${_gr}${_sl}<td class="text-muted small">${t.exit_reason||t.reason||'-'}</td><td class="${C(t.pnl)}">${t.pnl_formatted||F(t.pnl||0)}</td></tr>`;
+                            h+=`<tr><td>${++tradeIdx}</td><td><strong>${t.symbol||''}</strong></td><td>${t.entry_date||''}</td><td>${t.entry_time||''}</td><td>${t.exit_date||'-'}</td><td>${t.exit_time||'-'}</td><td>${t.option_type||'-'}</td><td>${t.strike||''}</td><td>${t.position||''}</td><td>${t.quantity||'-'}</td><td>${t.lots||1}</td><td>${t.entry_price?'₹'+Number(t.entry_price).toFixed(2):'-'}</td><td>${t.exit_price?'₹'+Number(t.exit_price).toFixed(2):'-'}</td>${_gr}${_sl}<td class="text-muted small">${btExitLabel(t.exit_reason||t.reason||'-')}</td><td class="${C(t.pnl)}">${t.pnl_formatted||F(t.pnl||0)}</td></tr>`;
                         }catch(_e){}
                     });
                     h+='</tbody></table>';
-                    document.getElementById('bt-tl').innerHTML=h;
+                    document.getElementById('bt-tl').innerHTML=exitMixHtml(_tl)+h;
                 }else{
                     try{document.getElementById('bt-tl').innerHTML='<p class="text-muted small p-2">No trades in this run.</p>';}catch(e){}
                     try{document.getElementById('bt-trades').classList.add('hidden');}catch(e){}
@@ -2727,103 +2717,22 @@ let _lastOpenTrdHTML = null;
         finally{if(btn){btn.disabled=false;btn.textContent='Fetch Real Data (NSE)';}}
     }
     async function lhIncrementalSync(){try{const r=await P('/api/lakehouse/sync-incremental',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});alert(r.message||JSON.stringify(r));await lhRefresh();await lhCheckMissing();}catch(e){alert(e.message);}}
-    // ---- Easy Backtest Builder helpers ----
-    let _ebLeg={leg:'CE',txn:'buy'};
-    function ebSelLeg(btn){document.querySelectorAll('.eb-leg').forEach(b=>b.classList.remove('active'));btn.classList.add('active');_ebLeg={leg:btn.dataset.leg,txn:btn.dataset.txn};ebUpdateSummary();}
+    // ---- One builder, one summary (posLegs = single source of truth) ----
     function ebUpdateSummary(){try{
-        const sym=document.getElementById('eb-symbol')?.value||'NIFTY';
-        const tf=document.getElementById('eb-tf')?.value||'5m';
-        const sl=document.getElementById('eb-sl')?.value||'50';
-        const tp=document.getElementById('eb-tp')?.value||'120';
-        const mode=document.getElementById('eb-mode')?.value||'intraday';
-        const leg=_ebLeg.leg+' '+_ebLeg.txn.toUpperCase();
+        const g=id=>document.getElementById(id)?.value||'';
+        const sym=g('eb-symbol')||'NIFTY', tf=g('eb-tf')||'5m';
+        const sl=g('eb-sl')||'0', tp=g('eb-tp')||'0', mode=g('eb-mode')||'intraday';
+        const inds=[...document.querySelectorAll('.eb-ind:checked')].map(x=>x.value);
+        const legs=(typeof posLegs!=='undefined'?posLegs:[]).map(posLegLabel);
+        const from=g('eb-start')||'auto', to=g('eb-end')||'today';
         const el=document.getElementById('eb-summary');
-        if(el) el.innerHTML='<strong>Summary:</strong> '+sym+' | '+leg+' | '+tf+' | SL '+sl+' pts | TP '+tp+' pts | '+mode+' | Slippage 0.5% (real data only)';
+        if(el) el.innerHTML='<strong>Summary:</strong> '+sym+' · '+tf+' · '+(inds.join(', ')||'SuperTrend')+' · '+mode+' · SL '+sl+' pts / TP '+tp+' pts · '+from+' → '+to+
+            '<br><strong>Legs ('+legs.length+'):</strong> '+(legs.join(' + ')||'none — Add Leg ya template chuno')+' · Payoff aur backtest results neeche apne aap update hote hain.';
     }catch(e){}}
-    function toggleEasyPro(){const c=document.getElementById('easy-bt-card');if(c)c.classList.toggle('border-primary');try{document.querySelectorAll('.slab-card').forEach(x=>{if(x.id!=='easy-bt-card')x.classList.toggle('d-none');});}catch(e){}}
-    async function runEasyBacktest(){
-        try{
-            const sym=document.getElementById('eb-symbol')?.value||'NIFTY';
-            const tf=document.getElementById('eb-tf')?.value||'5m';
-            const start=document.getElementById('eb-start')?.value||'';
-            const end=document.getElementById('eb-end')?.value||'';
-            const sl=parseFloat(document.getElementById('eb-sl')?.value||'50')||50;
-            const tp=parseFloat(document.getElementById('eb-tp')?.value||'120')||120;
-            const mode=document.getElementById('eb-mode')?.value||'intraday';
-            const _ip={'supertrend':{'period':10,'multiplier':3},'adx':{'period':14,'threshold':25},'rsi':{'period':14},'macd':{'fast':12,'slow':26,'signal':9},'ema_cross':{},'bollinger':{'period':20,'std':2},'vwap':{'period':20}};
-            let inds=[...document.querySelectorAll('.eb-ind:checked')].map(x=>({id:x.value,params:_ip[x.value]||{}}));
-            if(!inds.length) inds=[{'id':'supertrend','params':{'period':10,'multiplier':3}}];
-            const today=new Date().toISOString().split('T')[0];
-            const s=start||new Date(Date.now()-30*86400000).toISOString().split('T')[0];
-            const e=end||today;
-            const req={symbol:sym,symbols:[sym],start_date:s,end_date:e,indicators:inds,
-                legs:[{option_type:_ebLeg.leg,transaction:_ebLeg.txn,lots:1,strike_selection:'atm',otm_distance:0,expiry:'weekly'}],
-                advanced:{data_mode:'tick',trade_mode:mode,timeframe:tf,entry_time:'09:35',exit_time:'15:15',expiry:'weekly'},
-                risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp}};
-            const btn=document.querySelector('#easy-bt-card button'); if(btn){btn.disabled=true;btn.textContent='Running…';}
-            const r=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
-            let res=r.result||null;
-            if(!res&&r.job_id){
-                for(let i=0;i<60;i++){
-                    const d=await A('/api/backtest/result/'+r.job_id);
-                    if(d.status==='done'||d.result){res=d.result||d;break;}
-                    if(d.status==='error'){throw new Error(d.error||'backtest failed');}
-                    await new Promise(x=>setTimeout(x,1000));
-                }
-            }
-            if(!res||res.error) throw new Error((res&&res.error)||'no result');
-            window._directBT=res; await runBacktest({direct:res});
-        }catch(err){alert('Easy Backtest error: '+err.message);}
-        finally{const btn=document.querySelector('#easy-bt-card button'); if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Easy Backtest';}}
-    }
-    // Easy Builder ka Save button: pehle backtest chalao (result window._directBT
-    // me hota hai), phir is function se us result ko strategy ke saath save karo.
-    // Purana saveStrat() DELETE ho chuke PRO form fields (r-*, s-*) par depend
-    // karta tha — isliye alag, self-contained saver.
-    async function saveEasyBacktest(){
-        try{
-            if(!window._directBT){alert('Pehle "Run Easy Backtest" dabao, phir Save karo.');return;}
-            const sym=document.getElementById('eb-symbol')?.value||'NIFTY';
-            const tf=document.getElementById('eb-tf')?.value||'5m';
-            const start=document.getElementById('eb-start')?.value||'';
-            const end=document.getElementById('eb-end')?.value||'';
-            const sl=parseFloat(document.getElementById('eb-sl')?.value||'50')||50;
-            const tp=parseFloat(document.getElementById('eb-tp')?.value||'120')||120;
-            const mode=document.getElementById('eb-mode')?.value||'intraday';
-            const _ip={'supertrend':{'period':10,'multiplier':3},'adx':{'period':14,'threshold':25},'rsi':{'period':14},'macd':{'fast':12,'slow':26,'signal':9},'ema_cross':{},'bollinger':{'period':20,'std':2},'vwap':{'period':20}};
-            let inds=[...document.querySelectorAll('.eb-ind:checked')].map(x=>({id:x.value,params:_ip[x.value]||{}}));
-            if(!inds.length) inds=[{'id':'supertrend','params':{'period':10,'multiplier':3}}];
-            const leg=_ebLeg||{leg:'CE',txn:'buy'};
-            const dir=(leg.txn||'buy').toUpperCase()+'_'+(leg.leg||'CE');
-            const today=new Date().toISOString().split('T')[0];
-            const s=start||new Date(Date.now()-20*86400000).toISOString().split('T')[0];
-            const e=end||today;
-            const body={
-                id:window._editingStratId||0,
-                name:(sym+'_'+dir+'_Easy').replace(/_/g,' '),
-                symbol:sym,
-                timeframe:tf,
-                description:'Easy Builder — '+dir+' — real tick data',
-                indicators:inds,
-                entry_conditions:[],
-                exit_conditions:[],
-                legs:[{option_type:leg.leg,transaction:leg.txn,lots:1,strike_selection:'atm',otm_distance:0,expiry:'weekly'}],
-                advanced_options:{trade_mode:mode,entry_time:'09:35',exit_time:'15:15',timeframe:tf,slippage_pct:0.5,data_mode:'tick',strike_selection:'atm',otm_distance:0,expiry:'weekly'},
-                risk_management:{daily_stop_loss:sl,daily_take_profit:tp,sl_unit:'pt',tp_unit:'pt',max_trades_per_day:-1},
-                status:'active',
-                last_backtest:window._directBT||null,
-            };
-            const btn=document.querySelector('#easy-bt-card button.btn-outline-primary'); if(btn){btn.disabled=true;btn.textContent='Saving...';}
-            const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-            if(r.id){window._editingStratId=null;alert('✅ Strategy saved! ID: '+r.id+'\n\nTrading Center me card dikhega.');try{await loadStrats();}catch(e){}try{await loadRobotSaved();}catch(e){}}
-            else{alert('Error saving strategy'+(r.error?': '+JSON.stringify(r.error):''));}
-        }catch(err){alert('Save error: '+err.message);}
-        finally{const btn=document.querySelector('#easy-bt-card button.btn-outline-primary'); if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-save"></i> Save Strategy';}}
-    }
 
-    // ===== MULTI-LEG POSITION BUILDER (Positions tab) =====
-    // Backend already nets multiple legs (_enter_spread in backtest_engine.py),
-    // so OTM5 Buy + OTM2 Sell etc. run as a real spread with net premium.
+    // ===== Integrated legs table + payoff + backtest =====
+    // Backend nets multiple legs (_enter_spread), so OTM5 Buy + OTM2 Sell etc.
+    // run as a real spread with net premium. Settings come from the eb-* controls above.
     let posLegs=[];
     let _posSpot=0, _posLot=0, _posStep=50;
     function posFillDates(){try{
@@ -2876,12 +2785,7 @@ let _lastOpenTrdHTML = null;
                   '</tr>';
             }).join('');
         }
-        const ns=document.getElementById('pos-net-summary');
-        if(ns) ns.textContent=posLegs.length? (posLegs.length+' leg(s): '+posLegs.map(posLegLabel).join(' + ')) : 'No legs';
-        const sm=document.getElementById('pos-summary');
-        if(sm) sm.innerHTML=posLegs.length>1
-            ? '✅ <strong>Multi-leg spread</strong>: backend net premium se backtest hoga. <em>'+posLegs.map(posLegLabel).join(' + ')+'</em> — payoff graph neeche dikhega.'
-            : (posLegs.length? 'Single leg. Doosra leg add karke spread (e.g. OTM5 Buy + OTM2 Sell) bana sakte hain.' : 'Leg join karo — payoff graph aur backtest automatically update hote hain.');
+        ebUpdateSummary();
         posUpdatePayoff();
     }
     function posAddLeg(){posLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:1,expiry:'weekly'});posRenderLegs();}
@@ -2901,6 +2805,7 @@ let _lastOpenTrdHTML = null;
     function posApplyTemplate(t){
         const mk=(ot,tx,s,d)=>({option_type:ot,transaction:tx,strike_selection:s,otm_distance:d,lots:1,expiry:'weekly'});
         const M={
+            single:[mk('CE','buy','atm',0)],
             bullcall:[mk('CE','buy','atm',0),mk('CE','sell','otm',2)],
             bearput:[mk('PE','buy','atm',0),mk('PE','sell','otm',2)],
             bearcall:[mk('CE','sell','otm',2),mk('CE','buy','otm',5)],
@@ -2972,11 +2877,30 @@ let _lastOpenTrdHTML = null;
         if(!inds.length) inds=[{id:'supertrend',params:{period:10,multiplier:3}}];
         const today=new Date().toISOString().split('T')[0];
         let legs=posLegs.map(l=>({option_type:l.option_type,transaction:l.transaction,lots:l.lots||1,strike_selection:l.strike_selection||'atm',otm_distance:l.otm_distance||0,expiry:l.expiry||'weekly'}));
-        if(!legs.length){const e=_ebLeg||{leg:'CE',txn:'buy'};legs=[{option_type:e.leg,transaction:e.txn,lots:1,strike_selection:'atm',otm_distance:0,expiry:'weekly'}];}
+        if(!legs.length){legs=[{option_type:'CE',transaction:'buy',lots:1,strike_selection:'atm',otm_distance:0,expiry:'weekly'}];}
         return {symbol:sym,symbols:[sym],start_date:s||new Date(Date.now()-20*86400000).toISOString().split('T')[0],end_date:e||today,
             indicators:inds,legs:legs,
-            advanced:{data_mode:'tick',trade_mode:mode,timeframe:'1d',entry_time:'09:35',exit_time:'15:15',expiry:'weekly'},
-            risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp}};
+            advanced:{data_mode:'tick',trade_mode:mode,timeframe:(document.getElementById('eb-tf')?.value||'5m'),entry_time:'09:35',exit_time:'15:15',expiry:'weekly'},
+            risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp,sl_unit:'pt',tp_unit:'pt'}};
+    }
+    // Exit reasons readable in both the compact builder results and the full
+    // results table: SL/Target must never look blank or ambiguous.
+    function btExitLabel(x){
+        const s=String(x||'').toLowerCase();
+        if(/strategy_sl_tp/.test(s)) return 'Strategy MTM SL/TP';
+        if(/stop|\bsl\b/.test(s)) return 'Stop Loss';
+        if(/target|\btp\b/.test(s)) return 'Target';
+        if(/trail/.test(s)) return 'Trailing Lock';
+        if(/intraday|eod|square/.test(s)) return 'EOD Square-off';
+        if(/signal|reversal/.test(s)) return 'Signal Exit';
+        if(/expiry/.test(s)) return 'Expiry Close';
+        if(/max_hold|time/.test(s)) return 'Max Hold';
+        return String(x||'—');
+    }
+    function exitMixHtml(rows){
+        const c={}; (rows||[]).forEach(t=>{const k=btExitLabel(t.exit_reason||t.reason||t.trigger||'');c[k]=(c[k]||0)+1;});
+        const keys=Object.keys(c).sort((a,b)=>c[b]-c[a]);
+        return keys.length? '<div class="small text-muted mb-2">Exit mix: '+keys.map(k=>'<span class="badge bg-light text-dark border me-1">'+k+': '+c[k]+'</span>').join('')+'</div>':'';
     }
     function posBadge(res){
         const ds=String((res&&res.data_source)||'').toLowerCase();
@@ -3004,11 +2928,11 @@ let _lastOpenTrdHTML = null;
         const tl=document.getElementById('pos-trade-list');
         if(tl){
             const rows=(res&&res.trade_list)||[];
-            tl.innerHTML=rows.length? '<table class="table table-sm table-bordered" style="font-size:11px;min-width:720px"><thead class="table-light"><tr><th>#</th><th>Entry</th><th>Exit</th><th>Position</th><th>Entry ₹</th><th>Exit ₹</th><th>Exit Reason</th><th>P/L</th></tr></thead><tbody>'+
+            tl.innerHTML=exitMixHtml(rows)+(rows.length? '<table class="table table-sm table-bordered" style="font-size:11px;min-width:720px"><thead class="table-light"><tr><th>#</th><th>Entry</th><th>Exit</th><th>Position</th><th>Entry ₹</th><th>Exit ₹</th><th>Exit Reason</th><th>P/L</th></tr></thead><tbody>'+
               rows.map((t,i)=>{
                 const pl=Number(t.pnl||t.net_pnl||0);
-                return '<tr><td>'+(i+1)+'</td><td>'+(t.entry_date||'')+' '+(t.entry_time||'')+'</td><td>'+(t.exit_date||'')+' '+(t.exit_time||'')+'</td><td>'+(t.position||t.type||'')+'</td><td>₹'+(t.entry_price||0)+'</td><td>₹'+(t.exit_price||0)+'</td><td>'+(t.exit_reason||'')+'</td><td class="'+(pl>0?'price-up':pl<0?'price-down':'')+'">₹'+pl.toLocaleString()+'</td></tr>';
-              }).join('')+'</tbody></table>' : '<p class="text-muted small">Koi trade nahi — signals nahi bane (honest zero).</p>';
+                return '<tr><td>'+(i+1)+'</td><td>'+(t.entry_date||'')+' '+(t.entry_time||'')+'</td><td>'+(t.exit_date||'')+' '+(t.exit_time||'')+'</td><td>'+(t.position||t.type||'')+'</td><td>₹'+(t.entry_price||0)+'</td><td>₹'+(t.exit_price||0)+'</td><td><span class="badge bg-light text-dark border">'+btExitLabel(t.exit_reason||t.reason||t.trigger||'')+'</span></td><td class="'+(pl>0?'price-up':pl<0?'price-down':'')+'">₹'+pl.toLocaleString()+'</td></tr>';
+              }).join('')+'</tbody></table>' : '<p class="text-muted small">Koi trade nahi — signals nahi bane (honest zero).</p>');
         }
         card.scrollIntoView({behavior:'smooth',block:'start'});
     }
@@ -3016,7 +2940,7 @@ let _lastOpenTrdHTML = null;
         // Koi leg na ho to Easy Builder ki single leg chalegi (posReq fallback)
         try{
             const req=posReq();
-            const btn=Array.from(document.querySelectorAll('#positions-section button')).find(b=>b.textContent.includes('Run Backtest'));
+            const btn=document.getElementById('builder-run-btn');
             if(btn){btn.disabled=true;btn.textContent='Running...';}
             const r=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
             let res=r.result||null;
@@ -3024,7 +2948,7 @@ let _lastOpenTrdHTML = null;
             if(!res||res.error)throw new Error((res&&res.error)||'no result');
             renderPosResults(res);
         }catch(err){alert('Multi-leg backtest error: '+err.message);}
-        finally{const btn=Array.from(document.querySelectorAll('#positions-section button')).find(b=>b.textContent.includes('Run Backtest')||b.textContent==='Running...');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Backtest';}}
+        finally{const btn=document.getElementById('builder-run-btn');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Backtest';}}
     }
     function posOpenFullResults(){
         if(!window._posBT){alert('Pehle Run Backtest karo.');return;}
@@ -3036,27 +2960,27 @@ let _lastOpenTrdHTML = null;
         if(!window._posBT){alert('Pehle Run Backtest karo, phir Save karo.');return;}
         try{
             const req=posReq();
-            const nm=req.symbol+'_'+posLegs.map(posLegLabel).join('_').replace(/[^A-Za-z0-9]+/g,'-')+'_MultiLeg';
-            const body={id:window._editingStratId||0,name:nm,symbol:req.symbol,timeframe:'1d',
-                description:'Multi-Leg Position — '+posLegs.map(posLegLabel).join(' + '),
+            const nm=req.symbol+'_'+posLegs.map(posLegLabel).join('_').replace(/[^A-Za-z0-9]+/g,'-')+'_EasyMultiLeg';
+            const body={id:window._editingStratId||0,name:nm,symbol:req.symbol,timeframe:(document.getElementById('eb-tf')?.value||'5m'),
+                description:'Multi-Leg Easy Builder — '+posLegs.map(posLegLabel).join(' + '),
                 indicators:req.indicators,entry_conditions:[],exit_conditions:[],legs:req.legs,
                 advanced_options:req.advanced,risk_management:req.risk,status:'active',last_backtest:window._posBT};
-            const btn=Array.from(document.querySelectorAll('#positions-section button')).find(b=>b.textContent.includes('Save Strategy'));
+            const btn=document.getElementById('builder-save-btn');
             if(btn){btn.disabled=true;btn.textContent='Saving...';}
             const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             if(r.id){alert('✅ Multi-leg strategy saved! ID: '+r.id+'\n\nTrading Center me card dikhega.');try{await loadStrats();}catch(e){}try{await loadRobotSaved();}catch(e){}}
             else alert('Error saving strategy'+(r.error?': '+JSON.stringify(r.error):''));
         }catch(err){alert('Save error: '+err.message);}
-        finally{const btn=Array.from(document.querySelectorAll('#positions-section button')).find(b=>b.textContent.includes('Save Strategy')||b.textContent==='Saving...');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-save"></i> Save Strategy';}}
+        finally{const btn=document.getElementById('builder-save-btn');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-save"></i> Save Strategy';}}
     }
-    try{setTimeout(()=>{posFillDates();if(!posLegs.length){const e=_ebLeg||{leg:'CE',txn:'buy'};posLegs=[{option_type:e.leg,transaction:e.txn,strike_selection:'atm',otm_distance:0,lots:1,expiry:'weekly'}];}posRenderLegs();},350);}catch(e){}
+    try{setTimeout(()=>{posFillDates();if(!posLegs.length)posLegs=[{option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:1,expiry:'weekly'}];posRenderLegs();ebUpdateSummary();},350);}catch(e){}
     function ebFillDates(){try{
         const end=new Date(); const start=new Date(end.getTime()-20*86400000);
         const es=document.getElementById('eb-start'), ee=document.getElementById('eb-end');
         if(es&&!es.value) es.value=start.toISOString().split('T')[0];
         if(ee&&!ee.value) ee.value=end.toISOString().split('T')[0];
     }catch(e){}}
-    try{setTimeout(()=>{ebFillDates();const b=document.querySelector('.eb-leg');if(b){b.classList.add('active');_ebLeg={leg:b.dataset.leg,txn:b.dataset.txn};}ebUpdateSummary();},300);}catch(e){}
+    try{setTimeout(()=>{ebFillDates();ebUpdateSummary();},300);}catch(e){}
 
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{try{const _sc=localStorage.getItem('stratCardsCache'); if(_sc && cards && !cards.innerHTML.includes('card')) cards.innerHTML=_sc;}catch(e){} const [r,o]=await Promise.all([A('/api/strategies/list'), A('/api/trades/open/fast').catch(()=>({positions:[]}))]);const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3"><div class="text-center p-4"><i class="bi bi-lightbulb" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">No strategies yet</p><small class="text-muted">Create your first strategy to get started</small></div></p>';return;}
     // Running status per strategy: count open paper/live trades by strategy_id
