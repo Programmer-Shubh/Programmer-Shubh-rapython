@@ -2741,8 +2741,19 @@ let _lastOpenTrdHTML = null;
             '<br><strong>Legs ('+legs.length+'):</strong> '+(legs.join(' + ')||'none — Add Leg ya template chuno')+dirHint+' · Payoff aur backtest results neeche apne aap update hote hain.';
     }catch(e){}}
     // Har control change par summary turant fresh (keyboard/selection dono).
-    document.addEventListener('input',e=>{if(e.target&&e.target.closest&&e.target.closest('#easy-bt-card')){try{ebUpdateSummary();}catch(_){}}});
-    document.addEventListener('change',e=>{if(e.target&&e.target.closest&&e.target.closest('#easy-bt-card')){try{ebUpdateSummary();}catch(_){}}});
+    document.addEventListener('input',e=>{if(e.target&&e.target.closest&&e.target.closest('#easy-bt-card')){try{ebUpdateSummary();}catch(_){}try{posInvalidateResults();}catch(_){}}},true);
+    document.addEventListener('change',e=>{if(e.target&&e.target.closest&&e.target.closest('#easy-bt-card')){try{ebUpdateSummary();}catch(_){}try{posInvalidateResults();}catch(_){}}},true);
+    // Config badalte hi purana result hata do - warna doosre symbol/leg ka
+    // result dikhne se user ko galat symbol/strike samajh aa sakta tha.
+    function posInvalidateResults(){
+        try{
+            if(!window._posBT) return;
+            window._posBT=null;
+            const c=document.getElementById('pos-results-card'); if(c)c.style.display='none';
+            const t=document.getElementById('pos-trade-list'); if(t)t.innerHTML='';
+            const b=document.getElementById('pos-res-badge'); if(b)b.innerHTML='';
+        }catch(e){}
+    }
 
     // ===== Integrated legs table + payoff + backtest =====
     // Backend nets multiple legs (_enter_spread), so OTM5 Buy + OTM2 Sell etc.
@@ -2926,9 +2937,22 @@ let _lastOpenTrdHTML = null;
         return 'EOD BHAVCOPY';
     }
     function renderPosResults(res){
-        window._posBT=res;
         const card=document.getElementById('pos-results-card'); if(!card) return;
         card.style.display='block';
+        // Symbol guard: selected symbol ke alava koi trade dikhe (purana /
+        // doosre config ka result) to result kabhi display mat karo.
+        const allRows=(res&&res.trade_list)||[];
+        const allowed=new Set(((res&&res.params&&res.params.symbols)||[posSymbol()]).map(x=>String(x||'').toUpperCase()));
+        const wrong=allRows.filter(t=>t&&t.symbol&&!allowed.has(String(t.symbol).toUpperCase()));
+        if(wrong.length){
+            window._posBT=null;
+            const bd=document.getElementById('pos-res-badge'); if(bd) bd.innerHTML='<span class="badge bg-danger">STALE RESULT</span>';
+            const fmb=document.getElementById('pos-metrics'); if(fmb) fmb.innerHTML='';
+            const tlb=document.getElementById('pos-trade-list');
+            if(tlb) tlb.innerHTML='<div class="alert alert-warning py-2 small"><strong>Galat/purana result pakda gaya:</strong> isme '+wrong.length+' trade(s) doosre symbol ('+[...new Set(wrong.map(t=>t.symbol))].join(', ')+') ke hain. Ye result hata diya gaya hai — dobara <strong>Run Backtest</strong> dabao.</div>';
+            return;
+        }
+        window._posBT=res;
         const m=(res&&res.metrics)||{};
         const badge=document.getElementById('pos-res-badge');
         if(badge){
