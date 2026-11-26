@@ -38,6 +38,8 @@ class TransactionCosts:
         ye GLOBAL SLIPPAGE_PCT mutate hoti thi (race: paper worker usi waqt ki
         backtest slippage inherit kar leta tha). Ab caller apni local value
         pass karta hai, global untouched rahti hai."""
+        if price is None:
+            return price
         if price <= 0:
             return price
         try:

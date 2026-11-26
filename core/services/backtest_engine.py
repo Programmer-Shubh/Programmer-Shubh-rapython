@@ -540,6 +540,10 @@ class BacktestEngine:
                     trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
                 elif is_spread:
                     trade = self._enter_spread(cur_date, spot, symbol, legs, strike_sel, delta_target, otm_dist)
+                    if trade is None:
+                        pending_entry = None
+                        pending_auto_buy = None
+                        continue
                     trade["signal_time"] = pending_entry_signal_time or trade.get("time", "")
                 else:
                     trade = self._enter_single(cur_date, spot, symbol, legs[0], strike_sel, delta_target, otm_dist)
@@ -2094,6 +2098,11 @@ class BacktestEngine:
             else:
                 strike = self._select_strike(spot, symbol, option_type, leg_sel, leg_delta, leg_otm)
             premium = self._entry_premium(date, spot, strike, option_type)
+            # NO synthetic floor: single-leg ki tarah spread me bhi kisi leg ka
+            # asli premium na mile to poori trade skip karo (never fabricate).
+            if premium is None or float(premium) <= 0:
+                self._rej["no_real_option_premium"] = self._rej.get("no_real_option_premium", 0) + 1
+                return None
             # Dynamic Slippage for Option Selling: SELL leg पर प्राइस और खराब (कम) करें
             # One shared slippage application only (parity with paper entry).
             premium = TransactionCosts.apply_fill_slippage(premium, "BUY" if txn_type == "buy" else "SELL", self.is_live,
