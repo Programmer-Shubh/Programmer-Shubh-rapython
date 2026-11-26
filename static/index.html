@@ -487,7 +487,7 @@
             </div>
                 <!-- Easy Backtest Builder (3-step guided) -->
                 <div class="card mt-3 slab-card" id="easy-bt-card">
-                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1"><span><span class="slab-num">0</span><i class="bi bi-lightning-charge"></i> Easy Backtest Builder <span class="badge bg-light text-dark">30-sec setup</span></span><button class="btn btn-sm btn-outline-secondary" onclick="toggleEasyPro()">Switch to PRO Settings</button></div>
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1"><span><span class="slab-num">0</span><i class="bi bi-lightning-charge"></i> Easy Backtest Builder <span class="badge bg-light text-dark">30-sec setup</span></span></div>
                     <div class="card-body p-2">
                         <div class="row g-2">
                             <div class="col-md-4">
@@ -503,8 +503,8 @@
                             <div class="col-md-4">
                                 <div class="small fw-bold mb-1">Step 2 — Signal &amp; Timeframe</div>
                                 <select id="eb-tf" class="form-select form-select-sm mb-1"><option value="1d">Daily</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1m">1 Min</option></select>
-                                <div class="small text-muted mb-1">Indicators (multi-select):</div>
-                                <div class="d-flex flex-wrap gap-2" id="eb-inds">
+                                <div class="small fw-bold mb-1" style="color:#0d6efd"><i class="bi bi-graph-up"></i> Indicators (multi-select)</div>
+                                <div class="d-flex flex-wrap gap-2 p-2 mb-1" id="eb-inds" style="border:1px solid #dee2e6;border-radius:6px;background:#f8fafc;min-height:44px">
                                     <label class="small"><input type="checkbox" class="eb-ind" value="supertrend" checked> SuperTrend</label>
                                     <label class="small"><input type="checkbox" class="eb-ind" value="adx"> ADX</label>
                                     <label class="small"><input type="checkbox" class="eb-ind" value="rsi"> RSI</label>
@@ -513,6 +513,7 @@
                                     <label class="small"><input type="checkbox" class="eb-ind" value="bollinger"> Bollinger</label>
                                     <label class="small"><input type="checkbox" class="eb-ind" value="vwap"> VWAP</label>
                                 </div>
+                                <div class="small text-muted" style="font-size:10px">Indicators select karke signal banao (ek ya zyada)</div>
                             </div>
                             <div class="col-md-4">
                                 <div class="small fw-bold mb-1">Step 3 — Risk &amp; Dates</div>
