@@ -524,6 +524,41 @@
                         <div class="col-md-3 d-flex align-items-end"><small class="text-muted" style="font-size:10px">Slippage 0.5% realistic | Drawdown Days + Badge as per strategy Mar 2025 update</small></div>
                     </div>
                     </div>
+                <!-- Easy Backtest Builder (3-step guided) -->
+                <div class="card mt-3 slab-card" id="easy-bt-card">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1"><span><span class="slab-num">0</span><i class="bi bi-lightning-charge"></i> Easy Backtest Builder <span class="badge bg-light text-dark">30-sec setup</span></span><button class="btn btn-sm btn-outline-secondary" onclick="toggleEasyPro()">Switch to PRO Settings</button></div>
+                    <div class="card-body p-2">
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <div class="small fw-bold mb-1">Step 1 — Symbol &amp; Direction</div>
+                                <select id="eb-symbol" class="form-select form-select-sm mb-1"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select>
+                                <div class="btn-group btn-group-sm w-100" role="group">
+                                    <button type="button" class="btn btn-outline-primary eb-leg" data-leg="CE" data-txn="buy" onclick="ebSelLeg(this)">Buy Call</button>
+                                    <button type="button" class="btn btn-outline-primary eb-leg" data-leg="PE" data-txn="buy" onclick="ebSelLeg(this)">Buy Put</button>
+                                    <button type="button" class="btn btn-outline-danger eb-leg" data-leg="CE" data-txn="sell" onclick="ebSelLeg(this)">Sell Call</button>
+                                    <button type="button" class="btn btn-outline-danger eb-leg" data-leg="PE" data-txn="sell" onclick="ebSelLeg(this)">Sell Put</button>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="small fw-bold mb-1">Step 2 — Signal &amp; Timeframe</div>
+                                <select id="eb-tf" class="form-select form-select-sm mb-1"><option value="1d">Daily</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1m">1 Min</option></select>
+                                <select id="eb-preset" class="form-select form-select-sm"><option value="trend">Trend Follow (SuperTrend+ADX)</option><option value="momentum">Momentum (RSI+MACD)</option></select>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="small fw-bold mb-1">Step 3 — Risk &amp; Dates</div>
+                                <div class="d-flex gap-1 mb-1"><input type="date" id="eb-start" class="form-control form-control-sm"><input type="date" id="eb-end" class="form-control form-control-sm"></div>
+                                <div class="d-flex gap-1 mb-1"><input type="number" id="eb-sl" class="form-control form-control-sm" placeholder="SL pts" value="50"><input type="number" id="eb-tp" class="form-control form-control-sm" placeholder="TP pts" value="120"></div>
+                                <select id="eb-mode" class="form-select form-select-sm"><option value="intraday">Intraday</option><option value="positional">Positional</option></select>
+                            </div>
+                        </div>
+                        <div id="eb-summary" class="alert alert-info py-1 px-2 mb-2 small mt-2"></div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-success" onclick="runEasyBacktest()"><i class="bi bi-play-fill"></i> Run Easy Backtest</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="ebUpdateSummary()">Refresh Summary</button>
+                        </div>
+                        <div class="small text-muted mt-1"><i class="bi bi-info-circle"></i> User-Configured analytical setup — results are historical, not a guarantee of future returns. SEBI non-advisory.</div>
+                    </div>
+                </div>
                 <div class="card mt-3 slab-card" id="lh-card">
                     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1"><span><span class="slab-num">2A</span><i class="bi bi-hdd-stack"></i> Stored Option Data Library <span class="badge bg-light text-dark">Offline ready</span></span><span id="lh-record-pill" class="badge bg-secondary">Auto-recorder: checking…</span></div>
                     <div class="card-body p-2">
@@ -2770,6 +2805,57 @@ let _lastOpenTrdHTML = null;
         finally{if(btn){btn.disabled=false;btn.textContent='Fetch Real Data (NSE)';}}
     }
     async function lhIncrementalSync(){try{const r=await P('/api/lakehouse/sync-incremental',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});alert(r.message||JSON.stringify(r));await lhRefresh();await lhCheckMissing();}catch(e){alert(e.message);}}
+    // ---- Easy Backtest Builder helpers ----
+    let _ebLeg={leg:'CE',txn:'buy'};
+    function ebSelLeg(btn){document.querySelectorAll('.eb-leg').forEach(b=>b.classList.remove('active'));btn.classList.add('active');_ebLeg={leg:btn.dataset.leg,txn:btn.dataset.txn};ebUpdateSummary();}
+    function ebUpdateSummary(){try{
+        const sym=document.getElementById('eb-symbol')?.value||'NIFTY';
+        const tf=document.getElementById('eb-tf')?.value||'5m';
+        const sl=document.getElementById('eb-sl')?.value||'50';
+        const tp=document.getElementById('eb-tp')?.value||'120';
+        const mode=document.getElementById('eb-mode')?.value||'intraday';
+        const leg=_ebLeg.leg+' '+_ebLeg.txn.toUpperCase();
+        const el=document.getElementById('eb-summary');
+        if(el) el.innerHTML='<strong>Summary:</strong> '+sym+' | '+leg+' | '+tf+' | SL '+sl+' pts | TP '+tp+' pts | '+mode+' | Slippage 0.5% (real data only)';
+    }catch(e){}}
+    function toggleEasyPro(){const c=document.getElementById('easy-bt-card');if(c)c.classList.toggle('border-primary');try{document.querySelectorAll('.slab-card').forEach(x=>{if(x.id!=='easy-bt-card')x.classList.toggle('d-none');});}catch(e){}}
+    async function runEasyBacktest(){
+        try{
+            const sym=document.getElementById('eb-symbol')?.value||'NIFTY';
+            const tf=document.getElementById('eb-tf')?.value||'5m';
+            const preset=document.getElementById('eb-preset')?.value||'trend';
+            const start=document.getElementById('eb-start')?.value||'';
+            const end=document.getElementById('eb-end')?.value||'';
+            const sl=parseFloat(document.getElementById('eb-sl')?.value||'50')||50;
+            const tp=parseFloat(document.getElementById('eb-tp')?.value||'120')||120;
+            const mode=document.getElementById('eb-mode')?.value||'intraday';
+            const inds = preset==='momentum'
+                ? [{'id':'rsi','params':{'period':14}},{'id':'macd','params':{'fast':12,'slow':26,'signal':9}}]
+                : [{'id':'supertrend','params':{'period':10,'multiplier':3}},{'id':'adx','params':{'period':14,'threshold':25}}];
+            const today=new Date().toISOString().split('T')[0];
+            const s=start||new Date(Date.now()-30*86400000).toISOString().split('T')[0];
+            const e=end||today;
+            const req={symbol:sym,symbols:[sym],start_date:s,end_date:e,indicators:inds,
+                legs:[{option_type:_ebLeg.leg,transaction:_ebLeg.txn,lots:1,strike_selection:'atm',otm_distance:0,expiry:'weekly'}],
+                advanced:{data_mode:'tick',trade_mode:mode,timeframe:tf,entry_time:'09:35',exit_time:'15:15',expiry:'weekly'},
+                risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp}};
+            const btn=document.querySelector('#easy-bt-card button'); if(btn){btn.disabled=true;btn.textContent='Running…';}
+            const r=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
+            let res=r.result||null;
+            if(!res&&r.job_id){
+                for(let i=0;i<60;i++){
+                    const d=await A('/api/backtest/result/'+r.job_id);
+                    if(d.status==='done'||d.result){res=d.result||d;break;}
+                    if(d.status==='error'){throw new Error(d.error||'backtest failed');}
+                    await new Promise(x=>setTimeout(x,1000));
+                }
+            }
+            if(!res||res.error) throw new Error((res&&res.error)||'no result');
+            window._directBT=res; await runBacktest({direct:res});
+        }catch(err){alert('Easy Backtest error: '+err.message);}
+        finally{const btn=document.querySelector('#easy-bt-card button'); if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Easy Backtest';}}
+    }
+    try{setTimeout(ebUpdateSummary,500);}catch(e){}
 
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{try{const _sc=localStorage.getItem('stratCardsCache'); if(_sc && cards && !cards.innerHTML.includes('card')) cards.innerHTML=_sc;}catch(e){} const [r,o]=await Promise.all([A('/api/strategies/list'), A('/api/trades/open/fast').catch(()=>({positions:[]}))]);const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3"><div class="text-center p-4"><i class="bi bi-lightbulb" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">No strategies yet</p><small class="text-muted">Create your first strategy to get started</small></div></p>';return;}
     // Running status per strategy: count open paper/live trades by strategy_id
