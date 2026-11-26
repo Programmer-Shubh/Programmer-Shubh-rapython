@@ -60,3 +60,15 @@ def test_ui_uses_shared_helper_and_badge_column():
     assert "<th>Data Source</th>" in html          # Trade History
     assert "data_source_badge" in html
     assert "bt_trades" in html
+
+
+def test_only_high_frequency_tick_data_mode_is_visible():
+    """User rule: 1-Minute Option Chain dropdown option hata diya gaya hai."""
+    html = open(os.path.join(os.path.dirname(__file__), "..", "static", "index.html"),
+                encoding="utf-8").read()
+    assert "1-Minute Option Chain" not in html
+    for select_id in ("r-data-mode", "lh-mode"):
+        marker = f'<select id="{select_id}"'
+        chunk = html.split(marker, 1)[1].split("</select>", 1)[0]
+        assert chunk.count("<option") == 1, chunk
+        assert 'value="tick"' in chunk and "High-Frequency" in chunk
