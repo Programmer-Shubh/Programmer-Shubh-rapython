@@ -2928,10 +2928,11 @@ let _lastOpenTrdHTML = null;
         const tl=document.getElementById('pos-trade-list');
         if(tl){
             const rows=(res&&res.trade_list)||[];
-            tl.innerHTML=exitMixHtml(rows)+(rows.length? '<table class="table table-sm table-bordered" style="font-size:11px;min-width:720px"><thead class="table-light"><tr><th>#</th><th>Entry</th><th>Exit</th><th>Position</th><th>Entry ₹</th><th>Exit ₹</th><th>Exit Reason</th><th>P/L</th></tr></thead><tbody>'+
+            tl.innerHTML=exitMixHtml(rows)+(rows.length? '<table class="table table-sm table-bordered" style="font-size:11px;min-width:860px"><thead class="table-light"><tr><th>#</th><th>Symbol</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Position</th><th>Entry ₹</th><th>Exit ₹</th><th>Exit Reason</th><th>P/L</th></tr></thead><tbody>'+
               rows.map((t,i)=>{
                 const pl=Number(t.pnl||t.net_pnl||0);
-                return '<tr><td>'+(i+1)+'</td><td>'+(t.entry_date||'')+' '+(t.entry_time||'')+'</td><td>'+(t.exit_date||'')+' '+(t.exit_time||'')+'</td><td>'+(t.position||t.type||'')+'</td><td>₹'+(t.entry_price||0)+'</td><td>₹'+(t.exit_price||0)+'</td><td><span class="badge bg-light text-dark border">'+btExitLabel(t.exit_reason||t.reason||t.trigger||'')+'</span></td><td class="'+(pl>0?'price-up':pl<0?'price-down':'')+'">₹'+pl.toLocaleString()+'</td></tr>';
+                const pos=String(t.position||t.type||'')+((t.option_type&&t.option_type!=='Spread')?(' '+t.option_type):'');
+                return '<tr><td>'+(i+1)+'</td><td><strong>'+(t.symbol||res.symbol||'—')+'</strong></td><td>'+(t.strike||'—')+'</td><td>'+(t.entry_date||'')+' '+(t.entry_time||'')+'</td><td>'+(t.exit_date||'')+' '+(t.exit_time||'')+'</td><td>'+pos+'</td><td>₹'+(t.entry_price||0)+'</td><td>₹'+(t.exit_price||0)+'</td><td><span class="badge bg-light text-dark border">'+btExitLabel(t.exit_reason||t.reason||t.trigger||'')+'</span></td><td class="'+(pl>0?'price-up':pl<0?'price-down':'')+'">₹'+pl.toLocaleString()+'</td></tr>';
               }).join('')+'</tbody></table>' : '<p class="text-muted small">Koi trade nahi — signals nahi bane (honest zero).</p>');
         }
         card.scrollIntoView({behavior:'smooth',block:'start'});
