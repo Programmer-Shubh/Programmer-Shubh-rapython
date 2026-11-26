@@ -61,23 +61,29 @@ def seed_if_needed(force: bool = False) -> dict:
             try:
                 dmin = str(df["trade_date"].min())
                 dmax = str(df["trade_date"].max())
-                db.execute("DELETE FROM bhavcopy_data WHERE trade_date BETWEEN ? AND ?",
-                           [dmin, dmax])
+                conn = db._conn()
+                conn.execute("PRAGMA synchronous=OFF")
+                conn.execute("DELETE FROM bhavcopy_data WHERE trade_date BETWEEN ? AND ?", (dmin, dmax))
             except Exception:
-                pass
+                conn = db._conn()
             cols = ["symbol", "trade_date", "expiry_date", "strike_price", "option_type",
                     "open_price", "high_price", "low_price", "close_price", "volume", "oi"]
             rows = df.select(cols).rows()
-            CH = 8000
+            CH = 20000
             done = 0
             for i in range(0, len(rows), CH):
-                db.executemany(
+                conn.executemany(
                     "INSERT INTO bhavcopy_data (symbol, trade_date, expiry_date, "
                     "strike_price, option_type, open_price, high_price, low_price, "
                     "close_price, volume, oi) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     [tuple(r) for r in rows[i:i + CH]],
                 )
                 done += len(rows[i:i + CH])
+            conn.commit()
+            try:
+                conn.execute("PRAGMA synchronous=NORMAL")
+            except Exception:
+                pass
             _DONE["rows"] = done
             _DONE["seeded"] = True
             _DONE["reason"] = f"seeded {done} real NSE rows"

@@ -18,11 +18,33 @@ def _client():
     return get_nse_instance()
 
 
-def fetch_fno_bhavcopy(day):
-    """Official NSE F&O bhavcopy DataFrame for one date (all symbols)."""
+def fetch_fno_bhavcopy(day, retries: int = 4):
+    """Official NSE F&O bhavcopy DataFrame for one date (all symbols).
+
+    NSE rate-limits (HTTP 429) aggressive callers; retry with exponential
+    backoff so a single throttled request never fails the whole backtest fetch.
+    """
     if isinstance(day, str):
         day = datetime.datetime.strptime(day[:10], "%Y-%m-%d").date()
-    return _client().get_fno_bhav_copy(day)
+    last = None
+    for attempt in range(max(1, int(retries or 1))):
+        try:
+            return _client().get_fno_bhav_copy(day)
+        except Exception as e:
+            last = e
+            msg = str(e).lower()
+            if "429" not in msg and "rate" not in msg and "too many" not in msg:
+                # Non-rate-limit errors: still retry a couple of times.
+                if attempt >= 1:
+                    raise
+            try:
+                import time as _t
+                _t.sleep(min(2 ** attempt, 8))
+            except Exception:
+                pass
+    if last is not None:
+        raise last
+    return None
 
 
 def _norm_opt(right) -> str:

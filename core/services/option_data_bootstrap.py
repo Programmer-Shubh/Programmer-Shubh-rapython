@@ -112,6 +112,12 @@ def fetch_real_option_data(start_date: str = "", end_date: str = "",
             res = import_fno_bhavcopy(day)
             cached += _mirror_to_lakehouse(day, syms or None)
             done.append({"date": day, **res})
+            # Throttle NSE requests to avoid HTTP 429 on bulk fetches.
+            try:
+                import time as _t
+                _t.sleep(0.6)
+            except Exception:
+                pass
         except Exception as exc:
             failed.append({"date": day, "error": str(exc)[:180]})
     return {

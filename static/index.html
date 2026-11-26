@@ -2699,7 +2699,7 @@ let _lastOpenTrdHTML = null;
             const req={symbol:sym,symbols:[sym],start_date:s,end_date:e,indicators:inds,
                 legs:[{option_type:_ebLeg.leg,transaction:_ebLeg.txn,lots:1,strike_selection:'atm',otm_distance:0,expiry:'weekly'}],
                 advanced:{data_mode:'tick',trade_mode:mode,timeframe:tf,entry_time:'09:35',exit_time:'15:15',expiry:'weekly'},
-                risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp,sl_unit:'pt',tp_unit:'pt'}};
+                risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp}};
             const btn=document.querySelector('#easy-bt-card button'); if(btn){btn.disabled=true;btn.textContent='Running…';}
             const r=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
             let res=r.result||null;
