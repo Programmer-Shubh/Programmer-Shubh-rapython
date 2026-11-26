@@ -459,9 +459,8 @@
                         </div>
                         <div id="eb-summary" class="alert alert-info py-1 px-2 mb-2 small mt-2"></div>
                         <div class="d-flex gap-2 flex-wrap">
-                            <button class="btn btn-sm btn-success" onclick="runEasyBacktest()"><i class="bi bi-play-fill"></i> Run Easy Backtest</button>
-                            <button class="btn btn-sm btn-outline-primary" onclick="saveEasyBacktest()" title="Backtest chalane ke baad result ko strategy ke saath save karo"><i class="bi bi-save"></i> Save Strategy</button>
                             <button class="btn btn-sm btn-outline-secondary" onclick="ebUpdateSummary()">Refresh Summary</button>
+                            <small class="text-muted align-self-center">⬇ Run Backtest button neeche multi-leg section me hai (ek hi jagah)</small>
                         </div>
                         <div class="small text-muted mt-1"><i class="bi bi-info-circle"></i> User-Configured analytical setup — results are historical, not a guarantee of future returns. SEBI non-advisory.</div>
                     </div>
@@ -480,16 +479,9 @@
                     <button class="btn btn-sm btn-outline-secondary" onclick="posFillDates()" title="Start/End ko 20 din se auto-fill karo"><i class="bi bi-calendar"></i> 20-Day Dates</button>
                 </div>
                 <div class="card-body p-2">
+                    <div class="alert alert-light py-1 px-2 mb-2 small">Symbol, Dates, Indicators, SL/TP — sab <strong>upar Easy Builder</strong> se liye jate hain (ek hi source). Neeche sirf legs add karo.</div>
                     <div class="row g-2">
-                        <div class="col-md-3"><label class="form-label small mb-0">Symbol</label><select id="pos-symbol" class="form-select form-select-sm" onchange="posOnSymbolChange()"><option value="NIFTY" selected>NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select></div>
-                        <div class="col-md-3"><label class="form-label small mb-0">Start Date</label><input type="date" id="pos-start" class="form-control form-control-sm"></div>
-                        <div class="col-md-3"><label class="form-label small mb-0">End Date</label><input type="date" id="pos-end" class="form-control form-control-sm"></div>
-                        <div class="col-md-3"><label class="form-label small mb-0">Mode</label><select id="pos-mode" class="form-select form-select-sm"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
-                    </div>
-                    <div class="row g-2 mt-1">
-                        <div class="col-md-2"><label class="form-label small mb-0" title="0 = no SL (recommended for spreads)">SL (pts)</label><input type="number" id="pos-sl" class="form-control form-control-sm" value="0" min="0" step="10"></div>
-                        <div class="col-md-2"><label class="form-label small mb-0" title="0 = no target (recommended for spreads)">TP (pts)</label><input type="number" id="pos-tp" class="form-control form-control-sm" value="0" min="0" step="10"></div>
-                        <div class="col-md-4"><label class="form-label small mb-0">Quick Template</label><select id="pos-template" class="form-select form-select-sm" onchange="posApplyTemplate(this.value)"><option value="">— Custom / select template —</option><option value="bullcall">Bull Call Spread (CE ATM Buy + CE OTM2 Sell)</option><option value="bearput">Bear Put Spread (PE ATM Buy + PE OTM2 Sell)</option><option value="bearcall">Bear Call Spread (CE OTM2 Sell + CE OTM5 Buy)</option><option value="bullput">Bull Put Spread (PE OTM2 Sell + PE OTM5 Buy)</option><option value="straddle">Long Straddle (CE ATM Buy + PE ATM Buy)</option><option value="strangle">Long Strangle (CE OTM2 Buy + PE OTM2 Buy)</option><option value="ironcondor">Iron Condor (4 legs)</option><option value="custom2">OTM5 Buy + OTM2 Sell (example)</option></select></div>
+                        <div class="col-md-8"><label class="form-label small mb-0">Quick Template</label><select id="pos-template" class="form-select form-select-sm" onchange="posApplyTemplate(this.value)"><option value="">— Custom / select template —</option><option value="bullcall">Bull Call Spread (CE ATM Buy + CE OTM2 Sell)</option><option value="bearput">Bear Put Spread (PE ATM Buy + PE OTM2 Sell)</option><option value="bearcall">Bear Call Spread (CE OTM2 Sell + CE OTM5 Buy)</option><option value="bullput">Bull Put Spread (PE OTM2 Sell + PE OTM5 Buy)</option><option value="straddle">Long Straddle (CE ATM Buy + PE ATM Buy)</option><option value="strangle">Long Strangle (CE OTM2 Buy + PE OTM2 Buy)</option><option value="ironcondor">Iron Condor (4 legs)</option><option value="custom2">OTM5 Buy + OTM2 Sell (example)</option></select></div>
                         <div class="col-md-4 d-flex align-items-end"><small class="text-muted" id="pos-spot-info">Spot: — | Lot: —</small></div>
                     </div>
                     <div class="table-responsive mt-2" style="overflow-x:auto">
@@ -544,16 +536,6 @@
             <!-- Quant indicator table REMOVED (user demand): checkbox panel
                  (Indicators - signal, upar) hi single source hai. Engine me
                  saare ids ab bhi saved configs ke liye supported hain. -->
-            <div class="row mt-3 align-items-end" style="display:none">
-                <div class="col-md-3"><label class="form-label"><i class="bi bi-calendar3"></i> Backtest Period <span class="badge bg-primary">Min 60 bars</span></label><div class="d-flex gap-1"><input type="date" class="form-control form-control-sm" id="s-start" value="2026-07-02"><input type="date" class="form-control form-control-sm" id="s-end" value="2026-08-20"></div><div class="d-flex gap-1 mt-1"><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1M')">1M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('3M')">3M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('6M')">6M</button><button class="btn btn-sm btn-outline-secondary" style="font-size:10px" onclick="setBT('1Y')">1Y</button></div></div>
-                <div class="col-md-3 d-flex gap-2">
-                    <button class="btn btn-success flex-fill" id="s-run" onclick="runBacktest()"><i class="bi bi-play-circle"></i> Run Backtest</button>
-                    <button class="btn btn-outline-primary" onclick="saveStrat()"><i class="bi bi-save"></i> Save</button>
-                    <button class="btn btn-outline-dark" onclick="runBacktestMonteCarlo()" title="Monte Carlo"><i class="bi bi-shuffle"></i> MC</button>
-                    <button class="btn btn-outline-danger" onclick="downloadReportPDF()" title="PDF Report"><i class="bi bi-file-earmark-pdf"></i> PDF</button>
-                </div>
-                <div class="col-md-6"><small class="text-muted">Note: Backtest uses NSE archives → nselib → Google fallback (no manual bhavcopy). Results show 4 key metrics + Equity + Monthly P&L + Trade List.</small></div>
-            </div>
             <div id="bt-progress" class="hidden mt-2"><div class="progress" style="height:22px"><div id="bt-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%">0%</div></div><small class="text-muted" id="bt-progress-text">Queued...</small></div>
             <div id="bt-results" class="hidden">
                 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -2846,11 +2828,11 @@ let _lastOpenTrdHTML = null;
     let _posSpot=0, _posLot=0, _posStep=50;
     function posFillDates(){try{
         const end=new Date(), start=new Date(end.getTime()-20*86400000);
-        const es=document.getElementById('pos-start'), ee=document.getElementById('pos-end');
+        const es=document.getElementById('eb-start'), ee=document.getElementById('eb-end');
         if(es&&!es.value) es.value=start.toISOString().split('T')[0];
         if(ee&&!ee.value) ee.value=end.toISOString().split('T')[0];
     }catch(e){}}
-    function posSymbol(){return document.getElementById('pos-symbol')?.value||'NIFTY';}
+    function posSymbol(){return document.getElementById('eb-symbol')?.value||'NIFTY';}
     function posOnSymbolChange(){_posSpot=0;_posLot=0;posUpdatePayoff();}
     async function posEnsureSpot(){
         const s=posSymbol();
@@ -2980,13 +2962,19 @@ let _lastOpenTrdHTML = null;
         ],{xaxis:{title:'Spot at Expiry'},yaxis:{title:'P&L (₹)'},shapes:[{type:'line',x0:xs[0],x1:xs[xs.length-1],y0:0,y1:0,line:{color:'#6c757d',dash:'dash'}}],margin:{t:10,b:40,l:60,r:20},paper_bgcolor:'#fff',plot_bgcolor:'#fff'},{displayModeBar:false});}catch(e){}
     }
     function posReq(){
-        const sym=posSymbol(), s=document.getElementById('pos-start')?.value||'', e=document.getElementById('pos-end')?.value||'';
-        const sl=parseFloat(document.getElementById('pos-sl')?.value||'0')||0, tp=parseFloat(document.getElementById('pos-tp')?.value||'0')||0;
-        const mode=document.getElementById('pos-mode')?.value||'intraday';
+        // SINGLE SOURCE: Easy Builder (eb-*) — symbol/dates/SL/TP/mode/indicators.
+        // Legs: multi-leg table se; koi leg na ho to Easy Builder ki single leg.
+        const sym=posSymbol(), s=document.getElementById('eb-start')?.value||'', e=document.getElementById('eb-end')?.value||'';
+        const sl=parseFloat(document.getElementById('eb-sl')?.value||'0')||0, tp=parseFloat(document.getElementById('eb-tp')?.value||'0')||0;
+        const mode=document.getElementById('eb-mode')?.value||'intraday';
+        const _ip={'supertrend':{'period':10,'multiplier':3},'adx':{'period':14,'threshold':25},'rsi':{'period':14},'macd':{'fast':12,'slow':26,'signal':9},'ema_cross':{},'bollinger':{'period':20,'std':2},'vwap':{'period':20}};
+        let inds=[...document.querySelectorAll('.eb-ind:checked')].map(x=>({id:x.value,params:_ip[x.value]||{}}));
+        if(!inds.length) inds=[{id:'supertrend',params:{period:10,multiplier:3}}];
         const today=new Date().toISOString().split('T')[0];
+        let legs=posLegs.map(l=>({option_type:l.option_type,transaction:l.transaction,lots:l.lots||1,strike_selection:l.strike_selection||'atm',otm_distance:l.otm_distance||0,expiry:l.expiry||'weekly'}));
+        if(!legs.length){const e=_ebLeg||{leg:'CE',txn:'buy'};legs=[{option_type:e.leg,transaction:e.txn,lots:1,strike_selection:'atm',otm_distance:0,expiry:'weekly'}];}
         return {symbol:sym,symbols:[sym],start_date:s||new Date(Date.now()-20*86400000).toISOString().split('T')[0],end_date:e||today,
-            indicators:[{id:'supertrend',params:{period:10,multiplier:3}}],
-            legs:posLegs.map(l=>({option_type:l.option_type,transaction:l.transaction,lots:l.lots||1,strike_selection:l.strike_selection||'atm',otm_distance:l.otm_distance||0,expiry:l.expiry||'weekly'})),
+            indicators:inds,legs:legs,
             advanced:{data_mode:'tick',trade_mode:mode,timeframe:'1d',entry_time:'09:35',exit_time:'15:15',expiry:'weekly'},
             risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp}};
     }
@@ -3025,7 +3013,7 @@ let _lastOpenTrdHTML = null;
         card.scrollIntoView({behavior:'smooth',block:'start'});
     }
     async function runPosBacktest(){
-        if(!posLegs.length){alert('Pehle leg add karo (Add Leg ya template).');return;}
+        // Koi leg na ho to Easy Builder ki single leg chalegi (posReq fallback)
         try{
             const req=posReq();
             const btn=Array.from(document.querySelectorAll('#positions-section button')).find(b=>b.textContent.includes('Run Backtest'));
@@ -3044,7 +3032,7 @@ let _lastOpenTrdHTML = null;
         try{runBacktest({direct:window._posBT});}catch(e){alert('Full results load nahi hue: '+e.message);}
     }
     async function savePosStrategy(){
-        if(!posLegs.length){alert('Save karne ke liye pehle leg add karo.');return;}
+        // Single-leg bhi save ho sakta hai (posReq fallback)
         if(!window._posBT){alert('Pehle Run Backtest karo, phir Save karo.');return;}
         try{
             const req=posReq();
@@ -3061,7 +3049,7 @@ let _lastOpenTrdHTML = null;
         }catch(err){alert('Save error: '+err.message);}
         finally{const btn=Array.from(document.querySelectorAll('#positions-section button')).find(b=>b.textContent.includes('Save Strategy')||b.textContent==='Saving...');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-save"></i> Save Strategy';}}
     }
-    try{setTimeout(()=>{posFillDates();posRenderLegs();},350);}catch(e){}
+    try{setTimeout(()=>{posFillDates();if(!posLegs.length){const e=_ebLeg||{leg:'CE',txn:'buy'};posLegs=[{option_type:e.leg,transaction:e.txn,strike_selection:'atm',otm_distance:0,lots:1,expiry:'weekly'}];}posRenderLegs();},350);}catch(e){}
     function ebFillDates(){try{
         const end=new Date(); const start=new Date(end.getTime()-20*86400000);
         const es=document.getElementById('eb-start'), ee=document.getElementById('eb-end');
