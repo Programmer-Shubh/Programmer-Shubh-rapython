@@ -2783,7 +2783,7 @@ let _lastOpenTrdHTML = null;
     function posLegLabel(l){
         const side=(l.transaction||'buy').toUpperCase();
         const hit=l.strike_selection==='atm'?'ATM':(l.strike_selection==='otm'?'OTM':'ITM')+(l.otm_distance||0);
-        return side+' '+(l.option_type||'CE')+' '+(l.strike_selection==='atm'?'':hit);
+        return side+' '+(l.option_type||'CE')+' '+hit;
     }
     function posRenderLegs(){
         const tb=document.getElementById('pos-legs-body'); if(!tb) return;
@@ -3009,7 +3009,9 @@ let _lastOpenTrdHTML = null;
         try{
             const req=posReq();
             const nm=req.symbol+'_'+posLegs.map(posLegLabel).join('_').replace(/[^A-Za-z0-9]+/g,'-')+'_EasyMultiLeg';
-            const body={id:window._editingStratId||0,name:nm,symbol:req.symbol,timeframe:(document.getElementById('eb-tf')?.value||'5m'),
+            const body={id:window._editingStratId||0,name:nm,symbol:req.symbol,
+                start_date:req.start_date,end_date:req.end_date,
+                timeframe:(document.getElementById('eb-tf')?.value||'5m'),
                 description:'Multi-Leg Easy Builder — '+posLegs.map(posLegLabel).join(' + '),
                 indicators:req.indicators,entry_conditions:[],exit_conditions:[],legs:req.legs,
                 advanced_options:req.advanced,risk_management:req.risk,status:'active',last_backtest:window._posBT};
