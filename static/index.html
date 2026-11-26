@@ -301,6 +301,7 @@
     <div class="nav">
         <button class="active" onclick="go('dashboard',this)"><i class="bi bi-speedometer2"></i> Dashboard</button>
         <button onclick="go('trades',this)"><i class="bi bi-cash-stack"></i> Trading Center</button>
+        <button onclick="go('positions',this)"><i class="bi bi-diagram-3"></i> Positions</button>
         <button onclick="go('chain',this)"><i class="bi bi-graph-up-arrow"></i> Option Chain</button>
         <button onclick="go('strategy',this)"><i class="bi bi-robot"></i> Strategy Backtest</button>
 
@@ -399,6 +400,73 @@
             <div class="card">
                 <div class="card-header">Trade History <small class="text-muted">(Order-Type Badge: Live/Paper/BT — executed user-config data, not tips)</small></div>
                 <div class="card-body p-0"><div id="closed-trd" style="overflow-x:auto; -webkit-overflow-scrolling:touch"></div></div>
+            </div>
+        </div>
+
+        <!-- POSITIONS — Multi-leg builder + payoff graph -->
+        <div id="pg-positions" class="pg hidden" style="background:#f8fafc; padding:8px; border-radius:12px">
+            <div class="card mb-2" style="border:none;background:linear-gradient(135deg,#6610f2 0%,#0d6efd 55%,#00d4ff 100%)">
+                <div class="card-body py-2 px-3 text-white">
+                    <h4 class="fw-bold mb-0" style="font-size:16px"><i class="bi bi-diagram-3"></i> Multi-Leg Position Builder <span class="badge bg-white text-primary ms-2" style="font-size:11px">BACKTEST + PAYOFF</span></h4>
+                    <small class="text-white-50">Ek se zyada option legs (e.g. OTM5 Buy + OTM2 Sell) bana kar asli tick data par backtest karein — net premium, spread P&amp;L aur expiry payoff</small>
+                </div>
+            </div>
+
+            <div class="card mb-3 slab-card">
+                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1">
+                    <span><span class="slab-num">1</span><i class="bi bi-layers"></i> Position Setup <small class="text-muted">Legs + Risk + Dates</small></span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="posFillDates()" title="Start/End ko 20 din se auto-fill karo"><i class="bi bi-calendar"></i> 20-Day Dates</button>
+                </div>
+                <div class="card-body p-2">
+                    <div class="row g-2">
+                        <div class="col-md-3"><label class="form-label small mb-0">Symbol</label><select id="pos-symbol" class="form-select form-select-sm" onchange="posOnSymbolChange()"><option value="NIFTY" selected>NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select></div>
+                        <div class="col-md-3"><label class="form-label small mb-0">Start Date</label><input type="date" id="pos-start" class="form-control form-control-sm"></div>
+                        <div class="col-md-3"><label class="form-label small mb-0">End Date</label><input type="date" id="pos-end" class="form-control form-control-sm"></div>
+                        <div class="col-md-3"><label class="form-label small mb-0">Mode</label><select id="pos-mode" class="form-select form-select-sm"><option value="intraday" selected>Intraday</option><option value="positional">Positional</option></select></div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                        <div class="col-md-2"><label class="form-label small mb-0" title="0 = no SL (recommended for spreads)">SL (pts)</label><input type="number" id="pos-sl" class="form-control form-control-sm" value="0" min="0" step="10"></div>
+                        <div class="col-md-2"><label class="form-label small mb-0" title="0 = no target (recommended for spreads)">TP (pts)</label><input type="number" id="pos-tp" class="form-control form-control-sm" value="0" min="0" step="10"></div>
+                        <div class="col-md-4"><label class="form-label small mb-0">Quick Template</label><select id="pos-template" class="form-select form-select-sm" onchange="posApplyTemplate(this.value)"><option value="">— Custom / select template —</option><option value="bullcall">Bull Call Spread (CE ATM Buy + CE OTM2 Sell)</option><option value="bearput">Bear Put Spread (PE ATM Buy + PE OTM2 Sell)</option><option value="bearcall">Bear Call Spread (CE OTM2 Sell + CE OTM5 Buy)</option><option value="bullput">Bull Put Spread (PE OTM2 Sell + PE OTM5 Buy)</option><option value="straddle">Long Straddle (CE ATM Buy + PE ATM Buy)</option><option value="strangle">Long Strangle (CE OTM2 Buy + PE OTM2 Buy)</option><option value="ironcondor">Iron Condor (4 legs)</option><option value="custom2">OTM5 Buy + OTM2 Sell (example)</option></select></div>
+                        <div class="col-md-4 d-flex align-items-end"><small class="text-muted" id="pos-spot-info">Spot: — | Lot: —</small></div>
+                    </div>
+                    <div class="table-responsive mt-2" style="overflow-x:auto">
+                        <table class="table table-sm table-bordered align-middle mb-1" style="font-size:12px;min-width:660px">
+                            <thead class="table-light"><tr><th style="width:30px">#</th><th style="width:100px">Side</th><th style="width:90px">Type</th><th style="width:110px">Strike</th><th style="width:80px">Lots</th><th style="width:100px">Expiry</th><th style="width:40px"></th></tr></thead>
+                            <tbody id="pos-legs-body"></tbody>
+                        </table>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap align-items-center mt-1">
+                        <button class="btn btn-sm btn-outline-primary" onclick="posAddLeg()"><i class="bi bi-plus-lg"></i> Add Leg</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="posClearLegs()"><i class="bi bi-x-lg"></i> Clear</button>
+                        <span class="small fw-bold" id="pos-net-summary">No legs</span>
+                    </div>
+                    <div id="pos-summary" class="alert alert-info py-1 px-2 mb-2 mt-2 small">Leg join karo — payoff graph aur backtest automatically update hote hain.</div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-sm btn-success" onclick="runPosBacktest()"><i class="bi bi-play-fill"></i> Run Backtest</button>
+                        <button class="btn btn-sm btn-outline-primary" onclick="savePosStrategy()"><i class="bi bi-save"></i> Save Strategy</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="posUpdatePayoff()"><i class="bi bi-graph-up"></i> Refresh Payoff</button>
+                    </div>
+                    <div class="small text-muted mt-1"><i class="bi bi-info-circle"></i> User-Configured analytical setup — results are historical, not a guarantee of future returns. SEBI non-advisory.</div>
+                </div>
+            </div>
+
+            <div class="card mb-3 payoff-card" id="pos-payoff-card">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-1"><strong class="small"><i class="bi bi-graph-up"></i> Payoff Diagram (Expiry) — Multi-Leg Net P&amp;L</strong><span class="badge bg-primary" id="pos-payoff-spot">Spot: —</span></div>
+                <div class="card-body p-2">
+                    <div style="overflow-x:auto"><div id="pos-payoff-chart" style="height:300px;min-width:600px"></div></div>
+                    <div class="row g-2 mt-2" id="pos-payoff-metrics"></div>
+                    <div class="small text-muted mt-1">Premium proxy: Black-Scholes (IV 20%, DTE 7). Net P&amp;L across all legs at expiry. Backtest asli recorded option data par chalta hai.</div>
+                </div>
+            </div>
+
+            <div class="card mb-3" id="pos-results-card" style="display:none">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bar-chart"></i> Backtest Results</strong><span id="pos-res-badge"></span></div>
+                <div class="card-body p-2">
+                    <div class="row g-2" id="pos-metrics"></div>
+                    <div class="mt-2" id="pos-trade-list" style="overflow-x:auto"></div>
+                    <div class="mt-2"><button class="btn btn-sm btn-outline-info" onclick="posOpenFullResults()"><i class="bi bi-arrow-right"></i> Full Results (equity charts) me dekho</button></div>
+                </div>
             </div>
         </div>
         <!-- STRATEGY BUILDER — Advanced style -->
@@ -747,7 +815,7 @@
     function _setDashCache(d){try{localStorage.setItem(_dashCacheKey, JSON.stringify({ts:Date.now(), data:d}));}catch(e){}}
 
     async function go(id,btn){document.querySelectorAll('.pg').forEach(e=>e.classList.add('hidden'));const pg=document.getElementById('pg-'+id);if(pg)pg.classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');
-        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();try{await loadStrats();}catch(e){}loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();try{lhInit();}catch(e){}setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
+        if(id==='dashboard'){loadDash();try{loadRobotSaved();}catch(e){}}if(id==='trades'){loadTrades();try{await loadStrats();}catch(e){}loadDashPositions();loadDashHistory();try{loadRobotSaved();}catch(e){}}        if(id==='brokers'){loadBrokers();loadEgress();}if(id==='chain'){try{if(!window._chainFresh||Date.now()-window._chainFresh>5*60*1000){window._chainFresh=Date.now();cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}catch(e){cLoadSymbols();setTimeout(()=>cLoadChain(),500);}}if(id==='strategy'){loadStrategySymbols();loadRobotSaved();try{lhInit();}catch(e){}setTimeout(()=>{try{updateRunSummary();}catch(e){}},150);}if(id==='positions'){try{posFillDates();posRenderLegs();}catch(e){}setTimeout(()=>{try{posUpdatePayoff();}catch(e){}},200);}if(id==='tvchart'&&!_tvChart)tvLoad();if(id==='webhook'||id==='alerts')initWebhook();}
     // OTM filter cache-first: memory (15-min) -> localStorage (60-min) -> network.
     // "Loading symbols..." kabhi atakta nahi - pehli baar ke baad turant list.
     function otmCached(){try{const c=window._otmData;if(c&&c.ts&&Date.now()-c.ts<15*60*1000&&c.data&&c.data.symbols&&c.data.symbols.length)return c.data;}catch(e){}
@@ -2761,6 +2829,230 @@ let _lastOpenTrdHTML = null;
         }catch(err){alert('Save error: '+err.message);}
         finally{const btn=document.querySelector('#easy-bt-card button.btn-outline-primary'); if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-save"></i> Save Strategy';}}
     }
+
+    // ===== MULTI-LEG POSITION BUILDER (Positions tab) =====
+    // Backend already nets multiple legs (_enter_spread in backtest_engine.py),
+    // so OTM5 Buy + OTM2 Sell etc. run as a real spread with net premium.
+    let posLegs=[];
+    let _posSpot=0, _posLot=0, _posStep=50;
+    function posFillDates(){try{
+        const end=new Date(), start=new Date(end.getTime()-20*86400000);
+        const es=document.getElementById('pos-start'), ee=document.getElementById('pos-end');
+        if(es&&!es.value) es.value=start.toISOString().split('T')[0];
+        if(ee&&!ee.value) ee.value=end.toISOString().split('T')[0];
+    }catch(e){}}
+    function posSymbol(){return document.getElementById('pos-symbol')?.value||'NIFTY';}
+    function posOnSymbolChange(){_posSpot=0;_posLot=0;posUpdatePayoff();}
+    async function posEnsureSpot(){
+        const s=posSymbol();
+        if(_posSpot>0) return {spot:_posSpot,lot:_posLot||75,step:_posStep};
+        try{const d=await A('/api/dashboard/spot/'+encodeURIComponent(s)); if(d&&Number(d.spot)>0) _posSpot=Number(d.spot);}catch(e){}
+        if(!_posSpot){try{const d=await A('/api/chain/live/'+encodeURIComponent(s)); if(d&&Number(d.spot)>0) _posSpot=Number(d.spot);}catch(e){}}
+        if(!_posSpot) _posSpot=({NIFTY:24500,BANKNIFTY:54000,FINNIFTY:26000,MIDCPNIFTY:28000,SENSEX:84000})[s]||24000;
+        try{const d=await A('/api/lot-size/'+encodeURIComponent(s)); const v=Number(d&&d.lot_size||0); if(v>0)_posLot=v;}catch(e){}
+        if(!_posLot) _posLot=({NIFTY:75,BANKNIFTY:15,FINNIFTY:60,MIDCPNIFTY:75,SENSEX:10})[s]||75;
+        _posStep=({NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:50,SENSEX:100})[s]||100;
+        try{const el=document.getElementById('pos-spot-info'); if(el) el.textContent='Spot: ₹'+_posSpot.toFixed(2)+' | Lot: '+_posLot+' | Step: '+_posStep;}catch(e){}
+        return {spot:_posSpot,lot:_posLot,step:_posStep};
+    }
+    function posLegLabel(l){
+        const side=(l.transaction||'buy').toUpperCase();
+        const hit=l.strike_selection==='atm'?'ATM':(l.strike_selection==='otm'?'OTM':'ITM')+(l.otm_distance||0);
+        return side+' '+(l.option_type||'CE')+' '+(l.strike_selection==='atm'?'':hit);
+    }
+    function posRenderLegs(){
+        const tb=document.getElementById('pos-legs-body'); if(!tb) return;
+        if(!posLegs.length){tb.innerHTML='<tr><td colspan="7" class="text-muted text-center py-3">Koi leg nahi — "Add Leg" dabao ya template chuno.</td></tr>';}
+        else{
+            const strikeOpts=(cur)=>{
+                let h='<option value="atm"'+(cur.s==='atm'?' selected':'')+'>ATM</option>';
+                for(let d=1;d<=6;d++){
+                    h+='<option value="otm'+d+'"'+(cur.s==='otm'&&cur.d===d?' selected':'')+'>OTM '+d+'</option>';
+                    h+='<option value="itm'+d+'"'+(cur.s==='itm'&&cur.d===d?' selected':'')+'>ITM '+d+'</option>';
+                }
+                return h;
+            };
+            tb.innerHTML=posLegs.map((l,i)=>{
+                const s=l.strike_selection||'atm', d=l.otm_distance||0;
+                return '<tr>'+
+                  '<td class="text-muted">'+(i+1)+'</td>'+
+                  '<td><select class="form-select form-select-sm" onchange="posUpdLeg('+i+',\'transaction\',this.value)"><option value="buy"'+(l.transaction==='buy'?' selected':'')+'>BUY</option><option value="sell"'+(l.transaction==='sell'?' selected':'')+'>SELL</option></select></td>'+
+                  '<td><select class="form-select form-select-sm" onchange="posUpdLeg('+i+',\'option_type\',this.value)"><option value="CE"'+(l.option_type==='CE'?' selected':'')+'>CE</option><option value="PE"'+(l.option_type==='PE'?' selected':'')+'>PE</option></select></td>'+
+                  '<td><select class="form-select form-select-sm" onchange="posUpdLeg('+i+',\'strike\',this.value)">'+strikeOpts({s:s,d:d})+'</select></td>'+
+                  '<td><input type="number" class="form-control form-control-sm" min="1" max="20" value="'+(l.lots||1)+'" onchange="posUpdLeg('+i+',\'lots\',this.value)"></td>'+
+                  '<td><select class="form-select form-select-sm" onchange="posUpdLeg('+i+',\'expiry\',this.value)"><option value="weekly"'+(l.expiry!=='monthly'?' selected':'')+'>Weekly</option><option value="monthly"'+(l.expiry==='monthly'?' selected':'')+'>Monthly</option></select></td>'+
+                  '<td><button class="btn btn-sm btn-outline-danger" onclick="posRemoveLeg('+i+')" title="Remove"><i class="bi bi-x"></i></button></td>'+
+                  '</tr>';
+            }).join('');
+        }
+        const ns=document.getElementById('pos-net-summary');
+        if(ns) ns.textContent=posLegs.length? (posLegs.length+' leg(s): '+posLegs.map(posLegLabel).join(' + ')) : 'No legs';
+        const sm=document.getElementById('pos-summary');
+        if(sm) sm.innerHTML=posLegs.length>1
+            ? '✅ <strong>Multi-leg spread</strong>: backend net premium se backtest hoga. <em>'+posLegs.map(posLegLabel).join(' + ')+'</em> — payoff graph neeche dikhega.'
+            : (posLegs.length? 'Single leg. Doosra leg add karke spread (e.g. OTM5 Buy + OTM2 Sell) bana sakte hain.' : 'Leg join karo — payoff graph aur backtest automatically update hote hain.');
+        posUpdatePayoff();
+    }
+    function posAddLeg(){posLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:1,expiry:'weekly'});posRenderLegs();}
+    function posRemoveLeg(i){posLegs.splice(i,1);posRenderLegs();}
+    function posClearLegs(){posLegs=[];posRenderLegs();}
+    function posUpdLeg(i,f,v){
+        const l=posLegs[i]; if(!l) return;
+        if(f==='lots') l.lots=Math.max(1,parseInt(v)||1);
+        else if(f==='strike'){
+            const s=String(v||'atm');
+            if(s==='atm'){l.strike_selection='atm';l.otm_distance=0;}
+            else {l.strike_selection=s.slice(0,3);l.otm_distance=parseInt(s.slice(3))||1;}
+        }
+        else l[f]=v;
+        posRenderLegs();
+    }
+    function posApplyTemplate(t){
+        const mk=(ot,tx,s,d)=>({option_type:ot,transaction:tx,strike_selection:s,otm_distance:d,lots:1,expiry:'weekly'});
+        const M={
+            bullcall:[mk('CE','buy','atm',0),mk('CE','sell','otm',2)],
+            bearput:[mk('PE','buy','atm',0),mk('PE','sell','otm',2)],
+            bearcall:[mk('CE','sell','otm',2),mk('CE','buy','otm',5)],
+            bullput:[mk('PE','sell','otm',2),mk('PE','buy','otm',5)],
+            straddle:[mk('CE','buy','atm',0),mk('PE','buy','atm',0)],
+            strangle:[mk('CE','buy','otm',2),mk('PE','buy','otm',2)],
+            ironcondor:[mk('PE','buy','otm',1),mk('PE','sell','otm',3),mk('CE','sell','otm',3),mk('CE','buy','otm',5)],
+            custom2:[mk('CE','buy','otm',5),mk('CE','sell','otm',2)],
+        };
+        if(M[t]){posLegs=JSON.parse(JSON.stringify(M[t]));posRenderLegs();}
+    }
+    async function posUpdatePayoff(){
+        const card=document.getElementById('pos-payoff-card'); if(!card) return;
+        if(!posLegs.length){card.style.display='none';return;}
+        card.style.display='block';
+        const {spot,lot,step}=await posEnsureSpot();
+        const atm=Math.round(spot/step)*step;
+        function erf(x){const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;const sg=x<0?-1:1;x=Math.abs(x);const t=1/(1+p*x);const y=1-((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);return sg*y;}
+        function bs(s,k,ot){const dte=7/365,v=0.2,r=0.06;const d1=(Math.log(s/k)+(r+0.5*v*v)*dte)/(v*Math.sqrt(dte));const d2=d1-v*Math.sqrt(dte);const n1=0.5*(1+erf(d1/Math.sqrt(2))),n2=0.5*(1+erf(d2/Math.sqrt(2)));return ot==='CE'?s*n1-k*Math.exp(-r*dte)*n2:k*Math.exp(-r*dte)*(1-n2)-s*(1-n1);}
+        posLegs.forEach(l=>{
+            const ds=l.otm_distance||0;
+            if(l.strike_selection==='atm') l._strike=atm;
+            else if(l.strike_selection==='otm') l._strike=atm+(l.option_type==='CE'?ds*step:-ds*step);
+            else if(l.strike_selection==='itm') l._strike=atm+(l.option_type==='CE'?-ds*step:ds*step);
+            else l._strike=atm;
+            l._prem=Math.max(1.5,bs(spot,l._strike,l.option_type));
+        });
+        const netPnl=(spt)=>posLegs.reduce((a,l)=>{
+            const intr=l.option_type==='CE'?Math.max(0,spt-l._strike):Math.max(0,l._strike-spt);
+            return a+(l.transaction==='buy'?(intr-l._prem):(l._prem-intr))*lot*(l.lots||1);
+        },0);
+        const xs=[],ys=[];let maxP=-Infinity,minP=Infinity,bes=[];
+        for(let pct=-8;pct<=8;pct+=0.5){
+            const spt=Math.round(spot*(1+pct/100)), pnl=netPnl(spt);
+            xs.push(spt);ys.push(Math.round(pnl));
+            maxP=Math.max(maxP,pnl);minP=Math.min(minP,pnl);
+            if(ys.length>1&&((ys[ys.length-2]<0&&pnl>=0)||(ys[ys.length-2]>=0&&pnl<0))) bes.push(spt);
+        }
+        let ul='';
+        try{
+            const ue=netPnl(Math.round(spot*1.08)),uf=netPnl(Math.round(spot*1.5)),de=netPnl(Math.round(spot*0.92)),df=netPnl(Math.round(spot*0.5));
+            if(ue<0&&uf<ue) ul='upside (naked short CE)';
+            if(de<0&&df<de) ul=(ul?ul+' + ':'')+'downside (naked short PE)';
+        }catch(e){}
+        const maxProfit=Math.round(maxP),maxLoss=Math.round(minP);
+        const netCredit=posLegs.reduce((a,l)=>a+(l.transaction==='sell'?l._prem:-l._prem)*lot*(l.lots||1),0);
+        const sp=document.getElementById('pos-payoff-spot'); if(sp) sp.textContent='Spot: ₹'+spot.toFixed(2)+' | ATM: '+atm;
+        const pm=document.getElementById('pos-payoff-metrics');
+        if(pm) pm.innerHTML=
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">₹'+maxProfit.toLocaleString()+'</div></div></div>'+
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">'+(ul?'Unlimited ♾️':'₹'+Math.abs(maxLoss).toLocaleString())+'</div></div></div>'+
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Net '+(netCredit>=0?'Credit':'Debit')+'</div><div class="value">₹'+Math.abs(Math.round(netCredit)).toLocaleString()+'</div></div></div>'+
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">'+(bes.length?bes.map(b=>'₹'+b).join(', '):'—')+'</div></div></div>'+
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">'+(ul?'∞ (unlimited)':(maxLoss<0?(maxProfit/Math.abs(maxLoss)).toFixed(2):'∞'))+'</div></div></div>'+
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Legs × Lot</div><div class="value">'+posLegs.length+' × '+lot+'</div></div></div>';
+        try{Plotly.newPlot('pos-payoff-chart',[
+            {x:xs,y:ys,type:'scatter',mode:'lines',fill:'tozeroy',line:{color:maxProfit>Math.abs(maxLoss)?'#198754':'#0d6efd',width:2},fillcolor:'rgba(13,110,253,0.08)',name:'Net P&L'},
+            {x:[spot],y:[0],mode:'markers',marker:{color:'#dc3545',size:10},name:'Spot'}
+        ],{xaxis:{title:'Spot at Expiry'},yaxis:{title:'P&L (₹)'},shapes:[{type:'line',x0:xs[0],x1:xs[xs.length-1],y0:0,y1:0,line:{color:'#6c757d',dash:'dash'}}],margin:{t:10,b:40,l:60,r:20},paper_bgcolor:'#fff',plot_bgcolor:'#fff'},{displayModeBar:false});}catch(e){}
+    }
+    function posReq(){
+        const sym=posSymbol(), s=document.getElementById('pos-start')?.value||'', e=document.getElementById('pos-end')?.value||'';
+        const sl=parseFloat(document.getElementById('pos-sl')?.value||'0')||0, tp=parseFloat(document.getElementById('pos-tp')?.value||'0')||0;
+        const mode=document.getElementById('pos-mode')?.value||'intraday';
+        const today=new Date().toISOString().split('T')[0];
+        return {symbol:sym,symbols:[sym],start_date:s||new Date(Date.now()-20*86400000).toISOString().split('T')[0],end_date:e||today,
+            indicators:[{id:'supertrend',params:{period:10,multiplier:3}}],
+            legs:posLegs.map(l=>({option_type:l.option_type,transaction:l.transaction,lots:l.lots||1,strike_selection:l.strike_selection||'atm',otm_distance:l.otm_distance||0,expiry:l.expiry||'weekly'})),
+            advanced:{data_mode:'tick',trade_mode:mode,timeframe:'1d',entry_time:'09:35',exit_time:'15:15',expiry:'weekly'},
+            risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp}};
+    }
+    function posBadge(res){
+        const ds=String((res&&res.data_source)||'').toLowerCase();
+        if(ds.includes('bhavcopy')||ds.includes('eod')) return 'EOD BHAVCOPY';
+        if(ds.includes('tick')||ds.includes('parquet')) return 'TICK DATA';
+        if(ds.includes('model')||ds.includes('bs')) return 'MODEL';
+        return 'EOD BHAVCOPY';
+    }
+    function renderPosResults(res){
+        window._posBT=res;
+        const card=document.getElementById('pos-results-card'); if(!card) return;
+        card.style.display='block';
+        const m=(res&&res.metrics)||{};
+        const badge=document.getElementById('pos-res-badge'); if(badge) badge.innerHTML='<span class="badge bg-info">'+posBadge(res)+'</span> <small class="text-muted">'+(res&&res.run_id||'')+'</small>';
+        const fm=document.getElementById('pos-metrics');
+        if(fm){
+            const pnl=Number(m.net_pnl||0), win=Number(m.win_rate||0), tr=Number(m.total_trades||0);
+            fm.innerHTML=
+              '<div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value '+(pnl>0?'price-up':pnl<0?'price-down':'')+'">₹'+pnl.toLocaleString()+'</div></div></div>'+
+              '<div class="col"><div class="card stat-card-sm"><div class="label">No. of Trades</div><div class="value">'+tr+'</div></div></div>'+
+              '<div class="col"><div class="card stat-card-sm"><div class="label">Win %</div><div class="value">'+win+'%</div></div></div>'+
+              '<div class="col"><div class="card stat-card-sm"><div class="label">Profit Factor</div><div class="value">'+(m.profit_factor==null?'—':m.profit_factor)+'</div></div></div>'+
+              '<div class="col"><div class="card stat-card-sm"><div class="label">Max DD</div><div class="value">'+(m.max_drawdown_pct||0)+'%</div></div></div>';
+        }
+        const tl=document.getElementById('pos-trade-list');
+        if(tl){
+            const rows=(res&&res.trade_list)||[];
+            tl.innerHTML=rows.length? '<table class="table table-sm table-bordered" style="font-size:11px;min-width:720px"><thead class="table-light"><tr><th>#</th><th>Entry</th><th>Exit</th><th>Position</th><th>Entry ₹</th><th>Exit ₹</th><th>Exit Reason</th><th>P/L</th></tr></thead><tbody>'+
+              rows.map((t,i)=>{
+                const pl=Number(t.pnl||t.net_pnl||0);
+                return '<tr><td>'+(i+1)+'</td><td>'+(t.entry_date||'')+' '+(t.entry_time||'')+'</td><td>'+(t.exit_date||'')+' '+(t.exit_time||'')+'</td><td>'+(t.position||t.type||'')+'</td><td>₹'+(t.entry_price||0)+'</td><td>₹'+(t.exit_price||0)+'</td><td>'+(t.exit_reason||'')+'</td><td class="'+(pl>0?'price-up':pl<0?'price-down':'')+'">₹'+pl.toLocaleString()+'</td></tr>';
+              }).join('')+'</tbody></table>' : '<p class="text-muted small">Koi trade nahi — signals nahi bane (honest zero).</p>';
+        }
+        card.scrollIntoView({behavior:'smooth',block:'start'});
+    }
+    async function runPosBacktest(){
+        if(!posLegs.length){alert('Pehle leg add karo (Add Leg ya template).');return;}
+        try{
+            const req=posReq();
+            const btn=Array.from(document.querySelectorAll('#pg-positions button')).find(b=>b.textContent.includes('Run Backtest'));
+            if(btn){btn.disabled=true;btn.textContent='Running...';}
+            const r=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
+            let res=r.result||null;
+            if(!res&&r.job_id){for(let i=0;i<60;i++){const d=await A('/api/backtest/result/'+r.job_id);if(d.status==='done'||d.result){res=d.result||d;break;}if(d.status==='error')throw new Error(d.error||'backtest failed');await new Promise(x=>setTimeout(x,1000));}}
+            if(!res||res.error)throw new Error((res&&res.error)||'no result');
+            renderPosResults(res);
+        }catch(err){alert('Multi-leg backtest error: '+err.message);}
+        finally{const btn=Array.from(document.querySelectorAll('#pg-positions button')).find(b=>b.textContent.includes('Run Backtest')||b.textContent==='Running...');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Backtest';}}
+    }
+    function posOpenFullResults(){
+        if(!window._posBT){alert('Pehle Run Backtest karo.');return;}
+        try{go('strategy',document.querySelector('.nav button[onclick*="strategy"]'));}catch(e){}
+        try{runBacktest({direct:window._posBT});}catch(e){alert('Full results load nahi hue: '+e.message);}
+    }
+    async function savePosStrategy(){
+        if(!posLegs.length){alert('Save karne ke liye pehle leg add karo.');return;}
+        if(!window._posBT){alert('Pehle Run Backtest karo, phir Save karo.');return;}
+        try{
+            const req=posReq();
+            const nm=req.symbol+'_'+posLegs.map(posLegLabel).join('_').replace(/[^A-Za-z0-9]+/g,'-')+'_MultiLeg';
+            const body={id:window._editingStratId||0,name:nm,symbol:req.symbol,timeframe:'1d',
+                description:'Multi-Leg Position — '+posLegs.map(posLegLabel).join(' + '),
+                indicators:req.indicators,entry_conditions:[],exit_conditions:[],legs:req.legs,
+                advanced_options:req.advanced,risk_management:req.risk,status:'active',last_backtest:window._posBT};
+            const btn=Array.from(document.querySelectorAll('#pg-positions button')).find(b=>b.textContent.includes('Save Strategy'));
+            if(btn){btn.disabled=true;btn.textContent='Saving...';}
+            const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            if(r.id){alert('✅ Multi-leg strategy saved! ID: '+r.id+'\n\nTrading Center me card dikhega.');try{await loadStrats();}catch(e){}try{await loadRobotSaved();}catch(e){}}
+            else alert('Error saving strategy'+(r.error?': '+JSON.stringify(r.error):''));
+        }catch(err){alert('Save error: '+err.message);}
+        finally{const btn=Array.from(document.querySelectorAll('#pg-positions button')).find(b=>b.textContent.includes('Save Strategy')||b.textContent==='Saving...');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-save"></i> Save Strategy';}}
+    }
+    try{setTimeout(()=>{posFillDates();posRenderLegs();},350);}catch(e){}
     function ebFillDates(){try{
         const end=new Date(); const start=new Date(end.getTime()-20*86400000);
         const es=document.getElementById('eb-start'), ee=document.getElementById('eb-end');
