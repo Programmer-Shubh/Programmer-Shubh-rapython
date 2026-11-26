@@ -435,7 +435,16 @@
                             <div class="col-md-4">
                                 <div class="small fw-bold mb-1">Step 2 — Signal &amp; Timeframe</div>
                                 <select id="eb-tf" class="form-select form-select-sm mb-1"><option value="1d">Daily</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1m">1 Min</option></select>
-                                <select id="eb-preset" class="form-select form-select-sm"><option value="trend">Trend Follow (SuperTrend+ADX)</option><option value="momentum">Momentum (RSI+MACD)</option></select>
+                                <div class="small text-muted mb-1">Indicators (multi-select):</div>
+                                <div class="d-flex flex-wrap gap-2" id="eb-inds">
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="supertrend" checked> SuperTrend</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="adx"> ADX</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="rsi"> RSI</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="macd"> MACD</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="ema_cross"> EMA Cross</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="bollinger"> Bollinger</label>
+                                    <label class="small"><input type="checkbox" class="eb-ind" value="vwap"> VWAP</label>
+                                </div>
                             </div>
                             <div class="col-md-4">
                                 <div class="small fw-bold mb-1">Step 3 — Risk &amp; Dates</div>
@@ -2676,22 +2685,21 @@ let _lastOpenTrdHTML = null;
         try{
             const sym=document.getElementById('eb-symbol')?.value||'NIFTY';
             const tf=document.getElementById('eb-tf')?.value||'5m';
-            const preset=document.getElementById('eb-preset')?.value||'trend';
             const start=document.getElementById('eb-start')?.value||'';
             const end=document.getElementById('eb-end')?.value||'';
             const sl=parseFloat(document.getElementById('eb-sl')?.value||'50')||50;
             const tp=parseFloat(document.getElementById('eb-tp')?.value||'120')||120;
             const mode=document.getElementById('eb-mode')?.value||'intraday';
-            const inds = preset==='momentum'
-                ? [{'id':'rsi','params':{'period':14}},{'id':'macd','params':{'fast':12,'slow':26,'signal':9}}]
-                : [{'id':'supertrend','params':{'period':10,'multiplier':3}},{'id':'adx','params':{'period':14,'threshold':25}}];
+            const _ip={'supertrend':{'period':10,'multiplier':3},'adx':{'period':14,'threshold':25},'rsi':{'period':14},'macd':{'fast':12,'slow':26,'signal':9},'ema_cross':{},'bollinger':{'period':20,'std':2},'vwap':{'period':20}};
+            let inds=[...document.querySelectorAll('.eb-ind:checked')].map(x=>({id:x.value,params:_ip[x.value]||{}}));
+            if(!inds.length) inds=[{'id':'supertrend','params':{'period':10,'multiplier':3}}];
             const today=new Date().toISOString().split('T')[0];
             const s=start||new Date(Date.now()-30*86400000).toISOString().split('T')[0];
             const e=end||today;
             const req={symbol:sym,symbols:[sym],start_date:s,end_date:e,indicators:inds,
                 legs:[{option_type:_ebLeg.leg,transaction:_ebLeg.txn,lots:1,strike_selection:'atm',otm_distance:0,expiry:'weekly'}],
                 advanced:{data_mode:'tick',trade_mode:mode,timeframe:tf,entry_time:'09:35',exit_time:'15:15',expiry:'weekly'},
-                risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp}};
+                risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp,sl_unit:'pt',tp_unit:'pt'}};
             const btn=document.querySelector('#easy-bt-card button'); if(btn){btn.disabled=true;btn.textContent='Running…';}
             const r=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
             let res=r.result||null;
@@ -2708,7 +2716,13 @@ let _lastOpenTrdHTML = null;
         }catch(err){alert('Easy Backtest error: '+err.message);}
         finally{const btn=document.querySelector('#easy-bt-card button'); if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Easy Backtest';}}
     }
-    try{setTimeout(()=>{const b=document.querySelector('.eb-leg');if(b){b.classList.add('active');_ebLeg={leg:b.dataset.leg,txn:b.dataset.txn};}ebUpdateSummary();},500);}catch(e){}
+    function ebFillDates(){try{
+        const end=new Date(); const start=new Date(end.getTime()-20*86400000);
+        const es=document.getElementById('eb-start'), ee=document.getElementById('eb-end');
+        if(es&&!es.value) es.value=start.toISOString().split('T')[0];
+        if(ee&&!ee.value) ee.value=end.toISOString().split('T')[0];
+    }catch(e){}}
+    try{setTimeout(()=>{ebFillDates();const b=document.querySelector('.eb-leg');if(b){b.classList.add('active');_ebLeg={leg:b.dataset.leg,txn:b.dataset.txn};}ebUpdateSummary();},300);}catch(e){}
 
     async function loadStrats(){const cards=document.getElementById('strat-cards');try{try{const _sc=localStorage.getItem('stratCardsCache'); if(_sc && cards && !cards.innerHTML.includes('card')) cards.innerHTML=_sc;}catch(e){} const [r,o]=await Promise.all([A('/api/strategies/list'), A('/api/trades/open/fast').catch(()=>({positions:[]}))]);const strats=r.strategies||[];if(!strats.length){cards.innerHTML='<p class="text-muted p-3"><div class="text-center p-4"><i class="bi bi-lightbulb" style="font-size:24px;color:#adb5bd"></i><p class="text-muted small mt-2">No strategies yet</p><small class="text-muted">Create your first strategy to get started</small></div></p>';return;}
     // Running status per strategy: count open paper/live trades by strategy_id

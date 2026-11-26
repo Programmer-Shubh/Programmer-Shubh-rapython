@@ -1211,7 +1211,12 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         "AND option_type IN ('CE','PE') AND trade_date BETWEEN ? AND ?",
                         [_s, start_date, end_date]) or []
                     _have = {str(x.get("trade_date"))[:10] for x in _r}
-                    return all(d in _have for d in _req)
+                    # Holidays are never in NSE bhavcopy — require ~70% coverage
+                    # of weekdays, not 100% (which would trigger a pointless NSE
+                    # fetch for every holiday and make backtests slow/429-prone).
+                    if not _have:
+                        return False
+                    return sum(1 for d in _req if d in _have) >= max(1, int(len(_req) * 0.7))
                 except Exception:
                     return False
 
