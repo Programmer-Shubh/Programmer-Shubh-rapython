@@ -1780,6 +1780,7 @@ let _lastOpenTrdHTML = null;
             //tick-reason: 'Real Tick' select kiya par data na hone par kyun fallback hua - clear batayein.
             let _trBadge='';
             try{ if(r.tick_reason) _trBadge=' • <span class="badge bg-warning text-dark" title="'+String(r.tick_reason).replace(/"/g,'&quot;')+'">ℹ '+String(r.tick_reason).slice(0,90)+'</span>'; }catch(e){}
+            try{ if(r.data_note && !r.tick_reason) _trBadge=' • <span class="badge bg-warning text-dark" title="'+String(r.data_note).replace(/"/g,'&quot;')+'">ℹ '+String(r.data_note).slice(0,110)+'</span>'; }catch(e){}
             const _pinfo='Run '+(r.run_id||'-')+' • '+(_p.symbols||[r.symbol||'']).join('+')+' • '+_pleg+' • '+(_p.timeframe||'')+' • '+(_p.start_date||'')+'→'+(_p.end_date||'')+(r.strategy_name?(' • '+r.strategy_name):'')+_dsBadge+_trBadge+(r.validation_status&&r.validation_status!=='OK'?(' • <span class="badge bg-warning text-dark">'+r.validation_status+'</span>'):'')+_storedBadge+_chgBadge+_localBadge+_refreshBtn;
             document.getElementById('bt-results').classList.remove('hidden');
             document.getElementById('bt-metrics').classList.remove('hidden');
@@ -2751,7 +2752,9 @@ let _lastOpenTrdHTML = null;
             if(st)st.textContent='NSE official F&O bhavcopy se asli option data aa rahi hai (ye real prints hain, koi modeled premium nahi)…';
             const s=document.getElementById('r-start')?.value||'';
             const e=document.getElementById('r-end')?.value||'';
-            const sym=(document.getElementById('r-symbol')?.value||document.getElementById('lh-symbol')?.value||'').trim();
+            let _sel=[];
+            try{_sel=(typeof rSyms==='function')?rSyms():[];}catch(_){_sel=[];}
+            const sym=(_sel.length?_sel.join(','):((document.getElementById('r-symbol')?.value||document.getElementById('lh-symbol')?.value||'').trim()));
             const r=await P('/api/lakehouse/fetch-real',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:s,end_date:e,symbols:sym,max_days:12})});
             if(st)st.textContent=r.message||JSON.stringify(r);
             if(r.success)showToast('Asli option data cache ho gaya — ab Run Backtest dabao','success');

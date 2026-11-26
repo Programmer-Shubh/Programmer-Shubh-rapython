@@ -76,13 +76,39 @@ def _mirror_to_lakehouse(trade_date: str, symbols: Optional[List[str]]) -> int:
 def fetch_real_option_data(start_date: str = "", end_date: str = "",
                            symbols: Optional[List[str]] = None,
                            max_days: int = 12) -> Dict[str, object]:
-    """Fetch + cache real NSE option prints. Idempotent: re-running is a no-op."""
+    """Fetch + cache real NSE option prints. Idempotent: re-running is a no-op.
+
+    A date already in the local bhavcopy for every requested symbol is NOT
+    downloaded again - sirf lakehouse mirror hota hai. Isse repeat backtest
+    aur Fetch button turant chalte hain (koi NSE round-trip nahi)."""
     from core.services.nsefin_bhav import import_fno_bhavcopy
     dates = _dates(start_date, end_date, max(1, min(int(max_days or 12), 20)))
     syms = [str(s).strip().upper() for s in (symbols or []) if str(s).strip()]
-    done, failed, cached = [], [], 0
+
+    def _db_has_day(_d):
+        if not syms:
+            return False  # full-market fetch: cannot verify all symbols
+        try:
+            from core.models.database import Database
+            db = Database.get_instance()
+            ph = ",".join("?" for _ in syms)
+            rows = db.fetch_all(
+                f"SELECT DISTINCT symbol FROM bhavcopy_data WHERE trade_date=? "
+                f"AND option_type IN ('CE','PE') AND symbol IN ({ph})",
+                [_d] + syms) or []
+            have = {str(r.get("symbol") or "").upper() for r in rows}
+            return all(s in have for s in syms)
+        except Exception:
+            return False
+
+    done, failed, cached, skipped = [], [], 0, 0
     for day in dates:
         try:
+            if _db_has_day(day):
+                cached += _mirror_to_lakehouse(day, syms or None)
+                done.append({"date": day, "cached": True, "options": 0, "futures": 0, "spot": 0})
+                skipped += 1
+                continue
             res = import_fno_bhavcopy(day)
             cached += _mirror_to_lakehouse(day, syms or None)
             done.append({"date": day, **res})
@@ -92,10 +118,13 @@ def fetch_real_option_data(start_date: str = "", end_date: str = "",
         "success": bool(done),
         "dates_requested": dates,
         "days_imported": len(done),
+        "days_downloaded": max(0, len(done) - skipped),
+        "days_already_cached": skipped,
         "ticks_cached": cached,
         "failed": failed,
         "detail": done,
-        "message": (f"{len(done)} real NSE F&O din import, {cached} asli option print "
-                    f"lakehouse me cache. Ab backtest offline chal sakta hai."
-                    if done else "NSE real data abhi nahi mila — internet/broker check karo."),
+        "message": (f"{len(done)} real NSE F&O din ready ({skipped} pehle se cached), "
+                    f"{cached} asli option print lakehouse me. Ab backtest offline "
+                    f"turant chalega." if done else
+                    "NSE real data abhi nahi mila — internet/broker check karo."),
     }

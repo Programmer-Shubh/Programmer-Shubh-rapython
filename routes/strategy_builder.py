@@ -1180,6 +1180,30 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         symbol = (req.symbol or "NIFTY").upper()
         start_date = req.start_date or "2026-08-01"
         end_date = req.end_date or "2026-08-20"
+        # ---- Auto-seed REAL NSE option data (algotest-style "just works") ----
+        # Sirf tab network chhuao jab local bhavcopy me is symbol ki option
+        # rows hi nahi hain. Data pehle se hai to 0 extra latency - backtest
+        # turant result deta hai (no repeated NSE downloads on every click).
+        try:
+            from core.models.database import Database as _DB0
+            _req_syms0 = [s.strip().upper() for s in (req.symbols or [symbol]) if str(s).strip()]
+            _db0 = _DB0.get_instance()
+
+            def _has_rows(_s):
+                try:
+                    _r = _db0.fetch_one(
+                        "SELECT COUNT(*) c FROM bhavcopy_data WHERE symbol=? AND option_type IN ('CE','PE') "
+                        "AND trade_date BETWEEN ? AND ?", [_s, start_date, end_date])
+                    return int((_r or {}).get("c") or 0) > 0
+                except Exception:
+                    return False
+
+            _missing = [s for s in _req_syms0 if not _has_rows(s)]
+            if _missing:
+                from core.services.option_data_bootstrap import fetch_real_option_data
+                fetch_real_option_data(start_date, end_date, _missing, 8)
+        except Exception:
+            pass
         # Merge frontend flat fields
         advanced_in = dict(req.advanced or {})
         risk_in = dict(req.risk or {})
@@ -1256,7 +1280,10 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         try:
             _has_opt = any(str((l or {}).get("option_type", "")).upper() in ("CE", "PE") for l in (legs or []))
             if _has_opt:
-                advanced_in.setdefault("min_entry_premium", 15)
+                # Backtest easy-mode: ₹15 floor ne 200+ valid real entries
+                # reject kar diye the ("0 trades" ka bada kaaran). Real premium
+                # already >0 hota hai; floor ab sirf explicit user value par.
+                advanced_in.setdefault("min_entry_premium", 0)
         except Exception:
             pass
         # Indicators: if empty, inject defaults - include supertrend so synthetic always yields trades (rsi+ema alone gives 0 on flat synthetic)
@@ -1308,6 +1335,24 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         if len(_syms) > 25:
             _syms = _syms[:25]
         timeframe = (advanced_in.get("timeframe") or "1d").lower()
+        # Algottest-style fast path: agar is symbol ke liye REAL 1-minute option
+        # chain/tick data cached nahi hai, to 5m engine ko daily-bhavcopy bars
+        # par chalao. Warna engine har intraday bar ke liye missing premium par
+        # 0 trades deta tha aur slow network fetch me 30-60s lagte the. Daily
+        # real prints (open->close) se turant, honest result milta hai.
+        _auto_daily = False
+        if timeframe in ("1m", "5m", "15m", "30m", "1h"):
+            try:
+                from core.services.option_lakehouse import OPTION_TICKS_ROOT
+                _req_syms_tf = [str(s).upper() for s in (_syms or [symbol])]
+                _has_1m = any(
+                    (OPTION_TICKS_ROOT / f"underlying={_s}" / "data_mode=1m_chain").is_dir()
+                    for _s in _req_syms_tf)
+            except Exception:
+                _has_1m = False
+            if not _has_1m:
+                timeframe = "1d"
+                _auto_daily = True
         _syms = _syms[:25]
         _bar_cap = 120 if len(_syms) > 1 else 250
         # Coverage rule (absolute 15/30 ki jagah): requested trading days ka
@@ -2094,6 +2139,9 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         "tick_count": _tick_n,
         "tick_source": _tick_src,
         "tick_reason": _tick_reason,  # kyoon Black-Scholes / auto-seed note (UI toast)
+        "data_note": ("5-minute option-chain cache nahi hai — real daily bhavcopy "
+                      "(open→close) par instant backtest chala (no synthetic bars)."
+                      if _auto_daily else ""),
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
         "symbols": _syms,
         "per_symbol": _per_symbol,

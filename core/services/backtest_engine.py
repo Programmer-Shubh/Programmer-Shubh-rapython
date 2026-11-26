@@ -54,6 +54,10 @@ class BacktestEngine:
         self._cur_bar_time = ""
         self._skip_db = False  # True => synthetic-only fast path, no DB roundtrips
         self._cur_close = 0.0
+        # Premium-provenance sets (also reset per run in _reset()).
+        self._tick_prem_keys = set()
+        self._db_prem_keys = set()
+        self._fake_prem_keys = set()
         self._slippage_pct = 0.5  # Default dynamic slippage % for option selling
         # ---- v7 realism knobs (default = strict / real-market) ----
         # TP fill mode: "close" = target tabhi book hota hai jab COMPLETED
@@ -2436,21 +2440,54 @@ class BacktestEngine:
             from core.services.option_lakehouse import query_option_ticks
             _d = str(date or "")[:10]
             _clock = str(getattr(self, "_cur_bar_time", "") or "")
-            _expiry = str(getattr(self, "bt_expiry", "") or "")
+            _pref = str(getattr(self, "bt_expiry", "") or "")
+            if not _pref:
+                try:
+                    _pref = str(self._expiry_for_date(_d) or "")
+                except Exception:
+                    _pref = ""
             rows = None
-            for _mode in (("1m_chain", "tick") if self._intraday_bar() else ("tick", "1m_chain")):
-                _r = query_option_ticks(
-                    underlying=self.bt_symbol, data_mode=_mode, expiry=_expiry,
-                    start_date=_d, end_date=_d, option_type=option_type,
-                    strike=float(strike) if strike else None, limit=5000)
-                if _r is not None and len(_r) > 0:
-                    rows = _r
+            _modes = (("1m_chain", "tick") if self._intraday_bar() else ("tick", "1m_chain"))
+            _exps = self._lakehouse_expiry_candidates(_d, _pref)
+            for _mode in _modes:
+                for _expiry in _exps:
+                    _r = query_option_ticks(
+                        underlying=self.bt_symbol, data_mode=_mode, expiry=_expiry,
+                        start_date=_d, end_date=_d, option_type=option_type,
+                        strike=float(strike) if strike else None, limit=5000)
+                    if _r is not None and len(_r) > 0:
+                        rows = _r
+                        break
+                if rows is not None and len(rows) > 0:
                     break
+            if (rows is None or len(rows) == 0) and strike:
+                # Nearest real strike that actually traded that day.
+                for _mode in _modes:
+                    for _expiry in _exps:
+                        _r = query_option_ticks(
+                            underlying=self.bt_symbol, data_mode=_mode, expiry=_expiry,
+                            start_date=_d, end_date=_d, option_type=option_type,
+                            strike=None, limit=20000)
+                        if _r is None or len(_r) == 0:
+                            continue
+                        _all = [r for r in _r.to_dicts() if float(r.get("strike") or 0) > 0]
+                        if not _all:
+                            continue
+                        _kbest = min(_all, key=lambda r: abs(float(r.get("strike") or 0) - float(strike)))
+                        _ksel = float(_kbest.get("strike") or 0)
+                        import polars as _pl
+                        rows = _r.filter(_pl.col("strike") == _ksel)
+                        break
+                    if rows is not None and len(rows) > 0:
+                        break
             if rows is None or len(rows) == 0:
                 return None
             recs = rows.to_dicts()
             if _clock:
                 recs = [r for r in recs if str(r.get("timestamp", ""))[11:16] <= _clock]
+                if not recs:
+                    # Only later prints exist for this day; never peek ahead.
+                    return None
             points = []
             for r in recs:
                 px = float(r.get("ltp") or r.get("close_price") or 0)
@@ -2549,6 +2586,8 @@ class BacktestEngine:
             # 'model' label cache ho kar chhupa reh jata tha.
             if _ck in getattr(self, "_tick_prem_keys", set()):
                 return "real_ticks"
+            if _ck in getattr(self, "_db_prem_keys", set()):
+                return "db"
             if _ck in getattr(self, "_fake_prem_keys", set()):
                 return "fake_fallback"
             _memo = getattr(self, "_prem_src_cache", None)
@@ -2778,6 +2817,168 @@ class BacktestEngine:
         """
         return bool(getattr(self, "_cur_bar_time", ""))
 
+    # ---- Real-print resolvers (shared by entry / exit / SL-TP bars) -------
+    def _lakehouse_expiry_candidates(self, date, preferred=""):
+        """Expiry partitions to try: preferred/calendar first, then every real
+        lakehouse expiry for this underlying, nearest first. Bhavcopy expiry is
+        exchange-truth and can be a day/contract off the calendar guess, which
+        used to make a valid backtest silently return 0 trades."""
+        import datetime as _dt
+        out = []
+        pref = str(preferred or "")[:10]
+        if pref:
+            out.append(pref)
+        try:
+            from core.services.option_lakehouse import OPTION_TICKS_ROOT
+            base = OPTION_TICKS_ROOT / f"underlying={getattr(self, 'bt_symbol', '')}"
+            exps = set()
+            if base.is_dir():
+                for mode_dir in base.iterdir():
+                    if not mode_dir.is_dir():
+                        continue
+                    for ed in mode_dir.iterdir():
+                        if ed.is_dir() and ed.name.startswith("expiry="):
+                            e = ed.name.split("=", 1)[-1]
+                            if e:
+                                exps.add(e)
+            d0 = str(date or "")[:10]
+
+            def _dist(e):
+                try:
+                    return abs((_dt.date.fromisoformat(e) - _dt.date.fromisoformat(d0)).days)
+                except Exception:
+                    return 10 ** 6
+            for e in sorted(exps, key=_dist):
+                if e not in out:
+                    out.append(e)
+        except Exception:
+            pass
+        return out
+
+    def _pick_real_row(self, rows):
+        """Last real print at/before the current bar clock (never look ahead).
+
+        Daily rows sorted ASC. If every print is after the clock, the earliest
+        print is used (a real price, just stale) instead of a future one."""
+        clock = str(getattr(self, "_cur_bar_time", "") or "")
+        if clock:
+            prior = [r for r in rows if str(r.get("timestamp", ""))[11:16] <= clock]
+            if prior:
+                return prior[-1]
+            return rows[0] if rows else None
+        return rows[-1] if rows else None
+
+    def _lakehouse_premium(self, date, strike, option_type, anchor_exp=None):
+        """Real option premium from the Parquet lakehouse for this contract.
+
+        Tries intraday mode first on clocked bars then tick, and every real
+        expiry (nearest first). Falls back to the nearest real strike for that
+        day when the aligned strike has no print. Real prints only - never a
+        modeled Black-Scholes premium."""
+        try:
+            from core.services.option_lakehouse import query_option_ticks
+        except Exception:
+            return None
+        d = str(date or "")[:10]
+        if not d:
+            return None
+        pref = str(anchor_exp or getattr(self, "bt_expiry", "") or "")
+        if not pref:
+            try:
+                pref = str(self._expiry_for_date(d) or "")
+            except Exception:
+                pref = ""
+        modes = ("1m_chain", "tick") if self._intraday_bar() else ("tick", "1m_chain")
+        exps = self._lakehouse_expiry_candidates(d, pref)
+
+        def _query(mode, exp, k):
+            try:
+                return query_option_ticks(
+                    underlying=self.bt_symbol, data_mode=mode, expiry=exp,
+                    start_date=d, end_date=d, option_type=option_type,
+                    strike=k, limit=4000)
+            except Exception:
+                return None
+
+        # 1) Exact strike
+        if strike:
+            for mode in modes:
+                for exp in exps:
+                    df = _query(mode, exp, float(strike))
+                    if df is not None and len(df) > 0:
+                        row = self._pick_real_row(df.to_dicts())
+                        if row:
+                            val = float(row.get("ltp") or row.get("close_price") or 0)
+                            if val > 0:
+                                self._tick_prem_keys.add(
+                                    (d, float(strike or 0), str(option_type or "").upper()))
+                                return val
+        # 2) Nearest real strike on the same day (any strike -> closest)
+        for mode in modes:
+            for exp in exps:
+                df = _query(mode, exp, None)
+                if df is None or len(df) == 0:
+                    continue
+                try:
+                    rows = df.to_dicts()
+                except Exception:
+                    continue
+                rows = [r for r in rows if float(r.get("strike") or 0) > 0]
+                if not rows:
+                    continue
+                target = float(strike or 0)
+                if target > 0:
+                    kbest = min(rows, key=lambda r: abs(float(r.get("strike") or 0) - target))
+                    ksel = float(kbest.get("strike") or 0)
+                    rows = [r for r in rows if abs(float(r.get("strike") or 0) - ksel) < 0.01]
+                row = self._pick_real_row(rows)
+                if row:
+                    val = float(row.get("ltp") or row.get("close_price") or 0)
+                    if val > 0:
+                        self._tick_prem_keys.add(
+                            (d, float(strike or 0), str(option_type or "").upper()))
+                        return val
+        return None
+
+    def _db_premium(self, date, strike, option_type, for_exit=False):
+        """Real bhavcopy print from the local DB (works offline).
+
+        One daily open/high/low/close per contract exists, so a clocked bar
+        uses the real OPEN before 15:15 (no look-ahead) and the real CLOSE at
+        the session end. Nearest real strike within two steps is used when the
+        aligned strike was not traded that day."""
+        if getattr(self, "_skip_db", False):
+            return None
+        d = str(date or "")[:10]
+        if not d or not strike:
+            return None
+        clock = str(getattr(self, "_cur_bar_time", "") or "")
+        want_close = bool(for_exit) and (clock >= "15:15" if clock else True)
+        try:
+            db = Database.get_instance()
+            row = db.fetch_one(
+                "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? "
+                "AND ABS(strike_price-?)<0.01 AND option_type=?",
+                [self.bt_symbol, d, float(strike or 0), option_type])
+            if not row:
+                from utils.helpers import get_strike_step
+                step = get_strike_step(self.bt_symbol)
+                row = db.fetch_one(
+                    "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? "
+                    "AND trade_date=? AND ABS(strike_price-?) <= ?*2 ORDER BY ABS(strike_price-?) LIMIT 1",
+                    [self.bt_symbol, option_type, d, float(strike or 0), step, float(strike or 0)])
+            if row:
+                op = float(row.get("open_price") or 0)
+                cl = float(row.get("close_price") or 0)
+                val = cl if (want_close and cl > 0) else (op if op > 0 else cl)
+                if val > 0:
+                    self._db_prem_keys.add(
+                        (d, float(strike or 0), str(option_type or "").upper()))
+                    return val
+        except Exception:
+            return None
+        return None
+
     def _entry_premium(self, date, spot, strike, option_type):
         key = f"{date}_{strike}_{option_type}_e"
         _intra = self._intraday_bar()
@@ -2785,73 +2986,18 @@ class BacktestEngine:
         # value for the whole session). Never use it for a clocked bar.
         if not _intra and key in self.premium_cache:
             return self.premium_cache[key]
-        # DATA HONESTY (user rule 24-11 + 25-11 upgrade): REAL option tick /
-        # 1m_chain data ONLY from the Parquet lakehouse (real_ticks source).
-        # NEVER fabricate Black-Scholes / synthetic premiums. If no real data
-        # exists for this strike/expiry/date, return None so the caller can
-        # skip the entry honestly instead of trading on fabricated prices.
-        try:
-            from core.services.option_lakehouse import query_option_ticks
-            _bt = getattr(self, "_cur_bar_time", "") or ""
-            _expiry = str(getattr(self, "bt_expiry", "") or "")
-            if not _expiry:
-                # Leg me explicit expiry_date nahi - exchange calendar se
-                # us din ka weekly/monthly expiry nikalpe (real contract).
-                try:
-                    _expiry = str(self._expiry_for_date(str(date)[:10]) or "")
-                except Exception:
-                    _expiry = ""
-            if not _expiry:
-                return None  # no contract identity -> no real premium
-            # Query lakehouse for real ticks on this date/strike/type/expiry
-            _ticks = query_option_ticks(
-                underlying=self.bt_symbol,
-                data_mode="1m_chain" if _intra else "tick",
-                expiry=_expiry,
-                start_date=str(date)[:10],
-                end_date=str(date)[:10],
-                option_type=option_type,
-                strike=float(strike) if strike else 0,
-                limit=200,
-            )
-            if _ticks is not None and len(_ticks) > 0:
-                # Pick the tick closest to bar_time (intraday) or first/last
-                # of day for daily bars.
-                if _intra and _bt:
-                    # Filter ticks on/after bar_time, else take first
-                    cands = [r for r in _ticks if str(r.get("timestamp", ""))[11:16] >= _bt]
-                    tick_row = cands[0] if cands else _ticks[0]
-                else:
-                    tick_row = _ticks[-1] if _ticks else None  # EOD close
-                if tick_row:
-                    val = float(tick_row.get("ltp") or tick_row.get("close_price") or 0)
-                    if val > 0:
-                        self.premium_cache[key] = val
-                        self._tick_prem_keys.add((str(date or "")[:10], float(strike or 0),
-                                                  str(option_type or "").upper()))
-                        return val
-        except Exception:
-            pass
-        # 1) Real DB LTP (historical bhavcopy) — daily bars only
-        row = None
-        if not _intra and not getattr(self, "_skip_db", False):
-            try:
-                row = Database.get_instance().fetch_one(
-                    "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-                    [self.bt_symbol, date, strike, option_type],
-                )
-            except Exception:
-                row = None
-        if row:
-            if row["open_price"] and float(row["open_price"]) > 0:
-                val = float(row["open_price"])
-                self.premium_cache[key] = val
-                return val
-            if row["close_price"] and float(row["close_price"]) > 0:
-                val = float(row["close_price"])
-                self.premium_cache[key] = val
-                return val
-        # 2) Real LTP from live market - only in live mode
+        # DATA HONESTY: REAL option prints only (lakehouse tick/1m_chain or
+        # local bhavcopy). NEVER a Black-Scholes/synthetic premium. If there is
+        # genuinely no real print for the day, return None so the caller skips
+        # the entry honestly instead of trading on fabricated prices.
+        val = self._lakehouse_premium(date, strike, option_type)
+        if not val:
+            val = self._db_premium(date, strike, option_type, for_exit=False)
+        if val and float(val) > 0:
+            if not _intra:
+                self.premium_cache[key] = float(val)
+            return float(val)
+        # Real LTP from live market - only in live mode
         if self.is_live:
             try:
                 from core.services.live_market_data import LiveMarketData
@@ -2860,19 +3006,6 @@ class BacktestEngine:
                     val = float(live)
                     self.premium_cache[key] = val
                     return val
-            except Exception:
-                pass
-        # 3) Nearest strike real print fallback - DAILY bars only
-        if not _intra and not getattr(self, "_skip_db", False):
-            try:
-                from utils.helpers import get_strike_step
-                step = get_strike_step(self.bt_symbol)
-                row2 = Database.get_instance().fetch_one(
-                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
-                    [self.bt_symbol, option_type, strike, step, date, strike],
-                )
-                if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
-                    return float(row2["close_price"])
             except Exception:
                 pass
         # NO Black-Scholes / synthetic fallback. Return None honestly so the
@@ -2923,64 +3056,16 @@ class BacktestEngine:
         _intra = self._intraday_bar()
         if not _intra and key in self.premium_cache:
             return self.premium_cache[key]
-        # REAL tick data (exit): recorded 1-min LTP at the exit bar from
-        # Parquet lakehouse (real data only - NEVER synthetic).
-        try:
-            from core.services.option_lakehouse import query_option_ticks
-            _bt = getattr(self, "_cur_bar_time", "") or ""
-            _expiry = str(getattr(self, "bt_expiry", "") or "")
-            if not _expiry:
-                try:
-                    _expiry = str(self._expiry_for_date(str(date)[:10]) or "")
-                except Exception:
-                    _expiry = ""
-            if not _expiry:
-                return None
-            _ticks = query_option_ticks(
-                underlying=self.bt_symbol,
-                data_mode="1m_chain" if _intra else "tick",
-                expiry=_expiry,
-                start_date=str(date)[:10],
-                end_date=str(date)[:10],
-                option_type=option_type,
-                strike=float(strike) if strike else 0,
-                limit=200,
-            )
-            if _ticks is not None and len(_ticks) > 0:
-                # For exit, take the last tick of the day (EOD close) or the
-                # tick closest to bar_time (intraday).
-                if _intra and _bt:
-                    cands = [r for r in _ticks if str(r.get("timestamp", ""))[11:16] >= _bt]
-                    tick_row = cands[-1] if cands else _ticks[-1]
-                else:
-                    tick_row = _ticks[-1] if _ticks else None
-                if tick_row:
-                    val = float(tick_row.get("ltp") or tick_row.get("close_price") or 0)
-                    if val > 0:
-                        self.premium_cache[key] = val
-                        self._tick_prem_keys.add((str(date or "")[:10], float(strike or 0),
-                                                  str(option_type or "").upper()))
-                        return val
-        except Exception:
-            pass
-        skip_db = getattr(self, "_skip_db", False)
-        if not _intra and not skip_db:
-            try:
-                row = Database.get_instance().fetch_one(
-                    "SELECT close_price, open_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? AND strike_price=? AND option_type=?",
-                    [self.bt_symbol, date, strike, option_type],
-                )
-                if row:
-                    if row["close_price"] and float(row["close_price"]) > 0:
-                        val = float(row["close_price"])
-                        self.premium_cache[key] = val
-                        return val
-                    if row["open_price"] and float(row["open_price"]) > 0:
-                        val = float(row["open_price"])
-                        self.premium_cache[key] = val
-                        return val
-            except Exception:
-                pass
+        # REAL exit print: lakehouse tick/1m_chain first, then local bhavcopy.
+        # Only the last real print at/before this bar's clock is used (no
+        # look-ahead); never a modeled Black-Scholes premium.
+        val = self._lakehouse_premium(date, strike, option_type, anchor_exp=anchor_exp)
+        if not val:
+            val = self._db_premium(date, strike, option_type, for_exit=True)
+        if val and float(val) > 0:
+            if not _intra:
+                self.premium_cache[key] = float(val)
+            return float(val)
         # Real live LTP fallback - only in live mode
         if self.is_live:
             try:
@@ -2988,21 +3073,6 @@ class BacktestEngine:
                 live = LiveMarketData().get_option_ltp(self.bt_symbol, strike, option_type, getattr(self, 'bt_expiry', '') or '')
                 if live and float(live) > 0:
                     val = float(live)
-                    self.premium_cache[key] = val
-                    return val
-            except Exception:
-                pass
-        # Nearest strike real print fallback - DAILY bars only
-        if not _intra and not skip_db:
-            try:
-                from utils.helpers import get_strike_step
-                step = get_strike_step(self.bt_symbol)
-                row2 = Database.get_instance().fetch_one(
-                    "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? AND ABS(strike_price-?) <= ?*2 AND trade_date=? ORDER BY ABS(strike_price-?) LIMIT 1",
-                    [self.bt_symbol, option_type, strike, step, date, strike],
-                )
-                if row2 and row2["close_price"] and float(row2["close_price"]) > 0:
-                    val = float(row2["close_price"])
                     self.premium_cache[key] = val
                     return val
             except Exception:
@@ -3642,4 +3712,5 @@ class BacktestEngine:
         # Data-honesty audit (24-11): kis premium ne real tick / DB / fake
         # fallback se aayi. Fake ₹5 fallback ko 'model' bolna galat tha.
         self._tick_prem_keys = set()
+        self._db_prem_keys = set()
         self._fake_prem_keys = set()
