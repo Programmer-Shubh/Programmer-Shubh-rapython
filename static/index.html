@@ -456,6 +456,7 @@
                         <div id="eb-summary" class="alert alert-info py-1 px-2 mb-2 small mt-2"></div>
                         <div class="d-flex gap-2 flex-wrap">
                             <button class="btn btn-sm btn-success" onclick="runEasyBacktest()"><i class="bi bi-play-fill"></i> Run Easy Backtest</button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="saveEasyBacktest()" title="Backtest chalane ke baad result ko strategy ke saath save karo"><i class="bi bi-save"></i> Save Strategy</button>
                             <button class="btn btn-sm btn-outline-secondary" onclick="ebUpdateSummary()">Refresh Summary</button>
                         </div>
                         <div class="small text-muted mt-1"><i class="bi bi-info-circle"></i> User-Configured analytical setup — results are historical, not a guarantee of future returns. SEBI non-advisory.</div>
@@ -2715,6 +2716,50 @@ let _lastOpenTrdHTML = null;
             window._directBT=res; await runBacktest({direct:res});
         }catch(err){alert('Easy Backtest error: '+err.message);}
         finally{const btn=document.querySelector('#easy-bt-card button'); if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Easy Backtest';}}
+    }
+    // Easy Builder ka Save button: pehle backtest chalao (result window._directBT
+    // me hota hai), phir is function se us result ko strategy ke saath save karo.
+    // Purana saveStrat() DELETE ho chuke PRO form fields (r-*, s-*) par depend
+    // karta tha — isliye alag, self-contained saver.
+    async function saveEasyBacktest(){
+        try{
+            if(!window._directBT){alert('Pehle "Run Easy Backtest" dabao, phir Save karo.');return;}
+            const sym=document.getElementById('eb-symbol')?.value||'NIFTY';
+            const tf=document.getElementById('eb-tf')?.value||'5m';
+            const start=document.getElementById('eb-start')?.value||'';
+            const end=document.getElementById('eb-end')?.value||'';
+            const sl=parseFloat(document.getElementById('eb-sl')?.value||'50')||50;
+            const tp=parseFloat(document.getElementById('eb-tp')?.value||'120')||120;
+            const mode=document.getElementById('eb-mode')?.value||'intraday';
+            const _ip={'supertrend':{'period':10,'multiplier':3},'adx':{'period':14,'threshold':25},'rsi':{'period':14},'macd':{'fast':12,'slow':26,'signal':9},'ema_cross':{},'bollinger':{'period':20,'std':2},'vwap':{'period':20}};
+            let inds=[...document.querySelectorAll('.eb-ind:checked')].map(x=>({id:x.value,params:_ip[x.value]||{}}));
+            if(!inds.length) inds=[{'id':'supertrend','params':{'period':10,'multiplier':3}}];
+            const leg=_ebLeg||{leg:'CE',txn:'buy'};
+            const dir=(leg.txn||'buy').toUpperCase()+'_'+(leg.leg||'CE');
+            const today=new Date().toISOString().split('T')[0];
+            const s=start||new Date(Date.now()-20*86400000).toISOString().split('T')[0];
+            const e=end||today;
+            const body={
+                id:window._editingStratId||0,
+                name:(sym+'_'+dir+'_Easy').replace(/_/g,' '),
+                symbol:sym,
+                timeframe:tf,
+                description:'Easy Builder — '+dir+' — real tick data',
+                indicators:inds,
+                entry_conditions:[],
+                exit_conditions:[],
+                legs:[{option_type:leg.leg,transaction:leg.txn,lots:1,strike_selection:'atm',otm_distance:0,expiry:'weekly'}],
+                advanced_options:{trade_mode:mode,entry_time:'09:35',exit_time:'15:15',timeframe:tf,slippage_pct:0.5,data_mode:'tick',strike_selection:'atm',otm_distance:0,expiry:'weekly'},
+                risk_management:{daily_stop_loss:sl,daily_take_profit:tp,sl_unit:'pt',tp_unit:'pt',max_trades_per_day:-1},
+                status:'active',
+                last_backtest:window._directBT||null,
+            };
+            const btn=document.querySelector('#easy-bt-card button.btn-outline-primary'); if(btn){btn.disabled=true;btn.textContent='Saving...';}
+            const r=await P('/api/strategies/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            if(r.id){window._editingStratId=null;alert('✅ Strategy saved! ID: '+r.id+'\n\nTrading Center me card dikhega.');try{await loadStrats();}catch(e){}try{await loadRobotSaved();}catch(e){}}
+            else{alert('Error saving strategy'+(r.error?': '+JSON.stringify(r.error):''));}
+        }catch(err){alert('Save error: '+err.message);}
+        finally{const btn=document.querySelector('#easy-bt-card button.btn-outline-primary'); if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-save"></i> Save Strategy';}}
     }
     function ebFillDates(){try{
         const end=new Date(); const start=new Date(end.getTime()-20*86400000);
