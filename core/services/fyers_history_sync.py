@@ -315,7 +315,8 @@ def sync_all(start_date: str = "2026-01-01", log=print,
     import time as _ptime
     _PER_INDEX_DEADLINE = 50
     _paused = False
-    _completed = []
+    # NOTE: do NOT reset _completed here — sync_async() passes indices already
+    # finished in a previous paused run so the next trigger resumes properly.
     try:
         end = _ist_today().strftime("%Y-%m-%d")
         app_id, token = _fyers_creds()
@@ -413,6 +414,8 @@ def sync_all(start_date: str = "2026-01-01", log=print,
                             summary["contracts_failed"].append(f"{idx} {exp} {stk}{opt}:{str(e)[:60]}")
                 _set_status({"contracts_ok": summary["contracts_ok"],
                              "rows_stored": summary["rows_stored"],
+                             "failures": len(summary["contracts_failed"]),
+                             "failure_sample": summary["contracts_failed"][-8:],
                              "stage": f"contracts:{idx}",
                              "current_expiry": exp})
             summary["expiries"][idx] = exp_ok
@@ -506,6 +509,9 @@ def sync_async(start_date: str = "2026-01-01"):
             d = _js.loads(row["setting_value"]) or {}
             if isinstance(d, dict):
                 _completed = list(d.get("completed_indices") or [])
+                # SENSEX (BSE) is the scarce data — always re-attempt it so a
+                # rate-limited/partial earlier run cannot leave it skipped.
+                _completed = [x for x in _completed if str(x).upper() != "SENSEX"]
     except Exception:
         pass
     t = threading.Thread(target=sync_all,
