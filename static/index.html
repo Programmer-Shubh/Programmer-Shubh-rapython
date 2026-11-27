@@ -431,7 +431,15 @@
                         <div class="col-md-4">
                             <label class="form-label small mb-1">Symbol</label>
                             <select id="eb-symbol" class="form-select form-select-sm" onchange="posOnSymbolChange();ebUpdateSummary()"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select>
-                            <div id="eb-bse-note" class="alert alert-warning py-1 px-2 mt-1 mb-0 small" style="display:none;font-size:10px"><i class="bi bi-info-circle"></i> SENSEX/BANKEX BSE index hain — NSE bhavcopy me inka option data nahi hota, isliye backtest me real option premium nahi milega. NIFTY / BANKNIFTY / FINNIFTY chuno.</div>
+                            <div class="small fw-bold mt-2 mb-0"><i class="bi bi-check2-square"></i> Backtest Symbols <small class="text-muted">(2+ chuno = multi-symbol run; payoff primary symbol par)</small></div>
+                            <div class="d-flex flex-wrap gap-2 p-1 mb-1" id="eb-symbols" style="border:1px solid #dee2e6;border-radius:6px;background:#f8fafc">
+                                <label class="small"><input type="checkbox" class="eb-sym" value="NIFTY" checked onchange="ebUpdateSummary()"> NIFTY</label>
+                                <label class="small"><input type="checkbox" class="eb-sym" value="BANKNIFTY" onchange="ebUpdateSummary()"> BANKNIFTY</label>
+                                <label class="small"><input type="checkbox" class="eb-sym" value="FINNIFTY" onchange="ebUpdateSummary()"> FINNIFTY</label>
+                                <label class="small"><input type="checkbox" class="eb-sym" value="MIDCPNIFTY" onchange="ebUpdateSummary()"> MIDCPNIFTY</label>
+                                <label class="small"><input type="checkbox" class="eb-sym" value="SENSEX" onchange="ebUpdateSummary()"> SENSEX</label>
+                            </div>
+                            <div id="eb-bse-note" class="alert alert-warning py-1 px-2 mt-1 mb-0 small" style="display:none;font-size:10px"><i class="bi bi-info-circle"></i> SENSEX/BANKEX BSE index hain — NSE bhavcopy me inka option data nahi hota. Fyers se real SENSEX option data sync hone par hi backtest chalega; warna honest "no data" dikhega. Fyers → Sync Fyers History dabao.</div>
                             <label class="form-label small mb-1 mt-2">Timeframe</label>
                             <select id="eb-tf" class="form-select form-select-sm" onchange="ebUpdateSummary()" oninput="ebUpdateSummary()"><option value="1m">1 Min</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1d">Daily</option></select>
                         </div>
@@ -469,7 +477,10 @@
                                 <option value="">— Custom (edit legs below) —</option>
                                 <option value="single">Single Leg — BUY CE ATM (bullish / BUY signal)</option>
                                 <option value="single_pe">Single Leg — BUY PE ATM (bearish / SELL signal)</option>
-                                <option value="single_sellce">Single Leg — SELL CE OTM2 (bearish / SELL signal)</option>
+                                <option value="single_sellce_atm">Single Leg — SELL CE ATM (short CE / bearish)</option>
+                                <option value="single_sellce">Single Leg — SELL CE OTM2 (short CE / bearish)</option>
+                                <option value="single_sellpe">Single Leg — SELL PE ATM (short PE / bullish)</option>
+                                <option value="single_sellpe_otm2">Single Leg — SELL PE OTM2 (short PE / bullish)</option>
                                 <option value="bullcall">Bull Call Spread (CE ATM Buy + CE OTM2 Sell)</option>
                                 <option value="bearput">Bear Put Spread (PE ATM Buy + PE OTM2 Sell)</option>
                                 <option value="bearcall">Bear Call Spread (CE OTM2 Sell + CE OTM5 Buy)</option>
@@ -509,6 +520,15 @@
                             <div style="overflow-x:auto"><div id="pos-payoff-chart" style="height:300px;min-width:600px"></div></div>
                             <div class="row g-2 mt-2" id="pos-payoff-metrics"></div>
                             <div class="small text-muted mt-1">Premium proxy: Black-Scholes (IV 20%, DTE 7). Net P&amp;L across all legs at expiry. Backtest asli recorded option data par chalta hai.</div>
+                        </div>
+                    </div>
+
+                    <!-- Running progress: percent + per-symbol (shown while job runs) -->
+                    <div class="card mt-3" id="pos-progress-card" style="display:none">
+                        <div class="card-body p-2">
+                            <div class="d-flex justify-content-between align-items-center mb-1"><strong class="small"><i class="bi bi-hourglass-split"></i> Backtest chal raha hai…</strong><span class="badge bg-primary" id="pos-progress-pct">0%</span></div>
+                            <div class="progress" style="height:20px"><div id="pos-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%">0%</div></div>
+                            <div class="small text-muted mt-1" id="pos-progress-text">Queued…</div>
                         </div>
                     </div>
 
@@ -2735,7 +2755,8 @@ let _lastOpenTrdHTML = null;
         if(curLegs.length===1){
             const l=curLegs[0]||{}; const tx=String(l.transaction||'buy').toLowerCase(), op=String(l.option_type||'CE').toUpperCase();
             const bearish=(tx==='sell'&&op==='CE')||(tx==='buy'&&op==='PE');
-            dirHint=' · <span class="badge bg-light text-dark border">'+(bearish?'needs SELL signal':'needs BUY signal')+'</span>';
+            const bullish=(tx==='sell'&&op==='PE')||(tx==='buy'&&op==='CE');
+            dirHint=' · <span class="badge bg-light text-dark border">'+(bearish?'needs SELL signal':bullish?'needs BUY signal':'hedge / spread')+'</span>';
         }
         const el=document.getElementById('eb-summary');
         if(el) el.innerHTML='<strong>Summary:</strong> '+sym+' · '+tf+' · '+(inds.join(', ')||'SuperTrend')+' · '+mode+' · SL '+sl+' pts / TP '+tp+' pts · '+from+' → '+to+
@@ -2743,7 +2764,8 @@ let _lastOpenTrdHTML = null;
         // BSE-only index: backtest se pehle hi saaf warning (NSE bhavcopy me
         // SENSEX ka option data hota hi nahi — warna user ko "no result" milta).
         const bse=document.getElementById('eb-bse-note');
-        if(bse) bse.style.display=(['SENSEX','BANKEX','SENSEX50'].includes(String(sym).toUpperCase())?'block':'none');
+        const _sel=posSymbols();
+        if(bse) bse.style.display=(_sel.some(x=>['SENSEX','BANKEX','SENSEX50'].includes(String(x).toUpperCase()))?'block':'none');
     }catch(e){}}
     // Har control change par summary turant fresh (keyboard/selection dono).
     document.addEventListener('input',e=>{if(e.target&&e.target.closest&&e.target.closest('#easy-bt-card')){try{ebUpdateSummary();}catch(_){}try{posInvalidateResults();}catch(_){}}},true);
@@ -2774,7 +2796,17 @@ let _lastOpenTrdHTML = null;
         if(ee&&!ee.value) ee.value=end.toISOString().split('T')[0];
     }catch(e){}}
     function posSymbol(){return document.getElementById('eb-symbol')?.value||'NIFTY';}
-    function posOnSymbolChange(){_posSpot=0;_posLot=0;posUpdatePayoff();}
+    // 2+ symbols: checkboxes se selected list. Koi check na ho to primary symbol.
+    function posSymbols(){
+        const picked=[...document.querySelectorAll('.eb-sym:checked')].map(x=>x.value);
+        return picked.length?picked:[posSymbol()];
+    }
+    function posOnSymbolChange(){
+        _posSpot=0;_posLot=0;
+        // Primary symbol hamesha chuno me included rakho (payoff isi par).
+        try{const cb=document.querySelector('.eb-sym[value="'+posSymbol()+'"]');if(cb)cb.checked=true;}catch(e){}
+        posUpdatePayoff();
+    }
     async function posEnsureSpot(){
         const s=posSymbol();
         if(_posSpot>0) return {spot:_posSpot,lot:_posLot||75,step:_posStep};
@@ -2839,7 +2871,10 @@ let _lastOpenTrdHTML = null;
         const M={
             single:[mk('CE','buy','atm',0)],
             single_pe:[mk('PE','buy','atm',0)],
+            single_sellce_atm:[mk('CE','sell','atm',0)],
             single_sellce:[mk('CE','sell','otm',2)],
+            single_sellpe:[mk('PE','sell','atm',0)],
+            single_sellpe_otm2:[mk('PE','sell','otm',2)],
             bullcall:[mk('CE','buy','atm',0),mk('CE','sell','otm',2)],
             bearput:[mk('PE','buy','atm',0),mk('PE','sell','otm',2)],
             bearcall:[mk('CE','sell','otm',2),mk('CE','buy','otm',5)],
@@ -2912,7 +2947,7 @@ let _lastOpenTrdHTML = null;
         const today=new Date().toISOString().split('T')[0];
         let legs=posLegs.map(l=>({option_type:l.option_type,transaction:l.transaction,lots:l.lots||1,strike_selection:l.strike_selection||'atm',otm_distance:l.otm_distance||0,expiry:l.expiry||'weekly'}));
         if(!legs.length){legs=[{option_type:'CE',transaction:'buy',lots:1,strike_selection:'atm',otm_distance:0,expiry:'weekly'}];}
-        return {symbol:sym,symbols:[sym],start_date:s||new Date(Date.now()-20*86400000).toISOString().split('T')[0],end_date:e||today,
+        return {symbol:sym,symbols:posSymbols(),start_date:s||new Date(Date.now()-20*86400000).toISOString().split('T')[0],end_date:e||today,
             indicators:inds,legs:legs,
             advanced:{data_mode:'tick',trade_mode:mode,timeframe:(document.getElementById('eb-tf')?.value||'5m'),entry_time:'09:35',exit_time:'15:15',expiry:'weekly'},
             risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp,sl_unit:'pt',tp_unit:'pt'}};
@@ -3015,14 +3050,37 @@ let _lastOpenTrdHTML = null;
             '<button class="btn btn-sm btn-success" onclick="runPosBacktest()"><i class="bi bi-arrow-clockwise"></i> Dobara Run Backtest</button>';
         card.scrollIntoView({behavior:'smooth',block:'start'});
     }
+    // Percent progress driven by /api/backtest/result progress (done/total).
+    // Single-symbol runs have no per-symbol callback, so we advance an
+    // honest elapsed-time estimate (capped at 95%) until real data arrives.
+    function posShowProgress(pct,label){
+        const c=document.getElementById('pos-progress-card'); if(!c)return;
+        c.style.display='block';
+        const v=Math.max(0,Math.min(100,Math.round(pct||0)));
+        const b=document.getElementById('pos-progress-bar'), t=document.getElementById('pos-progress-pct'), x=document.getElementById('pos-progress-text');
+        if(b){b.style.width=v+'%';b.textContent=v+'%';}
+        if(t)t.textContent=v+'%';
+        if(x&&label)x.textContent=label;
+    }
+    function posHideProgress(){const c=document.getElementById('pos-progress-card');if(c)c.style.display='none';}
     async function runPosBacktest(){
         // Koi leg na ho to Easy Builder ki single leg chalegi (posReq fallback)
+        let ticker=null;
         try{
             const seq=(window._posRunSeq=(window._posRunSeq||0)+1);
+            window._posBT=null;
             const req=posReq();
             const btn=document.getElementById('builder-run-btn');
             const setBtn=t=>{if(btn)btn.innerHTML=t;};
             if(btn){btn.disabled=true;setBtn('<span class="spinner-border spinner-border-sm"></span> Running...');}
+            posHideProgress();
+            const started=Date.now();
+            posShowProgress(4,'Queued…');
+            ticker=setInterval(()=>{
+                if(window._posBT)return;
+                const el=(Date.now()-started)/1000;
+                posShowProgress(Math.min(95,4+el*0.55),'Backtest chal raha hai — ~'+Math.round(el)+'s');
+            },700);
             const r=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
             let res=r.result||null;
             if(!res&&r.job_id){
@@ -3040,9 +3098,13 @@ let _lastOpenTrdHTML = null;
                         throw e;
                     }
                     if(d&&d.status==='unknown'){lost=true;break;}
-                    if(d&&d.progress&&btn){
-                        const p=d.progress||{};
-                        setBtn('<span class="spinner-border spinner-border-sm"></span> Running '+(p.done||0)+'/'+(p.total||1)+'…');
+                    if(d&&d.progress){
+                        const p=d.progress, tot=Number(p.total||0), done=Number(p.done||0);
+                        if(tot>0&&done>0){
+                            const pct=Math.min(99,Math.round(done/tot*100));
+                            posShowProgress(pct,'Symbol '+(p.symbol||done)+' ('+done+'/'+tot+')');
+                            if(btn)setBtn('<span class="spinner-border spinner-border-sm"></span> Running '+done+'/'+tot+'…');
+                        }
                     }
                     if(d&&d.status==='error')throw new Error(d.error||'backtest failed');
                     if(d&&(d.status==='done'||d.result)){res=d.result||d;break;}
@@ -3054,10 +3116,15 @@ let _lastOpenTrdHTML = null;
             }
             if(!res)throw new Error('no result');
             if(seq!==window._posRunSeq)return; // config beech me badal gaya
+            posShowProgress(100,'Complete ✓');
             if(res.error){renderPosError(res);return;}
             renderPosResults(res);
         }catch(err){renderPosError(null,err&&err.message?err.message:String(err));}
-        finally{const btn=document.getElementById('builder-run-btn');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Backtest';}}
+        finally{
+            if(ticker){clearInterval(ticker);ticker=null;}
+            setTimeout(posHideProgress,1200);
+            const btn=document.getElementById('builder-run-btn');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Backtest';}
+        }
     }
     function posOpenFullResults(){
         if(!window._posBT){alert('Pehle Run Backtest karo.');return;}

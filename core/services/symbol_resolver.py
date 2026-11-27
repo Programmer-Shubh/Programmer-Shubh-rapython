@@ -308,9 +308,14 @@ def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str)
     yy = d.strftime("%y")
     mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
            "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][d.month - 1]
+    sym = symbol.upper()
+    # SENSEX/BANKEX are BSE indices -> Fyers symbols start with BSE:.
+    # Everything else here is NSE. (Earlier this always emitted NSE:...,
+    # so SENSEX option contract lookups always failed as "invalid symbol".)
+    ex = "BSE" if sym in ("SENSEX", "BANKEX", "SENSEX50") else "NSE"
     if not has_weekly_options(symbol):
-        return f"NSE:{symbol.upper()}{yy}{mon}{int(float(strike))}{option_type.upper()}"
-    wd = 3 if symbol.upper() == "SENSEX" else 1
+        return f"{ex}:{sym}{yy}{mon}{int(float(strike))}{option_type.upper()}"
+    wd = 3 if sym in ("SENSEX", "BANKEX", "SENSEX50") else 1
     last = _dt.date(d.year, d.month, _cal.monthrange(d.year, d.month)[1])
     while last.weekday() != wd:
         last -= _dt.timedelta(days=1)
@@ -322,7 +327,7 @@ def _fyers_symbol(symbol: str, expiry_ymd: str, strike: float, option_type: str)
         mcode = {1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6",
                  7: "7", 8: "8", 9: "9", 10: "O", 11: "N", 12: "D"}[d.month]
         code = f"{yy}{mcode}{d.day:02d}"
-    return f"NSE:{symbol.upper()}{code}{int(float(strike))}{option_type.upper()}"
+    return f"{ex}:{sym}{code}{int(float(strike))}{option_type.upper()}"
 
 
 async def resolve_contract(broker: str, creds: dict, underlying: str,

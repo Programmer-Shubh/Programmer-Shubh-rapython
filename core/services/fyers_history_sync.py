@@ -39,7 +39,9 @@ import os
 import threading
 import calendar as _cal
 
-INDICES = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")
+# SENSEX first: BSE option data is the scarce one (NSE bhavcopy can't supply
+# it), so give it the fresh rate-limit budget before the NSE indices.
+INDICES = ("SENSEX", "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")
 
 # Fyers index instrument symbols (candidate order - prod Fyers par jo chale,
 # woh use hoga). Production par ye verify honge (logs me failed candidates
@@ -52,10 +54,22 @@ _INDEX_FYERS = {
     "BANKNIFTY": ["NSE:NIFTYBANK-INDEX", "NSE:BANKNIFTY-INDEX"],
     "FINNIFTY": ["NSE:FINNIFTY-INDEX", "NSE:FINNIFTY50-INDEX", "NSE:FIN_SERVICE-INDEX"],
     "MIDCPNIFTY": _MIDCP_CANDIDATES,
+    # SENSEX is a BSE index — NSE bhavcopy can NEVER supply its option data.
+    # Fyers serves it as BSE:SENSEX-INDEX (verified 2026-11-27 live).
+    "SENSEX": ["BSE:SENSEX-INDEX"],
 }
 
-_STRIKE_STEP = {"NIFTY": 50.0, "BANKNIFTY": 100.0, "FINNIFTY": 50.0, "MIDCPNIFTY": 25.0}
-_HAS_WEEKLY = {"NIFTY"}   # baki indices monthly-only (NSE Sep-2026 verified)
+_STRIKE_STEP = {"NIFTY": 50.0, "BANKNIFTY": 100.0, "FINNIFTY": 50.0,
+                "MIDCPNIFTY": 25.0, "SENSEX": 100.0}
+_HAS_WEEKLY = {"NIFTY", "SENSEX"}   # NIFTY Tue, SENSEX Thu (BSE weekly)
+# SENSEX quick templates include OTM5/ITM legs, so fetch a wider strike band.
+_STRIKE_OFFSETS = {"SENSEX": tuple(range(-6, 7))}
+# SENSEX needs more calls (13 strikes x CE/PE x weekly expiries). Background
+# thread can afford a longer per-index budget than the NSE-only run.
+_INDEX_DEADLINE = {"SENSEX": 180}
+# Fyers free tier throttles bursts (429 after ~10-12 rapid requests). Pace
+# contract fetches to keep the sync honest and complete.
+_CONTRACT_SLEEP = 0.35
 
 _IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 _RUN_LOCK = threading.Lock()
@@ -136,22 +150,24 @@ def sync_status() -> dict:
 
 # ---------------- expiry calendar ----------------
 def expiry_dates(symbol: str, start_ymd: str, end_ymd: str):
-    """NIFTY: har Tuesday; baki (MONTHLY_IDX): mahine ka last Tuesday."""
+    """NIFTY: har Tuesday; SENSEX (BSE): har Thursday; baki monthly last Tue."""
     s = _dt.datetime.strptime(start_ymd[:10], "%Y-%m-%d").date()
     e = _dt.datetime.strptime(end_ymd[:10], "%Y-%m-%d").date()
     out = []
-    if symbol.upper() in _HAS_WEEKLY:
+    sym = symbol.upper()
+    wd = 3 if sym in ("SENSEX", "BANKEX", "SENSEX50") else 1
+    if sym in _HAS_WEEKLY:
         d = s
         while d <= e:
-            if d.weekday() == 1:  # Tuesday
+            if d.weekday() == wd:
                 out.append(d.strftime("%Y-%m-%d"))
             d += _dt.timedelta(days=1)
         return out
-    # Monthly: last Tuesday of each month
+    # Monthly: last expiry weekday of each month (Tue NSE / Thu BSE)
     y, m = s.year, s.month
     while True:
         last = _dt.date(y, m, _cal.monthrange(y, m)[1])
-        while last.weekday() != 1:
+        while last.weekday() != wd:
             last -= _dt.timedelta(days=1)
         if s <= last <= e:
             out.append(last.strftime("%Y-%m-%d"))
@@ -336,7 +352,7 @@ def sync_all(start_date: str = "2026-01-01", log=print,
             step = _STRIKE_STEP.get(idx, 50.0)
             exps = expiry_dates(idx, start_date, (end[:8] + "28"))
             exp_ok = []
-            _idx_deadline = _ptime.time() + _PER_INDEX_DEADLINE
+            _idx_deadline = _ptime.time() + _INDEX_DEADLINE.get(idx, _PER_INDEX_DEADLINE)
             for exp in exps:
                 if _ptime.time() > _idx_deadline:
                     _paused = True
@@ -345,14 +361,18 @@ def sync_all(start_date: str = "2026-01-01", log=print,
                 if ref <= 0:
                     continue
                 atm = round(ref / step) * step
-                strikes = [round(atm + k * step, 2) for k in (-2, -1, 0, 1, 2)]
+                strikes = [round(atm + k * step, 2)
+                           for k in _STRIKE_OFFSETS.get(idx, (-2, -1, 0, 1, 2))]
                 try:
                     d_exp = _dt.datetime.strptime(exp, "%Y-%m-%d").date()
                     days_ago = (_ist_today() - d_exp).days
                 except Exception:
                     days_ago = 0
                 is_monthly = idx not in _HAS_WEEKLY
-                if days_ago > 100 and not is_monthly:
+                # Fyers /data/history serves active contracts only — very old
+                # weeklies always fail, so cap how far back we even try.
+                _max_age = 45 if idx == "SENSEX" else 100
+                if days_ago > _max_age and not is_monthly:
                     continue
                 exp_ok.append(exp)
                 for stk in strikes:
@@ -363,6 +383,8 @@ def sync_all(start_date: str = "2026-01-01", log=print,
                         if _ptime.time() > _idx_deadline:
                             _paused = True
                             break
+                        # Pace requests — Fyers 429s rapid bursts.
+                        _ptime.sleep(_CONTRACT_SLEEP)
                         try:
                             from core.services.symbol_resolver import _fyers_symbol
                             fsym = _fyers_symbol(idx, exp, stk, opt)
