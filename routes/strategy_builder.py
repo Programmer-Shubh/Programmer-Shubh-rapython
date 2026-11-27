@@ -1934,6 +1934,8 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         "SENSEX ke liye broker (Fyers) live connection + option chain data chahiye",
                         "Ya date range badal kar dobara try karo (jahan data recorded ho)",
                     ]
+                    _err_msg = ("SENSEX/BANKEX (BSE index) ka option data NSE bhavcopy me nahi "
+                                "hota — is date range ke liye real option premium available nahi.")
                 else:
                     _dn = ("Is symbol/date range ke liye real option bars nahi mile. "
                            "Koi fake/synthetic bar nahi banaya jata.")
@@ -1942,8 +1944,9 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                         "Date range chhota karo ya NIFTY / BANKNIFTY try karo",
                         "Library me data availability check karo",
                     ]
-                return {"success": False, "error": errs, "data_note": _dn,
-                        "suggestions": _tips, "symbol": symbol}
+                    _err_msg = errs
+                return {"success": False, "error": _err_msg, "error_detail": errs,
+                        "data_note": _dn, "suggestions": _tips, "symbol": symbol}
             # Spec §15: synthetic retry HATAYA - fabricated data par trades
             # dikhana cheating hai. Zero trades = honest zero (neeche tips).
             _retry_used = False
@@ -2224,7 +2227,10 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             # Auto-seed (user rule 24-11): 'Real Tick' select kiya par is symbol
             # ke ticks nahi -> DB ke bhavcopy option data se abhi seed karo,
             # na ki seedha Black-Scholes par chalein. Ye broker-free hai.
-            if _tick_n == 0:
+            # BSE index (SENSEX/BANKEX) ke option ticks NSE bhavcopy me hote hi
+            # nahi — unke liye 3 lakh+ rows ka backfill bekaar hai (sirf time
+            # aur memory kharch), isliye skip.
+            if _tick_n == 0 and _sym not in _BSE_INDEX_SYMBOLS:
                 try:
                     backfill_from_bhavcopy(90)
                     _tick_n = int(tick_count(symbol=_sym) or 0)
@@ -2241,6 +2247,10 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 _tick_src = "real_1m_ticks"
             elif (_srcd.get("nse_bhavcopy") or 0) > 0:
                 _tick_src = "real_eod_bhavcopy"
+            elif not _tick_n and _sym in _BSE_INDEX_SYMBOLS:
+                _tick_reason = ("SENSEX/BANKEX BSE index hain — NSE bhavcopy me inka option tick "
+                                "data hota hi nahi, isliye intraday option backtest ke liye real "
+                                "premium nahi milta.")
             elif not _tick_n:
                 _tick_reason = ("Real Tick select kiya par is symbol ke liye koi cached tick data nahi "
                                 "— koi modeled premium nahi banaya gaya (Library me 'Fetch Real Data (NSE)' dabao — automatic)")

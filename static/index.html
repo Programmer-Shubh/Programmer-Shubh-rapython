@@ -3002,11 +3002,13 @@ let _lastOpenTrdHTML = null;
         if(badge) badge.innerHTML='<span class="badge '+(pending?'bg-warning text-dark':'bg-danger')+'">'+(pending?'DATA FETCH':'NO RESULT')+'</span>';
         const fm=document.getElementById('pos-metrics'); if(fm) fm.innerHTML='';
         const msg=String((res&&res.error)||err||'Backtest fail ho gaya.');
+        const detail=String((res&&res.error_detail)||'');
         const note=String((res&&res.data_note)||'');
         const tips=(res&&res.suggestions)||[];
         const tl=document.getElementById('pos-trade-list');
         if(tl) tl.innerHTML='<div class="alert '+(pending?'alert-warning':'alert-danger')+' py-2 small mb-2">'+
             '<strong>'+(pending?'Real data fetch ho raha hai':'Backtest nahi chala')+':</strong> '+msg+
+            (detail&&detail!==msg?'<div class="text-muted mt-1" style="font-size:10px">'+detail+'</div>':'')+
             (note?'<div class="mt-1">'+note+'</div>':'')+
             (tips.length?'<ul class="mb-0 mt-1 ps-3">'+tips.slice(0,4).map(x=>'<li>'+String(x)+'</li>').join('')+'</ul>':'')+
             '</div>'+
