@@ -34,7 +34,7 @@ class FyersHistoryData:
 
     RESOLUTIONS = ("1", "2", "3", "5", "10", "15", "20", "30", "60",
                    "120", "240", "D", "1D", "1W", "1M")
-    _MIN_GAP = 0.11  # 10 req/sec hadd; chhota margin rakho
+    _MIN_GAP = 0.25  # Fyers Standard plan: 5 req/sec + 50 req/min — stay under
     # v3 data host (the SDK's base URL changed between versions and the old
     # one 404s -> use the documented endpoint directly).
     HISTORY_URL = "https://api-t1.fyers.in/data/history"
@@ -177,6 +177,11 @@ class FyersHistoryData:
             self._throttle()
             resp = self._native_history(payload)
             if not resp.get("s") == "ok":
+                # An invalid symbol will NOT succeed via the SDK either, and
+                # retrying it just burns the Fyers rate budget + triggers 429.
+                if "invalid symbol" in str(resp.get("message") or "").lower():
+                    return {"s": "error", "code": str(resp.get("code") or "-300"),
+                            "message": str(resp.get("message") or "Invalid symbol provided")[:200]}
                 # fall back to the official SDK (older/newer base URLs)
                 try:
                     alt = self._sdk_history(payload)
