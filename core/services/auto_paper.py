@@ -218,13 +218,23 @@ def _today_signal(sid, s, today, need_more_than=0):
         # 60-din backtest dobara na chalaye (timeout pressure + CPU). 30 min TTL.
         try:
             import hashlib as _hl2
+            # Include risk/advanced settings in the hash: SL/TP, expiry and
+            # entry/exit time change the signal, so a cached result from the
+            # old config must never be reused (paper-vs-backtest divergence).
             _cfgh = _hl2.md5(_js.dumps(
-                [legs, _js.loads(s.get("indicators") or "[]")],
+                [legs, _js.loads(s.get("indicators") or "[]"),
+                 _js.loads(s.get("risk_management") or "{}"),
+                 _js.loads(s.get("advanced_options") or "{}")],
                 sort_keys=True, default=str).encode()).hexdigest()[:12]
             _sck = (int(sid or 0), today, _cfgh, int(need_more_than or 0))
             _shit = _SIGNAL_CACHE.get(_sck)
             if _shit and time.time() - _shit[0] < (_shit[3] if len(_shit) > 3 else _SIGNAL_TTL):
-                return bool(_shit[1]), str(_shit[2])
+                # Return the cached strike/premium too — caller unpacks 4
+                # values. Earlier this returned only 2, so every cached
+                # re-attempt crashed and the paper trade was silently skipped.
+                return (bool(_shit[1]), str(_shit[2]),
+                        _shit[4] if len(_shit) > 4 else None,
+                        _shit[5] if len(_shit) > 5 else 0.0)
         except Exception:
             _sck, _cfgh = None, ""
         def _sig_store(_fires, _why, _strike=None, _price=None):

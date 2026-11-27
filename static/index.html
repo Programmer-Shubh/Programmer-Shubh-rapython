@@ -433,11 +433,11 @@
                             <select id="eb-symbol" class="form-select form-select-sm" onchange="posOnSymbolChange();ebUpdateSummary()"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select>
                             <div class="small fw-bold mt-2 mb-0"><i class="bi bi-check2-square"></i> Backtest Symbols <small class="text-muted">(2+ chuno = multi-symbol run; payoff primary symbol par)</small></div>
                             <div class="d-flex flex-wrap gap-2 p-1 mb-1" id="eb-symbols" style="border:1px solid #dee2e6;border-radius:6px;background:#f8fafc">
-                                <label class="small"><input type="checkbox" class="eb-sym" value="NIFTY" checked onchange="ebUpdateSummary()"> NIFTY</label>
-                                <label class="small"><input type="checkbox" class="eb-sym" value="BANKNIFTY" onchange="ebUpdateSummary()"> BANKNIFTY</label>
-                                <label class="small"><input type="checkbox" class="eb-sym" value="FINNIFTY" onchange="ebUpdateSummary()"> FINNIFTY</label>
-                                <label class="small"><input type="checkbox" class="eb-sym" value="MIDCPNIFTY" onchange="ebUpdateSummary()"> MIDCPNIFTY</label>
-                                <label class="small"><input type="checkbox" class="eb-sym" value="SENSEX" onchange="ebUpdateSummary()"> SENSEX</label>
+                                <label class="small"><input type="checkbox" class="eb-sym" value="NIFTY" checked onchange="posOnSymCheck()"> NIFTY</label>
+                                <label class="small"><input type="checkbox" class="eb-sym" value="BANKNIFTY" onchange="posOnSymCheck()"> BANKNIFTY</label>
+                                <label class="small"><input type="checkbox" class="eb-sym" value="FINNIFTY" onchange="posOnSymCheck()"> FINNIFTY</label>
+                                <label class="small"><input type="checkbox" class="eb-sym" value="MIDCPNIFTY" onchange="posOnSymCheck()"> MIDCPNIFTY</label>
+                                <label class="small"><input type="checkbox" class="eb-sym" value="SENSEX" onchange="posOnSymCheck()"> SENSEX</label>
                             </div>
                             <div id="eb-bse-note" class="alert alert-warning py-1 px-2 mt-1 mb-0 small" style="display:none;font-size:10px"><i class="bi bi-info-circle"></i> SENSEX/BANKEX BSE index hain — NSE bhavcopy me inka option data nahi hota. Fyers se real SENSEX option data sync hone par hi backtest chalega; warna honest "no data" dikhega. Fyers → Sync Fyers History dabao.</div>
                             <label class="form-label small mb-1 mt-2">Timeframe</label>
@@ -2806,6 +2806,15 @@ let _lastOpenTrdHTML = null;
         // Primary symbol hamesha chuno me included rakho (payoff isi par).
         try{const cb=document.querySelector('.eb-sym[value="'+posSymbol()+'"]');if(cb)cb.checked=true;}catch(e){}
         posUpdatePayoff();
+    }
+    function posOnSymCheck(){
+        // Single symbol selected = primary bhi wahi karo (payoff + summary clear).
+        const picked=[...document.querySelectorAll('.eb-sym:checked')].map(x=>x.value);
+        if(picked.length===1){
+            const sel=document.getElementById('eb-symbol');
+            if(sel&&sel.value!==picked[0]){sel.value=picked[0];_posSpot=0;_posLot=0;}
+        }
+        ebUpdateSummary();
     }
     async function posEnsureSpot(){
         const s=posSymbol();

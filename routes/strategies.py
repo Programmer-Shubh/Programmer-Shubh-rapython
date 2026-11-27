@@ -775,7 +775,19 @@ def save_strategy(req: StrategyRequest):
             from core.services.sl_monitor import market_open_ist as _mkt
             if _mkt():
                 from core.services.auto_paper import place_for_strategy as _pl
-                auto_trades = (_pl(saved_id) or {}).get("placed", [])
+                # Same gate as the Paper button: intraday for 1m..1h, else daily.
+                # Pehle save-hook hamesha 'daily' chalata tha, isliye 5m wali
+                # strategy ke paper trades backtest signal se match nahi karte.
+                try:
+                    _adv0 = req.advanced_options
+                    if isinstance(_adv0, str):
+                        _adv0 = _js.loads(_adv0 or "{}")
+                    _adv0 = _adv0 if isinstance(_adv0, dict) else {}
+                    _tf0 = str(_adv0.get("timeframe") or getattr(req, "timeframe", "") or "").lower()
+                except Exception:
+                    _tf0 = ""
+                _gate0 = "intraday" if _tf0 in ("1m", "5m", "15m", "30m", "1h") else "daily"
+                auto_trades = (_pl(saved_id, signal_check=_gate0) or {}).get("placed", [])
     except Exception:
         pass
     resp = {"id": saved_id, "status": saved_status}

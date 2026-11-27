@@ -49,7 +49,8 @@ _CHAIN_CACHE_TTL = 10
 
 # --- helpers --------------------------------------------------------------
 
-def _tick_from_data(sym: str, data: dict | None, prev_spot: float, now_ms: int) -> dict:
+def _tick_from_data(sym: str, data: dict | None, prev_spot: float, now_ms: int,
+                    ts_ms: int | None = None) -> dict:
     spot = 0.0
     try:
         if data and data.get("spot"):
@@ -61,7 +62,9 @@ def _tick_from_data(sym: str, data: dict | None, prev_spot: float, now_ms: int) 
     return {
         "spot": spot,
         "change": (data or {}).get("change", 0) or 0,
-        "ts": now_ms,
+        # Forward the REAL age of a cached quote — never stamp an old value
+        # with "now" (that made a 2-minute-old price look live).
+        "ts": int(ts_ms if ts_ms is not None else now_ms),
         "source": (data or {}).get("source", "na"),
     }
 
@@ -75,9 +78,13 @@ def _cached_snapshot_text() -> str | None:
     for sym in SPOT_SYMBOLS:
         entry = _LIVE_CACHE.get(sym)
         data = None
-        if isinstance(entry, dict) and now - float(entry.get("ts") or 0) < 120:
+        if isinstance(entry, dict) and now - float(entry.get("ts") or 0) < 15:
             data = entry.get("data")
-        tick = _tick_from_data(sym, data, 0, now_ms)
+            # Keep the cache's original timestamp so the UI can see real age.
+            now_ms_sym = int(float(entry.get("ts") or 0) * 1000)
+        else:
+            now_ms_sym = now_ms
+        tick = _tick_from_data(sym, data, 0, now_ms_sym)
         if tick["spot"] > 0:
             any_spot = True
         ticks[sym] = tick
