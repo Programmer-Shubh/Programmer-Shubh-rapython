@@ -4413,7 +4413,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                 const s=await A('/api/broker/sync-historical/status');
                 const stage=s.stage||s.state||'…';
                 const cov=s.premium_coverage?Object.entries(s.premium_coverage).map(([k,v])=>k+':'+v).join(' '):'';
-                box.innerHTML=`<i class="bi bi-database"></i> Fyers sync: <strong>${stage}</strong> · contracts OK: ${s.contracts_ok||0} · rows: ${s.rows_stored||0} ${cov?('· '+cov):''}${s.contracts_failed_count?(' · failed: '+s.contracts_failed_count):''}`;
+                box.innerHTML=`<i class="bi bi-database"></i> Fyers sync: <strong>${stage}</strong> · contracts OK: ${s.contracts_ok||0} · rows: ${s.rows_stored||0} ${cov?('· '+cov):''}${s.contracts_failed_count?(' · failed: '+s.contracts_failed_count):''}`+(s.note?`<div class="small text-warning">${s.note}</div>`:'');
                 if(s.state==='done'||s.state==='error'){ alert(s.state==='done'
                     ? `Fyers history sync DONE.\nContracts OK: ${s.contracts_ok}\nRows stored: ${s.rows_stored}\nCoverage: ${cov}\nBacktests ab REAL premium IV use karenge.`
                     : 'Fyers sync ERROR: '+(s.error||'unknown')); return; }

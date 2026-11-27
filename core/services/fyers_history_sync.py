@@ -339,7 +339,14 @@ def sync_all(start_date: str = "2026-01-01", log=print,
                 sys_log(idx, "index bars:", len(bars), "via", src)
             else:
                 summary["indices"][idx] = {"bars": 0, "source": src, "errors": errs}
-                _set_status({"stage": "index_bars", "index_failed": [idx]})
+                _rate_limited = any("429" in str(e) for e in (errs or []))
+                _set_status({
+                    "stage": "index_bars", "index_failed": [idx],
+                    "note": ("Fyers ne rate-limit (429) lagaya — Standard plan par 50 req/min aur "
+                             "3 baar limit cross hone par account din bhar ke liye block ho jata hai. "
+                             "Kuch der baad (ya agle din) 'Sync SENSEX Options' dobara dabao."
+                             if _rate_limited else ""),
+                })
                 sys_log(idx, "INDEX BARS FAILED:", errs)
 
         # ---------- 2) option contracts per expiry ----------
