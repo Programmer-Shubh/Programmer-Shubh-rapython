@@ -1107,6 +1107,20 @@ async def sync_historical():
         return {"started": False, "error": str(e)[:200]}
 
 
+@router.post("/sensex-option-sync")
+async def sensex_option_sync():
+    """Dedicated SENSEX-only Fyers sync — BSE index bars + real option premiums
+    for the active weekly and monthly contracts. Saves rate limit for the one
+    index that NSE bhavcopy can never supply."""
+    try:
+        from core.services.fyers_history_sync import sync_async
+        import datetime as _dt
+        _start = (_dt.date.today() - _dt.timedelta(days=120)).strftime("%Y-%m-%d")
+        return sync_async(start_date=_start, indices=("SENSEX",))
+    except Exception as e:
+        return {"started": False, "error": str(e)[:200]}
+
+
 @router.post("/nse-option-sync")
 async def nse_option_sync():
     """NSE official F&O bhavcopy se REAL index-option premiums bhavcopy_data

@@ -587,6 +587,7 @@
                     <button class="btn btn-sm btn-outline-primary" onclick="autoConnectAll()"><i class="bi bi-plug"></i> Auto-Connect All</button>
                     <button class="btn btn-sm btn-outline-warning" onclick="refreshTokens()"><i class="bi bi-arrow-repeat"></i> Refresh Tokens</button>
                     <button class="btn btn-sm btn-outline-success" onclick="syncFyersHistory()" title="Fyers se index daily bars (+active contracts) DB me save karta hai"><i class="bi bi-database-down"></i> Sync Fyers History</button>
+                    <button class="btn btn-sm btn-outline-success" onclick="syncSensexOptions()" title="Sirf SENSEX ke BSE real option premiums Fyers se sync karo (kam API calls)"><i class="bi bi-database-add"></i> Sync SENSEX Options</button>
                     <button class="btn btn-sm btn-outline-info" onclick="syncNSEOptions()" title="NSE official F&amp;O bhavcopy se ASLI index-option premiums (ATM±3) DB me save karta hai - backtests real premium IV se anchored ho jayenge"><i class="bi bi-cloud-arrow-down"></i> Sync NSE Options</button>
                 </div>
             </div>
@@ -3071,6 +3072,12 @@ let _lastOpenTrdHTML = null;
                 '<span class="badge bg-danger">SELL signals: '+(di.signals_sell||0)+'</span>',
                 '<span class="badge bg-light text-dark border">Generated: '+(di.signals_generated||0)+' / evaluated: '+(di.signals_evaluated||0)+'</span>'
             ];
+            const cov=di.coverage||{};
+            Object.keys(cov).forEach(k=>{
+                const c=cov[k]||{};
+                if(c.data_start||c.days_with_data!==undefined)
+                    chips.push('<span class="badge bg-light text-dark border" title="'+String(c.missing_days||[]).slice(0,150)+'">'+k+' data: '+c.data_start+' → '+c.data_end+' ('+(c.days_with_data||0)+'/'+(c.trading_days||0)+' din, '+(c.intraday_candles||0)+' intraday)</span>');
+            });
             dg.innerHTML='<div class="d-flex flex-wrap gap-1 mb-1">'+chips.join('')+'</div>'+
                 (warn?'<div class="alert alert-warning py-1 px-2 mb-1"><i class="bi bi-exclamation-triangle"></i> '+warn+'</div>':'')+
                 (res.data_note?'<div class="text-muted">'+String(res.data_note)+'</div>':'')+
@@ -4388,6 +4395,14 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
             const r=await A('/api/broker/sync-historical',{method:'POST'});
             if(r && r.started){ alert('Sync shuru ho gaya (background). Status: /api/broker/sync-historical/status'); _pollSyncStatus(); }
             else { alert('Sync start nahi hua: '+JSON.stringify(r)); }
+        }catch(e){ alert('Sync error: '+e); }
+    }
+    async function syncSensexOptions(){
+        try{
+            if(!confirm('Sirf SENSEX ke REAL BSE option premiums Fyers se sync karun?\n\nNSE bhavcopy me SENSEX options kabhi nahi hote. Fyers sirf active contracts deta hai — isliye nearest weekly + monthly contracts fetch honge (kam API calls).')) return;
+            const r=await P('/api/broker/sensex-option-sync',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+            if(r&&r.started){ alert('SENSEX option sync shuru ho gaya. Status Brokers page par dikhega.'); _pollSyncStatus(); }
+            else alert('Sync start nahi hua: '+JSON.stringify(r));
         }catch(e){ alert('Sync error: '+e); }
     }
     async function _pollSyncStatus(){

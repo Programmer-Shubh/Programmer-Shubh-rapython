@@ -69,7 +69,7 @@ _STRIKE_OFFSETS = {"SENSEX": tuple(range(-6, 7))}
 _INDEX_DEADLINE = {"SENSEX": 300}
 # Fyers free tier throttles bursts (429 after ~10-12 rapid requests). Pace
 # contract fetches to keep the sync honest and complete.
-_CONTRACT_SLEEP = 0.6
+_CONTRACT_SLEEP = 1.5
 
 _IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 _RUN_LOCK = threading.Lock()
@@ -293,7 +293,7 @@ def _store_bars(bars, expiry=None, strike=None, option_type=None):
 
 
 def sync_all(start_date: str = "2026-01-01", log=print,
-             completed_indices: list = None):
+             completed_indices: list = None, indices=None):
     """Main entry. Returns summary dict. Safe to re-run (upsert).
 
     Per-index deadline (50s each) so one slow index (Fyers rate-limit) does
@@ -305,6 +305,9 @@ def sync_all(start_date: str = "2026-01-01", log=print,
         if _RUNNING:
             return {"started": False, "reason": "already_running"}
         _RUNNING = True
+    # Dedicated SENSEX-only runs avoid burning the Fyers rate budget on NSE
+    # indices whose option data already exists locally.
+    _idx_list = tuple(indices) if indices else INDICES
     _completed = list(completed_indices or [])
     _set_status({"state": "running", "started_at": _ist_now().strftime("%Y-%m-%d %H:%M:%S"),
                  "stage": "index_bars", "index_ok": [], "index_failed": [],
@@ -326,7 +329,7 @@ def sync_all(start_date: str = "2026-01-01", log=print,
 
         # ---------- 1) index daily bars ----------
         index_bars = {}
-        for idx in INDICES:
+        for idx in _idx_list:
             bars, src, errs = _fetch_index_daily(idx, start_date, end)
             if bars:
                 _store_bars(bars)
@@ -340,7 +343,7 @@ def sync_all(start_date: str = "2026-01-01", log=print,
                 sys_log(idx, "INDEX BARS FAILED:", errs)
 
         # ---------- 2) option contracts per expiry ----------
-        for idx in INDICES:
+        for idx in _idx_list:
             # Resume: skip indices already completed in a previous (paused) run.
             if idx in _completed:
                 continue
@@ -357,8 +360,10 @@ def sync_all(start_date: str = "2026-01-01", log=print,
                 # weeklies answer "Invalid symbol" (and their retries trigger
                 # 429). Keep two nearest weeklies + the monthly expiry.
                 _act = [e for e in exps
-                        if (_dt.datetime.strptime(e, "%Y-%m-%d").date() - _ist_today()).days >= -1]
-                _pick = _act[:2] + ([_act[-1]] if len(_act) > 2 and _act[-1] not in _act[:2] else [])
+                        if (_dt.datetime.strptime(e, "%Y-%m-%d").date() - _ist_today()).days >= 0]
+                # Nearest weekly + current monthly only (2 expiries) — enough
+                # for weekly/monthly templates with the least API calls.
+                _pick = _act[:1] + ([_act[-1]] if len(_act) > 1 and _act[-1] != _act[0] else [])
                 exps = _pick
             exp_ok = []
             _idx_deadline = _ptime.time() + _INDEX_DEADLINE.get(idx, _PER_INDEX_DEADLINE)
@@ -449,7 +454,7 @@ def sync_all(start_date: str = "2026-01-01", log=print,
         try:
             db = _db()
             cov = {}
-            for idx in INDICES:
+            for idx in _idx_list:
                 try:
                     r = db.fetch_one("SELECT COUNT(*) AS c FROM bhavcopy_data WHERE symbol=? AND option_type IN ('CE','PE')", [idx])
                     cov[idx] = int((r or {}).get("c") or 0)
@@ -502,7 +507,7 @@ def sync_all(start_date: str = "2026-01-01", log=print,
         _RUNNING = False
 
 
-def sync_async(start_date: str = "2026-01-01"):
+def sync_async(start_date: str = "2026-01-01", indices=None):
     """Spawn background thread (non-blocking). Returns status dict.
     Captures completed_indices from previous (paused) status so next run
     resumes from where it left off."""
@@ -523,7 +528,8 @@ def sync_async(start_date: str = "2026-01-01"):
     except Exception:
         pass
     t = threading.Thread(target=sync_all,
-                          kwargs={"start_date": start_date, "completed_indices": _completed},
+                          kwargs={"start_date": start_date, "completed_indices": _completed,
+                                  "indices": indices},
                           daemon=True)
     t.start()
     return {"started": True}
