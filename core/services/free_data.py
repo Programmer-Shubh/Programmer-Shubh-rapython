@@ -346,6 +346,52 @@ def fetch_google_spot(symbol: str) -> float:
     return 0
 
 
+def _proxy_nse_spot(symbol: str) -> dict:
+    """NSE spot through the configured fixed-IP egress proxy.
+
+    Render/AWS IPs are blocked by NSE, so nse_client.nse_fetch_spot() returns
+    None on cloud. The egress proxy has a whitelisted IP and is already used
+    for broker calls — using it here gives REAL live index/stock prices
+    instead of a stale bhavcopy close."""
+    try:
+        from core.services.egress_proxy import cfg as _pcfg, sync_request as _sreq
+        if not _pcfg().get("configured"):
+            return {}
+        sym = str(symbol or "").upper().strip()
+        hdr = dict(_UA)
+        hdr.update({"Accept": "application/json, text/plain, */*",
+                    "Referer": "https://www.nseindia.com/"})
+        if sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"):
+            r = _sreq("GET", "https://www.nseindia.com/api/allIndices",
+                      headers=hdr, timeout=8)
+            if getattr(r, "status_code", 0) != 200:
+                return {}
+            want = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
+                    "FINNIFTY": "NIFTY FINANCIAL SERVICES",
+                    "MIDCPNIFTY": "NIFTY MID SELECT"}[sym]
+            for it in ((r.json() or {}).get("data") or []):
+                if str(it.get("index") or "").strip() == want:
+                    px = float(it.get("last") or 0)
+                    if px > 0:
+                        return {"spot": px,
+                                "change": float(it.get("percentChange") or 0),
+                                "high": float(it.get("high") or px),
+                                "low": float(it.get("low") or px),
+                                "source": "nse-proxy"}
+        else:
+            r = _sreq("GET", f"https://www.nseindia.com/api/quote-equity?symbol={sym}",
+                      headers=hdr, timeout=8)
+            if getattr(r, "status_code", 0) == 200:
+                pi = ((r.json() or {}).get("priceInfo") or {})
+                px = float(pi.get("lastPrice") or pi.get("close") or 0)
+                if px > 0:
+                    return {"spot": px, "change": float(pi.get("pChange") or 0),
+                            "high": px, "low": px, "source": "nse-proxy"}
+    except Exception:
+        pass
+    return {}
+
+
 def fetch_cloud_spot(symbol: str) -> dict:
     """Live spot: NSE direct -> Yahoo -> Google -> Stooq (Stooq last, fixes KOTAKBANK 417 vs 1900 mismatch).
     Yahoo first for indices (Google has no index price markup; verified ^NSEI/^NSEBANK/^CNXFIN/^NSEMDCP50).
@@ -391,6 +437,17 @@ def fetch_cloud_spot(symbol: str) -> dict:
                             pass
     except Exception:
         pass
+    # 0b) Fixed-IP egress proxy -> NSE live. Cloud par direct NSE block hota
+    # hai (nse_fetch_spot cloud guard), aur Fyers daily 429 par milta hai.
+    # Ye tier bhavcopy fallback se PEHLE chalna chahiye.
+    if not spot:
+        try:
+            _px = _proxy_nse_spot(symbol)
+            if _px and float(_px.get("spot") or 0) > 0:
+                spot, source = float(_px["spot"]), str(_px.get("source") or "nse-proxy")
+                chg = float(_px.get("change") or 0)
+        except Exception:
+            pass
     # 1) NSE direct (free, most accurate; blocked from some cloud IPs)
     if not spot:
         try:
