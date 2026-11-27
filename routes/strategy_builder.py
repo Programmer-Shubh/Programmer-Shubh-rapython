@@ -2228,7 +2228,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                  "phase_ms": _phase_ms,
                  "requested_timeframe": _requested_timeframe,
                  "executed_timeframe": timeframe,
-                 "executed_data_source": _tick_src or ("daily_bhavcopy" if _auto_daily else timeframe),
+                 "executed_data_source": ("daily_bhavcopy" if _auto_daily else timeframe),
                  "risk_warning": (
                      "Risk Mode: Intraday + 1d EOD data — premium SL/TP (points) "
                      "intrabar high-low swings ko nahi pakadte; results approximate."
