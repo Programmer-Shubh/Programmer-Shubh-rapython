@@ -69,6 +69,10 @@ def _load_nse_lots():
 _STATIC_LOTS = {
     "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60,
     "SENSEX": 20, "BANKEX": 30,
+    # MIDCPNIFTY pehle map me nahi tha -> default 50 (galat) lagta tha.
+    # NSE contract spec (F&O launch circular) lot = 75. lot_master (broker)
+    # pehle aata hai; ye sirf cold-start/miss par hai.
+    "MIDCPNIFTY": 75,
     "RELIANCE": 500, "HDFCBANK": 650, "ICICIBANK": 700,
     "TCS": 225, "INFY": 400, "ITC": 1725, "SBIN": 750,
     "AXISBANK": 625, "KOTAKBANK": 2000, "LT": 175, "HINDUNILVR": 300,
@@ -300,6 +304,9 @@ def check_min_premium(premium, option_type: str = "CE") -> str | None:
 def get_strike_step(symbol: str) -> float:
     steps = {
         "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
+        # MIDCPNIFTY pehle map me NAHI tha -> DB probe/50 fallback. NSE
+        # contract spec (Strike Interval) = 50, isi se ATM/OTM chain banani hai.
+        "MIDCPNIFTY": 50,
         "SENSEX": 100, "BANKEX": 100,
         # Stocks: use appropriate strike steps based on price range
         "BAJFINANCE": 200, "BAJAJFINSV": 200, "MARUTI": 200, "SHREECEM": 100,

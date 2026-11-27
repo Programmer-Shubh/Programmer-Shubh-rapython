@@ -1642,6 +1642,22 @@ let _lastOpenTrdHTML = null;
             const vBadge=vv.ok==null?'':(vv.ok?'<span class="badge bg-success">Math OK</span>':'<span class="badge bg-warning text-dark">PARTIAL DATA</span>');
             return `<div class="alert alert-light border py-2 mb-2 small"><strong><i class="bi bi-activity"></i> Diagnostics:</strong> Signals evaluated ${dg.signals_evaluated||0} → generated ${dg.signals_generated||0} (BUY ${dg.signals_buy||0} / SELL ${dg.signals_sell||0}) | Rejected (${rej})<br>Coverage: ${covTxt} ${vBadge}${(vv.failed||[]).length?` <span class="text-danger">${vv.failed.join('; ')}</span>`:''}</div>`;
         }catch(e){return '';}}
+    // Extra routing/risk diagnostics for the FULL results card (0 trades me bhi).
+    // diagHtml() purana compact hai; ye naye fields (user rule 27-11) dikhata hai.
+    function diagHtml2(r){try{
+        const dg=r.diagnostics||{}, dr=r.data_routing||{};
+        const esc=s=>String(s==null?'':s).replace(/[<>"&]/g,' ');
+        const tf=dg.requested_timeframe||dr.requested_timeframe||(r.params||{}).timeframe||'—';
+        const ex=dg.executed_timeframe||dr.executed_timeframe||tf;
+        const src=Object.entries(dg.symbol_sources||dr.symbol_sources||{}).map(([k,s])=>
+            k+': '+(s.source||'—')+' ('+(s.executed_timeframe||ex)+')').join(' | ')||'—';
+        const warns=[dr.warning,dg.coverage_warning||dr.coverage_warning,
+                     dg.risk_warning||dr.risk_mode_warning].filter(Boolean);
+        return '<div class="alert alert-light border py-2 mb-2 small"><strong><i class="bi bi-signpost-split"></i> Run diagnostics:</strong> '+esc(dg.summary||'')+
+            '<br>TF: '+esc(tf)+(String(tf)!==String(ex)?' → <strong>'+esc(ex)+'</strong>':'')+
+            ((dg.executed_is_eod_daily||dr.executed_is_eod_daily)?' <span class="badge bg-warning text-dark">EOD daily (open→close)</span>':'')+
+            '<br>Executed source: '+esc(src)+warns.map(w=>'<div class="text-warning mt-1"><i class="bi bi-exclamation-triangle"></i> '+esc(w)+'</div>').join('')+'</div>';
+    }catch(e){return '';}}
     // Backtest ke baad: kya badalna hai (Hindi, numbers ke saath). User demand
     // 25-11: result dekhne ke baad SL/target/indicator/data sudhar ki wajah
     // saaf Hindi me dikhe - sirf metrics nahi.
@@ -1766,7 +1782,7 @@ let _lastOpenTrdHTML = null;
             }
             const nkH=r.naked_warning?`<div class="alert alert-danger py-2 mb-2 small"><strong><i class="bi bi-exclamation-triangle-fill"></i> Naked Short Warning:</strong> ${r.naked_warning}</div>`:'';
             document.getElementById('bt-metrics').innerHTML=zeroH+nkH+`
-<div class="alert alert-secondary py-1 px-2 mb-2 small text-muted">${_pinfo}</div>${diagHtml(r)}
+<div class="alert alert-secondary py-1 px-2 mb-2 small text-muted">${_pinfo}</div>${diagHtml(r)}${diagHtml2(r)}
 <div class="row g-2 mb-2">
 <div class="col"><div class="card stat-card-sm"><div class="label">Symbol</div><div class="value fw-bold">${r.symbol||'-'}</div></div></div>
 <div class="col"><div class="card stat-card-sm"><div class="label">Overall Profit</div><div class="value ${pnlClass}">${F(m.net_pnl!=null?m.net_pnl:pnl)}</div></div></div>
@@ -2236,11 +2252,22 @@ let _lastOpenTrdHTML = null;
             if(_lr&&_lr.lot_size) lot=parseInt(_lr.lot_size)||50;
             else throw 0;
         }catch(e){
-            const lotMap={NIFTY:75,BANKNIFTY:15,FINNIFTY:60,RELIANCE:250,TCS:175,INFY:400,SBIN:700,APOLLOHOSP:125,BAJAJHLDNG:75,HDFCBANK:550,ICICIBANK:700,ITC:1600,AXISBANK:625,KOTAKBANK:400,LT:150,"M&M":400,MARUTI:50,BAJFINANCE:125,ONGC:1875,TATAMOTORS:1125,TATASTEEL:550,NTPC:2250,POWERGRID:2700,COALINDIA:2700,HINDALCO:900,VEDL:1650};
+            const lotMap={NIFTY:65,BANKNIFTY:30,FINNIFTY:60,MIDCPNIFTY:75,SENSEX:20,BANKEX:30,RELIANCE:500,TCS:225,INFY:400,SBIN:750,APOLLOHOSP:125,BAJAJHLDNG:75,HDFCBANK:650,ICICIBANK:700,ITC:1725,AXISBANK:625,KOTAKBANK:2000,LT:175,"M&M":200,MARUTI:50,BAJFINANCE:750,ONGC:2250,TATAMOTORS:1125,TATASTEEL:2750,NTPC:1500,POWERGRID:1900,COALINDIA:1350,HINDALCO:700,VEDL:1150};
             lot=lotMap[sym]||50;
         }
-        const stepMap={NIFTY:50,BANKNIFTY:100,FINNIFTY:50};
-        const step=stepMap[sym]||100;
+        // Strike step = backend single source (utils.get_strike_step). Pehle
+        // yahan sirf 3 index hardcoded the — MIDCPNIFTY (step 50) ko 100 aur
+        // SENSEX ko fallback 100 milta tha, isliye ATM/OTM strike hi galat
+        // nikal kar poora payoff scale bigad jata tha.
+        let step=100;
+        try{
+            const _sr=await A('/api/strike-step/'+encodeURIComponent(sym));
+            if(_sr&&Number(_sr.strike_step)>0) step=Number(_sr.strike_step);
+            else throw 0;
+        }catch(e){
+            const stepMap={NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:50,SENSEX:100,BANKEX:100};
+            step=stepMap[sym]||50;
+        }
         const atm=Math.round(spot/step)*step;
         // Black-Scholes proxy (IV 20%, DTE 7) with erf polyfill (JS Math.erf not exists)
         function erf(x){ const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911; const s=x<0?-1:1; x=Math.abs(x); const t=1/(1+p*x); const y=1-((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t*Math.exp(-x*x); return s*y; }
@@ -2269,9 +2296,16 @@ let _lastOpenTrdHTML = null;
         // payoff metrics (unlimited short loss is NEVER clipped to the window)
         const beText = breakevens.length? breakevens.map(b=>'\u20B9'+b).join(', ') : '—';
         const maxProfit = Math.round(maxP), maxLoss=Math.round(minP);
+        // Net Credit/Debit (Expiry Payoff requirement): short premium received
+        // minus long premium paid — wahi lot × lots se, aur wahi IV 20% / DTE 7
+        // Black-Scholes proxy se jo ATM/OTM strike premium banata hai.
+        let netCredit=0;
+        stratLegs.forEach(l=>{ if(l.option_type==='EQ') return;
+            netCredit += (l.transaction==='buy'? -l._prem : l._prem) * lot * l.lots; });
+        netCredit=Math.round(netCredit);
         const rr = unlimitedLoss? '∞ (unlimited loss side)' : (maxLoss<0? (maxProfit/Math.abs(maxLoss)).toFixed(2): '∞');
         document.getElementById('payoff-spot').textContent='Spot: \u20B9'+spot.toFixed(2)+' | ATM: '+atm;
-        document.getElementById('payoff-metrics').innerHTML=`<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">\u20B9${maxProfit.toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">${unlimitedLoss?'Unlimited ♾️':'\u20B9'+Math.abs(maxLoss).toLocaleString()}</div></div></div>${unlimitedLoss?'<div class="col"><div class="card stat-card-sm" style="border-color:#dc3545"><div class="label">Warning</div><div class="value price-down" style="font-size:11px">Naked short: loss '+unlimitedLoss+'</div></div></div>':''}<div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">${beText}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">${rr}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Lots×LotSize</div><div class="value">${stratLegs.reduce((a,l)=>a+l.lots,0)}×${lot}</div></div></div>`;
+        document.getElementById('payoff-metrics').innerHTML=`<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">\u20B9${maxProfit.toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">${unlimitedLoss?'Unlimited ♾️':'\u20B9'+Math.abs(maxLoss).toLocaleString()}</div></div></div>${unlimitedLoss?'<div class="col"><div class="card stat-card-sm" style="border-color:#dc3545"><div class="label">Warning</div><div class="value price-down" style="font-size:11px">Naked short: loss '+unlimitedLoss+'</div></div></div>':''}<div class="col"><div class="card stat-card-sm"><div class="label">${netCredit>=0?'Net Credit':'Net Debit'}</div><div class="value '+(netCredit>=0?'price-up':'price-down')+'">\u20B9${Math.abs(netCredit).toLocaleString()}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">${beText}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">${rr}</div></div></div><div class="col"><div class="card stat-card-sm"><div class="label">Lots×LotSize</div><div class="value">${stratLegs.reduce((a,l)=>a+l.lots,0)}×${lot}</div></div></div>`;
         try{ Plotly.newPlot('payoff-chart', [{x:xs, y:ys, type:'scatter', mode:'lines', fill:'tozeroy', line:{color: maxProfit>Math.abs(maxLoss)?'#198754':'#0d6efd', width:2}, fillcolor:'rgba(13,110,253,0.08)'}, {x:[spot], y:[0], mode:'markers', marker:{color:'#dc3545', size:10}, name:'Spot'}], {title:'', xaxis:{title:'Spot at Expiry'}, yaxis:{title:'P&L (₹)'}, shapes:[{type:'line', x0:xs[0], x1:xs[xs.length-1], y0:0, y1:0, line:{color:'#6c757d', dash:'dash'}}], margin:{t:10,b:40,l:60,r:20}, paper_bgcolor:'#fff', plot_bgcolor:'#fff'}, {displayModeBar:false}); }catch(e){}
         // highlight quant cards
         document.querySelectorAll('.quant-card').forEach(c=>c.classList.remove('active'));
@@ -2821,13 +2855,20 @@ let _lastOpenTrdHTML = null;
     }
     async function posEnsureSpot(){
         const s=posSymbol();
-        if(_posSpot>0) return {spot:_posSpot,lot:_posLot||75,step:_posStep};
+        if(_posSpot>0 && _posLot>0) return {spot:_posSpot,lot:_posLot,step:_posStep};
         try{const d=await A('/api/dashboard/spot/'+encodeURIComponent(s)); if(d&&Number(d.spot)>0) _posSpot=Number(d.spot);}catch(e){}
         if(!_posSpot){try{const d=await A('/api/chain/live/'+encodeURIComponent(s)); if(d&&Number(d.spot)>0) _posSpot=Number(d.spot);}catch(e){}}
         if(!_posSpot) _posSpot=({NIFTY:24500,BANKNIFTY:54000,FINNIFTY:26000,MIDCPNIFTY:28000,SENSEX:84000})[s]||24000;
         try{const d=await A('/api/lot-size/'+encodeURIComponent(s)); const v=Number(d&&d.lot_size||0); if(v>0)_posLot=v;}catch(e){}
-        if(!_posLot) _posLot=({NIFTY:75,BANKNIFTY:15,FINNIFTY:60,MIDCPNIFTY:75,SENSEX:10})[s]||75;
-        _posStep=({NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:50,SENSEX:100})[s]||100;
+        // Fallback sirf tab jab lot API fail ho — values NSE contract spec se
+        // (MIDCPNIFTY 75 / SEXEX 20). Pehle SENSEX 10 tha = poora payoff 2x chhota.
+        if(!_posLot) _posLot=({NIFTY:65,BANKNIFTY:30,FINNIFTY:60,MIDCPNIFTY:75,SENSEX:20,BANKEX:30})[s]||50;
+        // Strike step: backend single source (har symbol ke liye exact).
+        try{
+            const _ss=await A('/api/strike-step/'+encodeURIComponent(s));
+            if(_ss&&Number(_ss.strike_step)>0) _posStep=Number(_ss.strike_step);
+            else _posStep=({NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:50,SENSEX:100,BANKEX:100})[s]||50;
+        }catch(e){ _posStep=({NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:50,SENSEX:100,BANKEX:100})[s]||50; }
         try{const el=document.getElementById('pos-spot-info'); if(el) el.textContent='Spot: ₹'+_posSpot.toFixed(2)+' | Lot: '+_posLot+' | Step: '+_posStep;}catch(e){}
         return {spot:_posSpot,lot:_posLot,step:_posStep};
     }
@@ -3062,27 +3103,54 @@ let _lastOpenTrdHTML = null;
         if(dg){
             const p=(res&&res.params)||{}, dr=(res&&res.data_routing)||{}, di=(res&&res.diagnostics)||{};
             const reqTf=dr.requested_timeframe||p.timeframe||'—', execTf=dr.executed_timeframe||p.timeframe||'—';
-            const warn=dr.warning||(di.risk_warning||'');
+            // Teen alag chetavni: (a) downgrade, (b) partial data coverage,
+            // (c) Intraday risk mode vs EOD daily data. Pehle sab ek string
+            // me chipak jate the aur (b)/(c) kabhi dikhte hi nahi the.
+            const warns=[];
+            if(dr.downgraded_to_daily&&dr.warning) warns.push(dr.warning);
+            else{
+                if(dr.coverage_warning) warns.push(dr.coverage_warning);
+                const rw=dr.risk_mode_warning||di.risk_warning||'';
+                if(rw) warns.push(rw);
+            }
             const chips=[
                 '<span class="badge bg-light text-dark border">Symbols: '+((p.symbols||posSymbols()).join(', ')||'—')+'</span>',
-                '<span class="badge bg-light text-dark border">TF: '+reqTf+(reqTf!==execTf?(' → <strong>'+execTf+'</strong>'):'')+'</span>',
-                '<span class="badge bg-light text-dark border">Source: '+String(res.data_source||'—')+'</span>',
+                '<span class="badge '+(reqTf!==execTf?'bg-warning text-dark':'bg-light text-dark border')+'">TF: '+reqTf+(reqTf!==execTf?(' → <strong>'+execTf+'</strong>'):'')+'</span>',
+                '<span class="badge '+(dr.executed_is_eod_daily?'bg-warning text-dark':'bg-light text-dark border')+'">Source: '+String(res.data_source||'—')+(dr.executed_is_eod_daily?' (EOD daily)':'')+'</span>',
                 '<span class="badge bg-light text-dark border">'+p.start_date+' → '+p.end_date+'</span>',
                 '<span class="badge bg-success">BUY signals: '+(di.signals_buy||0)+'</span>',
                 '<span class="badge bg-danger">SELL signals: '+(di.signals_sell||0)+'</span>',
                 '<span class="badge bg-light text-dark border">Generated: '+(di.signals_generated||0)+' / evaluated: '+(di.signals_evaluated||0)+'</span>'
             ];
+            // Internal server text ko HTML me daalte waqt tag/attribute break
+            // hone se bachao (entity literal likhne ki zaroorat nahi).
+            const escX=t=>String(t==null?'':t).replace(/\s+/g,' ').replace(/[<>"&]/g,' ');
+            // Per-symbol executed source + timeframe badge (req: chup-chaap
+            // 1d fallback na ho — kaun sa source/timeframe chala, dikhe).
+            const ss=di.symbol_sources||dr.symbol_sources||{};
+            Object.keys(ss).forEach(k=>{
+                const s=ss[k]||{};
+                chips.push('<span class="badge '+(s.error?'bg-danger':(s.eod_daily&&reqTf!=='1d')?'bg-warning text-dark':'bg-light text-dark border')+
+                    '" title="'+escX(s.error||s.why_zero||'')+'">'+k+' · '+(s.source||'—')+' · '+
+                    (s.executed_timeframe||execTf)+(s.bars?' · '+s.bars+' bars':'')+'</span>');
+            });
             const cov=di.coverage||{};
             Object.keys(cov).forEach(k=>{
                 const c=cov[k]||{};
                 if(c.data_start||c.days_with_data!==undefined)
                     chips.push('<span class="badge bg-light text-dark border" title="'+String(c.missing_days||[]).slice(0,150)+'">'+k+' data: '+c.data_start+' → '+c.data_end+' ('+(c.days_with_data||0)+'/'+(c.trading_days||0)+' din, '+(c.intraday_candles||0)+' intraday)</span>');
             });
+            // Ek-line run summary (har run me, 0 trades me bhi): symbol, TF,
+            // source, date range + BUY/SELL counts.
+            const summ=escX(di.summary||'');
+            const noteTxt=escX(res.note||'').trim();
             dg.innerHTML='<div class="d-flex flex-wrap gap-1 mb-1">'+chips.join('')+'</div>'+
-                (warn?'<div class="alert alert-warning py-1 px-2 mb-1"><i class="bi bi-exclamation-triangle"></i> '+warn+'</div>':'')+
-                (res.data_note?'<div class="text-muted">'+String(res.data_note)+'</div>':'')+
-                ((!((m.total_trades)||0))?'<div class="text-muted">Koi trade nahi — '+'signal/filter ya data gap ki wajah. '+
-                    ((res.suggestions||[]).length?res.suggestions.slice(0,2).join(' · '):'')+'</div>':'');
+                (summ?'<div class="small text-body-secondary mb-1"><i class="bi bi-clipboard-data"></i> '+summ+'</div>':'')+
+                warns.map(w=>'<div class="alert alert-warning py-1 px-2 mb-1"><i class="bi bi-exclamation-triangle"></i> '+escX(w)+'</div>').join('')+
+                (res.data_note?'<div class="text-muted">'+escX(res.data_note)+'</div>':'')+
+                (noteTxt?'<div class="alert alert-info py-1 px-2 mb-1"><i class="bi bi-info-circle"></i> '+noteTxt+'</div>':'')+
+                ((!((m.total_trades)||0))?'<div class="text-muted">0 trades = honest zero (koi fabricated trade nahi).'+
+                    ((res.suggestions||[]).length?' '+res.suggestions.slice(0,2).join(' · '):'')+'</div>':'');
         }
         const fm=document.getElementById('pos-metrics');
         if(fm){

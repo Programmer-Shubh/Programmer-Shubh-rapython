@@ -478,6 +478,15 @@ def lot_size(symbol: str):
     return {"symbol": symbol.upper(), "lot_size": get_lot_size(symbol),
             "source": lot_source(symbol)}
 
+
+@app.get("/api/strike-step/{symbol}")
+def strike_step(symbol: str):
+    # Payoff/ATM ke liye ek hi source of truth (utils.helpers.get_strike_step).
+    # Pehle index.html me har payoff apna hardcoded stepMap rakhta tha jisme
+    # MIDCPNIFTY/SENSEX missing the -> galat ATM strike aur galat payoff.
+    from utils.helpers import get_strike_step
+    return {"symbol": symbol.upper(), "strike_step": get_strike_step(symbol)}
+
 @app.get("/ready")
 async def ready():
     # Light readiness check with DB ping but bounded 1s

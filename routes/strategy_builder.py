@@ -2016,16 +2016,39 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     # Blocked entries (premium floor etc.) ko "signal nahi
                     # bana" mat batao - signal BANA tha, entry RUKI thi.
                     # (hhhh case: 6 BUY signals, par OTM put ₹4-18 < ₹20 floor.)
-                    _blocked = int((_diag_rej or {}).get("min_premium_lt_20", 0) or 0)
+                    # Rejection reasons: premium floor (dynamic 'min_premium_lt_N')
+                    # aur real option premium na milna - dono ko "signal hi nahi
+                    # bana" mat bolo. (SENSEX case: 5 SELL signals bane, par
+                    # recorded option premium na hone par sab block ho gaye.)
+                    _blocked = 0
+                    _blocked_prem = 0
+                    for _rk, _rv in ((_diag_rej or {}).items()):
+                        if str(_rk).startswith("min_premium_lt_"):
+                            _blocked += int(_rv or 0)
+                        elif str(_rk) == "no_real_option_premium":
+                            _blocked_prem += int(_rv or 0)
                     _sigs = int(_diag_sig or 0)
                     if _blocked > 0 and _sigs > 0:
                         _zero_note += (f"{', '.join(_ok_syms)} par {_sigs} entry signals bane, par "
-                                       f"{_blocked} entries ₹20 premium floor se block hui (option bahut sasta/deep-OTM). "
+                                       f"{_blocked} entries premium floor (₹20) se block hui (option bahut sasta/deep-OTM). "
                                        f"'{_leg_txt}' ke liye ATM ke najdeek strike chuno - wahan premium floor se upar hoga. ")
                         _zero_tips += [
                             "ATM/ITM strike chuno (OTM door ke premium ₹20 se kam hote hain - wahi block ho rahe hain)",
                             "Direction sahi karo: BUY signal → BUY CE / SELL PE; SELL signal → BUY PE / SELL CE",
                             "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
+                        ]
+                    elif _blocked_prem > 0 and _sigs > 0:
+                        # Signal BANA tha par us strike/din ka real option premium
+                        # recorded hi nahi tha -> entry honest skip. Ise "signals hi
+                        # nahi bane" bolna galat hota (diagnostics jhooth bolta).
+                        _zero_note += (f"{', '.join(_ok_syms)} par {_sigs} signals bane, par "
+                                       f"{_blocked_prem} entry(s) rok di gayi kyunki us strike ka real "
+                                       f"option premium (recorded option data) available nahi tha. "
+                                       f"Data source: daily bhavcopy/option ticks — synthetic premium nahi banaya jata. ")
+                        _zero_tips += [
+                            "Fyers → Sync Fyers History / Sync NSE Options dabao taaki real option premium aaye",
+                            "ATM strike + aisi date range chuno jahan option chain recorded hai",
+                            "Direction sahi karo: BUY signal → BUY CE / SELL PE; SELL signal → BUY PE / SELL CE",
                         ]
                     else:
                         _zero_note += (f"{', '.join(_ok_syms)} par is period me '{_leg_txt}' ke entry signals hi nahi bane. "
@@ -2221,6 +2244,58 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         _val = _validate_result(m, _per_symbol, _all_trades)
     except Exception:
         _val = {"ok": True, "passed": [], "failed": []}
+    # ---- DATA ROUTING / RISK-MODE DIAGNOSTICS (user rule 27-11) ----
+    # (1) EOD-intraday honesty: jab run daily (open->close) bhavcopy candles par
+    #     chala AUR Risk Mode Intraday hai, to SL/TP (premium points) ki
+    #     seemaon par saaf chetavni chahiye - daily bar me intrabar high-low
+    #     swing poora nahi dikhta. Ye downgrade par hi nahi, seedha 1d
+    #     request par bhi lagta hai (pehle _auto_daily par hi tha).
+    # (2) Per-symbol source: har symbol ka asli data source + executed TF
+    #     UI me badge ke roop me dikhe, taaki "5m chala" ka daava tab bhi
+    #     sach ho jab kisi symbol ka intraday data hi na ho.
+    # (3) Partial coverage: requested trading days ka aadha bhi data na mile
+    #     to chup-chap result na do - naam sahit warning.
+    try:
+        _intraday_risk = str(advanced_in.get("trade_mode", "") or "").lower() == "intraday"
+        _eod_daily = bool(_auto_daily or str(timeframe).lower() == "1d")
+        _risk_warn = ""
+        if _eod_daily and _intraday_risk:
+            _risk_warn = (
+                f"Risk Mode: Intraday + {timeframe} EOD (open→close) data — "
+                "SL/TP premium points ki seema intrabar high-low swings nahi pakadti, "
+                "isliye intraday SL/TP is run me approximate hain.")
+        _sym_src = {}
+        for _s, _v in (_per_symbol or {}).items():
+            if not isinstance(_v, dict):
+                continue
+            _dd = _v.get("data") or {}
+            _sym_src[_s] = {
+                "source": str(_dd.get("source") or ""),
+                "status": str(_dd.get("status") or ""),
+                "bars": int(_dd.get("bars") or 0),
+                "executed_timeframe": timeframe,
+                "eod_daily": bool(_eod_daily),
+                "error": str(_v.get("error") or ""),
+                "why_zero": str(_v.get("why_zero") or ""),
+            }
+        _partial = []
+        for _s, _c in (_cov_by_sym or {}).items():
+            if not isinstance(_c, dict):
+                continue
+            try:
+                _td, _dw = int(_c.get("trading_days") or 0), int(_c.get("days_with_data") or 0)
+                if _td >= 5 and _dw < max(5, int(_td * 0.6)):
+                    _partial.append(f"{_s} {_dw}/{_td} din")
+            except Exception:
+                pass
+        _cov_warn = (""
+                     if not _partial
+                     else ("Partial data: " + ", ".join(_partial) +
+                           " ka data requested range me adhura hai — is symbol/timeframe "
+                           "par signals sirf usi available data se bane hain."))
+    except Exception:
+        _intraday_risk, _eod_daily, _risk_warn = False, False, ""
+        _sym_src, _partial, _cov_warn = {}, [], ""
     try:
         _diag = {"signals_evaluated": _diag_eval, "signals_generated": _diag_sig,
                  "signals_buy": _diag_buy, "signals_sell": _diag_sell,
@@ -2228,12 +2303,24 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                  "phase_ms": _phase_ms,
                  "requested_timeframe": _requested_timeframe,
                  "executed_timeframe": timeframe,
-                 "executed_data_source": ("daily_bhavcopy" if _auto_daily else timeframe),
-                 "risk_warning": (
-                     "Risk Mode: Intraday + 1d EOD data — premium SL/TP (points) "
-                     "intrabar high-low swings ko nahi pakadte; results approximate."
-                     if (_auto_daily and str(advanced_in.get("trade_mode", "")).lower() == "intraday")
-                     else "")}
+                 "executed_data_source": ("daily_bhavcopy" if _eod_daily else timeframe),
+                 "executed_is_eod_daily": bool(_eod_daily),
+                 "symbol_sources": _sym_src,
+                 "partial_coverage": _partial,
+                 "coverage_warning": _cov_warn,
+                 "risk_warning": _risk_warn,
+                 # Har run ka ek-line summary (0 trades wale run me bhi):
+                 # symbol + TF + source + date range + BUY/SELL counts.
+                 "summary": (
+                     f"Symbols: {', '.join(_syms) or req.symbol} · "
+                     f"Timeframe: {_requested_timeframe}"
+                     + ("" if str(_requested_timeframe) == str(timeframe)
+                        else f" → executed {timeframe}") +
+                     f" · Source: {('daily_bhavcopy (EOD)' if _eod_daily else timeframe)} · "
+                     f"Dates: {start_date} → {end_date} · "
+                     f"Signals: {int(_diag_buy)} BUY / {int(_diag_sell)} SELL "
+                     f"({int(_diag_sig)} generated of {int(_diag_eval)} evaluated) · "
+                     f"Trades: {int((m or {}).get('total_trades', 0) or 0)}")}
     except Exception:
         _diag = {}
     # Real option tick data: mode user ne maanga ho (data_mode) aur ticks store ho.
@@ -2346,11 +2433,18 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             "executed_timeframe": timeframe,
             "downgraded_to_daily": bool(_auto_daily),
             "unavailable_symbols": _intraday_unavailable,
+            "executed_is_eod_daily": bool(_eod_daily),
+            "symbol_sources": _sym_src,
+            "partial_coverage": _partial,
+            "coverage_warning": _cov_warn,
+            "risk_mode_warning": _risk_warn,
             "warning": (
-                f"Requested {_requested_timeframe} ke liye real intraday data nahi mila "
-                f"({', '.join(_intraday_unavailable) or 'symbols'}). Backtest honestly "
-                f"1d EOD bhavcopy par chalaya gaya — intrabar SL/TP swings isme nahi dikhte."
-                if _auto_daily else ""),
+                (f"Requested {_requested_timeframe} ke liye real intraday data nahi mila "
+                 f"({', '.join(_intraday_unavailable) or 'symbols'}). Backtest honestly "
+                 f"1d EOD bhavcopy par chalaya gaya — intrabar SL/TP swings isme nahi dikhte."
+                 if _auto_daily else "")
+                + ((" " + _cov_warn) if _cov_warn else "")
+                + ((" " + _risk_warn) if _risk_warn else "")),
         },
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
         "symbols": _syms,
