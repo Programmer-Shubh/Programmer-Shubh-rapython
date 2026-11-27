@@ -530,7 +530,7 @@ def _ws_index_symbols():
             out[_fy] = _name
     except Exception:
         pass
-    out.setdefault("NSE:NIFTYMIDSELECT-INDEX", "MIDCPNIFTY")
+    out.setdefault("NSE:NIFTY_MID_SELECT-INDEX", "MIDCPNIFTY")
     return out
 
 
