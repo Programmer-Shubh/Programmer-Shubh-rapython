@@ -138,6 +138,20 @@ _STOOQ_MAP = {
 
 _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
+
+def _free_get(url, headers=None, timeout=5):
+    """Free quote sources bhi fixed-IP proxy se chalao jab configured ho.
+    Cloud par direct Yahoo/Google/Stooq block/429 milte hain; broker / NSE
+    ki tarah yahin proxy use karna zaroori hai (live data fallback)."""
+    try:
+        from core.services.egress_proxy import cfg as _pcfg, sync_request as _sreq
+        if _pcfg().get("configured"):
+            return _sreq("GET", url, headers=headers or _UA, timeout=timeout)
+    except Exception:
+        pass
+    return requests.get(url, headers=headers or _UA, timeout=timeout)
+
+
 _YAHOO_SESS = None
 
 
@@ -235,7 +249,7 @@ def _yahoo_fallback_quote(symbol: str, timeout: float = 5) -> dict:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=1d&range=5d"
         _sess = _yahoo_session()
         try:
-            r = _sess.get(url, timeout=timeout) if _sess is not None else requests.get(url, headers=_UA, timeout=timeout)
+            r = _free_get(url, _UA, timeout)
         except Exception:
             r = None
         if r is not None and r.status_code == 200:
@@ -247,7 +261,7 @@ def _yahoo_fallback_quote(symbol: str, timeout: float = 5) -> dict:
             # (regularMarketPrice stale ho sakta hai - PGINVIT jaisa).
             try:
                 url2 = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=15m&range=5d"
-                r2 = _sess.get(url2, timeout=timeout) if _sess is not None else requests.get(url2, headers=_UA, timeout=timeout)
+                r2 = _free_get(url2, _UA, timeout)
                 if r2 is not None and r2.status_code == 200:
                     j2 = r2.json()
                     res2 = (j2.get("chart", {}).get("result") or [{}])[0]
@@ -315,7 +329,7 @@ def fetch_stooq_spot(symbol: str) -> float:
         for ssym in candidates:
             try:
                 url = f"https://stooq.com/q/l/?s={ssym}&f=sd2t2ohlcv&h&e=csv"
-                r = requests.get(url, headers=_UA, timeout=5)
+                r = _free_get(url, _UA, 5)
                 if r.status_code == 200 and "N/D" not in r.text:
                     lines = r.text.strip().split("\n")
                     if len(lines) >= 2:
@@ -336,7 +350,7 @@ def fetch_google_spot(symbol: str) -> float:
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         url = f"https://www.google.com/finance/quote/{symbol}:NSE"
-        r = requests.get(url, headers=headers, timeout=5)
+        r = _free_get(url, headers, 5)
         if r.status_code == 200:
             m = re.search(r'data-last-price="([^"]+)"', r.text)
             if m:
@@ -598,7 +612,7 @@ def fetch_yahoo_daily(symbol: str, start_date: str, end_date: str, timeout: floa
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}?interval=1d&period1={p1}&period2={p2}"
         _sess = _yahoo_session()
         try:
-            r = _sess.get(url, timeout=timeout) if _sess is not None else requests.get(url, headers=_UA, timeout=timeout)
+            r = _free_get(url, _UA, timeout)
         except Exception:
             return []
         if r is None or r.status_code != 200:
