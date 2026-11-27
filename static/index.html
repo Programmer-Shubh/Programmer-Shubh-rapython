@@ -503,6 +503,7 @@
                         <button class="btn btn-sm btn-outline-primary" onclick="posAddLeg()"><i class="bi bi-plus-lg"></i> Add Leg</button>
                         <button class="btn btn-sm btn-outline-danger" onclick="posClearLegs()"><i class="bi bi-x-lg"></i> Clear</button>
                     </div>
+                    <div id="pos-direction-map" class="alert alert-light border py-1 px-2 mt-2 mb-0 small" style="font-size:11px"></div>
 
                     <!-- STEP 3 — one clear primary action -->
                     <div class="small fw-bold text-primary mt-3 mb-1"><i class="bi bi-play-circle"></i> 3 · Run &amp; Results</div>
@@ -536,6 +537,7 @@
                     <div class="card mt-3" id="pos-results-card" style="display:none">
                         <div class="card-header py-2 d-flex justify-content-between align-items-center"><strong class="small"><i class="bi bi-bar-chart"></i> Backtest Results</strong><span id="pos-res-badge"></span></div>
                         <div class="card-body p-2">
+                            <div id="pos-diag" class="small mb-2"></div>
                             <div class="row g-2" id="pos-metrics"></div>
                             <div class="mt-2" id="pos-trade-list" style="overflow-x:auto"></div>
                             <div class="mt-2"><button class="btn btn-sm btn-outline-info" onclick="posOpenFullResults()"><i class="bi bi-arrow-right"></i> Full Results (equity charts) me dekho</button></div>
@@ -2858,8 +2860,29 @@ let _lastOpenTrdHTML = null;
                   '</tr>';
             }).join('');
         }
+        posRenderDirectionMap();
         ebUpdateSummary();
         posUpdatePayoff();
+    }
+    // Signal → leg mapping. Engine signal direction (BUY=bullish, SELL=bearish)
+    // sirf tab leg chalati hai jab leg usi direction ki ho. Galat/ulta suggesion
+    // (SELL signal par BUY CE) yahan kabhi nahi dikhte.
+    function posLegBias(l){
+        const tx=String(l.transaction||'buy').toLowerCase(), ot=String(l.option_type||'CE').toUpperCase();
+        if((tx==='buy'&&ot==='CE')||(tx==='sell'&&ot==='PE')) return 'bull';
+        if((tx==='buy'&&ot==='PE')||(tx==='sell'&&ot==='CE')) return 'bear';
+        return 'none';
+    }
+    function posRenderDirectionMap(){
+        const el=document.getElementById('pos-direction-map'); if(!el)return;
+        if(!posLegs.length){el.innerHTML='<i class="bi bi-info-circle"></i> Template chuno ya leg add karo — signal ↔ leg mapping yahan dikhega.';return;}
+        const bull=posLegs.filter(l=>posLegBias(l)==='bull').map(posLegLabel);
+        const bear=posLegs.filter(l=>posLegBias(l)==='bear').map(posLegLabel);
+        const none=posLegs.filter(l=>posLegBias(l)==='none').map(posLegLabel);
+        el.innerHTML='<strong><i class="bi bi-arrow-left-right"></i> Signal → Leg mapping:</strong> '+
+            '<span class="badge bg-success">BUY / bullish</span> → '+(bull.length?bull.join(' + '):'<em>koi bullish leg nahi — BUY signal par trade nahi</em>')+
+            ' &nbsp;|&nbsp; <span class="badge bg-danger">SELL / bearish</span> → '+(bear.length?bear.join(' + '):'<em>koi bearish leg nahi — SELL signal par trade nahi</em>')+
+            (none.length?(' &nbsp;|&nbsp; <span class="badge bg-light text-dark border">hedge/other</span> → '+none.join(' + ')):'');
     }
     function posAddLeg(){posLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:1,expiry:'weekly'});posRenderLegs();}
     function posRemoveLeg(i){posLegs.splice(i,1);posRenderLegs();}
@@ -2915,29 +2938,49 @@ let _lastOpenTrdHTML = null;
             const intr=l.option_type==='CE'?Math.max(0,spt-l._strike):Math.max(0,l._strike-spt);
             return a+(l.transaction==='buy'?(intr-l._prem):(l._prem-intr))*lot*(l.lots||1);
         },0);
-        const xs=[],ys=[];let maxP=-Infinity,minP=Infinity,bes=[];
+        const xs=[],ys=[];
         for(let pct=-8;pct<=8;pct+=0.5){
-            const spt=Math.round(spot*(1+pct/100)), pnl=netPnl(spt);
-            xs.push(spt);ys.push(Math.round(pnl));
-            maxP=Math.max(maxP,pnl);minP=Math.min(minP,pnl);
-            if(ys.length>1&&((ys[ys.length-2]<0&&pnl>=0)||(ys[ys.length-2]>=0&&pnl<0))) bes.push(spt);
+            const spt=Math.round(spot*(1+pct/100));
+            xs.push(spt);ys.push(Math.round(netPnl(spt)));
         }
-        let ul='';
-        try{
-            const ue=netPnl(Math.round(spot*1.08)),uf=netPnl(Math.round(spot*1.5)),de=netPnl(Math.round(spot*0.92)),df=netPnl(Math.round(spot*0.5));
-            if(ue<0&&uf<ue) ul='upside (naked short CE)';
-            if(de<0&&df<de) ul=(ul?ul+' + ':'')+'downside (naked short PE)';
-        }catch(e){}
-        const maxProfit=Math.round(maxP),maxLoss=Math.round(minP);
-        const netCredit=posLegs.reduce((a,l)=>a+(l.transaction==='sell'?l._prem:-l._prem)*lot*(l.lots||1),0);
+        // ANALYTIC expiry payoff (not a ±8% sample): slope at S→∞ tells us
+        // whether profit/loss is truly unlimited; endpoints give exact finite
+        // bounds. This keeps Max Profit / Max Loss / Net Credit / Breakeven
+        // mathematically consistent with spot, strike, lot and BS premium.
+        let lower=0, upperConst=0, upperSlope=0;
+        posLegs.forEach(l=>{
+            const q=lot*(l.lots||1), K=l._strike, pr=l._prem, buy=l.transaction==='buy';
+            if(l.option_type==='CE'){
+                lower += buy? -pr*q : pr*q;
+                upperConst += buy? -pr*q : pr*q;
+                upperSlope += buy? q : -q;
+            }else{
+                lower += buy? (K-pr)*q : -(K-pr)*q;
+                upperConst += buy? -pr*q : pr*q;
+            }
+        });
+        const netCredit=upperConst;
+        const maxProfit=upperSlope>0?Infinity:Math.round(Math.max(lower,upperConst));
+        const maxLoss=upperSlope<0?-Infinity:Math.round(Math.min(lower,upperConst));
+        // Breakeven: payoff is piecewise linear; check sign changes at strikes.
+        const pts=[0,...posLegs.map(l=>l._strike),spot*10].filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>a-b);
+        const bes=[];
+        for(let i=0;i<pts.length-1;i++){
+            const a=pts[i],b=pts[i+1],fa=netPnl(a),fb=netPnl(b);
+            if(fa===0){bes.push(Math.round(a));continue;}
+            if((fa<0&&fb>0)||(fa>0&&fb<0)) bes.push(Math.round(a+(b-a)*(-fa)/(fb-fa)));
+        }
+        if(netPnl(pts[pts.length-1])===0) bes.push(Math.round(pts[pts.length-1]));
+        const uniqBes=[...new Set(bes)].filter(b=>b>0);
         const sp=document.getElementById('pos-payoff-spot'); if(sp) sp.textContent='Spot: ₹'+spot.toFixed(2)+' | ATM: '+atm;
         const pm=document.getElementById('pos-payoff-metrics');
+        const _unlP=!isFinite(maxProfit), _unlL=!isFinite(maxLoss);
         if(pm) pm.innerHTML=
-            '<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">₹'+maxProfit.toLocaleString()+'</div></div></div>'+
-            '<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">'+(ul?'Unlimited ♾️':'₹'+Math.abs(maxLoss).toLocaleString())+'</div></div></div>'+
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">'+( _unlP?'Unlimited ♾️':'₹'+maxProfit.toLocaleString())+'</div></div></div>'+
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">'+(_unlL?'Unlimited ♾️':'₹'+Math.abs(maxLoss).toLocaleString())+'</div></div></div>'+
             '<div class="col"><div class="card stat-card-sm"><div class="label">Net '+(netCredit>=0?'Credit':'Debit')+'</div><div class="value">₹'+Math.abs(Math.round(netCredit)).toLocaleString()+'</div></div></div>'+
-            '<div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">'+(bes.length?bes.map(b=>'₹'+b).join(', '):'—')+'</div></div></div>'+
-            '<div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">'+(ul?'∞ (unlimited)':(maxLoss<0?(maxProfit/Math.abs(maxLoss)).toFixed(2):'∞'))+'</div></div></div>'+
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">'+(uniqBes.length?uniqBes.map(b=>'₹'+b.toLocaleString()).join(', '):'—')+'</div></div></div>'+
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">'+(_unlP||_unlL?'∞ / undefined':(maxLoss<0?(maxProfit/Math.abs(maxLoss)).toFixed(2):'∞'))+'</div></div></div>'+
             '<div class="col"><div class="card stat-card-sm"><div class="label">Legs × Lot</div><div class="value">'+posLegs.length+' × '+lot+'</div></div></div>';
         try{Plotly.newPlot('pos-payoff-chart',[
             {x:xs,y:ys,type:'scatter',mode:'lines',fill:'tozeroy',line:{color:maxProfit>Math.abs(maxLoss)?'#198754':'#0d6efd',width:2},fillcolor:'rgba(13,110,253,0.08)',name:'Net P&L'},
@@ -3012,6 +3055,27 @@ let _lastOpenTrdHTML = null;
                 ? ' <span class="badge bg-warning text-dark" title="Real 1M option data na hone par app imaandaari se daily bhavcopy par chalti hai (koi fake bar nahi)">Requested '+tfSel+' → executed '+tfRun+'</span>'
                 : ' <span class="badge bg-light text-dark border">'+tfRun+'</span>') : '';
             badge.innerHTML='<span class="badge bg-info">'+posBadge(res)+'</span>'+tfBadge+' <small class="text-muted">'+(res&&res.run_id||'')+'</small>';
+        }
+        // Run diagnostics — har run me (0 trades ho tab bhi) kya chala, kyon.
+        const dg=document.getElementById('pos-diag');
+        if(dg){
+            const p=(res&&res.params)||{}, dr=(res&&res.data_routing)||{}, di=(res&&res.diagnostics)||{};
+            const reqTf=dr.requested_timeframe||p.timeframe||'—', execTf=dr.executed_timeframe||p.timeframe||'—';
+            const warn=dr.warning||(di.risk_warning||'');
+            const chips=[
+                '<span class="badge bg-light text-dark border">Symbols: '+((p.symbols||posSymbols()).join(', ')||'—')+'</span>',
+                '<span class="badge bg-light text-dark border">TF: '+reqTf+(reqTf!==execTf?(' → <strong>'+execTf+'</strong>'):'')+'</span>',
+                '<span class="badge bg-light text-dark border">Source: '+String(res.data_source||'—')+'</span>',
+                '<span class="badge bg-light text-dark border">'+p.start_date+' → '+p.end_date+'</span>',
+                '<span class="badge bg-success">BUY signals: '+(di.signals_buy||0)+'</span>',
+                '<span class="badge bg-danger">SELL signals: '+(di.signals_sell||0)+'</span>',
+                '<span class="badge bg-light text-dark border">Generated: '+(di.signals_generated||0)+' / evaluated: '+(di.signals_evaluated||0)+'</span>'
+            ];
+            dg.innerHTML='<div class="d-flex flex-wrap gap-1 mb-1">'+chips.join('')+'</div>'+
+                (warn?'<div class="alert alert-warning py-1 px-2 mb-1"><i class="bi bi-exclamation-triangle"></i> '+warn+'</div>':'')+
+                (res.data_note?'<div class="text-muted">'+String(res.data_note)+'</div>':'')+
+                ((!((m.total_trades)||0))?'<div class="text-muted">Koi trade nahi — '+'signal/filter ya data gap ki wajah. '+
+                    ((res.suggestions||[]).length?res.suggestions.slice(0,2).join(' · '):'')+'</div>':'');
         }
         const fm=document.getElementById('pos-metrics');
         if(fm){

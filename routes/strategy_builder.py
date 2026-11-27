@@ -1428,25 +1428,41 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         # Multi-symbol support: always allow all symbols (user selected them)
         if len(_syms) > 25:
             _syms = _syms[:25]
-        timeframe = (advanced_in.get("timeframe") or "1d").lower()
-        # Algottest-style fast path: agar is symbol ke liye REAL 1-minute option
-        # chain/tick data cached nahi hai, to 5m engine ko daily-bhavcopy bars
-        # par chalao. Warna engine har intraday bar ke liye missing premium par
-        # 0 trades deta tha aur slow network fetch me 30-60s lagte the. Daily
-        # real prints (open->close) se turant, honest result milta hai.
+        _requested_timeframe = (advanced_in.get("timeframe") or "1d").lower()
+        timeframe = _requested_timeframe
+        # DATA ROUTING (user rule): 5m/15m must use REAL intraday bars whenever
+        # they exist. Check the persistent intraday cache + the lakehouse tick
+        # store first (offline/fast). If neither has data, a connected broker can
+        # still fetch real intraday bars via _intraday_full_range(); we no longer
+        # silently downgrade to 1d. If even that is impossible (BSE indices have
+        # no NSE intraday feed), the daily path runs — but we RECORD it so the UI
+        # shows an explicit "requested X / executed Y" warning.
         _auto_daily = False
+        _intraday_unavailable = []
         if timeframe in ("1m", "5m", "15m", "30m", "1h"):
+            _has_intraday = False
             try:
-                from core.services.option_lakehouse import OPTION_TICKS_ROOT
-                _req_syms_tf = [str(s).upper() for s in (_syms or [symbol])]
-                _has_1m = any(
-                    (OPTION_TICKS_ROOT / f"underlying={_s}" / "data_mode=1m_chain").is_dir()
-                    for _s in _req_syms_tf)
+                from core.services.intraday_cache import get_cached_bars
+                for _s in _syms:
+                    if len(get_cached_bars(_s, timeframe, start_date, end_date) or []) >= 15:
+                        _has_intraday = True
+                        break
             except Exception:
-                _has_1m = False
-            if not _has_1m:
+                pass
+            if not _has_intraday:
+                try:
+                    from core.services.option_lakehouse import OPTION_TICKS_ROOT
+                    _has_intraday = any(
+                        (OPTION_TICKS_ROOT / f"underlying={_s}").is_dir() for _s in _syms)
+                except Exception:
+                    pass
+            if not _has_intraday:
+                # NSE symbols with a live broker can attempt a real fetch.
+                _has_intraday = any(_s not in _BSE_INDEX_SYMBOLS for _s in _syms)
+            if not _has_intraday:
                 timeframe = "1d"
                 _auto_daily = True
+                _intraday_unavailable = list(_syms)
         _syms = _syms[:25]
         _bar_cap = 120 if len(_syms) > 1 else 250
         # Coverage rule (absolute 15/30 ki jagah): requested trading days ka
@@ -2008,14 +2024,14 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                                        f"'{_leg_txt}' ke liye ATM ke najdeek strike chuno - wahan premium floor se upar hoga. ")
                         _zero_tips += [
                             "ATM/ITM strike chuno (OTM door ke premium ₹20 se kam hote hain - wahi block ho rahe hain)",
-                            "Opposite side try karo (Buy ke bajaye Sell / CE ke bajaye PE)",
+                            "Direction sahi karo: BUY signal → BUY CE / SELL PE; SELL signal → BUY PE / SELL CE",
                             "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
                         ]
                     else:
                         _zero_note += (f"{', '.join(_ok_syms)} par is period me '{_leg_txt}' ke entry signals hi nahi bane. "
                                        "Ye honest zero hai — signal nahi to trade nahi.")
                         _zero_tips += [
-                            "Opposite side try karo (Buy ke bajaye Sell / CE ke bajaye PE)",
+                            "Direction sahi karo: BUY signal → BUY CE / SELL PE; SELL signal → BUY PE / SELL CE",
                             "Indicators kam karo (sirf SuperTrend) ya Min Score ghatao",
                             "Dates lambi karo (3 month) taaki signals banne ka mauka mile",
                             "Strategy Target/SL bahut tight to nahi — pehle bina SL/TP chalakar dekho",
@@ -2209,7 +2225,15 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         _diag = {"signals_evaluated": _diag_eval, "signals_generated": _diag_sig,
                  "signals_buy": _diag_buy, "signals_sell": _diag_sell,
                  "rejected": _diag_rej, "coverage": _cov_by_sym,
-                 "phase_ms": _phase_ms}
+                 "phase_ms": _phase_ms,
+                 "requested_timeframe": _requested_timeframe,
+                 "executed_timeframe": timeframe,
+                 "executed_data_source": _tick_src or ("daily_bhavcopy" if _auto_daily else timeframe),
+                 "risk_warning": (
+                     "Risk Mode: Intraday + 1d EOD data — premium SL/TP (points) "
+                     "intrabar high-low swings ko nahi pakadte; results approximate."
+                     if (_auto_daily and str(advanced_in.get("trade_mode", "")).lower() == "intraday")
+                     else "")}
     except Exception:
         _diag = {}
     # Real option tick data: mode user ne maanga ho (data_mode) aur ticks store ho.
@@ -2315,6 +2339,19 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         "data_note": ("5-minute option-chain cache nahi hai — real daily bhavcopy "
                       "(open→close) par instant backtest chala (no synthetic bars)."
                       if _auto_daily else ""),
+        # Explicit routing transparency. UI isko prominent badge/warning me
+        # dikhati hai (requested TF != executed TF par kabhi chup nahi rehte).
+        "data_routing": {
+            "requested_timeframe": _requested_timeframe,
+            "executed_timeframe": timeframe,
+            "downgraded_to_daily": bool(_auto_daily),
+            "unavailable_symbols": _intraday_unavailable,
+            "warning": (
+                f"Requested {_requested_timeframe} ke liye real intraday data nahi mila "
+                f"({', '.join(_intraday_unavailable) or 'symbols'}). Backtest honestly "
+                f"1d EOD bhavcopy par chalaya gaya — intrabar SL/TP swings isme nahi dikhte."
+                if _auto_daily else ""),
+        },
         "symbol": "+".join(_syms) if len(_syms) > 1 else req.symbol,
         "symbols": _syms,
         "per_symbol": _per_symbol,

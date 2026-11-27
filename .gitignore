@@ -75,6 +75,10 @@ Dockerfile
 .koyeb.yaml
 WEBSITE_HINDI_DOC.md
 
+# generated market data + one-off probe scripts (not for commit)
+data/lakehouse/
+find_unknown.py
+
 # research artifacts (not for commit)
 scripts/_sell_grid_*_results*.json
 scripts/_validation_results.json
