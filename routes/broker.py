@@ -1097,7 +1097,12 @@ async def sync_historical():
     POST /api/broker/nse-option-sync (NSE official bhavcopy)."""
     try:
         from core.services.fyers_history_sync import sync_async
-        return sync_async(start_date="2026-01-01")
+        # Last ~4 months is enough for strategy backtests. Fetching the whole
+        # year on every click made the index-bars phase take 6+ minutes and
+        # ate the rate-limit budget before option contracts were reached.
+        import datetime as _dt
+        _start = (_dt.date.today() - _dt.timedelta(days=120)).strftime("%Y-%m-%d")
+        return sync_async(start_date=_start)
     except Exception as e:
         return {"started": False, "error": str(e)[:200]}
 

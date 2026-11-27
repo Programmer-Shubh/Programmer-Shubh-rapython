@@ -66,10 +66,10 @@ _HAS_WEEKLY = {"NIFTY", "SENSEX"}   # NIFTY Tue, SENSEX Thu (BSE weekly)
 _STRIKE_OFFSETS = {"SENSEX": tuple(range(-6, 7))}
 # SENSEX needs more calls (13 strikes x CE/PE x weekly expiries). Background
 # thread can afford a longer per-index budget than the NSE-only run.
-_INDEX_DEADLINE = {"SENSEX": 180}
+_INDEX_DEADLINE = {"SENSEX": 300}
 # Fyers free tier throttles bursts (429 after ~10-12 rapid requests). Pace
 # contract fetches to keep the sync honest and complete.
-_CONTRACT_SLEEP = 0.35
+_CONTRACT_SLEEP = 0.6
 
 _IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 _RUN_LOCK = threading.Lock()
@@ -352,6 +352,14 @@ def sync_all(start_date: str = "2026-01-01", log=print,
             closes = ibars
             step = _STRIKE_STEP.get(idx, 50.0)
             exps = expiry_dates(idx, start_date, (end[:8] + "28"))
+            if idx == "SENSEX":
+                # Fyers /data/history serves ACTIVE contracts only — expired
+                # weeklies answer "Invalid symbol" (and their retries trigger
+                # 429). Keep two nearest weeklies + the monthly expiry.
+                _act = [e for e in exps
+                        if (_dt.datetime.strptime(e, "%Y-%m-%d").date() - _ist_today()).days >= -1]
+                _pick = _act[:2] + ([_act[-1]] if len(_act) > 2 and _act[-1] not in _act[:2] else [])
+                exps = _pick
             exp_ok = []
             _idx_deadline = _ptime.time() + _INDEX_DEADLINE.get(idx, _PER_INDEX_DEADLINE)
             for exp in exps:
