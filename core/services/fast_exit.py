@@ -473,6 +473,18 @@ def _on_message(message):
                 continue
             _WS["ticks"] = int(_WS.get("ticks") or 0) + 1
             _WS["last_tick"] = _ist_now_str()
+            # Underlying index WS tick -> dashboard/WS spot cache. Ye REAL
+            # live price hai (Fyers feed), REST quote limit (429) se independent.
+            _idx_name = _ws_index_symbols().get(sym)
+            if _idx_name:
+                try:
+                    from core.services.live_market_data import _live_cache_set
+                    _live_cache_set(_idx_name, {
+                        "spot": float(v), "formatted": f"INR {float(v):,.2f}",
+                        "change": 0, "high": float(v), "low": float(v),
+                        "source": "fyers_ws"})
+                except Exception:
+                    pass
             # REAL option tick recording (user rule 24-11): har WS tick ka
             # option LTP option_ticks table me store karo - backtest real tick
             # data par chal sake. Non-option symbols ignore hote hain.
@@ -507,13 +519,31 @@ def _on_message(message):
         _WS["last_error"] = f"tick: {e}"[:160]
 
 
+def _ws_index_symbols():
+    """Underlying index symbols for the live dashboard. Tick stream pehle
+    sirf open option contracts subscribe karta tha (0 positions = 0 ticks),
+    isliye 'realtime' spot kabhi update hi nahi hota tha."""
+    out = {}
+    try:
+        from core.services.symbol_resolver import FYERS_UNDERLYING
+        for _name, _fy in FYERS_UNDERLYING.items():
+            out[_fy] = _name
+    except Exception:
+        pass
+    out.setdefault("NSE:NIFTYMIDSELECT-INDEX", "MIDCPNIFTY")
+    return out
+
+
 def _ws_on_connect():
     global _WS_SOCKET
     _WS["connected"] = True
     _WS["connected_at"] = _ist_now_str()
     _WS["last_error"] = ""
     try:
-        syms = list(_refresh_symbol_map(force=True).keys())
+        syms = list(_SYM_MAP.keys())
+        for _fy in _ws_index_symbols():
+            if _fy not in syms:
+                syms.append(_fy)
         if syms and _WS_SOCKET is not None:
             _WS_SOCKET.subscribe(symbols=syms, data_type="SymbolUpdate")
             _WS["subscribed"] = syms
@@ -538,6 +568,7 @@ def _reconcile_subscriptions():
         return
     _LAST_RECONCILE = now
     want = set(_refresh_symbol_map(force=True).keys())
+    want.update(_ws_index_symbols().keys())
     if not _WS.get("connected") or _WS_SOCKET is None:
         return
     have = set(_WS.get("subscribed") or [])
