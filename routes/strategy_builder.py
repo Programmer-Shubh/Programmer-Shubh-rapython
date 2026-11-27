@@ -1156,6 +1156,59 @@ def _dummy_trades_all_symbols(syms, start_date, end_date, legs, indicators):
     _rnd.shuffle(trades)
     return trades, per_sym
 
+# ---------------------------------------------------------------------------
+# Real-data auto-seed — NEVER blocks a backtest for minutes.
+# Pehle yahan NSE F&O bhavcopy ke 8 din ke full CSV sync me download + parse
+# hote the (pandas read_csv + iterrows). Free tier par ye 60s+ le leta tha,
+# UI ka poll khatam ho jata tha aur user ko "Multi-leg backtest error: no
+# result" dikhta tha. SENSEX/BANKEX (BSE index) ka option data NSE bhavcopy me
+# hota hi nahi — unke liye fetch bilkul bekaar tha (hamesha hang).
+# Ab: BSE index skip, bounded wait (max 20s), phir background me chalta rehta
+# hai aur UI ko saaf "data fetch ho raha hai" message milta hai.
+# ---------------------------------------------------------------------------
+_BSE_INDEX_SYMBOLS = {"SENSEX", "BANKEX", "SENSEX50"}
+_SEED_WAIT_S = 20.0
+_SEED_LOCK = _bt_thread.Lock()
+_SEED_INFLIGHT: set = set()
+
+
+def _seed_option_data_bounded(start_date, end_date, symbols, max_days=3):
+    """Start real NSE bhavcopy auto-seed, wait at most _SEED_WAIT_S seconds.
+
+    Returns {"started": bool, "finished": bool, "still_running": bool}.
+    Jab tak fetch chal raha hai tab tak backtest NAHI chalaya jata (SQLite
+    write/read race se bachne ke liye) — caller user ko retry message deta hai.
+    """
+    syms = [str(s).strip().upper() for s in (symbols or []) if str(s).strip()]
+    syms = [s for s in syms if s not in _BSE_INDEX_SYMBOLS]
+    if not syms:
+        return {"started": False, "finished": True, "still_running": False}
+    key = (str(start_date)[:10], str(end_date)[:10], tuple(sorted(syms)))
+    with _SEED_LOCK:
+        if key in _SEED_INFLIGHT:
+            return {"started": True, "finished": False, "still_running": True,
+                    "already_running": True}
+        _SEED_INFLIGHT.add(key)
+    done = {"finished": False}
+
+    def _work():
+        try:
+            from core.services.option_data_bootstrap import fetch_real_option_data
+            fetch_real_option_data(start_date, end_date, syms, max_days)
+            done["finished"] = True
+        except Exception:
+            done["finished"] = True
+        finally:
+            with _SEED_LOCK:
+                _SEED_INFLIGHT.discard(key)
+
+    t = _bt_thread.Thread(target=_work, daemon=True)
+    t.start()
+    t.join(_SEED_WAIT_S)
+    return {"started": True, "finished": bool(done["finished"]),
+            "still_running": bool(t.is_alive())}
+
+
 def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     import time as _t0m, hashlib, json
     _t0 = _t0m.time()
@@ -1221,9 +1274,28 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                     return False
 
             _missing = [s for s in _req_syms0 if not _has_rows(s)]
-            if _missing:
-                from core.services.option_data_bootstrap import fetch_real_option_data
-                fetch_real_option_data(start_date, end_date, _missing, 8)
+            # BSE indices (SENSEX/BANKEX) NSE bhavcopy me kabhi nahi aate —
+            # unke liye network fetch mat karo (warna har click 60s+ hang).
+            _missing_nse = [s for s in _missing if s not in _BSE_INDEX_SYMBOLS]
+            if _missing_nse:
+                _seed = _seed_option_data_bounded(start_date, end_date,
+                                                  _missing_nse, 3)
+                if _seed.get("still_running"):
+                    return {
+                        "success": False,
+                        "data_pending": True,
+                        "error": ("Real option data (NSE bhavcopy) fetch ho raha hai "
+                                  f"({', '.join(_missing_nse)}). Ye 1-2 minute le sakta hai — "
+                                  "thodi der baad dobara Run Backtest dabao."),
+                        "data_note": ("Pehli baar is date range ka data download hota hai. "
+                                      "Download ke bina koi fake/synthetic bar nahi banaya jata."),
+                        "suggestions": [
+                            "60-90 second ruk kar dobara Run Backtest dabao",
+                            "Ya Library → 'Fetch Real Data (NSE)' se pehle data sync karo",
+                            "NIFTY / BANKNIFTY / FINNIFTY ke liye data pehle se maujood hai — turant result milta hai",
+                        ],
+                        "symbol": symbol,
+                    }
         except Exception:
             pass
         # Merge frontend flat fields
@@ -1847,7 +1919,31 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 return _m if _m.startswith(str(k)) else f"{k}: {_m}"
             errs = "; ".join(_e(k, v) for k, v in _per_symbol.items() if v.get("error"))
             if errs:
-                return {"error": errs}
+                # Structured, actionable failure — UI alert ke bajaye card
+                # dikhata hai (symbol/date/data ka saaf reason + next step).
+                _err_syms = [k for k, v in _per_symbol.items() if v.get("error")]
+                _bse_only = bool(_err_syms) and all(
+                    str(k).upper() in _BSE_INDEX_SYMBOLS for k in _err_syms)
+                if _bse_only:
+                    _dn = ("SENSEX / BANKEX BSE ke index hain — NSE F&O bhavcopy me "
+                           "inka option data hota hi nahi, isliye is date range ke liye "
+                           "recorded option premium available nahi hai. Koi synthetic "
+                           "premium nahi banaya jata.")
+                    _tips = [
+                        "NIFTY / BANKNIFTY / FINNIFTY chuno — inka real option data maujood hai",
+                        "SENSEX ke liye broker (Fyers) live connection + option chain data chahiye",
+                        "Ya date range badal kar dobara try karo (jahan data recorded ho)",
+                    ]
+                else:
+                    _dn = ("Is symbol/date range ke liye real option bars nahi mile. "
+                           "Koi fake/synthetic bar nahi banaya jata.")
+                    _tips = [
+                        "Library → 'Fetch Real Data (NSE)' se pehle data sync karo",
+                        "Date range chhota karo ya NIFTY / BANKNIFTY try karo",
+                        "Library me data availability check karo",
+                    ]
+                return {"success": False, "error": errs, "data_note": _dn,
+                        "suggestions": _tips, "symbol": symbol}
             # Spec §15: synthetic retry HATAYA - fabricated data par trades
             # dikhana cheating hai. Zero trades = honest zero (neeche tips).
             _retry_used = False

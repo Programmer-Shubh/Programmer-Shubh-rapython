@@ -431,6 +431,7 @@
                         <div class="col-md-4">
                             <label class="form-label small mb-1">Symbol</label>
                             <select id="eb-symbol" class="form-select form-select-sm" onchange="posOnSymbolChange();ebUpdateSummary()"><option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="FINNIFTY">FINNIFTY</option><option value="MIDCPNIFTY">MIDCPNIFTY</option><option value="SENSEX">SENSEX</option></select>
+                            <div id="eb-bse-note" class="alert alert-warning py-1 px-2 mt-1 mb-0 small" style="display:none;font-size:10px"><i class="bi bi-info-circle"></i> SENSEX/BANKEX BSE index hain — NSE bhavcopy me inka option data nahi hota, isliye backtest me real option premium nahi milega. NIFTY / BANKNIFTY / FINNIFTY chuno.</div>
                             <label class="form-label small mb-1 mt-2">Timeframe</label>
                             <select id="eb-tf" class="form-select form-select-sm" onchange="ebUpdateSummary()" oninput="ebUpdateSummary()"><option value="1m">1 Min</option><option value="5m" selected>5 Min</option><option value="15m">15 Min</option><option value="1d">Daily</option></select>
                         </div>
@@ -2739,6 +2740,10 @@ let _lastOpenTrdHTML = null;
         const el=document.getElementById('eb-summary');
         if(el) el.innerHTML='<strong>Summary:</strong> '+sym+' · '+tf+' · '+(inds.join(', ')||'SuperTrend')+' · '+mode+' · SL '+sl+' pts / TP '+tp+' pts · '+from+' → '+to+
             '<br><strong>Legs ('+legs.length+'):</strong> '+(legs.join(' + ')||'none — Add Leg ya template chuno')+dirHint+' · Payoff aur backtest results neeche apne aap update hote hain.';
+        // BSE-only index: backtest se pehle hi saaf warning (NSE bhavcopy me
+        // SENSEX ka option data hota hi nahi — warna user ko "no result" milta).
+        const bse=document.getElementById('eb-bse-note');
+        if(bse) bse.style.display=(['SENSEX','BANKEX','SENSEX50'].includes(String(sym).toUpperCase())?'block':'none');
     }catch(e){}}
     // Har control change par summary turant fresh (keyboard/selection dono).
     document.addEventListener('input',e=>{if(e.target&&e.target.closest&&e.target.closest('#easy-bt-card')){try{ebUpdateSummary();}catch(_){}try{posInvalidateResults();}catch(_){}}},true);
@@ -2747,6 +2752,8 @@ let _lastOpenTrdHTML = null;
     // result dikhne se user ko galat symbol/strike samajh aa sakta tha.
     function posInvalidateResults(){
         try{
+            // Run sequence: config badalne par chalu run ka late result discard.
+            window._posRunSeq=(window._posRunSeq||0)+1;
             if(!window._posBT) return;
             window._posBT=null;
             const c=document.getElementById('pos-results-card'); if(c)c.style.display='none';
@@ -2984,18 +2991,70 @@ let _lastOpenTrdHTML = null;
         }
         card.scrollIntoView({behavior:'smooth',block:'start'});
     }
+    // Error/pending state bhi ek proper card me dikhao — pehle yahan alert()
+    // aata tha aur user ko sirf "no result" jaisa dhundhla message milta tha.
+    function renderPosError(res, err){
+        window._posBT=null;
+        const card=document.getElementById('pos-results-card'); if(!card) return;
+        card.style.display='block';
+        const pending=!!(res&&res.data_pending);
+        const badge=document.getElementById('pos-res-badge');
+        if(badge) badge.innerHTML='<span class="badge '+(pending?'bg-warning text-dark':'bg-danger')+'">'+(pending?'DATA FETCH':'NO RESULT')+'</span>';
+        const fm=document.getElementById('pos-metrics'); if(fm) fm.innerHTML='';
+        const msg=String((res&&res.error)||err||'Backtest fail ho gaya.');
+        const note=String((res&&res.data_note)||'');
+        const tips=(res&&res.suggestions)||[];
+        const tl=document.getElementById('pos-trade-list');
+        if(tl) tl.innerHTML='<div class="alert '+(pending?'alert-warning':'alert-danger')+' py-2 small mb-2">'+
+            '<strong>'+(pending?'Real data fetch ho raha hai':'Backtest nahi chala')+':</strong> '+msg+
+            (note?'<div class="mt-1">'+note+'</div>':'')+
+            (tips.length?'<ul class="mb-0 mt-1 ps-3">'+tips.slice(0,4).map(x=>'<li>'+String(x)+'</li>').join('')+'</ul>':'')+
+            '</div>'+
+            '<button class="btn btn-sm btn-success" onclick="runPosBacktest()"><i class="bi bi-arrow-clockwise"></i> Dobara Run Backtest</button>';
+        card.scrollIntoView({behavior:'smooth',block:'start'});
+    }
     async function runPosBacktest(){
         // Koi leg na ho to Easy Builder ki single leg chalegi (posReq fallback)
         try{
+            const seq=(window._posRunSeq=(window._posRunSeq||0)+1);
             const req=posReq();
             const btn=document.getElementById('builder-run-btn');
-            if(btn){btn.disabled=true;btn.textContent='Running...';}
+            const setBtn=t=>{if(btn)btn.innerHTML=t;};
+            if(btn){btn.disabled=true;setBtn('<span class="spinner-border spinner-border-sm"></span> Running...');}
             const r=await P('/api/backtest/run-async',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
             let res=r.result||null;
-            if(!res&&r.job_id){for(let i=0;i<60;i++){const d=await A('/api/backtest/result/'+r.job_id);if(d.status==='done'||d.result){res=d.result||d;break;}if(d.status==='error')throw new Error(d.error||'backtest failed');await new Promise(x=>setTimeout(x,1000));}}
-            if(!res||res.error)throw new Error((res&&res.error)||'no result');
+            if(!res&&r.job_id){
+                // Poll up to 4 min (pehle sirf 60×1s tha — 60s se lamba run
+                // "no result" ban jata tha). 429/5xx par backoff, kyunki
+                // Render free tier edge 1s polling par 429 deta hai.
+                const deadline=Date.now()+240000;
+                let wait=900, lost=false;
+                while(Date.now()<deadline){
+                    let d=null;
+                    try{ d=await A('/api/backtest/result/'+r.job_id); }
+                    catch(e){
+                        const st=e&&e.status;
+                        if(st===429||st===408||st>=500||!st){ await new Promise(x=>setTimeout(x,3000)); continue; }
+                        throw e;
+                    }
+                    if(d&&d.status==='unknown'){lost=true;break;}
+                    if(d&&d.progress&&btn){
+                        const p=d.progress||{};
+                        setBtn('<span class="spinner-border spinner-border-sm"></span> Running '+(p.done||0)+'/'+(p.total||1)+'…');
+                    }
+                    if(d&&d.status==='error')throw new Error(d.error||'backtest failed');
+                    if(d&&(d.status==='done'||d.result)){res=d.result||d;break;}
+                    await new Promise(x=>setTimeout(x,wait));
+                    wait=Math.min(2500,wait+250);
+                }
+                if(!res&&lost)throw new Error('Server restart ho gaya (job lost). Dobara Run Backtest dabao — data cache me hai to jaldi chalega.');
+                if(!res)throw new Error('Backtest 4 minute me poora nahi hua. Dobara Run Backtest dabao.');
+            }
+            if(!res)throw new Error('no result');
+            if(seq!==window._posRunSeq)return; // config beech me badal gaya
+            if(res.error){renderPosError(res);return;}
             renderPosResults(res);
-        }catch(err){alert('Multi-leg backtest error: '+err.message);}
+        }catch(err){renderPosError(null,err&&err.message?err.message:String(err));}
         finally{const btn=document.getElementById('builder-run-btn');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill"></i> Run Backtest';}}
     }
     function posOpenFullResults(){

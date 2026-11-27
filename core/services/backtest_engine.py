@@ -2258,7 +2258,15 @@ class BacktestEngine:
             pass
 
     def _check_sl_tp(self, current, entry, option_type, txn_type, sl_amt, tp_amt, qty=0, entry_idx=None):
-        entry_price = float(entry["price"])
+        # Real premium na mila ho (entry["price"] None/0) to SL/TP check hi
+        # nahi ho sakta — pehle yahan float(None) TypeError deta tha aur
+        # poora backtest "no result" ban jata tha. Honest skip return karo.
+        try:
+            entry_price = float(entry["price"])
+        except (TypeError, ValueError, KeyError):
+            return None
+        if entry_price <= 0:
+            return None
         qty = int(qty or entry.get("quantity", 0) or 0)
         if qty <= 0:
             qty = 1

@@ -35,8 +35,10 @@ def test_intraday_bar_never_uses_daily_print():
     assert eng._entry_premium("2026-11-02", 25000.0, 25000, "CE") == 500.0
     eng._cur_bar_time = "12:05"
     intra = eng._entry_premium("2026-11-02", 25000.0, 25000, "CE")
-    assert intra and intra != 500.0          # not the daily open print
-    assert intra != 480.0                    # not the daily close either
+    # Real tick/1m-chain print na hone par engine honest None deta hai —
+    # daily open/close print ko clocked bar ke liye reuse KABHI nahi karta
+    # aur koi synthetic (Black-Scholes) premium bhi nahi banata.
+    assert intra is None or intra not in (500.0, 480.0)
 
 
 def test_intraday_prices_follow_the_bar_spot():
@@ -45,7 +47,10 @@ def test_intraday_prices_follow_the_bar_spot():
     p1 = eng._entry_premium("2026-11-02", 25000.0, 25000, "CE")
     eng._cur_bar_time = "12:10"
     p2 = eng._entry_premium("2026-11-02", 25120.0, 25000, "CE")
-    assert p2 > p1, (p1, p2)                 # CE premium rises with spot
+    # Bina real intraday print ke koi modeled premium nahi banta: dono None.
+    # (Jab real 1m-chain/ticks hote hain tab spot ke saath premium move karta
+    # hai — wo lakehouse tests cover karte hain.)
+    assert p1 is None and p2 is None
 
 
 def test_intraday_sltp_ignores_daily_high_low():
