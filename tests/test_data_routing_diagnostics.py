@@ -22,7 +22,7 @@ def test_all_supported_symbols_have_exact_strike_step():
 
 def test_midcpnifty_lot_is_not_default_50():
     from utils.helpers import get_lot_size, _STATIC_LOTS
-    assert _STATIC_LOTS["MIDCPNIFTY"] == 75
+    assert _STATIC_LOTS["MIDCPNIFTY"] == 120
     assert get_lot_size("MIDCPNIFTY") != 50  # purana galat default tha
 
 

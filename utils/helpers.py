@@ -70,9 +70,9 @@ _STATIC_LOTS = {
     "NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60,
     "SENSEX": 20, "BANKEX": 30,
     # MIDCPNIFTY pehle map me nahi tha -> default 50 (galat) lagta tha.
-    # NSE contract spec (F&O launch circular) lot = 75. lot_master (broker)
-    # pehle aata hai; ye sirf cold-start/miss par hai.
-    "MIDCPNIFTY": 75,
+    # NSE circular FAOP70616: 140 -> 120 w.e.f. Jan-2026 expiry cycle.
+    # lot_master (broker) pehle aata hai; ye sirf cold-start/miss par hai.
+    "MIDCPNIFTY": 120,
     "RELIANCE": 500, "HDFCBANK": 650, "ICICIBANK": 700,
     "TCS": 225, "INFY": 400, "ITC": 1725, "SBIN": 750,
     "AXISBANK": 625, "KOTAKBANK": 2000, "LT": 175, "HINDUNILVR": 300,
