@@ -170,6 +170,19 @@ def _recent_signal_ok(entry_dates, today, lookback_days, traded_dates):
     return False, ""
 
 
+def _load_conds(s, key):
+    """Saved strategy ki entry/exit conditions (JSON string ya list) — paper
+    signal gate ko backtest ke SAME conditions par chalane ke liye. Pehle
+    always [] bheja jata tha -> backtest 'custom AND' branch, paper indicator
+    fallback = alag signals = paper/backtest mismatch."""
+    import json as _js
+    try:
+        v = _js.loads((s or {}).get(key) or "[]")
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
 def _today_signal(sid, s, today, need_more_than=0):
     """True if the strategy's own indicators fire an entry dated TODAY on
     REAL history (backtest engine, same legs/config). Guards:
@@ -224,7 +237,9 @@ def _today_signal(sid, s, today, need_more_than=0):
             _cfgh = _hl2.md5(_js.dumps(
                 [legs, _js.loads(s.get("indicators") or "[]"),
                  _js.loads(s.get("risk_management") or "{}"),
-                 _js.loads(s.get("advanced_options") or "{}")],
+                 _js.loads(s.get("advanced_options") or "{}"),
+                 _load_conds(s, "entry_conditions"),
+                 _load_conds(s, "exit_conditions")],
                 sort_keys=True, default=str).encode()).hexdigest()[:12]
             _sck = (int(sid or 0), today, _cfgh, int(need_more_than or 0))
             _shit = _SIGNAL_CACHE.get(_sck)
@@ -285,6 +300,10 @@ def _today_signal(sid, s, today, need_more_than=0):
             req.legs = legs if isinstance(legs, list) else []
             req.advanced = adv
             req.risk = risk
+            # BACKTEST == PAPER: saved custom conditions MUST reach the same
+            # engine branch (pehle yahan [] tha -> alag signal logic).
+            req.entry_conditions = _load_conds(s, "entry_conditions")
+            req.exit_conditions = _load_conds(s, "exit_conditions")
             return _run_backtest_core(req)
 
         with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
@@ -484,13 +503,17 @@ def _intraday_signal(sid, s, today, need_more_than=0):
             inds = _js.loads(s.get("indicators") or "[]")
         except Exception:
             inds = []
+        # Saved entry/exit conditions: backtest aur paper DONO ko wahi
+        # custom condition branch chalan hai (pehle yahin [] tha).
+        ent_c = _load_conds(s, "entry_conditions")
+        ext_c = _load_conds(s, "exit_conditions")
 
         def _run():
             from core.services.backtest_engine import BacktestEngine
             eng = BacktestEngine(is_live=False)
             return eng.run(bars[-120:], sym, today, today,
                            inds if isinstance(inds, list) else [],
-                           [], [], legs if isinstance(legs, list) else [],
+                           ent_c, ext_c, legs if isinstance(legs, list) else [],
                            adv, risk, is_live=False)
 
         import concurrent.futures as _cf

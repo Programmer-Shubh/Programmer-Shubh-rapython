@@ -386,7 +386,21 @@ def _fyers_get(path: str, app_id: str, token: str, timeout: int = 8):
     try:
         import requests
         url = f"https://api-t1.fyers.in{path}"
-        r = requests.get(url, headers=_fyers_headers(app_id, token), timeout=timeout)
+        def _fetch():
+            # Render ke rotating IP par Fyers quotes tab whitelisted IP se
+            # aane chahiye — broker_fyers order path proxy use karta tha,
+            # UI quote path sidha requests.get se chala jata tha (blank live).
+            try:
+                from core.services.egress_proxy import sync_request as _sreq
+                _r = _sreq("GET", url, headers=_fyers_headers(app_id, token),
+                           timeout=timeout)
+                if getattr(_r, "status_code", 0) == 200:
+                    return _r
+            except Exception:
+                pass
+            return requests.get(url, headers=_fyers_headers(app_id, token),
+                                timeout=timeout)
+        r = _fetch()
         for _w in (0.4, 0.9):
             if getattr(r, "status_code", 0) != 429:
                 break
@@ -394,7 +408,7 @@ def _fyers_get(path: str, app_id: str, token: str, timeout: int = 8):
                 time.sleep(_w)
             except Exception:
                 pass
-            r = requests.get(url, headers=_fyers_headers(app_id, token), timeout=timeout)
+            r = _fetch()
         if getattr(r, "status_code", 0) != 200:
             return {}
         body = r.json() or {}

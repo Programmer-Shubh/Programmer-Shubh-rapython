@@ -24,7 +24,7 @@ from core.models.bhavcopy_model import BhavcopyModel
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-SPOT_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "HDFCBANK", "TCS", "INFY"]
+SPOT_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "HDFCBANK", "TCS", "INFY"]
 
 # Hard cap: keep a misbehaving client / reconnect storm from eating memory.
 MAX_CONNECTIONS = 20   # per stream
@@ -107,7 +107,13 @@ def _build_spot_frame(live: LiveMarketData, prev: dict):
         if not data:
             entry = _LIVE_CACHE.get(sym)
             data = entry.get("data") if isinstance(entry, dict) else None
-        tick = _tick_from_data(sym, data, prev.get(sym, 0), now_ms)
+        # Honest quote age: purana cached / stale DB close ko "abhi" mat
+        # dikhao. data.quote_ts source par set hota hai; wahi age bhejo.
+        try:
+            ts_ms = int(float((data or {}).get("quote_ts") or 0) * 1000) or None
+        except Exception:
+            ts_ms = None
+        tick = _tick_from_data(sym, data, prev.get(sym, 0), now_ms, ts_ms)
         ticks[sym] = tick
         if prev.get(sym) != tick["spot"]:
             changed = True

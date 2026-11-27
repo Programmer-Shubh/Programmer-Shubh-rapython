@@ -35,6 +35,13 @@ def _live_cache_set(sym, data):
                     and time.time() - float(cur.get("ts") or 0) < 300):
                 return
     if sym in _LIVE_CACHE: _LIVE_CACHE.move_to_end(sym)
+    # Real quote age: cache-entry ts kabhi-kabir stale reuse par refresh hota
+    # hai, isliye alag quote_ts rakho jo UI ko sachchi age bataye.
+    try:
+        if isinstance(data, dict) and not data.get("quote_ts"):
+            data["quote_ts"] = time.time()
+    except Exception:
+        pass
     _LIVE_CACHE[sym] = {"ts": time.time(), "data": data, "ttl": ttl}
     if len(_LIVE_CACHE) > _LIVE_CACHE_MAX: _LIVE_CACHE.popitem(last=False)
 

@@ -4114,7 +4114,9 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
                             _prevSpots[sym]=cur;
                             const chg=d.change?`<div class="${d.change>=0?'price-up':'price-down'}" style="font-size:12px">${d.change>=0?'+':''}${d.change.toFixed(2)}%</div>`:''; 
                             const fmt=cur>0?`INR ${cur.toLocaleString('en-IN',{minimumFractionDigits:2})}`:'No Data';
-                            h+=`<div class="col"><div class="card stat-card ${flash}"><div class="label">${sym}</div><div class="value">${fmt}</div>${chg}<div class="label">${d.source||'live'}</div></div></div>`;
+                            const ageS=d.ts?Math.max(0,Math.round((Date.now()-Number(d.ts))/1000)):0;
+                            const ageTxt=ageS>60?` · STALE ${Math.round(ageS/60)}m`:'';
+                            h+=`<div class="col"><div class="card stat-card ${flash}"><div class="label">${sym}</div><div class="value">${fmt}</div>${chg}<div class="label">${d.source||'live'}${ageTxt}</div></div></div>`;
                         }
                         if(h) document.getElementById('mkt-cards').innerHTML=h;
                         _dashWSDownSince=0;
@@ -4167,7 +4169,7 @@ if(document.getElementById('r-ind-market_regime')?.checked) indicators.push({id:
             if(document.hidden) return;
             if(_dashWS && _dashWS.readyState===1) return;
             if(!_dashWSDownSince){ _dashWSDownSince=Date.now(); return; }
-            if(Date.now()-_dashWSDownSince < 60000) return;
+            if(Date.now()-_dashWSDownSince < 20000) return;
             loadDash();
         }catch(e){}
     },30000);
