@@ -19,12 +19,22 @@ from routes.strategy_builder import _run_backtest_core, BacktestRequest
 @pytest.fixture(autouse=True, scope="module")
 def _seed_pipeline_db():
     """Deterministic DB seed (BANKNIFTY + RELIANCE spot, Jul-Aug 2026).
-    Pipeline DB-first hai (>=15 bars -> no network), isliye suite hermetic +
-    stable hai: Yahoo/NSE availability ya 60d-clock se koi lena-dena nahi.
-    Series me up/down regimes hain taaki BUY+SELL dono taraf signals bane.
-    Teardown seeded range saaf karta hai (dev data ko haath nahi)."""
+
+    ISOLATED TEMP DB: pehle yahin seed shared dev DB (data/ratrade.db) me
+    insert hota tha. Us range me pehle se real bhavcopy rows hone par
+    `UNIQUE constraint failed: idx_bhav_unique` error aata tha (suite kabhi
+    green nahi hoti thi), aur teardown un real rows ko delete bhi kar deta
+    tha. Ab poora module apni temporary SQLite file par chalata hai —
+    na conflict, na dev data ka nuksaan, aur baaki test modules apne DB par
+    hi rahte hain (singleton + env dono restore kiye jaate hain).
+
+    Pipeline DB-first hai (>=15 bars -> no network), isliye suite hermetic:
+    Yahoo/NSE availability ya 60d-clock se koi lena-dena nahi. Series me
+    up/down regimes hain taaki BUY+SELL dono taraf signals bane."""
     import random as _rnd
     import datetime as _dt
+    import shutil as _shutil
+    import tempfile as _tempfile
     from core.models.database import Database as _DB
 
     def _series(sym, base, seed):
@@ -50,19 +60,69 @@ def _seed_pipeline_db():
             d += _dt.timedelta(days=1)
         return rows
 
+    # --- Swap in a private DB for this module (save EVERY global we touch) ---
+    _tmpdir = _tempfile.mkdtemp(prefix="ratrade-bt-consistency-")
+    _tmp_db = os.path.join(_tmpdir, "ratrade.db")
+    _saved = {
+        "instance": _DB._instance,
+        "db_path": _DB._db_path,
+        "use_postgres": _DB._use_postgres,
+        "pg_url": _DB._pg_url,
+        "pg_failed": _DB._pg_failed,
+        "pg_failed_at": _DB._pg_failed_at,
+        "env": {k: os.environ.get(k) for k in
+                ("DB_PATH", "DATABASE_URL", "POSTGRES_URL", "SUPABASE_DB_URL")},
+    }
+    for _k in ("DATABASE_URL", "POSTGRES_URL", "SUPABASE_DB_URL"):
+        os.environ.pop(_k, None)
+    os.environ["DB_PATH"] = _tmp_db
+    _DB._instance = None
+    _DB._db_path = _tmp_db
+    _DB._use_postgres = False
+    _DB._pg_url = None
+    _DB._pg_failed = False
+    _DB._pg_failed_at = 0.0
     _db = _DB.get_instance()
+    _db.init_schema()
+
+    # Gate ke liye network auto-seed band karo: temp DB me option rows nahi
+    # hain, isliye har run "data_pending" (background NSE fetch) de deta tha.
+    # Suite ka maqsad engine consistency hai — NSE download yahan nahi chahiye.
+    import routes.strategy_builder as _sb
+    _saved_seed = _sb._seed_option_data_bounded
+    _sb._seed_option_data_bounded = lambda *a, **k: {"still_running": False, "seeded": 0}
+
     _rows = (_series("BANKNIFTY", 55000.0, 11)
              + _series("RELIANCE", 2850.0, 22))
     _db.executemany(
         "INSERT INTO bhavcopy_data (symbol, trade_date, open_price, high_price,"
         " low_price, close_price, volume, oi) VALUES (?,?,?,?,?,?,?,?)", _rows)
-    yield
     try:
-        _db.execute("DELETE FROM bhavcopy_data WHERE option_type IS NULL AND ("
-                    "(symbol='BANKNIFTY' OR symbol='RELIANCE') ) AND "
-                    "trade_date BETWEEN '2026-07-15' AND '2026-08-25'")
-    except Exception:
-        pass
+        yield
+    finally:
+        _sb._seed_option_data_bounded = _saved_seed
+        # Close this thread's temp-DB connection before removing the file
+        # (Windows won't delete an open SQLite file).
+        try:
+            _lc = getattr(_db, "_local", None)
+            _conn = getattr(_lc, "conn", None)
+            if _conn is not None:
+                _conn.close()
+                _lc.conn = None
+        except Exception:
+            pass
+        _DB._instance = _saved["instance"]
+        _DB._db_path = _saved["db_path"]
+        _DB._use_postgres = _saved["use_postgres"]
+        _DB._pg_url = _saved["pg_url"]
+        _DB._pg_failed = _saved["pg_failed"]
+        _DB._pg_failed_at = _saved["pg_failed_at"]
+        for _k, _v in _saved["env"].items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
+        _shutil.rmtree(_tmpdir, ignore_errors=True)
 
 SYM = "BANKNIFTY"
 START, END = "2026-07-20", "2026-08-20"
