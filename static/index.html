@@ -469,6 +469,19 @@
                                 <option value="bullish">Bullish Only (BUY signal)</option>
                                 <option value="bearish">Bearish Only (SELL signal)</option>
                             </select>
+                            <label class="form-label small mb-1 mt-2">Entry Time Window (IST)</label>
+                            <div class="d-flex flex-wrap gap-1 mb-1">
+                                <button type="button" class="btn btn-sm btn-outline-secondary eb-ew-preset" data-start="09:15" data-end="15:15" data-label="All Session" onclick="posSetEntryWindow(this)" style="font-size:10px;padding:1px 5px">All Session</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary eb-ew-preset" data-start="09:20" data-end="12:00" data-label="Morning Session" onclick="posSetEntryWindow(this)" style="font-size:10px;padding:1px 5px">Morning</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary eb-ew-preset" data-start="12:30" data-end="15:00" data-label="Afternoon Session" onclick="posSetEntryWindow(this)" style="font-size:10px;padding:1px 5px">Afternoon</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary eb-ew-preset" data-start="13:00" data-end="15:00" data-label="Post-13:00 Session" onclick="posSetEntryWindow(this)" style="font-size:10px;padding:1px 5px">Post-13:00</button>
+                            </div>
+                            <div class="d-flex gap-1 align-items-center">
+                                <input type="time" id="eb-entry-start" class="form-control form-control-sm" value="09:15" onchange="posOnEntryWindowChange()">
+                                <span class="small text-muted">→</span>
+                                <input type="time" id="eb-entry-end" class="form-control form-control-sm" value="15:15" onchange="posOnEntryWindowChange()">
+                            </div>
+                            <div class="small text-muted" style="font-size:10px">Sirf naye entries is window me. SL/TP/EOD poori session tak active rahte hain.</div>
                         </div>
                     </div>
                     <!-- ONE live summary for the whole builder -->
@@ -481,6 +494,8 @@
                             <label class="form-label small mb-0">Quick Template</label>
                             <select id="pos-template" class="form-select form-select-sm" onchange="posApplyTemplate(this.value)">
                                 <option value="">— Custom (edit legs below) —</option>
+                                <option value="bullput">Bull Put Spread — SELL PE OTM2 + BUY PE OTM5 (defined risk)</option>
+                                <option value="bearcall">Bear Call Spread — SELL CE OTM2 + BUY CE OTM5 (defined risk)</option>
                                 <option value="single">Single Leg — BUY CE ATM (bullish / BUY signal)</option>
                                 <option value="single_pe">Single Leg — BUY PE ATM (bearish / SELL signal)</option>
                                 <option value="single_sellce_atm">Single Leg — SELL CE ATM (short CE / bearish)</option>
@@ -489,8 +504,6 @@
                                 <option value="single_sellpe_otm2">Single Leg — SELL PE OTM2 (short PE / bullish)</option>
                                 <option value="bullcall">Bull Call Spread (CE ATM Buy + CE OTM2 Sell)</option>
                                 <option value="bearput">Bear Put Spread (PE ATM Buy + PE OTM2 Sell)</option>
-                                <option value="bearcall">Bear Call Spread (CE OTM2 Sell + CE OTM5 Buy)</option>
-                                <option value="bullput">Bull Put Spread (PE OTM2 Sell + PE OTM5 Buy)</option>
                                 <option value="straddle">Long Straddle (CE ATM Buy + PE ATM Buy)</option>
                                 <option value="strangle">Long Strangle (CE OTM2 Buy + PE OTM2 Buy)</option>
                                 <option value="ironcondor">Iron Condor (4 legs)</option>
@@ -498,6 +511,13 @@
                             </select>
                         </div>
                         <div class="col-md-4 d-flex align-items-end"><small class="text-muted" id="pos-spot-info">Spot: — | Lot: —</small></div>
+                    </div>
+                    <div class="d-flex flex-wrap gap-1 mt-2" id="pos-quick-templates">
+                        <button type="button" class="btn btn-sm btn-outline-success" onclick="posApplyTemplate('single_sellpe_otm2')"><i class="bi bi-arrow-up-right"></i> SELL PE OTM2 (Bullish)</button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="posApplyTemplate('single_sellce')"><i class="bi bi-arrow-down-right"></i> SELL CE OTM2 (Bearish)</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="posApplyTemplate('bullput')"><i class="bi bi-shield-check"></i> Bull Put Spread (Defined Risk)</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="posApplyTemplate('bearcall')"><i class="bi bi-shield-check"></i> Bear Call Spread (Defined Risk)</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="posApplyTemplate('ironcondor')">Iron Condor (4 legs)</button>
                     </div>
                     <div class="table-responsive mt-2" style="overflow-x:auto">
                         <table class="table table-sm table-bordered align-middle mb-1" style="font-size:12px;min-width:660px">
@@ -516,6 +536,7 @@
                     <div class="d-flex gap-2 flex-wrap align-items-center">
                         <button id="builder-run-btn" class="btn btn-success" onclick="runPosBacktest()"><i class="bi bi-play-fill"></i> Run Backtest</button>
                         <button id="builder-save-btn" class="btn btn-outline-primary" onclick="savePosStrategy()"><i class="bi bi-save"></i> Save Strategy</button>
+                        <input type="text" id="eb-strategy-name" class="form-control form-control-sm" style="max-width:230px" placeholder="Strategy name (optional)">
                         <button class="btn btn-outline-secondary" onclick="posUpdatePayoff()"><i class="bi bi-graph-up"></i> Refresh Payoff</button>
                     </div>
                     <div class="small text-muted mt-2"><i class="bi bi-info-circle"></i> User-Configured analytical setup — results are historical, not a guarantee of future returns. SEBI non-advisory.</div>
@@ -2784,6 +2805,36 @@ let _lastOpenTrdHTML = null;
     }
     async function lhIncrementalSync(){try{const r=await P('/api/lakehouse/sync-incremental',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});alert(r.message||JSON.stringify(r));await lhRefresh();await lhCheckMissing();}catch(e){alert(e.message);}}
     // ---- One builder, one summary (posLegs = single source of truth) ----
+    function posEntryWindow(){
+        const s=document.getElementById('eb-entry-start')?.value||'09:15';
+        const e=document.getElementById('eb-entry-end')?.value||'15:15';
+        const key=s+'-'+e;
+        const label=({'09:15-15:15':'All Session','09:20-12:00':'Morning Session',
+                      '12:30-15:00':'Afternoon Session','13:00-15:00':'Post-13:00 Session'})[key]||'Custom';
+        return {start:s,end:e,label:label};
+    }
+    function posHighlightEntryWindow(){
+        const ew=posEntryWindow();
+        document.querySelectorAll('.eb-ew-preset').forEach(b=>{
+            const on=b.dataset.start===ew.start&&b.dataset.end===ew.end;
+            b.classList.toggle('btn-primary',on);
+            b.classList.toggle('btn-outline-secondary',!on);
+        });
+    }
+    function posSetEntryWindow(btn){
+        try{
+            const s=document.getElementById('eb-entry-start'), e=document.getElementById('eb-entry-end');
+            if(s)s.value=btn.dataset.start||'09:15';
+            if(e)e.value=btn.dataset.end||'15:15';
+            posOnEntryWindowChange();
+        }catch(err){}
+    }
+    function posOnEntryWindowChange(){
+        try{ebUpdateSummary();}catch(e){}
+        try{posRenderDirectionMap();}catch(e){}
+        try{posInvalidateResults();}catch(e){}
+        try{posHighlightEntryWindow();}catch(e){}
+    }
     function ebUpdateSummary(){try{
         const g=id=>document.getElementById(id)?.value||'';
         const sym=g('eb-symbol')||'NIFTY', tf=g('eb-tf')||'5m';
@@ -2802,8 +2853,11 @@ let _lastOpenTrdHTML = null;
             dirHint=' · <span class="badge bg-light text-dark border">'+(bearish?'needs SELL signal':bullish?'needs BUY signal':'hedge / spread')+'</span>';
         }
         const dir=document.getElementById('eb-direction')?.value||'both';
+        const ew=posEntryWindow();
+        const ewTxt='Entry Window: '+ew.start+'–'+ew.end+' IST'+(ew.label&&ew.label!=='Custom'?(' ('+ew.label+')'):'');
         const el=document.getElementById('eb-summary');
         if(el) el.innerHTML='<strong>Summary:</strong> '+sym+' · '+tf+' · '+(inds.join(', ')||'SuperTrend')+' · '+mode+' · Direction: '+dir+' · SL '+sl+' pts / TP '+tp+' pts · '+from+' → '+to+
+            '<br>'+ewTxt+' · <span class="text-muted">naye entries isi window me; exits poori session tak</span>'+
             '<br><strong>Legs ('+legs.length+'):</strong> '+(legs.join(' + ')||'none — Add Leg ya template chuno')+dirHint+' · Payoff aur backtest results neeche apne aap update hote hain.';
         // BSE-only index: backtest se pehle hi saaf warning (NSE bhavcopy me
         // SENSEX ka option data hota hi nahi — warna user ko "no result" milta).
@@ -2952,7 +3006,8 @@ let _lastOpenTrdHTML = null;
         const el=document.getElementById('pos-direction-map'); if(!el)return;
         const dir=document.getElementById('eb-direction')?.value||'both';
         const dirLabel={both:'Both',bullish:'Bullish Only',bearish:'Bearish Only'}[dir]||dir;
-        if(!posLegs.length){el.innerHTML='<strong>Trade Direction:</strong> <span class="badge bg-primary">'+dirLabel+'</span> · Template chuno ya leg add karo — signal ↔ leg mapping yahan dikhega.';return;}
+        const ew=posEntryWindow();
+        if(!posLegs.length){el.innerHTML='<strong>Trade Direction:</strong> <span class="badge bg-primary">'+dirLabel+'</span> · <span class="badge bg-light text-dark border">Entry Window '+ew.start+'–'+ew.end+' IST</span> · Template chuno ya leg add karo — signal ↔ leg mapping yahan dikhega.';return;}
         const bias=posStructureBias();
         const biasLabel={bull:'Bullish',bear:'Bearish',neutral:'Neutral / two-way',none:'—'}[bias]||bias;
         const sameTrigger=posLegs.every(l=>!l.trigger_on||l.trigger_on===(posLegs[0].trigger_on||''));
@@ -2963,13 +3018,38 @@ let _lastOpenTrdHTML = null;
         const blocked=(dir==='bullish'&&!allowsBuy)||(dir==='bearish'&&!allowsSell);
         const trigLabel=t=>({buy:'BUY Signal',sell:'SELL Signal',both:'Both'}[t]||'Auto (leg bias)');
         const rules=posLegs.map((l,i)=>'<span class="badge bg-light text-dark border">Leg '+(i+1)+' '+posLegLabel(l)+' → '+trigLabel(l.trigger_on||'')+'</span>');
-        const bull=posLegs.filter(l=>posLegBias(l)==='bull').map(posLegLabel);
-        const bear=posLegs.filter(l=>posLegBias(l)==='bear').map(posLegLabel);
-        el.innerHTML='<strong><i class="bi bi-arrow-left-right"></i> Signal → Leg mapping</strong> · <span class="badge bg-primary">Direction: '+dirLabel+'</span><br>'+
-            (posLegs.length>1
-                ? '<span class="badge bg-info text-dark">'+posLegs.length+'-leg structure: '+biasLabel+'</span> → <strong>'+trigger+'</strong> · <em>sab legs ek hi timestamp par enter/exit</em>'+(blocked?' <span class="badge bg-secondary">direction se blocked</span>':'')+(sameTrigger?'':' <span class="badge bg-warning text-dark">conflicting per-leg triggers → structure bias</span>')
-                : '<span class="badge bg-success">BUY / bullish</span> → '+(bull.length?bull.join(' + '):'<em>koi bullish leg nahi</em>')+
-                  ' &nbsp;|&nbsp; <span class="badge bg-danger">SELL / bearish</span> → '+(bear.length?bear.join(' + '):'<em>koi bearish leg nahi</em>'))+
+        const bullLegs=posLegs.filter(l=>posLegBias(l)==='bull');
+        const bearLegs=posLegs.filter(l=>posLegBias(l)==='bear');
+        const bull=bullLegs.map(posLegLabel), bear=bearLegs.map(posLegLabel);
+        let map='';
+        if(posLegs.length>1){
+            map='<span class="badge bg-info text-dark">'+posLegs.length+'-leg structure: '+biasLabel+'</span> → <strong>'+trigger+'</strong> · <em>sab legs ek hi timestamp par enter/exit</em>'+
+                (blocked?' <span class="badge bg-secondary">direction se blocked</span>':'')+
+                (sameTrigger?'':' <span class="badge bg-warning text-dark">conflicting per-leg triggers → structure bias</span>');
+        }else if(dir==='bullish'){
+            // Bullish Only: sirf BUY triggers evaluate. Bearish signal ko
+            // "unmapped mismatch" nahi ginte — wo intentionally ignore hota hai.
+            const l=posLegs[0];
+            map='<span class="badge bg-success">BUY / bullish</span> → '+(bull.length?bull.join(' + '):'<em>koi bullish leg nahi — is direction me trade nahi</em>')+
+                (bear.length?' · <span class="badge bg-light text-dark border">'+bear.join(' + ')+' (SELL signals Bullish Only me ignore)</span>':'');
+        }else if(dir==='bearish'){
+            const l=posLegs[0];
+            map='<span class="badge bg-danger">SELL / bearish</span> → '+(bear.length?bear.join(' + '):'<em>koi bearish leg nahi — is direction me trade nahi</em>')+
+                (bull.length?' · <span class="badge bg-light text-dark border">'+bull.join(' + ')+' (BUY signals Bearish Only me ignore)</span>':'');
+        }else{
+            map='<span class="badge bg-success">BUY / bullish</span> → '+(bull.length?bull.join(' + '):'<em>koi bullish leg nahi</em>')+
+                ' &nbsp;|&nbsp; <span class="badge bg-danger">SELL / bearish</span> → '+(bear.length?bear.join(' + '):'<em>koi bearish leg nahi</em>');
+        }
+        // Both direction: one-sided setup silently half-trading se bachao.
+        let bothHint='';
+        if(dir==='both'&&!(bullLegs.length&&bearLegs.length)){
+            const needBear=!bearLegs.length;
+            const sug=needBear
+                ? '<button type="button" class="btn btn-sm btn-outline-danger" onclick="posApplyTemplate(\'single_sellce\')">SELL CE OTM2</button> <button type="button" class="btn btn-sm btn-outline-primary" onclick="posApplyTemplate(\'bearcall\')">Bear Call Spread</button>'
+                : '<button type="button" class="btn btn-sm btn-outline-success" onclick="posApplyTemplate(\'single_sellpe_otm2\')">SELL PE OTM2</button> <button type="button" class="btn btn-sm btn-outline-primary" onclick="posApplyTemplate(\'bullput\')">Bull Put Spread</button>';
+            bothHint='<div class="alert alert-warning py-1 px-2 mb-1 mt-1" style="font-size:10px"><i class="bi bi-exclamation-triangle"></i> <strong>Both</strong> active hai par setup sirf '+(needBear?'bullish':'bearish')+' taraf ka hai — doosri taraf ka signal kabhi trade nahi karega. Matching leg add karo: '+sug+'</div>';
+        }
+        el.innerHTML='<strong><i class="bi bi-arrow-left-right"></i> Signal → Leg mapping</strong> · <span class="badge bg-primary">Direction: '+dirLabel+'</span> · <span class="badge bg-light text-dark border">Entry Window: '+ew.start+'–'+ew.end+' IST ('+ew.label+')</span><br>'+map+bothHint+
             '<div class="mt-1 d-flex flex-wrap gap-1">'+rules.join('')+'</div>';
     }
     function posAddLeg(){posLegs.push({option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:1,expiry:'weekly'});posTemplate='';posRenderLegs();}
@@ -3005,7 +3085,11 @@ let _lastOpenTrdHTML = null;
             ironcondor:[mk('PE','buy','otm',1),mk('PE','sell','otm',3),mk('CE','sell','otm',3),mk('CE','buy','otm',5)],
             custom2:[mk('CE','buy','otm',5),mk('CE','sell','otm',2)],
         };
-        if(M[t]){posLegs=JSON.parse(JSON.stringify(M[t]));posTemplate=t;posRenderLegs();}
+        if(M[t]){
+            posLegs=JSON.parse(JSON.stringify(M[t]));posTemplate=t;
+            try{const sel=document.getElementById('pos-template');if(sel)sel.value=t;}catch(e){}
+            posRenderLegs();
+        }
     }
     async function posUpdatePayoff(){
         const card=document.getElementById('pos-payoff-card'); if(!card) return;
@@ -3084,6 +3168,13 @@ let _lastOpenTrdHTML = null;
         const pnote=document.getElementById('pos-payoff-note'); if(pnote) pnote.textContent='Premium: '+(chainLive?('real chain ('+chainLive+' quotes, expiry '+expiry+')'):('BS proxy IV 20%, DTE '+dteDays+'d'))+' · Net P&L across all legs at expiry. Backtest asli recorded option data par chalta hai.';
         const pm=document.getElementById('pos-payoff-metrics');
         const _unlP=!isFinite(maxProfit), _unlL=!isFinite(maxLoss);
+        // Naked short option (no opposing BUY hedge) = undefined/high risk,
+        // even though a short PE's analytic max loss is strike-limited.
+        const _allSell=posLegs.every(l=>l.transaction!=='buy');
+        const _shortOt=(posLegs.find(l=>l.transaction==='sell')||{}).option_type||'';
+        const _riskProfile=(_unlL||_allSell)
+            ? ((_shortOt==='CE'&&!_unlL)?'Undefined / High Upside Risk':'Undefined / High Downside Risk')
+            : 'Defined Risk';
         if(pm) pm.innerHTML=
             '<div class="col"><div class="card stat-card-sm"><div class="label">Max Profit</div><div class="value price-up">'+( _unlP?'Unlimited ♾️':'₹'+maxProfit.toLocaleString())+'</div></div></div>'+
             '<div class="col"><div class="card stat-card-sm"><div class="label">Max Loss</div><div class="value price-down">'+(_unlL?'Unlimited ♾️':'₹'+Math.abs(maxLoss).toLocaleString())+'</div></div></div>'+
@@ -3091,7 +3182,7 @@ let _lastOpenTrdHTML = null;
             '<div class="col"><div class="card stat-card-sm"><div class="label">Breakeven</div><div class="value">'+(uniqBes.length?uniqBes.map(b=>'₹'+b.toLocaleString()).join(', '):'—')+'</div></div></div>'+
             '<div class="col"><div class="card stat-card-sm"><div class="label">Risk/Reward</div><div class="value">'+(_unlP||_unlL?'∞ / undefined':(maxLoss<0?(maxProfit/Math.abs(maxLoss)).toFixed(2):'∞'))+'</div></div></div>'+
             '<div class="col"><div class="card stat-card-sm"><div class="label">Legs × Lot</div><div class="value">'+posLegs.length+' × '+lot+'</div></div></div>'+
-            '<div class="col"><div class="card stat-card-sm"><div class="label">Risk Profile</div><div class="value">'+(!_unlL?'Defined Risk':'Unlimited')+'</div></div></div>';
+            '<div class="col"><div class="card stat-card-sm"><div class="label">Risk Profile</div><div class="value '+((_unlL||_allSell)?'price-down':'')+'">'+_riskProfile+'</div></div></div>';
         try{Plotly.newPlot('pos-payoff-chart',[
             {x:xs,y:ys,type:'scatter',mode:'lines',fill:'tozeroy',line:{color:maxProfit>Math.abs(maxLoss)?'#198754':'#0d6efd',width:2},fillcolor:'rgba(13,110,253,0.08)',name:'Net P&L'},
             {x:[spot],y:[0],mode:'markers',marker:{color:'#dc3545',size:10},name:'Spot'}
@@ -3113,7 +3204,7 @@ let _lastOpenTrdHTML = null;
         return {symbol:sym,symbols:posSymbols(),start_date:s||new Date(Date.now()-20*86400000).toISOString().split('T')[0],end_date:e||today,
             direction:direction,
             indicators:inds,legs:legs,
-            advanced:{data_mode:'tick',trade_mode:mode,timeframe:(document.getElementById('eb-tf')?.value||'5m'),entry_time:'09:35',exit_time:'15:15',expiry:(legs[0]&&legs[0].expiry)||'weekly',direction:direction,structure_bias:posStructureBias(),strike_step:_posStep||0,lot_size:_posLot||0},
+            advanced:{data_mode:'tick',trade_mode:mode,timeframe:(document.getElementById('eb-tf')?.value||'5m'),entry_time:'09:35',exit_time:'15:15',entry_window:posEntryWindow(),expiry:(legs[0]&&legs[0].expiry)||'weekly',direction:direction,structure_bias:posStructureBias(),strike_step:_posStep||0,lot_size:_posLot||0},
             risk:{max_trades_per_day:5,daily_stop_loss:sl,daily_take_profit:tp,sl_unit:'pt',tp_unit:'pt'}};
     }
     // Exit reasons readable in both the compact builder results and the full
@@ -3146,6 +3237,21 @@ let _lastOpenTrdHTML = null;
         return '<span class="badge bg-light text-dark border">'+(cr>=0?'Net Credit ₹':'Net Debit ₹')+Math.abs(cr).toLocaleString()+'</span>'+
             '<br><small>Net premium ₹'+pp.toLocaleString()+' · Max loss '+maxL+' · R/R '+rr+'</small>';
     }
+    // req 10: exact premium-point trail from entry to exit + slippage/bar-gap
+    // beyond the configured SL/TP/trailing threshold.
+    function fillDetailHtml(t){
+        if(!t||t.entry_points==null) return '—';
+        const n=v=>Number(v||0).toFixed(2);
+        const diff=Number(t.point_diff||0);
+        const sig=diff>0?'price-up':(diff<0?'price-down':'');
+        const bits=[];
+        if(t.trigger_level) bits.push('SL/TP level '+n(t.trigger_level));
+        if(t.beyond_threshold_pts) bits.push('beyond '+n(t.beyond_threshold_pts));
+        if(t.slippage_pts) bits.push('slip '+n(t.slippage_pts));
+        if(t.bar_gap_pts) bits.push('gap '+n(t.bar_gap_pts));
+        return '<span class="'+sig+'">'+n(t.entry_points)+' → '+n(t.exit_points)+' ('+(diff>0?'+':'')+n(diff)+' pts)</span>'+
+            (bits.length?'<br><small class="text-muted">'+bits.join(' · ')+'</small>':'');
+    }
     function posBadge(res){
         const ds=String((res&&res.data_source)||'').toLowerCase();
         if(ds.includes('bhavcopy')||ds.includes('eod')) return 'EOD BHAVCOPY';
@@ -3177,7 +3283,11 @@ let _lastOpenTrdHTML = null;
             const tfBadge=tfRun? (tfSel&&tfRun!==tfSel
                 ? ' <span class="badge bg-warning text-dark" title="Real 1M option data na hone par app imaandaari se daily bhavcopy par chalti hai (koi fake bar nahi)">Requested '+tfSel+' → executed '+tfRun+'</span>'
                 : ' <span class="badge bg-light text-dark border">'+tfRun+'</span>') : '';
-            badge.innerHTML='<span class="badge bg-info">'+posBadge(res)+'</span>'+tfBadge+' <small class="text-muted">'+(res&&res.run_id||'')+'</small>';
+            const dr0=(res&&res.data_routing)||{};
+            const ewm=(p.entry_window||dr0.entry_window||{});
+            const ewBadge=(ewm.start||ewm.end)
+                ? ' <span class="badge bg-light text-dark border" title="Entry window (IST) — naye entries isi window me; exits full session">Window: '+ewm.start+'–'+ewm.end+' IST'+(ewm.label?' ('+ewm.label+')':'')+'</span>' : '';
+            badge.innerHTML='<span class="badge bg-info">'+posBadge(res)+'</span>'+tfBadge+ewBadge+' <small class="text-muted">'+(res&&res.run_id||'')+'</small>';
         }
         // Run diagnostics — har run me (0 trades ho tab bhi) kya chala, kyon.
         const dg=document.getElementById('pos-diag');
@@ -3199,7 +3309,10 @@ let _lastOpenTrdHTML = null;
                 '<span class="badge bg-light text-dark border">'+p.start_date+' → '+p.end_date+'</span>',
                 '<span class="badge bg-success">BUY signals: '+(di.signals_buy||0)+'</span>',
                 '<span class="badge bg-danger">SELL signals: '+(di.signals_sell||0)+'</span>',
-                '<span class="badge bg-light text-dark border">Generated: '+(di.signals_generated||0)+' / evaluated: '+(di.signals_evaluated||0)+'</span>'
+                '<span class="badge bg-light text-dark border">Generated: '+(di.signals_generated||0)+' / evaluated: '+(di.signals_evaluated||0)+'</span>',
+                '<span class="badge bg-warning text-dark" title="Signals outside the configured entry time window (IST)">Window-filtered: '+(di.signals_outside_entry_window||0)+'</span>',
+                '<span class="badge bg-secondary" title="Signals blocked by active position / re-entry rules">Rule-blocked: '+(di.signals_blocked_rules||0)+'</span>',
+                '<span class="badge bg-success" title="Actual trades executed">Executed: '+(di.trades_executed||0)+'</span>'
             ];
             // Internal server text ko HTML me daalte waqt tag/attribute break
             // hone se bachao (entity literal likhne ki zaroorat nahi).
@@ -3244,13 +3357,13 @@ let _lastOpenTrdHTML = null;
         const tl=document.getElementById('pos-trade-list');
         if(tl){
             const rows=(res&&res.trade_list)||[];
-            tl.innerHTML=(res&&res.data_note?'<div class="small text-muted mb-2"><i class="bi bi-info-circle"></i> '+String(res.data_note)+'</div>':'')+exitMixHtml(rows)+(rows.length? '<table class="table table-sm table-bordered" style="font-size:11px;min-width:960px"><thead class="table-light"><tr><th>#</th><th>Symbol</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Position</th><th>Entry ₹</th><th>Exit ₹</th><th>Exit Reason</th><th>Structure Risk</th><th>P/L</th></tr></thead><tbody>'+
+            tl.innerHTML=(res&&res.data_note?'<div class="small text-muted mb-2"><i class="bi bi-info-circle"></i> '+String(res.data_note)+'</div>':'')+exitMixHtml(rows)+(rows.length? '<table class="table table-sm table-bordered" style="font-size:11px;min-width:1080px"><thead class="table-light"><tr><th>#</th><th>Symbol</th><th>Strike</th><th>Entry</th><th>Exit</th><th>Position</th><th>Entry ₹</th><th>Exit ₹</th><th>Exit Reason</th><th>Fill / Points</th><th>Structure Risk</th><th>P/L</th></tr></thead><tbody>'+
               rows.map((t,i)=>{
                 const pl=Number(t.pnl||t.net_pnl||0);
                 const pos=String(t.position||t.type||'')+((t.option_type&&t.option_type!=='Spread')?(' '+t.option_type):'');
                 const slp=Number(t.sl_points||0);
                 const exitLbl=btExitLabel(t.exit_status||t.exit_reason||t.reason||t.trigger||'')+(slp>0?' ('+slp+' pts)':'');
-                return '<tr><td>'+(i+1)+'</td><td><strong>'+(t.symbol||res.symbol||'—')+'</strong></td><td>'+(t.strike||'—')+'</td><td>'+(t.entry_date||'')+' '+(t.entry_time||'')+'</td><td>'+(t.exit_date||'')+' '+(t.exit_time||'')+'</td><td>'+pos+'</td><td>₹'+(t.entry_price||0)+'</td><td>₹'+(t.exit_price||0)+'</td><td><span class="badge bg-light text-dark border">'+exitLbl+'</span></td><td>'+spreadRiskHtml(t)+'</td><td class="'+(pl>0?'price-up':pl<0?'price-down':'')+'">₹'+pl.toLocaleString()+'</td></tr>';
+                return '<tr><td>'+(i+1)+'</td><td><strong>'+(t.symbol||res.symbol||'—')+'</strong></td><td>'+(t.strike||'—')+'</td><td>'+(t.entry_date||'')+' '+(t.entry_time||'')+'</td><td>'+(t.exit_date||'')+' '+(t.exit_time||'')+'</td><td>'+pos+'</td><td>₹'+(t.entry_price||0)+'</td><td>₹'+(t.exit_price||0)+'</td><td><span class="badge bg-light text-dark border">'+exitLbl+'</span></td><td>'+fillDetailHtml(t)+'</td><td>'+spreadRiskHtml(t)+'</td><td class="'+(pl>0?'price-up':pl<0?'price-down':'')+'">₹'+pl.toLocaleString()+'</td></tr>';
               }).join('')+'</tbody></table>' : '<div class="small text-muted">Koi trade nahi — signals nahi bane (honest zero).'+(res&&res.note?('<br>'+String(res.note).slice(0,400)):'')+(res&&res.suggestions&&res.suggestions.length?('<br>'+res.suggestions.slice(0,2).map(x=>'• '+x).join('<br>')):'')+'</div>');
         }
         card.scrollIntoView({behavior:'smooth',block:'start'});
@@ -3365,11 +3478,14 @@ let _lastOpenTrdHTML = null;
         if(!window._posBT){alert('Pehle Run Backtest karo, phir Save karo.');return;}
         try{
             const req=posReq();
-            const nm=req.symbol+'_'+posLegs.map(posLegLabel).join('_').replace(/[^A-Za-z0-9]+/g,'-')+'_EasyMultiLeg';
+            const typed=(document.getElementById('eb-strategy-name')?.value||'').trim();
+            const auto=req.symbol+'_'+posLegs.map(posLegLabel).join('_').replace(/[^A-Za-z0-9]+/g,'-')+'_EasyMultiLeg';
+            const nm=typed||auto;
+            try{if(window._posBT)window._posBT.strategy_name=nm;}catch(e){}
             const body={id:window._editingStratId||0,name:nm,symbol:req.symbol,
                 start_date:req.start_date,end_date:req.end_date,
                 timeframe:(document.getElementById('eb-tf')?.value||'5m'),
-                description:'Multi-Leg Easy Builder — '+posLegs.map(posLegLabel).join(' + '),
+                description:'Multi-Leg Easy Builder — '+posLegs.map(posLegLabel).join(' + ')+' · Entry Window '+posEntryWindow().start+'–'+posEntryWindow().end+' IST',
                 indicators:req.indicators,entry_conditions:[],exit_conditions:[],legs:req.legs,
                 advanced_options:req.advanced,risk_management:req.risk,status:'active',last_backtest:window._posBT};
             const btn=document.getElementById('builder-save-btn');
@@ -3380,7 +3496,7 @@ let _lastOpenTrdHTML = null;
         }catch(err){alert('Save error: '+err.message);}
         finally{const btn=document.getElementById('builder-save-btn');if(btn){btn.disabled=false;btn.innerHTML='<i class="bi bi-save"></i> Save Strategy';}}
     }
-    try{setTimeout(()=>{posFillDates();if(!posLegs.length)posLegs=[{option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:1,expiry:'weekly'}];posRenderLegs();ebUpdateSummary();},350);}catch(e){}
+    try{setTimeout(()=>{posFillDates();if(!posLegs.length)posLegs=[{option_type:'CE',transaction:'buy',strike_selection:'atm',otm_distance:0,lots:1,expiry:'weekly'}];posRenderLegs();ebUpdateSummary();try{posHighlightEntryWindow();}catch(e){}},350);}catch(e){}
     function ebFillDates(){try{
         const end=new Date(); const start=new Date(end.getTime()-20*86400000);
         const es=document.getElementById('eb-start'), ee=document.getElementById('eb-end');

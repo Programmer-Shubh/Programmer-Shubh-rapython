@@ -1444,6 +1444,21 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
         _engine_metrics_list = []
         _brokerage = 0.0
         _diag_eval, _diag_sig, _diag_rej, _cov_by_sym = 0, 0, {}, {}
+        _diag_window_out, _diag_blocked = 0, 0
+        # Strategy-level Entry Time Window (IST) — echoed into every result so
+        # full-session vs afternoon-only runs can be compared side by side.
+        try:
+            _ew_raw = advanced_in.get("entry_window") or {}
+            if not isinstance(_ew_raw, dict):
+                _ew_raw = {}
+            _ew_start = str(advanced_in.get("entry_window_start")
+                            or _ew_raw.get("start") or "09:15")[:5]
+            _ew_end = str(advanced_in.get("entry_window_end")
+                          or _ew_raw.get("end") or "15:15")[:5]
+            _entry_window_meta = {"start": _ew_start, "end": _ew_end,
+                                  "label": str(_ew_raw.get("label") or "")}
+        except Exception:
+            _entry_window_meta = {"start": "09:15", "end": "15:15", "label": ""}
         _diag_buy, _diag_sell = 0, 0
         _phase_ms = {}
 
@@ -1880,6 +1895,8 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 _diag_sig += int(_sm.get("signals_generated", 0) or 0)
                 _diag_buy += int(_sm.get("signals_buy", 0) or 0)
                 _diag_sell += int(_sm.get("signals_sell", 0) or 0)
+                _diag_window_out += int(_sm.get("signals_outside_entry_window", 0) or 0)
+                _diag_blocked += int(_sm.get("signals_blocked_rules", 0) or 0)
                 if progress_cb:
                     _fire_prog(_sym, _extra=1)
                 for _rjk, _rv in ((_sm.get("rejected") or {}).items()):
@@ -2335,6 +2352,11 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
     try:
         _diag = {"signals_evaluated": _diag_eval, "signals_generated": _diag_sig,
                  "signals_buy": _diag_buy, "signals_sell": _diag_sell,
+                 # req 11: complete signal funnel, each stage counted separately.
+                 "signals_outside_entry_window": _diag_window_out,
+                 "signals_blocked_rules": _diag_blocked,
+                 "trades_executed": int((m.get("total_trades", 0) if m else 0) or 0),
+                 "entry_window": _entry_window_meta,
                  "rejected": _diag_rej, "coverage": _cov_by_sym,
                  "phase_ms": _phase_ms,
                  "requested_timeframe": _requested_timeframe,
@@ -2441,6 +2463,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                    "trade_mode": str(advanced_in.get("trade_mode", "")),
                    "entry_time": str(advanced_in.get("entry_time", "")),
                    "exit_time": str(advanced_in.get("exit_time", "") or advanced_in.get("early_exit_time", "")),
+                   "entry_window": _entry_window_meta,
                    "sl": float(risk_in.get("daily_stop_loss", 0) or 0),
                    "tp": float(risk_in.get("daily_take_profit", 0) or 0),
                    # Rulebook units: 'pt' (premium points), 'pct', ya 'rs'.
@@ -2472,6 +2495,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             "executed_is_eod_daily": bool(_eod_daily),
             "symbol_sources": _sym_src,
             "partial_coverage": _partial,
+            "entry_window": _entry_window_meta,
             "coverage_warning": _cov_warn,
             "risk_mode_warning": _risk_warn,
             "warning": (
@@ -2497,6 +2521,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             "win_rate": m["win_rate"],
             "loss_rate": m.get("loss_rate", 0),
             "max_drawdown": m["max_drawdown"],
+            "max_drawdown_pct": m.get("max_drawdown_pct", m["max_drawdown"]),
             "profit_factor": m["profit_factor"],
             "profit_factor_infinite": bool(m.get("profit_factor_infinite") or (m.get("profit_factor", 0) or 0) >= 999999.0),
             "sharpe_ratio": m["sharpe_ratio"],

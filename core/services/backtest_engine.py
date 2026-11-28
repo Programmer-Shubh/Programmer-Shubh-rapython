@@ -60,6 +60,11 @@ class BacktestEngine:
         self._fake_prem_keys = set()
         self._slippage_pct = 0.5  # Default dynamic slippage % for option selling
         self._expiry_guard_cache = {}  # strict contract map (date -> expiry)
+        # Default full-session entry window (run() overrides from advanced).
+        self._entry_start = "09:15"
+        self._entry_end = "15:15"
+        self._entry_window = {"start": "09:15", "end": "15:15", "label": "All Session"}
+        self._direction = "both"
         # ---- v7 realism knobs (default = strict / real-market) ----
         # TP fill mode: "close" = target tabhi book hota hai jab COMPLETED
         # candle ka close level ke paar ho (wick/high-low touch par nahi).
@@ -166,6 +171,25 @@ class BacktestEngine:
         self._entry_time = entry_time
         self._exit_time = exit_time
         self._early_exit_time = early_exit_time
+        # ---- STRATEGY-LEVEL ENTRY TIME WINDOW (IST) ----
+        # Signal must occur INSIDE this window for a new trade to open. Exits
+        # (SL / TP / trailing / EOD) are NEVER gated by it — once a position
+        # exists it is managed for the whole session.
+        _ew = advanced_options.get("entry_window") or {}
+        if not isinstance(_ew, dict):
+            _ew = {}
+        _ew_start = (advanced_options.get("entry_window_start")
+                     or _ew.get("start") or "09:15")
+        _ew_end = (advanced_options.get("entry_window_end")
+                   or _ew.get("end") or "15:15")
+        self._entry_start = self._norm_clock(_ew_start, "09:15")
+        self._entry_end = self._norm_clock(_ew_end, "15:15")
+        if self._entry_end < self._entry_start:
+            # Overnight/custom inversion: treat as full session, not a 0-min
+            # window that silently kills every entry.
+            self._entry_start, self._entry_end = "09:15", "15:15"
+        self._entry_window = {"start": self._entry_start, "end": self._entry_end,
+                              "label": str(_ew.get("label") or "").strip()}
         trade_mode = str(advanced_options.get("trade_mode", advanced_options.get("trade_type", "positional")) or "positional").lower()
         if trade_mode not in ("intraday", "positional", "btst"):
             trade_mode = "positional"
@@ -440,6 +464,11 @@ class BacktestEngine:
         self._n_sig = 0
         self._n_sig_buy = 0
         self._n_sig_sell = 0
+        # Signal breakdown (req 11): filtered by entry window / blocked by
+        # active position or re-entry rules. Counted separately from the
+        # generic rejection bucket so the UI can show an honest funnel.
+        self._n_sig_window_out = 0
+        self._n_sig_blocked = 0
         self._rej = {}
         self._cov_days = set()
         self._cov_bars = 0
@@ -650,6 +679,16 @@ class BacktestEngine:
                         _rsn = spread_hit["reason"]
                         _fill = float(spread_hit.get("fill", spread_hit["level"]))
                         _trig = ("SL" if _rsn == "stoploss" else "TP") + f"@{float(spread_hit['level']):.2f}"
+                        entry["_exit_meta"] = {
+                            "trigger_level": round(float(spread_hit.get("level") or 0), 2),
+                            "raw_fill": round(float(spread_hit.get("fill") or 0), 2),
+                            "beyond_pts": float(spread_hit.get("beyond_pts") or 0),
+                            "bar_high": float(spread_hit.get("bar_high") or 0),
+                            "bar_low": float(spread_hit.get("bar_low") or 0),
+                            "bar_open": float(spread_hit.get("bar_open") or 0),
+                            "reason": spread_hit.get("reason", ""),
+                            "net_pts": True,
+                        }
                         self._close_spread(entries, exits, entry, _rsn, cur_date,
                                            trigger=_trig, net_fill_target=_fill)
                         daily_pnl += exits[-1]["pnl"]
@@ -703,6 +742,18 @@ class BacktestEngine:
                             # 'stoploss' nahi, 'trailing_lock' exit hai (sahi label).
                             _reason = "trailing_lock"
                         _trig = f"{'SL' if hit['reason'] == 'stoploss' else 'TP'}@{float(hit['level']):.2f}"
+                        # Exact fill audit for the trade log: trigger level,
+                        # raw bar fill, cap/slippage adjustment and how far the
+                        # candle ran beyond the configured SL/TP threshold.
+                        entry["_exit_meta"] = {
+                            "trigger_level": round(float(hit.get("level") or 0), 2),
+                            "raw_fill": round(float(hit.get("fill") or 0), 2),
+                            "beyond_pts": float(hit.get("beyond_pts") or 0),
+                            "bar_high": float(hit.get("bar_high") or 0),
+                            "bar_low": float(hit.get("bar_low") or 0),
+                            "bar_open": float(hit.get("bar_open") or 0),
+                            "reason": hit.get("reason", ""),
+                        }
                         self._close_position(entries, exits, entry, sl_exit, _reason, cur_date, qty, txn_type,
                                              trigger=_trig)
                         daily_pnl += exits[-1]["pnl"]
@@ -854,6 +905,25 @@ class BacktestEngine:
                         exit_sig = (buy_sig if txn_type == "buy" else sell_sig) if _exit_on_signal else False
                     else:
                         exit_sig = (sell_sig if txn_type == "buy" else buy_sig) if _exit_on_signal else False
+                # ---- ENTRY TIME WINDOW (signal bar clock, IST) ----
+                # New entries only. Exit management below is intentionally
+                # OUTSIDE this gate: SL/TP/trailing/EOD keep running after the
+                # window closes. Out-of-window signals get their OWN counter —
+                # they are not silently mixed into "entry_gates" rejects.
+                if entry_sig:
+                    _sig_clock = str(cur.get("bar_time", "") or "")[:5]
+                    if _sig_clock and not self._in_entry_window(_sig_clock):
+                        if buy_sig or sell_sig:
+                            try:
+                                self._n_sig_window_out += 1
+                            except Exception:
+                                pass
+                        try:
+                            self._rej["entry_time_window"] = (
+                                self._rej.get("entry_time_window", 0) + 1)
+                        except Exception:
+                            pass
+                        entry_sig = False
                 # ---- GLOBAL TRADE DIRECTION GATE (Both / Bullish / Bearish) ----
                 if entry_sig and self._direction == "bullish" and not buy_sig:
                     entry_sig = False
@@ -932,6 +1002,11 @@ class BacktestEngine:
                             if not can_enter:
                                 self._rej["reentry_block"] = (
                                     self._rej.get("reentry_block", 0) + 1)
+                                if entry_sig:
+                                    try:
+                                        self._n_sig_blocked += 1
+                                    except Exception:
+                                        pass
                     except Exception:
                         pass
                 # Entry delay: wait N bars after the SESSION opens (per-day), not
@@ -976,6 +1051,10 @@ class BacktestEngine:
                     if entry_sig and not can_enter and _in_range:
                         if has_open:
                             self._rej["position_already_open"] = self._rej.get("position_already_open", 0) + 1
+                            try:
+                                self._n_sig_blocked += 1
+                            except Exception:
+                                pass
                         elif (not _unlimited_trades) and daily_trades >= max_trades_day:
                             self._rej["max_trades_day"] = self._rej.get("max_trades_day", 0) + 1
                         else:
@@ -2235,6 +2314,28 @@ class BacktestEngine:
             return atm
 
     @staticmethod
+    def _norm_clock(value, fallback="09:15"):
+        """'9:20', '09:20:00', 'All Session' -> 'HH:MM' (IST string compare)."""
+        try:
+            s = str(value or "").strip()
+            if not s or s.lower() in ("all", "all session", "full", "full session"):
+                return fallback
+            parts = s.split(":")
+            h = max(0, min(23, int(parts[0])))
+            m = max(0, min(59, int(parts[1]))) if len(parts) > 1 else 0
+            return f"{h:02d}:{m:02d}"
+        except Exception:
+            return fallback
+
+    def _in_entry_window(self, clock) -> bool:
+        """Bar clock 'HH:MM' within configured [start, end]. Daily bars have
+        no clock -> no time filter (can't model an intraday window on 1d)."""
+        s = str(clock or "")[:5]
+        if not s:
+            return True
+        return self._entry_start <= s <= self._entry_end
+
+    @staticmethod
     def _leg_bias(leg: dict) -> str:
         """BUY CE / SELL PE = bullish; BUY PE / SELL CE = bearish."""
         txn = str((leg or {}).get("transaction", "buy") or "buy").lower()
@@ -2875,9 +2976,19 @@ class BacktestEngine:
                         fill = _ob if _ob >= sl_level else sl_level
                 else:
                     fill = min(sl_level, opt_low) if txn_type == "buy" else max(sl_level, opt_high)
-                return {"reason": "stoploss", "level": sl_level, "fill": fill}
+                # Bar extremes travel WITH the hit so the trade log can show
+                # how far the candle ran past the configured threshold.
+                _beyond = (sl_level - opt_low) if txn_type == "buy" else (opt_high - sl_level)
+                return {"reason": "stoploss", "level": sl_level, "fill": fill,
+                        "bar_high": float(opt_high or 0), "bar_low": float(opt_low or 0),
+                        "bar_open": float(bar_open or 0),
+                        "beyond_pts": round(max(0.0, float(_beyond or 0)), 2)}
             if hit_tp:
-                return {"reason": "target", "level": tp_level, "fill": tp_level}
+                _beyond = (opt_high - tp_level) if txn_type == "buy" else (tp_level - opt_low)
+                return {"reason": "target", "level": tp_level, "fill": tp_level,
+                        "bar_high": float(opt_high or 0), "bar_low": float(opt_low or 0),
+                        "bar_open": float(bar_open or 0),
+                        "beyond_pts": round(max(0.0, float(_beyond or 0)), 2)}
         except Exception:
             pass
         return None
@@ -3561,6 +3672,44 @@ class BacktestEngine:
         except Exception:
             return 0.0
 
+    @staticmethod
+    def _exit_fill_detail(entry, final_fill, reason):
+        """Trade-log audit (req 10): entry/exit premium POINTS and their
+        difference, exact threshold, slippage and bar-gap beyond it."""
+        meta = entry.get("_exit_meta") or {}
+        try:
+            ep = float(entry.get("price") or 0)
+        except Exception:
+            ep = 0.0
+        try:
+            xp = float(final_fill or 0)
+        except Exception:
+            xp = 0.0
+        is_spread = bool(entry.get("is_spread"))
+        base = float(entry.get("net_pts") or ep) if is_spread else ep
+        # Spread net points go UP for a credit structure when premium is
+        # bought back higher (a loss); a debit spread profits when it rises.
+        if is_spread:
+            credit = bool(entry.get("credit"))
+            diff = (base - xp) if credit else (xp - base)
+        else:
+            txn = str(entry.get("type") or "buy").lower()
+            diff = (xp - base) if txn == "buy" else (base - xp)
+        raw = float(meta.get("raw_fill") or 0)
+        lvl = float(meta.get("trigger_level") or 0)
+        bo = float(meta.get("bar_open") or 0)
+        slip = max(0.0, abs(xp - raw)) if raw > 0 else 0.0
+        gap = max(0.0, abs(bo - lvl)) if (bo > 0 and lvl > 0) else 0.0
+        return {
+            "entry_points": round(base, 2),
+            "exit_points": round(xp, 2),
+            "point_diff": round(diff, 2),
+            "trigger_level": round(lvl, 2),
+            "beyond_threshold_pts": round(float(meta.get("beyond_pts") or 0), 2),
+            "slippage_pts": round(slip, 2),
+            "bar_gap_pts": round(gap, 2),
+        }
+
     def _close_position(self, entries, exits, entry, exit_prem, reason, exit_date, qty, txn_type, trigger=""):
         if entry.get("is_spread"):
             self._close_spread(entries, exits, entry, reason, exit_date, trigger=trigger)
@@ -3630,6 +3779,7 @@ class BacktestEngine:
             "exit_status": reason,
             "sl_points": round(float(getattr(self, "_sl_amt", 0) or 0), 2)
             if str(reason).lower() in ("stoploss", "trailing_lock") else 0.0,
+            **self._exit_fill_detail(entry, exit_prem, reason),
         })
 
     def _close_spread(self, entries, exits, entry, reason, exit_date, trigger="", net_fill_target=None):
@@ -3694,6 +3844,12 @@ class BacktestEngine:
             "exit_status": reason,
             "sl_points": round(float(getattr(self, "_sl_amt", 0) or 0), 2)
             if str(reason).lower() in ("stoploss", "trailing_lock") else 0.0,
+            # exit_value is RUPEES (sum over every leg); trade log needs the
+            # same PREMIUM POINTS scale as entry_points (per spread).
+            **self._exit_fill_detail(entry,
+                                     net_fill_target if net_fill_target is not None
+                                     else abs(exit_value) / max(leg["quantity"] for leg in entry.get("legs", [{"quantity": 1}])),
+                                     reason),
         })
 
     @staticmethod
@@ -3825,6 +3981,13 @@ class BacktestEngine:
                         "signal_time": entry.get("signal_time", entry.get("time", "")),
                         "exit_status": exit.get("exit_status", exit.get("reason", "")),
                         "sl_points": round(float(exit.get("sl_points", 0) or 0), 2),
+                        "entry_points": exit.get("entry_points", 0),
+                        "exit_points": exit.get("exit_points", 0),
+                        "point_diff": exit.get("point_diff", 0),
+                        "trigger_level": exit.get("trigger_level", 0),
+                        "beyond_threshold_pts": exit.get("beyond_threshold_pts", 0),
+                        "slippage_pts": exit.get("slippage_pts", 0),
+                        "bar_gap_pts": exit.get("bar_gap_pts", 0),
                         **self._spread_risk(entry),
                     })
                 else:
@@ -3882,6 +4045,13 @@ class BacktestEngine:
                         "signal_time": entry.get("signal_time", entry.get("time", "")),
                         "exit_status": exit.get("exit_status", exit.get("reason", "")),
                         "sl_points": round(float(exit.get("sl_points", 0) or 0), 2),
+                        "entry_points": exit.get("entry_points", 0),
+                        "exit_points": exit.get("exit_points", 0),
+                        "point_diff": exit.get("point_diff", 0),
+                        "trigger_level": exit.get("trigger_level", 0),
+                        "beyond_threshold_pts": exit.get("beyond_threshold_pts", 0),
+                        "slippage_pts": exit.get("slippage_pts", 0),
+                        "bar_gap_pts": exit.get("bar_gap_pts", 0),
                     })
             equity.append(capital)
         total_return = capital - self.initial_capital
@@ -4069,6 +4239,11 @@ class BacktestEngine:
                 "signals_generated": int(getattr(self, "_n_sig", 0) or 0),
                 "signals_buy": int(getattr(self, "_n_sig_buy", 0) or 0),
                 "signals_sell": int(getattr(self, "_n_sig_sell", 0) or 0),
+                # Honest funnel: generated -> filtered by entry window ->
+                # blocked by position/re-entry rules -> executed trades.
+                "signals_outside_entry_window": int(getattr(self, "_n_sig_window_out", 0) or 0),
+                "signals_blocked_rules": int(getattr(self, "_n_sig_blocked", 0) or 0),
+                "entry_window": dict(getattr(self, "_entry_window", {}) or {}),
                 "rejected": dict(getattr(self, "_rej", {}) or {}),
                 "coverage": dict(getattr(self, "_cov", {}) or {}),
                 "total_brokerage": round(total_brokerage, 2),
