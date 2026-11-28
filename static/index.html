@@ -2886,7 +2886,7 @@ let _lastOpenTrdHTML = null;
     // Backend nets multiple legs (_enter_spread), so OTM5 Buy + OTM2 Sell etc.
     // run as a real spread with net premium. Settings come from the eb-* controls above.
     let posLegs=[], posTemplate='';
-    let _posSpot=0, _posLot=0, _posStep=50, _posExpiry='', _posCtxSym='', _posCtxHint='';
+    let _posSpot=0, _posLot=0, _posStep=50, _posExpiry='', _posCtxSym='', _posCtxHint='', _posCtxSrc='';
     function posFillDates(){try{
         const end=new Date(), start=new Date(end.getTime()-20*86400000);
         const es=document.getElementById('eb-start'), ee=document.getElementById('eb-end');
@@ -2900,7 +2900,7 @@ let _lastOpenTrdHTML = null;
         return picked.length?picked:[posSymbol()];
     }
     function posOnSymbolChange(){
-        _posSpot=0;_posLot=0;_posExpiry='';_posCtxSym='';_posCtxHint='';
+        _posSpot=0;_posLot=0;_posExpiry='';_posCtxSym='';_posCtxHint='';_posCtxSrc='';
         // Primary symbol hamesha chuno me included rakho (payoff isi par).
         try{const cb=document.querySelector('.eb-sym[value="'+posSymbol()+'"]');if(cb)cb.checked=true;}catch(e){}
         posUpdatePayoff();
@@ -2927,17 +2927,19 @@ let _lastOpenTrdHTML = null;
         if(ctx && Number(ctx.spot)>0){
             _posSpot=Number(ctx.spot); _posLot=Number(ctx.lot_size)||_posLot;
             _posStep=Number(ctx.strike_step)||_posStep; _posExpiry=ctx.expiry||'';
+            _posCtxSrc=String(ctx.spot_source||'live');
         }else{
             // Purane fallback endpoints — sirf tab jab context API fail ho.
-            try{const d=await A('/api/dashboard/spot/'+encodeURIComponent(s)); if(d&&Number(d.spot)>0) _posSpot=Number(d.spot);}catch(e){}
+            try{const d=await A('/api/dashboard/spot/'+encodeURIComponent(s)); if(d&&Number(d.spot)>0){_posSpot=Number(d.spot);_posCtxSrc=String(d.source||'live');}}catch(e){}
             try{const d=await A('/api/lot-size/'+encodeURIComponent(s)); const v=Number(d&&d.lot_size||0); if(v>0)_posLot=v;}catch(e){}
             try{const d=await A('/api/strike-step/'+encodeURIComponent(s)); const v=Number(d&&d.strike_step||0); if(v>0)_posStep=v;}catch(e){}
         }
         if(!_posLot) _posLot=({NIFTY:65,BANKNIFTY:30,FINNIFTY:60,MIDCPNIFTY:120,SENSEX:20,BANKEX:30})[s]||50;
         if(!_posStep) _posStep=({NIFTY:50,BANKNIFTY:100,FINNIFTY:50,MIDCPNIFTY:50,SENSEX:100,BANKEX:100})[s]||50;
         _posCtxSym=s; _posCtxHint=hint;
-        try{const el=document.getElementById('pos-spot-info'); if(el) el.textContent='Spot: ₹'+_posSpot.toFixed(2)+' | Lot: '+_posLot+' | Step: '+_posStep+' | Expiry: '+(_posExpiry||'—');}catch(e){}
-        return {spot:_posSpot,lot:_posLot,step:_posStep,expiry:_posExpiry};
+        const _liveTag=(_posCtxSrc&&_posCtxSrc!=='db'&&_posCtxSrc!=='na')?(' · LIVE '+_posCtxSrc.toUpperCase()):' · '+(_posCtxSrc||'na');
+        try{const el=document.getElementById('pos-spot-info'); if(el) el.textContent='Spot: ₹'+_posSpot.toFixed(2)+' | Lot: '+_posLot+' | Step: '+_posStep+' | Expiry: '+(_posExpiry||'—')+_liveTag;}catch(e){}
+        return {spot:_posSpot,lot:_posLot,step:_posStep,expiry:_posExpiry,source:_posCtxSrc};
     }
     function posLegLabel(l){
         const side=(l.transaction||'buy').toUpperCase();
@@ -3096,7 +3098,7 @@ let _lastOpenTrdHTML = null;
         if(!posLegs.length){card.style.display='none';return;}
         card.style.display='block';
         const sym=posSymbol();
-        const {spot,lot,step,expiry}=await posEnsureSpot();
+        const {spot,lot,step,expiry,source}=await posEnsureSpot();
         const atm=Math.round(spot/step)*step;
         function erf(x){const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;const sg=x<0?-1:1;x=Math.abs(x);const t=1/(1+p*x);const y=1-((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);return sg*y;}
         // Nearest active expiry ka REAL option chain — payoff premium yahan se
@@ -3164,7 +3166,7 @@ let _lastOpenTrdHTML = null;
         }
         if(netPnl(pts[pts.length-1])===0) bes.push(Math.round(pts[pts.length-1]));
         const uniqBes=[...new Set(bes)].filter(b=>b>0);
-        const sp=document.getElementById('pos-payoff-spot'); if(sp) sp.textContent='Spot: ₹'+spot.toFixed(2)+' | ATM: '+atm+' | Expiry: '+(expiry||'—');
+        const sp=document.getElementById('pos-payoff-spot'); if(sp) sp.textContent='Spot: ₹'+spot.toFixed(2)+' | ATM: '+atm+' | Expiry: '+(expiry||'—')+(source&&source!=='db'&&source!=='na'?(' | LIVE '+source.toUpperCase()):'');
         const pnote=document.getElementById('pos-payoff-note'); if(pnote) pnote.textContent='Premium: '+(chainLive?('real chain ('+chainLive+' quotes, expiry '+expiry+')'):('BS proxy IV 20%, DTE '+dteDays+'d'))+' · Net P&L across all legs at expiry. Backtest asli recorded option data par chalta hai.';
         const pm=document.getElementById('pos-payoff-metrics');
         const _unlP=!isFinite(maxProfit), _unlL=!isFinite(maxLoss);

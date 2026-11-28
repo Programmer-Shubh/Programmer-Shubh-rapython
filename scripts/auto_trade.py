@@ -109,6 +109,20 @@ def check_stoploss_target(confirm_secs=2):
     trade_model = TradeModel()
     open_trades = trade_model.get_open_trades()
     closed, skipped = [], []
+    # PARITY: multi-leg paper entries share `auto_action.spread_group`. When
+    # one leg of a spread hits SL/TP, close ALL its legs together — the
+    # backtest exits every leg of a defined-risk spread at one timestamp.
+    _groups = {}
+    _closed_ids = set()
+    for _tr in open_trades:
+        try:
+            _aa = _tr.get("auto_action")
+            _dd = json.loads(_aa) if isinstance(_aa, str) and _aa.strip().startswith("{") else {}
+            _g = str((_dd or {}).get("spread_group") or "") if isinstance(_dd, dict) else ""
+            if _g:
+                _groups.setdefault(_g, []).append(_tr)
+        except Exception:
+            pass
 
     def _skip(trade, reason):
         try:
@@ -120,6 +134,8 @@ def check_stoploss_target(confirm_secs=2):
             pass
 
     for trade in open_trades:
+        if int(trade.get("id") or 0) in _closed_ids:
+            continue
         sl = float(trade.get("stop_loss", 0) or 0)
         tp = float(trade.get("target", 0) or 0)
         if sl <= 0 and tp <= 0:
@@ -140,7 +156,7 @@ def check_stoploss_target(confirm_secs=2):
         _sig_entry_price = None
         try:
             _aa_raw = trade.get("auto_action")
-            _aa_d = _js.loads(_aa_raw) if isinstance(_aa_raw, str) and _aa_raw.strip().startswith("{") else {}
+            _aa_d = json.loads(_aa_raw) if isinstance(_aa_raw, str) and _aa_raw.strip().startswith("{") else {}
             if isinstance(_aa_d, dict) and _aa_d.get("signal_entry_price"):
                 _sig_entry_price = float(_aa_d.get("signal_entry_price"))
         except Exception:
@@ -286,8 +302,31 @@ def check_stoploss_target(confirm_secs=2):
                 _exit_px = tp_level
             elif hit_sl and sl_level > 0:
                 _exit_px = sl_level
-            trade_model.close_trade(trade["id"], _exit_px, datetime.now().strftime("%Y-%m-%d"), reason)
+            _exit_date = datetime.now().strftime("%Y-%m-%d")
+            trade_model.close_trade(trade["id"], _exit_px, _exit_date, reason)
             closed.append({"id": trade["id"], "reason": reason, "exit_price": round(float(_exit_px), 2)})
+            _closed_ids.add(int(trade.get("id") or 0))
+            # Close the rest of the spread at the SAME timestamp/reason.
+            try:
+                _aa_cur = trade.get("auto_action")
+                _dd_cur = json.loads(_aa_cur) if isinstance(_aa_cur, str) and _aa_cur.strip().startswith("{") else {}
+                _grp = str((_dd_cur or {}).get("spread_group") or "") if isinstance(_dd_cur, dict) else ""
+                for _sib in _groups.get(_grp, []) if _grp else []:
+                    if int(_sib.get("id") or 0) in _closed_ids:
+                        continue
+                    _spx = trade_model.get_option_premium(
+                        _sib["symbol"], _sib["option_type"],
+                        _sib["strike_price"], _sib["expiry_date"])
+                    if _spx is None or float(_spx) <= 0:
+                        _spx = float(_sib.get("entry_price") or 0)
+                    if float(_spx) <= 0:
+                        continue
+                    trade_model.close_trade(_sib["id"], _spx, _exit_date, reason)
+                    closed.append({"id": _sib["id"], "reason": reason,
+                                   "exit_price": round(float(_spx), 2)})
+                    _closed_ids.add(int(_sib.get("id") or 0))
+            except Exception:
+                pass
     try:
         LAST_SCAN = {"ts": datetime.now().isoformat(timespec="seconds"),
                      "closed": closed, "skipped": skipped}

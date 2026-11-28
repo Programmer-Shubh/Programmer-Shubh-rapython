@@ -323,6 +323,19 @@ def _today_signal(sid, s, today, need_more_than=0):
             _today_tl = [t for t in tl if str(t.get("entry_date", ""))[:10] == today]
         except Exception:
             _today_tl = []
+
+        def _paper_pick(st):
+            """Spread trade -> stash per-leg strikes/premiums on the strategy
+            row so place_for_strategy fires ALL legs together (same as BT)."""
+            try:
+                _fired, _spread = _legs_for_backtest_trade(st or {}, legs)
+                if _spread:
+                    s["_paper_leg_overrides"] = _fired
+                    return None, 0.0
+            except Exception:
+                pass
+            return (st or {}).get("strike"), float((st or {}).get("entry_price") or 0)
+
         # Parity gate for re-entries: paper may only consume the SAME number
         # of intraday signals the backtest actually produced today (in time
         # order). Before this, after the first exit the worker re-entered on
@@ -332,8 +345,8 @@ def _today_signal(sid, s, today, need_more_than=0):
             _n_bt_today = len(_today_tl)
             if int(need_more_than or 0) <= 0:
                 _st = _today_tl[0]
-                return _sig_store(True, "aaj ka signal mila",
-                                  _st.get("strike"), float(_st.get("entry_price") or 0))
+                _sk, _sp = _paper_pick(_st)
+                return _sig_store(True, "aaj ka signal mila", _sk, _sp)
             if _n_bt_today <= int(need_more_than or 0):
                 return _sig_store(False, f"aaj backtest me sirf {_n_bt_today} signal the, "
                                          f"{int(need_more_than)} already paper-traded - naya signal nahi")
@@ -349,9 +362,9 @@ def _today_signal(sid, s, today, need_more_than=0):
             except Exception:
                 pass
                 _st = _today_tl[int(need_more_than)]
+                _sk, _sp = _paper_pick(_st)
                 return _sig_store(True, f"aaj ka signal #{int(need_more_than) + 1} mila "
-                                    f"(backtest me {_n_bt_today})",
-                                  _st.get("strike"), float(_st.get("entry_price") or 0))
+                                    f"(backtest me {_n_bt_today})", _sk, _sp)
         # Lookback fallback: aaj ka signal na ho par pichhle N din me asli
         # signal bana ho AUR us par ab tak koi paper entry na hui ho to lagao
         # (trend-follow, once-per-signal - roz dobara nahi). N =
@@ -393,8 +406,7 @@ def _today_signal(sid, s, today, need_more_than=0):
                     except Exception:
                         _age = 0
                     _sig_trade = [t for t in tl if str(t.get("entry_date", ""))[:10] == _sd]
-                    _stk = _sig_trade[0].get("strike") if _sig_trade else None
-                    _stk_px = float(_sig_trade[0].get("entry_price") or 0) if _sig_trade else 0.0
+                    _stk, _stk_px = _paper_pick(_sig_trade[0]) if _sig_trade else (None, 0.0)
                     return _sig_store(True, f"{_age} din purana signal {_sd} (trend follow, pehli entry)",
                                       _stk, _stk_px)
         except Exception:
@@ -402,6 +414,49 @@ def _today_signal(sid, s, today, need_more_than=0):
         return _sig_store(False, "aaj koi signal nahi", None, 0.0)
     except Exception as e:
         return False, f"signal-check fail: {e}"[:120]
+
+
+def _legs_for_backtest_trade(t, legs):
+    """Map the engine's picked trade back to the SAVED legs.
+
+    Multi-leg engine trades carry `position` as a combined string
+    ("Sell PE 25000 + Buy PE 24800") — matching that string against a leg's
+    BUY/SELL (as the old live gate did) produced ZERO fired legs, so a saved
+    Bull Put Spread never paper-traded. Engine also stores `legs_detail`
+    (exact strike + premium per leg); use it so every leg enters at the same
+    strikes/premiums the backtest used, not one shared ATM strike.
+    Returns (legs_with_overrides, is_spread)."""
+    try:
+        _is_spread = bool(t.get("is_spread")) or str(t.get("option_type") or "").lower() == "spread"
+        if not _is_spread:
+            _o = str(t.get("option_type") or "").upper()
+            _p = str(t.get("position") or "").upper()
+            for leg in legs or []:
+                if (str(leg.get("option_type") or "").upper() == _o
+                        and str(leg.get("transaction") or "").upper() == _p):
+                    return [dict(leg)], False
+            return [], False
+        details = t.get("legs_detail") or []
+        out = []
+        for leg in legs or []:
+            cp = dict(leg)
+            _ot = str(leg.get("option_type") or "").upper()
+            _tx = str(leg.get("transaction") or "").upper()
+            for d in details:
+                _dtx = str(d.get("transaction") or d.get("type") or "").upper()
+                if str(d.get("option_type") or "").upper() == _ot and _dtx == _tx:
+                    try:
+                        if d.get("strike") not in (None, ""):
+                            cp["strike_override"] = float(d["strike"])
+                        if float(d.get("premium") or 0) > 0:
+                            cp["_signal_price"] = float(d["premium"])
+                    except Exception:
+                        pass
+                    break
+            out.append(cp)
+        return (out or [dict(l) for l in (legs or [])]), True
+    except Exception:
+        return [dict(l) for l in (legs or [])], False
 
 
 def _intraday_signal(sid, s, today, need_more_than=0):
@@ -563,14 +618,18 @@ def _intraday_signal(sid, s, today, need_more_than=0):
                 except Exception:
                     _sig_price = 0.0
             for t in ([_pick] if _pick else []):
-                _o = str(t.get("option_type") or "").upper()
-                _p = str(t.get("position") or "").upper()
-                for leg in legs:
-                    if (str(leg.get("option_type") or "").upper() == _o
-                            and str(leg.get("transaction") or "").upper() == _p
-                            and leg not in fired):
-                        fired.append(leg)
-                        break
+                _matched, _spread = _legs_for_backtest_trade(t, legs)
+                if _spread:
+                    # All legs of a defined-risk spread enter together at the
+                    # engine's exact strikes/premiums. One shared signal strike
+                    # would collapse a Bull Put Spread into two same-strike legs.
+                    fired = _matched
+                    _sig_strike = None
+                    _sig_price = 0.0
+                else:
+                    for leg in _matched:
+                        if leg not in fired:
+                            fired.append(leg)
         except Exception:
             pass
         if fired:
@@ -656,6 +715,13 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False,
         _live_mode = False
     if _live_mode:
         notes.append(f"{s.get('name')}: LIVE route via {_live_broker}")
+    # Spread legs from ONE signal share an exit group: SL/TP monitor closes
+    # them together, same as the backtest's single net-premium exit.
+    try:
+        import uuid as _uuid
+        _spread_group = _uuid.uuid4().hex[:12] if len(legs or []) > 1 else ""
+    except Exception:
+        _spread_group = ""
     from routes.option_chain import place_trade, TradeRequest
     for leg in legs:
         try:
@@ -669,7 +735,10 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False,
             dist = int(leg.get("otm_distance") or 0)
             # PARITY (25-11): backtest signal ke saath hi strike/use karo —
             # live ATM se alag strike laga ne par SL immediately hit hota tha.
-            if signal_strike:
+            if leg.get("strike_override") not in (None, ""):
+                # Engine's exact strike for THIS leg of a spread (parity).
+                strike = float(leg["strike_override"])
+            elif signal_strike:
                 strike = float(signal_strike)
             else:
                 strike = atm
@@ -768,8 +837,11 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False,
                         # backtest se match hon. Live entry price alag ho
                         # sakti hai (LTP vs model), isliye signal_price se
                         # SL/TP levels calculate karo.
-                        if _sig_price and _sig_price > 0:
-                            _aad5["signal_entry_price"] = round(_sig_price, 2)
+                        _leg_sig_px = float(leg.get("_signal_price") or 0) or float(signal_price or 0)
+                        if _leg_sig_px > 0:
+                            _aad5["signal_entry_price"] = round(_leg_sig_px, 2)
+                        if _spread_group:
+                            _aad5["spread_group"] = _spread_group
                         db.execute("UPDATE paper_trades SET auto_action=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                                    [_js5.dumps(_aad5), res["trade_id"]])
                 except Exception:
@@ -785,6 +857,17 @@ def _execute_legs(s, legs, db, tm, today, force_paper=False,
             notes.append(f"{s.get('name')}: leg failed {e}"[:120])
             break
     return placed, notes
+
+
+def _parse_clock_min(value, fallback=0):
+    try:
+        s = str(value or "").strip()
+        if not s:
+            return fallback
+        p = s.split(":")
+        return max(0, min(23 * 60 + 59, int(p[0]) * 60 + int(p[1]) if len(p) > 1 else int(p[0]) * 60))
+    except Exception:
+        return fallback
 
 
 def _entry_window_ok_for(adv: dict, note_out: list, _now=None):
@@ -808,6 +891,27 @@ def _entry_window_ok_for(adv: dict, note_out: list, _now=None):
         elif isinstance(_now, str):
             _now = _dt.datetime.fromisoformat(_now)
         _mins = _now.hour * 60 + _now.minute
+        # STRATEGY-LEVEL ENTRY WINDOW (new builder control): same window the
+        # backtest engine uses, so a morning-only / afternoon-only strategy
+        # can never place paper entries outside its configured IST window.
+        # Existing strategies WITHOUT entry_window keep the legacy
+        # entry_time(+15m) then till-15:00 rule below (no behaviour change).
+        _ew = (adv or {}).get("entry_window")
+        if isinstance(_ew, dict) and (_ew.get("start") or _ew.get("end")):
+            _ws = _parse_clock_min(_ew.get("start"), 9 * 60 + 15)
+            _we = _parse_clock_min(_ew.get("end"), 15 * 60)
+            if _we < _ws:
+                _ws, _we = 9 * 60 + 15, 15 * 60
+            _lbl = str(_ew.get("label") or "Entry Window")
+            if _mins < _ws:
+                if note_out is not None:
+                    note_out.append(f"{_lbl} {_ew.get('start')} se pehle - entry skip")
+                return False, str(_ew.get("start") or "09:15")
+            if _mins > _we:
+                if note_out is not None:
+                    note_out.append(f"{_lbl} {_ew.get('end')} ke baad - entry skip (exits chalu)")
+                return False, str(_ew.get("end") or "15:15")
+            return True, str(_ew.get("start") or "09:15")
         _et = str((adv or {}).get("entry_time") or "09:35").strip()[:5]
         try:
             _eh, _em = _et.split(":")
@@ -954,6 +1058,9 @@ def place_for_strategy(sid, signal_check="daily"):
             if not _fired:
                 return {"placed": placed, "notes": [f"{s.get('name')}: {_why} - skipped"]}
             use_legs = _fired
+        # Multi-leg spread: signal helper stashed the engine's exact per-leg
+        # strikes/premiums on the row. Use them so paper fires all legs together.
+        use_legs = s.pop("_paper_leg_overrides", None) or use_legs
         _pl, _nt = _execute_legs(s, use_legs, db, tm, today,
                                  signal_strike=_sig_strike, signal_price=_sig_price)
         placed.extend(_pl)

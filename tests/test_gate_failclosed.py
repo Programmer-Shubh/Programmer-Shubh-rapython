@@ -79,8 +79,8 @@ def test_signal_result_cached_per_day(monkeypatch):
     monkeypatch.setattr("routes.strategy_builder._run_backtest_core", fake_bt)
     s = {"id": 424242, "symbol": "NIFTY", "legs": "[1]", "indicators": "[]",
          "advanced_options": "{}", "risk_management": "{}"}
-    f1, _ = ap._today_signal(424242, s, "2026-10-12")
-    f2, _ = ap._today_signal(424242, s, "2026-10-12")
+    f1, n1, sk1, px1 = ap._today_signal(424242, s, "2026-10-12")
+    f2, n2, sk2, px2 = ap._today_signal(424242, s, "2026-10-12")
     assert (f1, f2) == (False, False)
     assert calls["n"] == 1, calls  # second call served from per-day cache
     ap._SIGNAL_CACHE.clear()
