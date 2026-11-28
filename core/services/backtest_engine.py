@@ -59,6 +59,7 @@ class BacktestEngine:
         self._db_prem_keys = set()
         self._fake_prem_keys = set()
         self._slippage_pct = 0.5  # Default dynamic slippage % for option selling
+        self._expiry_guard_cache = {}  # strict contract map (date -> expiry)
         # ---- v7 realism knobs (default = strict / real-market) ----
         # TP fill mode: "close" = target tabhi book hota hai jab COMPLETED
         # candle ka close level ke paar ho (wick/high-low touch par nahi).
@@ -109,12 +110,29 @@ class BacktestEngine:
             self._used_intraday_bars = False
         self._trade_mode = str(advanced_options.get("trade_mode") or "").lower()
         self._advanced = advanced_options
+        # Trade Direction (Both / Bullish Only / Bearish Only). Global gate —
+        # per-leg Trigger On ke saath milkar chalata hai.
+        self._direction = str(advanced_options.get("direction", "both") or "both").lower()
+        if self._direction not in ("both", "bullish", "bearish"):
+            self._direction = "both"
         # REAL option tick data mode (user rule 24-11): '1m_chain' / 'tick' /
         # 'real' par premium recorded ticks se lo, Black-Scholes nahi.
         self._use_tick_data = str(advanced_options.get("data_mode") or "").lower() in (
             "1m_chain", "1m", "tick", "ticks", "real", "real_option", "option_chain")
         self.bt_expiry = str(legs[0].get("expiry_date", "") if legs else "")[:10]
         self._explicit_expiry = bool(self.bt_expiry)
+        # STRICT EXPIRY VALIDATION: multi-leg me sab legs ka expiry SAME hona
+        # chahiye. Ek weekly aur doosra monthly = alag contracts = galat P&L.
+        self._leg_expiry_mismatch = False
+        try:
+            _dates = {str((l or {}).get("expiry_date") or "")[:10]
+                      for l in (legs or []) if (l or {}).get("expiry_date")}
+            _hints = {str((l or {}).get("expiry") or "").lower()
+                      for l in (legs or []) if (l or {}).get("expiry")}
+            if len(_dates) > 1 or len(_hints) > 1:
+                self._leg_expiry_mismatch = True
+        except Exception:
+            pass
         # Premium sirf real recorded tick / 1m-chain se. IV sirf user-explicit
         # ya us din ke real option prints se — koi model IV/model premium nahi.
         self.implied_volatility = advanced_options.get("implied_volatility") or None
@@ -624,7 +642,20 @@ class BacktestEngine:
             # so skipping SL on is_last meant intraday SL never triggered).
             if has_open:
                 entry = entries[len(exits)]
-                if not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
+                if entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
+                    # Defined-risk spread: combined net-premium SL/TP on the
+                    # SAME intraday candle (all legs exit together).
+                    spread_hit = self._check_spread_sl_tp(cur, entry, leg_sl, leg_tp)
+                    if spread_hit:
+                        _rsn = spread_hit["reason"]
+                        _fill = float(spread_hit.get("fill", spread_hit["level"]))
+                        _trig = ("SL" if _rsn == "stoploss" else "TP") + f"@{float(spread_hit['level']):.2f}"
+                        self._close_spread(entries, exits, entry, _rsn, cur_date,
+                                           trigger=_trig, net_fill_target=_fill)
+                        daily_pnl += exits[-1]["pnl"]
+                        if daily_loss_limit > 0 and daily_pnl <= -daily_loss_limit:
+                            kill_switch_on = True
+                elif not entry.get("is_spread") and (leg_sl > 0 or leg_tp > 0):
                     hit = self._check_sl_tp(cur, entry, option_type, txn_type, leg_sl, leg_tp, qty, entry_idx=len(exits))
                     if hit:
                         # SL हिट होने पर मार्केट स्पाइक के चाले एक्स्ट्रा 1% स्लिपेज (विशेषकर SELL पोजीशन पर)
@@ -802,24 +833,39 @@ class BacktestEngine:
                         entry_sig = True
                     exit_sig = time_exit
                 elif is_spread:
-                    entry_sig = buy_sig or sell_sig
+                    # Multi-leg = ONE structure, ONE timestamp. Per-leg
+                    # Trigger On ko structure trigger me collapse karo: ek
+                    # signal par opposing legs fire nahi hoti. Net structure
+                    # bias (bull/bear/neutral) ya sab legs ka same explicit
+                    # trigger direction decide karta hai.
+                    entry_sig = self._spread_triggered(legs, buy_sig, sell_sig)
                     if not entry_sig and not pre_calc:
                         entry_sig = True
                     exit_sig = time_exit
                 else:
-                    # Direction-aware: CE Buy = bullish (buy_sig), PE Buy = bearish (sell_sig)
-                    # CE Sell = bearish, PE Sell = bullish
-                    # Signal-based EXIT only when the user wrote explicit
-                    # exit_conditions. Paper holds until SL/TP/EOD (its monitor
-                    # has no opposite-indicator exit), so an empty conditions
-                    # list must NOT create a backtest-only exit.
+                    # Direction-aware single leg via per-leg trigger (default
+                    # = leg's natural bias). Signal-based EXIT sirf tab jab
+                    # explicit exit_conditions ho (paper parity).
                     _exit_on_signal = bool(exit_conditions)
+                    entry_sig = self._leg_triggered(leg, buy_sig, sell_sig)
+                    if not entry_sig and not pre_calc:
+                        entry_sig = True
                     if option_type == "PE":
-                        entry_sig = sell_sig if txn_type == "buy" else buy_sig
                         exit_sig = (buy_sig if txn_type == "buy" else sell_sig) if _exit_on_signal else False
                     else:
-                        entry_sig = buy_sig if txn_type == "buy" else sell_sig
                         exit_sig = (sell_sig if txn_type == "buy" else buy_sig) if _exit_on_signal else False
+                # ---- GLOBAL TRADE DIRECTION GATE (Both / Bullish / Bearish) ----
+                if entry_sig and self._direction == "bullish" and not buy_sig:
+                    entry_sig = False
+                if entry_sig and self._direction == "bearish" and not sell_sig:
+                    entry_sig = False
+                # Expiry mismatch = alag contracts par spread — koi trade nahi.
+                if getattr(self, "_leg_expiry_mismatch", False):
+                    entry_sig = False
+                    try:
+                        self._rej["expiry_mismatch"] = self._rej.get("expiry_mismatch", 0) + 1
+                    except Exception:
+                        pass
                 # Market Regime filter: when selected, only enter in matching regime
                 if "market_regime" in (pre_calc or {}):
                     try:
@@ -2014,6 +2060,7 @@ class BacktestEngine:
             # across exits/MTM stay crash-free; display shows the level.
             return {
                 "date": date, "strike": round(float(spot or 0), 2), "price": round(premium, 2),
+                "spot": round(float(spot or 0), 2),
                 "quantity": qty, "costs": costs, "time": entry_clock,
                 "total_cost": round(premium * qty + costs["total"], 2),
                 "type": txn_type, "legs": [{"option_type": "EQ", "strike": round(float(spot or 0), 2), "type": txn_type, "lots": lots}],
@@ -2053,6 +2100,7 @@ class BacktestEngine:
             _sig_inds = []
         return {
             "date": date, "strike": str(strike), "price": round(premium, 2),
+            "spot": round(float(spot or 0), 2),
             "quantity": qty, "costs": costs, "time": entry_clock,
             "total_cost": round(premium * qty + costs["total"], 2),
             "type": txn_type, "legs": [{"option_type": option_type, "strike": strike, "type": txn_type, "lots": lots}],
@@ -2067,6 +2115,7 @@ class BacktestEngine:
         leg_details = []
         total_cost = 0.0
         qty = 0
+        net_delta_acc = 0.0
         for idx, leg in enumerate(legs):
             option_type = leg.get("option_type", leg.get("optType", "CE"))
             # Support both 'transaction' and frontend 'position'
@@ -2114,15 +2163,39 @@ class BacktestEngine:
             signed = premium * lqty if txn_type == "sell" else -premium * lqty
             total_cost += signed
             qty += lqty
+            # Net premium sensitivity (points per 1 pt of underlying move) for
+            # combined SL/TP. SIGNED delta is essential: CE delta > 0, PE
+            # delta < 0. Using abs() reversed every PE leg and made a bull
+            # put spread look bearish (SL hit on a rally instead of a fall).
+            # d(net premium)/dS = +signed_delta for a SOLD leg, -signed for a
+            # BOUGHT leg (net premium = sold premium - bought premium).
+            try:
+                from utils.helpers import bs_delta as _bd
+                _iv = float(self._pricing_iv(date, strike, option_type, spot) or 0) or 0.20
+                _dte = max(1, int(self._days_to_expiry(str(date)[:10]) or 7))
+                _dl = float(_bd(spot, strike, _dte / 365.0,
+                                max(_iv, 0.05), option_type) or 0)
+                net_delta_acc += (1 if txn_type == "sell" else -1) * _dl * lqty
+            except Exception:
+                pass
             leg_details.append({
                 "option_type": option_type, "strike": strike, "type": txn_type,
                 "lots": lots, "quantity": lqty, "premium": round(premium, 2),
                 "costs": costs, "signed_value": round(signed, 2),
             })
         net_premium = abs(total_cost)
+        # SL/TP "premium points" are PER SPREAD (one unit of every leg), not
+        # per total units across all legs. Dividing by `qty` (sum of all legs'
+        # quantities) halved a 2-leg net credit and quartered an iron condor,
+        # so SL/TP fired at the wrong premium level. Use the per-leg quantity.
+        per_spread_qty = max([int(l["quantity"]) for l in leg_details] or [1])
         entry_clock = getattr(self, '_cur_bar_time', '') or getattr(self, '_entry_time', '09:35')
         return {
             "date": date, "strike": str(leg_details[0]["strike"]), "price": round(net_premium, 2),
+            "spot": round(float(spot or 0), 2),
+            "net_pts": round(net_premium / max(per_spread_qty, 1), 2),
+            "net_delta": round(net_delta_acc / max(per_spread_qty, 1), 4),
+            "credit": bool(total_cost > 0),
             "quantity": qty, "costs": {"total": sum(l["costs"]["total"] for l in leg_details), **leg_details[0]["costs"]},
             "total_cost": round(total_cost + sum(l["costs"]["total"] for l in leg_details), 2),
             "type": "spread", "legs": leg_details,
@@ -2160,6 +2233,101 @@ class BacktestEngine:
             return best
         except Exception:
             return atm
+
+    @staticmethod
+    def _leg_bias(leg: dict) -> str:
+        """BUY CE / SELL PE = bullish; BUY PE / SELL CE = bearish."""
+        txn = str((leg or {}).get("transaction", "buy") or "buy").lower()
+        ot = str((leg or {}).get("option_type", "CE") or "CE").upper()
+        if (txn == "buy" and ot == "CE") or (txn == "sell" and ot == "PE"):
+            return "bull"
+        if (txn == "buy" and ot == "PE") or (txn == "sell" and ot == "CE"):
+            return "bear"
+        return "none"
+
+    def _leg_triggered(self, leg: dict, buy_sig: bool, sell_sig: bool) -> bool:
+        """Per-leg 'Trigger On' (BUY signal / SELL signal / Both).
+
+        Default (no explicit trigger_on) follows the leg's NATURAL bias —
+        ek SELL CE leg ko BUY signal par chalana galat tha. Explicit 'both'
+        user ko do-way deta hai."""
+        trig = str((leg or {}).get("trigger_on", "") or "").lower()
+        if trig in ("buy", "bull", "bullish", "buysignal"):
+            return bool(buy_sig)
+        if trig in ("sell", "bear", "bearish", "sellsignal"):
+            return bool(sell_sig)
+        if trig in ("both", "any", "two-way"):
+            return bool(buy_sig or sell_sig)
+        return bool(buy_sig if self._leg_bias(leg) == "bull" else sell_sig)
+
+    def _structure_bias(self, legs=None) -> str:
+        """NET direction of a multi-leg structure ('bull' / 'bear' / 'neutral').
+
+        A vertical spread's direction depends on WHICH strike is bought vs
+        sold, not on each leg's isolated bias: Bull Call (buy ATM CE + sell
+        OTM2 CE) is bullish although its second leg is a CE sell. Deeper OTM
+        legs carry less delta, so a 1/(1+0.3*OTM) weight gives the right sign.
+        The EASY UI sends an explicit advanced.structure_bias from its template
+        (bullcall/bullput -> bull, bearcall/bearput -> bear, condor -> neutral).
+        """
+        adv = getattr(self, "_advanced", {}) or {}
+        explicit = str(adv.get("structure_bias", "") or "").lower()
+        explicit = {"bullish": "bull", "bearish": "bear", "both": "neutral"}.get(explicit, explicit)
+        if explicit in ("bull", "bear", "neutral"):
+            return explicit
+        legs = legs or []
+        if len(legs) == 1:
+            return self._leg_bias(legs[0])
+        # Four-leg neutral templates (Iron Condor / Iron Butterfly) have one
+        # bull and one bear leg on each side — they are not a directional bet.
+        if len(legs) == 4:
+            return "neutral"
+        score = 0.0
+        for leg in legs:
+            bias = self._leg_bias(leg)
+            if bias == "none":
+                continue
+            d = abs(int(leg.get("otm_distance", 0) or 0))
+            score += (1 if bias == "bull" else -1) / (1.0 + 0.3 * d)
+        if abs(score) < 0.15:
+            return "neutral"
+        return "bull" if score > 0 else "bear"
+
+    def _spread_triggered(self, legs, buy_sig, sell_sig) -> bool:
+        """Spread legs enter/exit at the SAME timestamp, so the structure has
+        ONE trigger — opposing legs can never fire on the same signal.
+
+        - Every leg explicitly set the SAME trigger_on -> use it.
+        - Conflicting per-leg triggers collapse to the structure's net
+          direction (logged in diagnostics) instead of arming half the legs.
+        - Otherwise the structure fires on its own bias: bull -> BUY signal,
+          bear -> SELL signal, neutral -> either.
+        """
+        trigs = {str((l or {}).get("trigger_on", "") or "").lower()
+                 for l in (legs or [])}
+        trigs.discard("")
+        if len(trigs) > 1:
+            try:
+                if not hasattr(self, "_rej") or self._rej is None:
+                    self._rej = {}
+                self._rej["conflicting_leg_triggers"] = (
+                    self._rej.get("conflicting_leg_triggers", 0) + 1)
+            except Exception:
+                pass
+        if len(trigs) == 1:
+            t = next(iter(trigs))
+            if t in ("buy", "bull", "bullish", "buysignal"):
+                return bool(buy_sig)
+            if t in ("sell", "bear", "bearish", "sellsignal"):
+                return bool(sell_sig)
+            if t in ("both", "any", "two-way"):
+                return bool(buy_sig or sell_sig)
+        bias = self._structure_bias(legs)
+        if bias == "bull":
+            return bool(buy_sig)
+        if bias == "bear":
+            return bool(sell_sig)
+        return bool(buy_sig or sell_sig)
 
     def _resolve_sltp(self, leg: dict, risk_management: dict):
         """SL/TP rupees YA percent-of-premium ('2%' / *_pct key) - ek jagah
@@ -2453,8 +2621,11 @@ class BacktestEngine:
         # delta-synthetic band ? an invented range minted fantasy SL/TP hits.
         _obar = self._real_option_bar(cur_d, strike, option_type)
         if not _obar or _obar.get("high") is None:
-            # Real premium unavailable for this bar -> honest no-hit (never
-            # fabricate a modelled option path).
+            # Real tick bar nahi mila: ab intraday candle ke high/low se
+            # delta-based option band bana kar SL/TP evaluate karo (pehle yahan
+            # return None tha -> har trade EOD square-off par nikalta tha).
+            _obar = self._modelled_option_bar(current, entry, option_type, txn_type)
+        if not _obar or _obar.get("high") is None:
             return None
         prem_high, prem_low = _obar["high"], _obar["low"]
         prem_open, prem_close = _obar["open"], _obar["close"]
@@ -2711,6 +2882,89 @@ class BacktestEngine:
             pass
         return None
 
+    def _modelled_option_bar(self, current, entry, option_type, txn_type):
+        """Underlying candle high/low -> option premium band (intraday SL/TP).
+
+        Real 1m/tick print na hone par bhi SL/TP ko EOD tak ignore nahi karna.
+        Delta-based band = SHARED bs_delta + us din ka real IV; entry premium
+        par anchor kiya (spot == entry spot par band = actual fill). Ye koi
+        naya fake price nahi — real candle range ka premium translation hai.
+        `advanced.option_band_scale` se width tune hoti hai.
+        """
+        try:
+            from utils.helpers import bs_delta as _bd
+            es = float(entry.get("spot") or 0)
+            ep = float(entry.get("price") or 0)
+            strike = float(entry.get("strike") or 0)
+            if es <= 0 or ep <= 0 or strike <= 0:
+                return None
+            ch = float(current.get("high_price") or current.get("close_price") or 0)
+            cl = float(current.get("low_price") or current.get("close_price") or 0)
+            co = float(current.get("open_price") or es)
+            cc = float(current.get("close_price") or 0)
+            if ch <= 0 or cl <= 0:
+                return None
+            d = str(current.get("trade_date") or "")[:10]
+            dte = max(1, int(self._days_to_expiry(d) or 7))
+            iv = float(self._pricing_iv(d, strike, option_type, es) or 0) or 0.20
+            # SIGNED delta: CE premium rises with spot, PE premium FALLS.
+            # abs() here inverted every PE premium path, so a short PE hit SL
+            # on a rally (wrong direction) and TP on a fall.
+            delta = float(_bd(es, strike, dte / 365.0,
+                              max(iv, 0.05), option_type) or 0)
+            if option_type == "PE":
+                delta = -abs(delta or 0.5)
+            else:
+                delta = abs(delta or 0.5)
+            delta = min(max(abs(delta), 0.05), 0.95) * (1 if delta >= 0 else -1)
+            scale = float((getattr(self, "_advanced", {}) or {}).get("option_band_scale", 1.0) or 1.0)
+            scale = min(max(scale, 0.25), 4.0)
+
+            def px(s):
+                return max(0.05, ep + (float(s) - es) * delta * scale)
+
+            self._n_modelled_band = getattr(self, "_n_modelled_band", 0) + 1
+            return {"open": px(co), "high": px(max(ch, cl)),
+                    "low": px(min(ch, cl)), "close": px(cc or cl)}
+        except Exception:
+            return None
+
+    def _check_spread_sl_tp(self, current, entry, leg_sl, leg_tp):
+        """Defined-risk spread: SL/TP on the COMBINED net premium points.
+
+        Sab legs ka band usi intraday candle se banta hai (same timestamps),
+        net premium = sum(signed leg premium). Credit spread = sell (net gitta
+        to profit), debit spread = buy (net badhta to profit)."""
+        try:
+            ep = float(entry.get("net_pts") or 0)
+            if ep <= 0 or (leg_sl <= 0 and leg_tp <= 0):
+                return None
+            credit = bool(entry.get("credit", True))
+            net_delta = float(entry.get("net_delta") or 0)
+            es = float(entry.get("spot") or 0)
+            if es <= 0:
+                return None
+            ch = float(current.get("high_price") or current.get("close_price") or 0)
+            cl = float(current.get("low_price") or current.get("close_price") or 0)
+            co = float(current.get("open_price") or es)
+            cc = float(current.get("close_price") or cl)
+            if ch <= 0 or cl <= 0:
+                return None
+            scale = float((getattr(self, "_advanced", {}) or {}).get("option_band_scale", 1.0) or 1.0)
+
+            def netv(s):
+                return max(0.05, ep + (float(s) - es) * net_delta * scale)
+
+            n_open, n_high, n_low, n_close = netv(co), netv(max(ch, cl)), netv(min(ch, cl)), netv(cc)
+            from utils.helpers import sltp_premium_level as _lvl
+            txn = "sell" if credit else "buy"
+            sl_level = _lvl(ep, leg_sl, 1, 1, txn, True, unit=self._sl_unit)
+            tp_level = _lvl(ep, leg_tp, 1, 1, txn, False, unit=self._tp_unit)
+            hit = self._check_sl_tp_levels(txn, sl_level, tp_level, n_high, n_low, bar_open=n_open)
+            return self._confirm_tp(hit, txn, tp_level, n_close)
+        except Exception:
+            return None
+
     def run_vectorbt(self, df, symbol="NIFTY"):
         """Vectorbt lightning-fast in-memory backtest on DataFrame (no CSV)."""
         try:
@@ -2852,6 +3106,36 @@ class BacktestEngine:
         return bool(getattr(self, "_cur_bar_time", ""))
 
     # ---- Real-print resolvers (shared by entry / exit / SL-TP bars) -------
+    def _contract_guard(self, date):
+        """Strict expiry + strike-distance map for a trade date.
+
+        Returns (expiry, max_strike_steps) or None. Ek bhi real contract nahi
+        mila to None -> caller trade skip karta hai (koi wrong-expiry / deep-ITM
+        fill nahi). Pehle har expiry aur har nearest strike try hota tha, jis
+        se FINNIFTY OTM2 PE ke liye ₹2,844-₹4,005 ke deep-ITM contract fill
+        hote the."""
+        d = str(date or "")[:10]
+        if not d:
+            return None
+        if d in self._expiry_guard_cache:
+            return self._expiry_guard_cache[d]
+        out = None
+        try:
+            exp = str(getattr(self, "bt_expiry", "") or "")[:10]
+            if not exp:
+                # Real chain (same source as Setup + Expiry Payoff) pehle.
+                from utils.helpers import nearest_active_expiry as _nae
+                exp = str(_nae(getattr(self, "bt_symbol", ""),
+                               getattr(self, "_expiry_hint", "weekly"), d) or "")
+                if not exp:
+                    exp = str(self._expiry_for_date(d) or "")
+            if exp and exp >= d:
+                out = (exp, 1)
+        except Exception:
+            out = None
+        self._expiry_guard_cache[d] = out
+        return out
+
     def _lakehouse_expiry_candidates(self, date, preferred=""):
         """Expiry partitions to try: preferred/calendar first, then every real
         lakehouse expiry for this underlying, nearest first. Bhavcopy expiry is
@@ -2916,14 +3200,14 @@ class BacktestEngine:
         d = str(date or "")[:10]
         if not d:
             return None
-        pref = str(anchor_exp or getattr(self, "bt_expiry", "") or "")
-        if not pref:
-            try:
-                pref = str(self._expiry_for_date(d) or "")
-            except Exception:
-                pref = ""
+        guard = self._contract_guard(d)
+        if not guard:
+            return None
+        exp_allowed, max_steps = guard
+        # STRICT: sirf select kiya gaya expiry. Doosre expiry ke contract se
+        # premium lena hi galat tha (weekly chahein to monthly bhaav nahi).
+        exps = [exp_allowed]
         modes = ("1m_chain", "tick") if self._intraday_bar() else ("tick", "1m_chain")
-        exps = self._lakehouse_expiry_candidates(d, pref)
 
         def _query(mode, exp, k):
             try:
@@ -2962,9 +3246,16 @@ class BacktestEngine:
                     continue
                 target = float(strike or 0)
                 if target > 0:
-                    kbest = min(rows, key=lambda r: abs(float(r.get("strike") or 0) - target))
+                    # STRIKE-DISTANCE VALIDATION: ek step se door strike = doosra
+                    # contract (deep ITM), uska premium yahan kabhi nahi liya.
+                    tol = float(max_steps) * float(get_strike_step(self.bt_symbol) or 50)
+                    near = [r for r in rows
+                            if abs(float(r.get("strike") or 0) - target) <= tol + 0.01]
+                    if not near:
+                        continue
+                    kbest = min(near, key=lambda r: abs(float(r.get("strike") or 0) - target))
                     ksel = float(kbest.get("strike") or 0)
-                    rows = [r for r in rows if abs(float(r.get("strike") or 0) - ksel) < 0.01]
+                    rows = [r for r in near if abs(float(r.get("strike") or 0) - ksel) < 0.01]
                 row = self._pick_real_row(rows)
                 if row:
                     val = float(row.get("ltp") or row.get("close_price") or 0)
@@ -2988,19 +3279,35 @@ class BacktestEngine:
             return None
         clock = str(getattr(self, "_cur_bar_time", "") or "")
         want_close = bool(for_exit) and (clock >= "15:15" if clock else True)
+        guard = self._contract_guard(d)
+        if not guard:
+            return None
+        exp, max_steps = guard
         try:
             db = Database.get_instance()
             row = db.fetch_one(
                 "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND trade_date=? "
-                "AND ABS(strike_price-?)<0.01 AND option_type=?",
-                [self.bt_symbol, d, float(strike or 0), option_type])
+                "AND ABS(strike_price-?)<0.01 AND option_type=? AND (expiry_date=? OR expiry_date IS NULL)",
+                [self.bt_symbol, d, float(strike or 0), option_type, exp])
             if not row:
                 from utils.helpers import get_strike_step
                 step = get_strike_step(self.bt_symbol)
                 row = db.fetch_one(
                     "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? "
-                    "AND trade_date=? AND ABS(strike_price-?) <= ?*2 ORDER BY ABS(strike_price-?) LIMIT 1",
-                    [self.bt_symbol, option_type, d, float(strike or 0), step, float(strike or 0)])
+                    "AND trade_date=? AND ABS(strike_price-?) <= ? AND expiry_date=? "
+                    "ORDER BY ABS(strike_price-?) LIMIT 1",
+                    [self.bt_symbol, option_type, d, float(strike or 0),
+                     float(max_steps) * float(step or 50), exp, float(strike or 0)])
+                if not row:
+                    # Legacy/test rows me expiry_date NULL hota hai (purana
+                    # import). Expiry-CONFUSED multi-expiry data nahi — sirf
+                    # wahi rows jahan expiry recorded hi nahi thi.
+                    row = db.fetch_one(
+                        "SELECT open_price, close_price FROM bhavcopy_data WHERE symbol=? AND option_type=? "
+                        "AND trade_date=? AND ABS(strike_price-?) <= ? AND expiry_date IS NULL "
+                        "ORDER BY ABS(strike_price-?) LIMIT 1",
+                        [self.bt_symbol, option_type, d, float(strike or 0),
+                         float(max_steps) * float(step or 50), float(strike or 0)])
             if row:
                 op = float(row.get("open_price") or 0)
                 cl = float(row.get("close_price") or 0)
@@ -3027,22 +3334,34 @@ class BacktestEngine:
         d = str(date or "")[:10]
         if not d or not strike:
             return None
+        guard = self._contract_guard(d)
+        if not guard:
+            return None
+        exp, max_steps = guard
         try:
             db = Database.get_instance()
             cols = "open_price, high_price, low_price, close_price"
             row = db.fetch_one(
                 f"SELECT {cols} FROM bhavcopy_data WHERE symbol=? AND trade_date=? "
-                "AND ABS(strike_price-?)<0.01 AND option_type=?",
-                [self.bt_symbol, d, float(strike), option_type])
+                "AND ABS(strike_price-?)<0.01 AND option_type=? AND (expiry_date=? OR expiry_date IS NULL)",
+                [self.bt_symbol, d, float(strike), option_type, exp])
             if not row or not (float(row.get("high_price") or 0) > 0
                                and float(row.get("low_price") or 0) > 0):
                 from utils.helpers import get_strike_step
                 step = get_strike_step(self.bt_symbol)
                 row = db.fetch_one(
                     f"SELECT {cols} FROM bhavcopy_data WHERE symbol=? AND option_type=? "
-                    "AND trade_date=? AND ABS(strike_price-?) <= ?*2 "
+                    "AND trade_date=? AND ABS(strike_price-?) <= ? AND expiry_date=? "
                     "ORDER BY ABS(strike_price-?) LIMIT 1",
-                    [self.bt_symbol, option_type, d, float(strike), step, float(strike)])
+                    [self.bt_symbol, option_type, d, float(strike),
+                     float(max_steps) * float(step or 50), exp, float(strike)])
+                if not row:
+                    row = db.fetch_one(
+                        f"SELECT {cols} FROM bhavcopy_data WHERE symbol=? AND option_type=? "
+                        "AND trade_date=? AND ABS(strike_price-?) <= ? AND expiry_date IS NULL "
+                        "ORDER BY ABS(strike_price-?) LIMIT 1",
+                        [self.bt_symbol, option_type, d, float(strike),
+                         float(max_steps) * float(step or 50), float(strike)])
             if row:
                 o = float(row.get("open_price") or 0)
                 h = float(row.get("high_price") or 0)
@@ -3308,17 +3627,32 @@ class BacktestEngine:
             "quantity": qty, "exit_costs": exit_costs, "reason": reason, "pnl": round(pnl, 2),
             "time": exit_clock, "trigger": trigger or reason,
             "prem_src": self._prem_source(exit_date, entry.get("strike", 0), _eopt),
+            "exit_status": reason,
+            "sl_points": round(float(getattr(self, "_sl_amt", 0) or 0), 2)
+            if str(reason).lower() in ("stoploss", "trailing_lock") else 0.0,
         })
 
-    def _close_spread(self, entries, exits, entry, reason, exit_date, trigger=""):
+    def _close_spread(self, entries, exits, entry, reason, exit_date, trigger="", net_fill_target=None):
         exit_costs_total = 0.0
         exit_value = 0.0
+        _adj = 0.0
+        if net_fill_target is not None:
+            try:
+                _adj = float(net_fill_target) - float(entry.get("net_pts") or 0)
+            except Exception:
+                _adj = 0.0
         for leg in entry.get("legs", []):
             option_type = leg["option_type"]
             strike = leg["strike"]
             lqty = leg["quantity"]
             spot = self._close_spot_for_date(exit_date)
             prem = self._close_premium(exit_date, spot, strike, option_type)
+            # SL/TP net-fill: net premium (sell prem - buy prem) ko _adj
+            # badhana hai. Dono legs ko pura _adj shift karne par net 2*_adj
+            # badhta tha (SL level se double), isliye aadha-aadha lagao —
+            # sab legs ka fill usi ek timestamp par (same bar clock).
+            if _adj:
+                prem = max(0.05, float(prem) + (1 if leg["type"] == "sell" else -1) * (_adj / 2.0))
             prem = TransactionCosts.apply_fill_slippage(prem, "SELL" if leg["type"] == "buy" else "BUY", self.is_live,
                                                         slippage_pct=float(getattr(self, "_slippage_pct", 0.5) or 0.5))
             # v7 exit latency (spread legs bhi market exit hain, TP nahi)
@@ -3357,7 +3691,54 @@ class BacktestEngine:
                 or getattr(self, '_exit_time', '15:14')
             ),
             "trigger": trigger or reason, "prem_src": "spread",
+            "exit_status": reason,
+            "sl_points": round(float(getattr(self, "_sl_amt", 0) or 0), 2)
+            if str(reason).lower() in ("stoploss", "trailing_lock") else 0.0,
         })
+
+    @staticmethod
+    def _spread_risk(entry: dict) -> dict:
+        """Analytic expiry bounds for a multi-leg structure (all legs, same
+        expiry). Defined-risk templates must show a FINITE net max loss."""
+        try:
+            legs = entry.get("legs") or []
+            if not legs:
+                return {}
+            entry_cash = sum(float(l.get("signed_value") or 0) for l in legs)
+            # Exit side sign is OPPOSITE of entry side: a SELL leg is bought
+            # back (loses when intrinsic rises), a BUY leg is sold (gains).
+            lower = entry_cash  # spot -> 0: CE intrinsic 0, PE intrinsic K
+            ce_slope = 0.0
+            detail = []
+            for l in legs:
+                is_sell = str(l.get("type") or "buy").lower() == "sell"
+                xsign = -1 if is_sell else 1
+                q = float(l.get("quantity") or 0)
+                k = float(l.get("strike") or 0)
+                pr = float(l.get("premium") or 0)
+                if str(l.get("option_type") or "").upper() == "CE":
+                    ce_slope += xsign * q
+                else:
+                    lower += xsign * k * q
+                detail.append({"option_type": l.get("option_type"), "strike": k,
+                               "transaction": l.get("type"), "premium": pr,
+                               "quantity": int(q)})
+            # At spot -> inf CE intrinsic -> inf, PE -> 0.
+            unlimited_profit = ce_slope > 0
+            unlimited_loss = ce_slope < 0
+            upper = entry_cash if abs(ce_slope) < 1e-9 else None
+            best = max(lower, upper if upper is not None else lower)
+            worst = min(lower, upper if upper is not None else lower)
+            return {
+                "net_premium": round(abs(entry_cash), 2),
+                "net_credit": round(entry_cash, 2),
+                "net_max_profit": (None if unlimited_profit else round(best, 2)),
+                "net_max_loss": (None if unlimited_loss else round(max(0.0, -worst), 2)),
+                "defined_risk": bool(not unlimited_loss and not unlimited_profit and worst < 0),
+                "legs_detail": detail,
+            }
+        except Exception:
+            return {}
 
     def _close_spot_for_date(self, bar_date):
         # Intraday bars: use the bar's own spot (the daily DB close belongs to
@@ -3442,6 +3823,9 @@ class BacktestEngine:
                         "r_multiple": round(pnl / max(float(entry.get("risk_amount_rs", 0) or 0), 0.01), 2)
                         if float(entry.get("risk_amount_rs", 0) or 0) > 0 else 0.0,
                         "signal_time": entry.get("signal_time", entry.get("time", "")),
+                        "exit_status": exit.get("exit_status", exit.get("reason", "")),
+                        "sl_points": round(float(exit.get("sl_points", 0) or 0), 2),
+                        **self._spread_risk(entry),
                     })
                 else:
                     leg_info = entry.get("legs", [{}])[0] if entry.get("legs") else {}
@@ -3496,6 +3880,8 @@ class BacktestEngine:
                         "risk_amount_rs": round(_risk_amt, 2),
                         "r_multiple": round(pnl / max(_risk_amt, 0.01), 2) if _risk_amt > 0 else 0.0,
                         "signal_time": entry.get("signal_time", entry.get("time", "")),
+                        "exit_status": exit.get("exit_status", exit.get("reason", "")),
+                        "sl_points": round(float(exit.get("sl_points", 0) or 0), 2),
                     })
             equity.append(capital)
         total_return = capital - self.initial_capital
@@ -3652,6 +4038,9 @@ class BacktestEngine:
                 "win_rate": round(win_rate, 2),
                 "loss_rate": round(loss_rate, 2),
                 "max_drawdown": round(max_dd, 4),
+                # UI ka expected field. Pehle yahan koi key hi nahi thi ->
+                # builder me Max DD hamesha 0% dikhta tha (losses ke baad bhi).
+                "max_drawdown_pct": round(max_dd, 4),
                 "profit_factor": profit_factor_display,
                 "profit_factor_infinite": profit_factor == float('inf'),
                 "sharpe_ratio": round(sharpe, 4),
@@ -3714,6 +4103,7 @@ class BacktestEngine:
                     "tp_fill_mode": str(getattr(self, "_tp_fill_mode", "close")),
                     "tp_confirmed_by_close": int(getattr(self, "_n_tp_confirmed", 0) or 0),
                     "tp_wick_touches_ignored": int(getattr(self, "_n_tp_unconfirmed", 0) or 0),
+                    "intraday_candle_band_bars": int(getattr(self, "_n_modelled_band", 0) or 0),
                     "exit_latency_fills": int(getattr(self, "_n_exit_latency", 0) or 0),
                     "fake_premium_fills": _fake_n,
                     "tick_priced_fills": len(getattr(self, "_tick_prem_keys", set()) or ()),
@@ -3789,6 +4179,7 @@ class BacktestEngine:
         self._used_intraday_bars = False
         self._trailing_best = {}  # trade index -> best price seen (for trailing SL)
         self._prem_src_cache = {}
+        self._expiry_guard_cache = {}  # date -> allowed expiry (strict contract map)
         # Data-honesty audit (24-11): kis premium ne real tick / DB / fake
         # fallback se aayi. Fake ₹5 fallback ko 'model' bolna galat tha.
         self._tick_prem_keys = set()

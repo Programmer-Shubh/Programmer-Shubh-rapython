@@ -487,6 +487,17 @@ def strike_step(symbol: str):
     from utils.helpers import get_strike_step
     return {"symbol": symbol.upper(), "strike_step": get_strike_step(symbol)}
 
+
+@app.get("/api/symbol/context/{symbol}")
+def symbol_context_api(symbol: str, expiry: str = "weekly"):
+    """Single source for Setup / Expiry Payoff / Backtest engine.
+
+    spot + lot + strike step + nearest active expiry — sab ek hi call se.
+    Spot symbol ke sanity band se validate hota hai (MIDCPNIFTY ~63,040 jaisa
+    galat instrument price yahan reject ho jata hai)."""
+    from utils.helpers import symbol_context as _ctx
+    return _ctx(symbol, expiry)
+
 @app.get("/ready")
 async def ready():
     # Light readiness check with DB ping but bounded 1s

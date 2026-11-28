@@ -50,6 +50,13 @@ FYERS_UNDERLYING = {
     "NIFTY": "NSE:NIFTY50-INDEX",
     "BANKNIFTY": "NSE:NIFTYBANK-INDEX",
     "FINNIFTY": "NSE:FINNIFTY-INDEX",
+    # MIDCPNIFTY (Nifty Midcap Select) ka SAHI Fyers index symbol
+    # "NSE:MIDCPNIFTY-INDEX" hai (live Fyers history se verify: close ~14,360).
+    # Pehle yahan missing tha to _fyers_underlying() "NSE:MIDCPNIFTY-EQ"
+    # bana deta tha aur payoff spot ~63,040 (kisi doosre instrument ka price)
+    # dikhta tha. "NSE:NIFTY_MID_SELECT-INDEX" bhi Fyers par INVALID hai
+    # (code -300) — WS subscribe aur history dono fail hote the.
+    "MIDCPNIFTY": "NSE:MIDCPNIFTY-INDEX",
     "SENSEX": "BSE:SENSEX-INDEX",
 }
 

@@ -340,6 +340,136 @@ def get_strike_step(symbol: str) -> float:
     return 50
 
 
+# Sanity bands for index underlyings. A quote outside its band is a DIFFERENT
+# instrument (e.g. Fyers "NSE:MIDCPNIFTY-EQ" returned ~63,040 while the real
+# NIFTY MID SELECT index is ~14,200). Setup, payoff and backtest must all
+# reject such a quote instead of silently building strikes from it.
+_INDEX_SPOT_BANDS = {
+    "NIFTY": (15000, 35000),
+    "BANKNIFTY": (35000, 75000),
+    "FINNIFTY": (18000, 38000),
+    "MIDCPNIFTY": (8000, 24000),
+    "SENSEX": (55000, 110000),
+    "BANKEX": (45000, 90000),
+}
+
+
+def spot_sane(symbol: str, spot) -> bool:
+    """False = quote is out of range for this index (wrong instrument / stale)."""
+    try:
+        px = float(spot or 0)
+    except Exception:
+        return False
+    if px <= 0:
+        return False
+    band = _INDEX_SPOT_BANDS.get(str(symbol or "").strip().upper())
+    if band:
+        return band[0] <= px <= band[1]
+    return True
+
+
+def nearest_active_expiry(symbol: str, expiry_hint: str = "weekly", on_date: str = "") -> str:
+    """Nearest ACTIVE option expiry (YYYY-MM-DD) for a symbol from real chain
+    rows in bhavcopy_data / lakehouse. Never guesses a date. Prefers the
+    requested weekly/monthly flavour, then falls back to the nearest real one.
+    Returns "" when there is genuinely no chain data."""
+    import datetime as _dt
+    try:
+        sym = str(symbol or "").strip().upper()
+        d0 = str(on_date or "")[:10]
+        if not d0:
+            d0 = _dt.datetime.utcnow().date().isoformat()
+        hint = str(expiry_hint or "weekly").lower()
+        exps = []
+        try:
+            from core.models.database import Database as _DB
+            rows = _DB.get_instance().fetch_all(
+                "SELECT DISTINCT expiry_date FROM bhavcopy_data WHERE symbol=? "
+                "AND option_type IN ('CE','PE') AND expiry_date>=? "
+                "ORDER BY expiry_date LIMIT 20", [sym, d0]) or []
+            exps = [str((r or {}).get("expiry_date") or "")[:10] for r in rows if (r or {}).get("expiry_date")]
+        except Exception:
+            pass
+        if not exps:
+            try:
+                from core.services.option_lakehouse import OPTION_TICKS_ROOT
+                base = OPTION_TICKS_ROOT / f"underlying={sym}"
+                if base.is_dir():
+                    for mode_dir in base.iterdir():
+                        if not mode_dir.is_dir():
+                            continue
+                        for ed in mode_dir.iterdir():
+                            if ed.is_dir() and ed.name.startswith("expiry="):
+                                exps.append(ed.name.split("=", 1)[-1])
+            except Exception:
+                pass
+        exps = sorted({e for e in exps if e and e >= d0})
+        if not exps:
+            return ""
+        # Weekly = expiry within ~10 days; monthly = the farthest of the near
+        # expiries (typically the month's last Tuesday/Thursday).
+        near = exps[:4]
+        if hint == "monthly" and len(near) > 1:
+            return near[-1]
+        if hint == "weekly" and len(near) > 1:
+            # Weekly-only symbols: first expiry that is <= 10 days away.
+            d0d = _dt.date.fromisoformat(d0)
+            for e in near:
+                try:
+                    if (_dt.date.fromisoformat(e) - d0d).days <= 10:
+                        return e
+                except Exception:
+                    continue
+        return near[0]
+    except Exception:
+        return ""
+
+
+def symbol_context(symbol: str, expiry_hint: str = "weekly") -> dict:
+    """ONE source of truth for Setup / Payoff / Backtest.
+
+    Returns {symbol, spot, spot_source, strike_step, lot_size, expiry,
+    expiry_source, atm, ok, note}. Spot is validated against the index's
+    sanity band so a mis-mapped broker symbol can never leak into strikes.
+    """
+    sym = str(symbol or "").strip().upper() or "NIFTY"
+    step = float(get_strike_step(sym) or 50)
+    lot = int(get_lot_size(sym) or 50)
+    spot, source = 0.0, "na"
+    try:
+        from core.services.live_market_data import LiveMarketData
+        d = LiveMarketData().get_live_spot(sym) or {}
+        px = float(d.get("spot") or 0)
+        if spot_sane(sym, px):
+            spot, source = px, str(d.get("source") or "live")
+    except Exception:
+        pass
+    if spot <= 0:
+        try:
+            from core.models.database import Database as _DB
+            row = _DB.get_instance().fetch_one(
+                "SELECT close_price FROM bhavcopy_data WHERE symbol=? AND option_type IS NULL "
+                "ORDER BY trade_date DESC LIMIT 1", [sym])
+            px = float((row or {}).get("close_price") or 0)
+            if spot_sane(sym, px):
+                spot, source = px, "db"
+        except Exception:
+            pass
+    exp = nearest_active_expiry(sym, expiry_hint)
+    ok = spot > 0
+    note = ""
+    if not ok:
+        note = ("Live/DB spot missing ya symbol ke sanity band se bahar — "
+                "galat instrument ka price use nahi kiya gaya.")
+    return {
+        "symbol": sym, "spot": round(spot, 2), "spot_source": source,
+        "strike_step": step, "lot_size": lot, "expiry": exp,
+        "expiry_source": "chain" if exp else "na",
+        "atm": (round(spot / step) * step) if spot > 0 else 0,
+        "ok": ok, "note": note,
+    }
+
+
 def align_strike_price(symbol: str, strike: float) -> float:
     """Snap any strike to the exchange's required multiple for this symbol.
     Global fix: Nifty 50, BankNifty 100, stocks mostly 10/20 etc. Prevents

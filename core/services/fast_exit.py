@@ -530,7 +530,10 @@ def _ws_index_symbols():
             out[_fy] = _name
     except Exception:
         pass
-    out.setdefault("NSE:NIFTY_MID_SELECT-INDEX", "MIDCPNIFTY")
+    # Fyers MIDCPNIFTY index symbol verified against live history/quotes:
+    # "NSE:MIDCPNIFTY-INDEX" (~14,360). "NSE:NIFTY_MID_SELECT-INDEX" code -300
+    # (invalid symbol) deta hai - WS subscribe fail ho jata tha.
+    out.setdefault("NSE:MIDCPNIFTY-INDEX", "MIDCPNIFTY")
     return out
 
 

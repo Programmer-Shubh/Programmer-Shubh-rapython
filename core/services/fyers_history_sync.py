@@ -46,7 +46,8 @@ INDICES = ("SENSEX", "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")
 # Fyers index instrument symbols (candidate order - prod Fyers par jo chale,
 # woh use hoga). Production par ye verify honge (logs me failed candidates
 # dikhenge).
-_MIDCP_CANDIDATES = ["NSE:NIFTY_MID_SELECT-INDEX",
+_MIDCP_CANDIDATES = ["NSE:MIDCPNIFTY-INDEX",  # verified live (close ~14,360)
+                     "NSE:NIFTY_MID_SELECT-INDEX",
                      "NSE:NIFTYMIDSELECT-INDEX",
                      "NSE:NIFTY_MIDCAP_SELECT-INDEX"]
 _INDEX_FYERS = {

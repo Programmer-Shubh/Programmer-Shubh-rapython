@@ -284,6 +284,9 @@ class BacktestRequest(BaseModel):
     legs: list = []
     advanced: dict = {}
     risk: dict = {}
+    # Trade Direction (Both / Bullish Only / Bearish Only) — per-leg
+    # trigger_on legs me aata hai. Dono engine tak pahunchte hain.
+    direction: str = "both"
     # Frontend compatibility - flat fields from Strategy Builder UI
     strategy_type: Optional[str] = None
     strategy_preset: Optional[str] = None
@@ -361,6 +364,14 @@ def _normalize_legs(raw_legs: list, lots_fallback: int = 1) -> list:
         except Exception:
             otm = 1
         entry = {"option_type": opt, "transaction": txn, "lots": lots_v, "strike_selection": sel, "otm_distance": otm}
+        # Expiry + per-leg signal routing — pehle normalize step in dono
+        # drop ho jate the (engine ko weekly/monthly ka pata hi nahi chalta tha).
+        if leg.get("expiry"):
+            entry["expiry"] = str(leg.get("expiry")).lower()
+        if leg.get("trigger_on"):
+            _trg = str(leg.get("trigger_on")).lower()
+            if _trg in ("buy", "sell", "both"):
+                entry["trigger_on"] = _trg
         if leg.get("offset") not in (None, ""):
             try:
                 entry["offset"] = int(leg.get("offset"))
@@ -392,7 +403,7 @@ def _fyers_intraday(sym, timeframe, start_date, end_date):
         return []
     under = {"NIFTY": "NSE:NIFTY50-INDEX", "BANKNIFTY": "NSE:NIFTYBANK-INDEX",
              "FINNIFTY": "NSE:FINNIFTY-INDEX",
-             "MIDCPNIFTY": "NSE:NIFTY_MID_SELECT-INDEX"}.get(str(sym).strip().upper())
+             "MIDCPNIFTY": "NSE:MIDCPNIFTY-INDEX"}.get(str(sym).strip().upper())
     if not under:
         # Stocks default to Fyers EQ format - every NSE F&O underlying works
         # (lot master me listed NSE symbols).
@@ -633,11 +644,16 @@ def _validate_result(m: dict, per_symbol: dict, all_trades: list) -> dict:
                 failed.append(f"expectancy mismatch: calc={_ex} shown={m.get('expectancy')}")
         except Exception:
             pass
-        # drawdown recompute from equity curve
+        # drawdown recompute from equity curve. Engine curve = absolute capital
+        # (starts 10L), merged curve = cumulative PnL (starts 0) — dono shapes
+        # normalize karke peak-to-trough DD nikalo.
         try:
             _eq = list(m.get("equity_curve", []) or [])
+            _base = 1000000.0
+            _absolute = bool(_eq) and float(_eq[0] or 0) >= _base * 0.5
+            _vals = [_base] + [float(x or 0) for x in _eq] if not _absolute else [float(x or 0) for x in _eq]
             _pk, _dd = 0.0, 0.0
-            for _v in [1000000.0] + [1000000.0 + float(x or 0) for x in _eq]:
+            for _v in _vals:
                 _pk = max(_pk, _v)
                 if _pk > 0:
                     _dd = max(_dd, (_pk - _v) / _pk * 100)
@@ -873,6 +889,7 @@ def _merge_trade_metrics(all_trades: list, total_brokerage: float = 0.0,
         "win_rate": round(wins / n * 100, 2) if n else 0.0,
         "loss_rate": round(losses / n * 100, 2) if n else 0.0,
         "max_drawdown": round(max_dd, 2),
+        "max_drawdown_pct": round(max_dd, 2),
         "profit_factor": profit_factor,
         "profit_factor_infinite": _pf_inf,
         "sharpe_ratio": sharpe,
@@ -1317,11 +1334,26 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
             # Rulebook profiles: Buy 2/day, Sell 5/day (default). Explicit
             # -1 = unlimited bhi allowed hai. (Global circuit breaker nahi.)
             risk_in["max_trades_per_day"] = None
+        # Trade Direction → engine gate (Both / Bullish Only / Bearish Only).
+        _dir = str(getattr(req, "direction", "both") or "both").lower()
+        advanced_in["direction"] = _dir if _dir in ("bullish", "bearish") else str(advanced_in.get("direction") or "both").lower()
         # Normalize legs + handle presets (Bear Call, Bull Put, Bear Put, Iron Condor)
         raw_legs = req.legs or []
         preset = (req.strategy_preset or advanced_in.get("preset") or "").lower()
         lots_fb = req.lots or 1
         legs = _normalize_legs(raw_legs, lots_fb)
+
+        def _carry_leg_config(expanded):
+            """Preset expansion must keep the user's selected expiry, explicit
+            expiry date and per-leg trigger — dropping them silently routed
+            the spread to a different expiry / wrong signal."""
+            src = (raw_legs or [{}])[0] if isinstance((raw_legs or [{}])[0], dict) else {}
+            for l in expanded:
+                for k in ("expiry", "expiry_date", "trigger_on"):
+                    if src.get(k) not in (None, ""):
+                        l[k] = src[k]
+            return expanded
+
         # Preset expansion
         if preset in ("bear_call_spread", "bearcall", "bear_call"):
             otm = legs[0].get("otm_distance", 1) if legs else 1
@@ -1355,6 +1387,7 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 {"option_type": "PE", "transaction": "sell", "lots": lots_v, "strike_selection": "otm", "otm_distance": 1},
                 {"option_type": "PE", "transaction": "buy", "lots": lots_v, "strike_selection": "otm", "otm_distance": 3},
             ]
+        legs = _carry_leg_config(legs)
         # RULEBOOK DEFAULTS (Buy vs Sell profile): sirf khaali fields bharte
         # hain - UI/API ka explicit value override nahi hota.
         try:
@@ -2284,15 +2317,18 @@ def _run_backtest_core(req: BacktestRequest, progress_cb=None):
                 continue
             try:
                 _td, _dw = int(_c.get("trading_days") or 0), int(_c.get("days_with_data") or 0)
-                if _td >= 5 and _dw < max(5, int(_td * 0.6)):
-                    _partial.append(f"{_s} {_dw}/{_td} din")
+                # 60% ke neeche hi nahi — range ka KOI BHI din missing ho to
+                # saaf coverage warning (e.g. 9/15 days available).
+                if _td >= 2 and _dw < _td:
+                    _partial.append(f"{_s}: {_dw}/{_td} din available")
             except Exception:
                 pass
         _cov_warn = (""
                      if not _partial
-                     else ("Partial data: " + ", ".join(_partial) +
-                           " ka data requested range me adhura hai — is symbol/timeframe "
-                           "par signals sirf usi available data se bane hain."))
+                     else ("DATA COVERAGE WARNING: " + ", ".join(_partial) +
+                           " — baaki dinon ke historical intraday bars cache/market me "
+                           "nahi mile. Results sirf available bars se bane hain; "
+                           "missing din par koi trade nahi simulate kiya gaya."))
     except Exception:
         _intraday_risk, _eod_daily, _risk_warn = False, False, ""
         _sym_src, _partial, _cov_warn = {}, [], ""
